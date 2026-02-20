@@ -2,6 +2,9 @@ import mongoose from "mongoose";
 
 const adminSchema = new mongoose.Schema(
   {
+     refreshToken: {
+      type: String,
+    },
     fullName: {
       type: String,
       required: true,
@@ -34,6 +37,7 @@ const adminSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
     },
+    
   },
   { timestamps: true }
 );

@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import Admin from "../modules/Admin/adminModel.js";
+import Admin from "../modules/Admin/model/adminModel.js";
 
 export const createDefaultAdmin = async () => {
   try {
