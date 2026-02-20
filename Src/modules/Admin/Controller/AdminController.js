@@ -1,5 +1,5 @@
 
-const  {loginAdmin} = require('../Repo/AdminRepo.js')
+const  {loginAdmin,refreshAccessToken} = require('../Repo/AdminRepo.js')
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -17,6 +17,20 @@ const login = async (req, res) => {
     });
   }
 };
+ const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    const newToken = await refreshAccessToken(refreshToken);
+
+    return res.json(newToken);
+  } catch (error) {
+    return res.status(403).json({
+      message: "Invalid refresh token",
+    });
+  }
+};
 module.exports = {
-  login
+  login,
+  refreshToken
 }

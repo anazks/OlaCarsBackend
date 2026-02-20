@@ -1,8 +1,8 @@
 const express = require ("express")
 const router = express.Router();
-const {login} = require ('../Controller/AdminController.js')
+const {login,refreshToken} = require ('../Controller/AdminController.js')
 
 
 router.route("/login").post(login);
-
+router.post("/refresh", refreshToken);
 module.exports = router;

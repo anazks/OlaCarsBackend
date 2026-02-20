@@ -10,29 +10,19 @@ const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-/* =========================
-   Middlewares
-========================= */
 app.use(helmet()); // Security headers
 app.use(cors({ origin: "*" })); // Adjust in production
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* =========================
-   Routes
-========================= */
+
 app.use("/admin", AdminRouter);
 
-/* =========================
-   Health Check
-========================= */
+
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-/* =========================
-   Global Error Handler
-========================= */
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({
@@ -41,9 +31,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-/* =========================
-   Start Server Only After DB
-========================= */
 const startServer = async () => {
   try {
     await connectDB();
@@ -64,9 +51,6 @@ const startServer = async () => {
 
 startServer();
 
-/* =========================
-   Graceful Shutdown
-========================= */
 process.on("SIGINT", () => {
   console.log("Server shutting down...");
   process.exit(0);

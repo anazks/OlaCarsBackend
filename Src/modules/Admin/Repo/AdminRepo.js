@@ -32,3 +32,23 @@ export const loginAdmin = async (email, password) => {
 
   return { accessToken, refreshToken };
 };
+
+export const refreshAccessToken = async (token) => {
+  const decoded = jwt.verify(
+    token,
+    process.env.JWT_REFRESH_SECRET
+  );
+
+  const admin = await Admin.findById(decoded.id);
+
+  if (!admin || admin.refreshToken !== token)
+    throw new Error("Invalid refresh token");
+
+  const newAccessToken = jwt.sign(
+    { id: admin._id, role: admin.role },
+    process.env.JWT_SECRET,
+    { expiresIn: jwtConfig.accessTokenExpiry }
+  );
+
+  return { accessToken: newAccessToken };
+};
