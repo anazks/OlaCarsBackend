@@ -1,4 +1,4 @@
-const { addBranchService } = require('../Repo/BranchRepo.js');
+const { addBranchService,deleteBranchService,editBranchService } = require('../Repo/BranchRepo.js');
 
 const addBranch = async (req, res) => {
         try {   
@@ -17,7 +17,40 @@ const addBranch = async (req, res) => {
             })
         }
 }
-
+const editBranch = async (req, res) => {
+    try {
+        const branchData = req.body;
+        console.log("editBranch called with body:", req.body); // Debug log
+        const updatedBranch = await editBranchService(branchData);
+        return res.status(200).json({
+            success: true,
+            data: updatedBranch
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        })
+    }
+}
+const deleteBranch = async (req, res) => {
+    try {
+        const branchId = req.params.id;
+        console.log("deleteBranch called with id:", branchId); // Debug log
+        await deleteBranchService(branchId);
+        return res.status(200).json({
+            success: true,
+            message: "Branch deleted successfully"
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        })
+    }
+}
 module.exports = {
-    addBranch
+    addBranch,
+    editBranch,
+    deleteBranch
 }

@@ -2,7 +2,8 @@ require("dotenv").config(); // 1️⃣ Always load first
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
@@ -15,6 +16,7 @@ app.use(cors({ origin: "*" })); // Adjust in production
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/admin", AdminRouter);
 app.use("/api/branches",BranchRouter);
