@@ -1,0 +1,5 @@
+module.exports.ROLES = {
+  SUPER_ADMIN: "SUPER_ADMIN",
+  BRANCH_ADMIN: "BRANCH_ADMIN",
+  STAFF: "STAFF"
+};

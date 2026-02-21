@@ -6,7 +6,7 @@ const helmet = require("helmet");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
-
+const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -16,7 +16,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 
-app.use("/admin", AdminRouter);
+app.use("/api/admin", AdminRouter);
+app.use("/api/branches",BranchRouter);
 
 
 app.get("/health", (req, res) => {
