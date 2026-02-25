@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch,editBranch,deleteBranch } = require("../Controller/BranchController.js");
+const { addBranch,editBranch,deleteBranch,getAllBranches } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 
@@ -74,12 +74,10 @@ router.post(
  *         description: List of branches
  */
 router.get(
-  "/branch",
+  "/getAllBranches",
   authenticate,
   authorize("SUPER_ADMIN"),
-  (req, res) => {
-    res.send("Get branches");
-  }
+ getAllBranches
 );
 
 /**
@@ -140,5 +138,6 @@ router.delete(
   authorize("SUPER_ADMIN"),
  deleteBranch
 );
+
 
 module.exports = router;

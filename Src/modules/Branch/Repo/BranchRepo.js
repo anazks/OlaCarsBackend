@@ -28,3 +28,12 @@ export const deleteBranchService = async (branchId) => {
     }
 }
 
+export const getAllBranch = async () => {
+    try {
+        const branches = await Branch.find({ isDeleted: false });
+        return branches;
+    } catch (error) {
+        throw error;
+    }
+}
+

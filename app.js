@@ -8,6 +8,7 @@ const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
+const DriverRouter = require("./Src/modules/drivers/Routes/DriverRoutes");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -18,8 +19,10 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-app.use("/api/admin", AdminRouter);
-app.use("/api/branches",BranchRouter);
+app.use("/api/admin/Auth", AdminRouter);
+app.use("/api/admin/branches",BranchRouter);
+app.use("/api/drivers",DriverRouter);
+
 
 
 app.get("/health", (req, res) => {

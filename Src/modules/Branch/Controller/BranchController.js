@@ -1,4 +1,4 @@
-const { addBranchService,deleteBranchService,editBranchService } = require('../Repo/BranchRepo.js');
+const { addBranchService,deleteBranchService,editBranchService,getAllBranch } = require('../Repo/BranchRepo.js');
 
 const addBranch = async (req, res) => {
         try {   
@@ -49,8 +49,24 @@ const deleteBranch = async (req, res) => {
         })
     }
 }
+const getAllBranches = async (req, res) => {
+    try {
+        // Placeholder for fetching branches from the database
+        const branches = await getAllBranch() // Replace with actual data fetching logic
+        return res.status(200).json({
+            success: true,
+            data: branches
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        })
+    }
+}
 module.exports = {
     addBranch,
     editBranch,
-    deleteBranch
+    deleteBranch,
+    getAllBranches
 }
