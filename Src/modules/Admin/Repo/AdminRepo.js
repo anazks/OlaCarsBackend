@@ -1,11 +1,18 @@
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import Admin from "../model/adminModel.js";
-import {jwtConfig} from '../../../config/jwtConfig.js'
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const Admin = require("../model/adminModel.js");
+const { jwtConfig } = require('../../../config/jwtConfig.js');
 
 
-export const loginAdmin = async (email, password) => {
-  const admin = await Admin.findOne({ email });
+/**
+ * Authenticates an Admin using email and password.
+ * @param {string} email - Admin's email address.
+ * @param {string} password - Admin's plaintext password.
+ * @returns {Promise<Object>} Object containing accessToken and refreshToken.
+ * @throws {Error} If credentials are invalid or account is not active.
+ */
+exports.loginAdmin = async (email, password) => {
+  const admin = await Admin.findOne({ email, isDeleted: false });
 
   if (!admin) throw new Error("Invalid credentials");
 
@@ -33,7 +40,13 @@ export const loginAdmin = async (email, password) => {
   return { accessToken, refreshToken };
 };
 
-export const refreshAccessToken = async (token) => {
+/**
+ * Refreshes the access token using a valid refresh token.
+ * @param {string} token - The refresh token.
+ * @returns {Promise<Object>} Object containing the new accessToken.
+ * @throws {Error} If the refresh token is invalid or does not match the stored token.
+ */
+exports.refreshAccessToken = async (token) => {
   const decoded = jwt.verify(
     token,
     process.env.JWT_REFRESH_SECRET
@@ -51,4 +64,78 @@ export const refreshAccessToken = async (token) => {
   );
 
   return { accessToken: newAccessToken };
+};
+
+/**
+ * Adds a new Admin to the database.
+ * @param {Object} data - Admin details.
+ * @returns {Promise<Object>} Added Admin object.
+ */
+exports.addAdminService = async (data) => {
+  try {
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+    const newAdmin = await Admin.create({
+      ...data,
+      passwordHash: hashedPassword,
+    });
+
+    const adminObj = newAdmin.toObject();
+    delete adminObj.passwordHash;
+
+    return adminObj;
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Updates an existing Admin.
+ * @param {Object} data - Updated field details including ID.
+ * @returns {Promise<Object>} Updated Admin object.
+ */
+exports.editAdminService = async (data) => {
+  try {
+    const { id, ...updateData } = data;
+    return await Admin.findByIdAndUpdate(id, updateData, { new: true });
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Soft deletes an Admin.
+ * @param {string} id - The ID to delete.
+ * @returns {Promise<void>}
+ */
+exports.deleteAdminService = async (id) => {
+  try {
+    await Admin.findByIdAndUpdate(id, { isDeleted: true });
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Retrieves all Admins.
+ * @returns {Promise<Array>} Array of Admins.
+ */
+exports.getAdminsService = async () => {
+  try {
+    return await Admin.find({ isDeleted: false });
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Retrieves an Admin by their ID.
+ * @param {string} id - Admin's mongo ID.
+ * @returns {Promise<Object>} Admin details.
+ */
+exports.getAdminByIdService = async (id) => {
+  try {
+    return await Admin.findOne({ _id: id, isDeleted: false });
+  } catch (error) {
+    throw error;
+  }
 };

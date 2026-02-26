@@ -1,0 +1,68 @@
+const mongoose = require("mongoose");
+
+const countryManagerSchema = new mongoose.Schema(
+    {
+        refreshToken: {
+            type: String,
+        },
+        fullName: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        email: {
+            type: String,
+            required: true,
+            unique: true,
+            lowercase: true,
+            trim: true,
+        },
+        passwordHash: {
+            type: String,
+            required: true,
+        },
+        phone: {
+            type: String,
+            trim: true,
+        },
+        role: {
+            type: String,
+            enum: ["COUNTRYMANAGER"],
+            default: "COUNTRYMANAGER",
+        },
+        status: {
+            type: String,
+            enum: ["ACTIVE", "SUSPENDED", "LOCKED"],
+            default: "ACTIVE",
+        },
+        twoFactorEnabled: {
+            type: Boolean,
+            default: false,
+        },
+        lastLoginAt: {
+            type: Date,
+        },
+        isDeleted: {
+            type: Boolean,
+            default: false,
+        },
+        createdBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: true,
+            refPath: 'creatorRole'
+        },
+        creatorRole: {
+            type: String,
+            required: true,
+            enum: ['ADMIN', 'OPERATIONADMIN', 'FINANCEADMIN'] // Depending on what is in JWT or who is generating
+        },
+        country: {
+            type: String,
+            required: true,
+            trim: true
+        }
+    },
+    { timestamps: true }
+);
+
+module.exports = mongoose.model("CountryManager", countryManagerSchema);

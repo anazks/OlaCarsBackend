@@ -1,0 +1,97 @@
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const BranchManager = require("../Model/BranchManagerModel.js");
+const { jwtConfig  } = require("../../../config/jwtConfig.js");
+
+/**
+ * Adds a new Branch Manager to the database.
+ * @param {Object} data - Branch Manager details.
+ * @returns {Promise<Object>} Added Branch Manager object.
+ */
+exports.addBranchManagerService = async (data) => {
+    try {
+        const hashedPassword = await bcrypt.hash(data.password, 12);
+        const newManager = await BranchManager.create({
+            ...data,
+            passwordHash: hashedPassword,
+        });
+
+        // Remove password hash from response
+        const managerObj = newManager.toObject();
+        delete managerObj.passwordHash;
+
+        return managerObj;
+    } catch (error) {
+        throw error;
+    }
+};
+
+/**
+ * Updates an existing Branch Manager.
+ * @param {Object} data - Updated field details including ID.
+ * @returns {Promise<Object>} Updated Branch Manager object.
+ */
+exports.editBranchManagerService = async (data) => {
+    try {
+        const { id, ...updateData } = data;
+        const updatedManager = await BranchManager.findByIdAndUpdate(id, updateData, { new: true });
+        return updatedManager;
+    } catch (error) {
+        throw error;
+    }
+};
+
+/**
+ * Soft deletes a Branch Manager.
+ * @param {string} id - The ID to delete.
+ * @returns {Promise<void>}
+ */
+exports.deleteBranchManagerService = async (id) => {
+    try {
+        await BranchManager.findByIdAndUpdate(id, { isDeleted: true });
+    } catch (error) {
+        throw error;
+    }
+};
+
+exports.getBranchManagersService = async () => {
+    try {
+        return await BranchManager.find({ isDeleted: false });
+    } catch (error) {
+        throw error;
+    }
+};
+
+exports.getBranchManagerByIdService = async (id) => {
+    try {
+        return await BranchManager.findOne({ _id: id, isDeleted: false });
+    } catch (error) {
+        throw error;
+    }
+};
+
+exports.loginBranchManager = async (email, password) => {
+    const manager = await BranchManager.findOne({ email, isDeleted: false });
+    if (!manager) throw new Error("Invalid credentials");
+
+    const isMatch = await bcrypt.compare(password, manager.passwordHash);
+    if (!isMatch) throw new Error("Invalid credentials");
+    if (manager.status !== "ACTIVE") throw new Error("Account not active");
+
+    const accessToken = jwt.sign(
+        { id: manager._id, role: manager.role, branchId: manager.branchId },
+        process.env.JWT_SECRET,
+        { expiresIn: jwtConfig.accessTokenExpiry }
+    );
+
+    const refreshToken = jwt.sign(
+        { id: manager._id },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: jwtConfig.refreshTokenExpiry }
+    );
+
+    manager.refreshToken = refreshToken;
+    await manager.save();
+
+    return { accessToken, refreshToken };
+};

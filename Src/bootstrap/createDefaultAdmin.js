@@ -21,7 +21,7 @@ export const createDefaultAdmin = async () => {
       fullName: "System Administrator",
       email: process.env.DEFAULT_ADMIN_EMAIL,
       passwordHash: hashedPassword,
-      role: "SUPER_ADMIN",
+      role: "ADMIN",
       status: "ACTIVE",
     });
 

@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch,editBranch,deleteBranch } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
@@ -14,9 +15,9 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware.js"
 
 /**
  * @swagger
- * /admin/branch:
+ * /api/branches/branch:
  *   post:
- *     summary: Create new branch (SUPER_ADMIN only)
+ *     summary: Create new branch
  *     tags: [Branch]
  *     security:
  *       - bearerAuth: []
@@ -57,15 +58,15 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware.js"
 router.post(
   "/branch",
   authenticate,
-  authorize("SUPER_ADMIN"),
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   addBranch
 );
 
 /**
  * @swagger
- * /admin/branch:
+ * /api/branches/branch:
  *   get:
- *     summary: Get all branches (SUPER_ADMIN only)
+ *     summary: Get all branches
  *     tags: [Branch]
  *     security:
  *       - bearerAuth: []
@@ -76,7 +77,7 @@ router.post(
 router.get(
   "/branch",
   authenticate,
-  authorize("SUPER_ADMIN"),
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   (req, res) => {
     res.send("Get branches");
   }
@@ -84,7 +85,7 @@ router.get(
 
 /**
  * @swagger
- * /admin/branch/{id}:
+ * /api/branches/branch/{id}:
  *   get:
  *     summary: Get branch by ID
  *     tags: [Branch]
@@ -103,7 +104,7 @@ router.get(
 router.get(
   "/branch/:id",
   authenticate,
-  authorize("SUPER_ADMIN"),
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   (req, res) => {
     res.send("Get branch by id");
   }
@@ -111,34 +112,57 @@ router.get(
 
 /**
  * @swagger
- * /admin/branch/{id}:
+ * /api/branches/Updatebranch:
  *   put:
  *     summary: Update branch
  *     tags: [Branch]
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Branch updated successfully
  */
 router.put(
   "/Updatebranch",
   authenticate,
-  authorize("SUPER_ADMIN"),
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   editBranch
 );
 
 /**
  * @swagger
- * /admin/branch/{id}:
+ * /api/branches/branch/{id}:
  *   delete:
  *     summary: Delete branch
  *     tags: [Branch]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Branch deleted successfully
  */
 router.delete(
   "/branch/:id",
   authenticate,
-  authorize("SUPER_ADMIN"),
- deleteBranch
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+  deleteBranch
 );
 
 module.exports = router;

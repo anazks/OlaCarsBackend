@@ -1,0 +1,1718 @@
+
+
+
+
+OLA CARS FLEET MANAGEMENT SYSTEM
+
+Vehicle Onboarding Workflow
+
+Staff Procedures | Document Checklist | Inspection | Accounting | GPS | Maintenance
+
+
+
+Document Ref: OLA-VEH-ONBOARD-03  |  Version 1.0  |  February 2026  |  Confidential
+
+Prepared by: Byteboot Techno Solutions Pvt Ltd  |  For: Ola Cars / Naventra Exports Private Limited
+
+
+
+Document Scope
+
+Covers
+
+Procurement → Registration → Insurance → Importation → Pre-Entry Inspection → Accounting Setup → GPS Activation → Maintenance Scheduling → Active Fleet
+
+Staff Roles
+
+Operations Staff, Finance Staff, Branch Manager, Country Manager
+
+Applies To
+
+All new vehicle additions — purchased locally, imported, or transferred from another branch/country
+
+System Modules
+
+Fleet Management, Importation, Insurance, Financial/Accounting Module, GPS & Maintenance, Workshop Operations
+
+
+
+SECTION 1: VEHICLE ONBOARDING — OVERVIEW FLOW
+
+Every vehicle entering the Ola Cars fleet must complete all 9 onboarding stages before it can be set to ACTIVE and made available for rental. No stage can be skipped. The system enforces sequential completion — the next stage unlocks only when the previous stage is fully complete and approved.
+
+
+
+STEP
+
+1
+
+Procurement & Purchase Entry
+
+Owner: Operations Staff + Finance Staff
+
+System: New vehicle record created; PO and purchase price recorded; accounting GL entry initiated
+
+Action: Enter supplier, purchase price, payment method, branch assignment
+
+
+
+STEP
+
+2
+
+Vehicle Basic Details & Registration
+
+Owner: Operations Staff
+
+System: VIN validated for duplicates; vehicle profile populated; odometer baseline set for maintenance alerts
+
+Action: Enter make, model, year, VIN, engine number, fuel type, colour, GPS serial
+
+
+
+STEP
+
+3
+
+Registration & Legal Documents Upload
+
+Owner: Operations Staff
+
+System: Expiry dates stored; alert schedule set; registration number indexed for search
+
+Action: Upload registration certificate, road tax disc, roadworthiness certificate, number plate photos
+
+
+
+STEP
+
+4
+
+Insurance Policy Setup
+
+Owner: Finance Staff + Branch Manager
+
+System: Insurance expense schedule created in accounting; auto-renewal alerts configured
+
+Action: Upload policy document; enter provider, policy number, coverage, premium, expiry date
+
+
+
+STEP
+
+5
+
+Importation & Landed Cost (Imported Vehicles Only)
+
+Owner: Operations Staff + Finance Staff
+
+System: Landed cost calculated automatically; capitalised as fixed asset value in accounting GL
+
+Action: Enter shipping, customs duty, port charges; upload customs clearance documents
+
+
+
+STEP
+
+6
+
+Pre-Entry Physical Inspection
+
+Owner: Operations Staff
+
+System: Inspection results stored against vehicle record; failed items auto-generate maintenance work orders; mandatory photos uploaded
+
+Action: Complete 23-point inspection checklist; rate each item; upload minimum 6 exterior photos + odometer photo
+
+
+
+STEP
+
+7
+
+Accounting Setup & Depreciation
+
+Owner: Finance Staff
+
+System: GL entries auto-posted on save; depreciation schedule activated from purchase/arrival date; asset registers updated
+
+Action: Confirm asset posting; select depreciation method (straight-line or reducing balance); set useful life
+
+
+
+STEP
+
+8
+
+GPS Device Activation & Configuration
+
+Owner: Operations Staff
+
+System: Vehicle linked to GPS API; live location visible on map; geofence and alert thresholds applied; driver behaviour monitoring active
+
+Action: Confirm GPS serial installed; run sync test; assign geofence zone; configure speed and idle alerts
+
+
+
+STEP
+
+9
+
+Branch Manager Final Approval & Activation
+
+Owner: Branch Manager
+
+System: Vehicle status set to AVAILABLE; appears on fleet dashboard; rental booking enabled; maintenance schedule active
+
+Action: Review onboarding summary report; confirm all stages complete; click Activate Vehicle
+
+
+
+
+
+SECTION 2: VEHICLE RECORD STATUS FLOW
+
+The system tracks the vehicle through 12 status states from initial record creation to retirement. Each status change is logged in the immutable audit trail with timestamp, user, and reason.
+
+
+
+Status
+
+Staff Action
+
+System Action
+
+Owner
+
+Record Label
+
+PENDING ENTRY
+
+Staff begins vehicle record; uploads minimum required documents
+
+Profile created; document completeness checker runs; GPS unlinked
+
+Operations Staff
+
+Incomplete
+
+DOCUMENTS REVIEW
+
+All mandatory documents uploaded; inspection checklist submitted
+
+System validates all required fields; flags missing items in red; notifies Branch Manager
+
+Operations Staff
+
+Under Review
+
+INSPECTION REQUIRED
+
+Documents complete; pre-entry physical inspection pending
+
+System shows inspection checklist; blocks activation until all items completed
+
+Operations Staff
+
+Inspection Pending
+
+INSPECTION FAILED
+
+One or more inspection items rated Poor or mandatory item missing
+
+System lists all failed items; creates automatic maintenance work orders for faults; vehicle cannot be activated
+
+Operations Staff + Branch Manager
+
+Repair Required
+
+REPAIR IN PROGRESS
+
+Workshop work orders raised for inspection failures
+
+Work orders tracked in Workshop module; vehicle status locked until all faults cleared
+
+Workshop / Branch Manager
+
+In Workshop
+
+ACCOUNTING SETUP
+
+All physical checks passed; Finance Staff completes accounting entries
+
+GL entries auto-posted; depreciation schedule activated; insurance expense schedule created
+
+Finance Staff
+
+Financial Setup
+
+GPS ACTIVATION
+
+Accounting complete; GPS sync test performed
+
+System pings GPS device; verifies live location; vehicle appears on map dashboard
+
+Operations Staff
+
+GPS Pending
+
+BRANCH MANAGER APPROVAL
+
+All steps complete; Branch Manager final review and sign-off
+
+System generates activation summary report; Branch Manager clicks Activate Vehicle
+
+Branch Manager
+
+Awaiting Approval
+
+ACTIVE — AVAILABLE
+
+Branch Manager activates vehicle
+
+Vehicle status set to AVAILABLE; appears on fleet dashboard; rental booking enabled; GPS monitoring live
+
+System (auto)
+
+Available
+
+ACTIVE — RENTED
+
+Vehicle assigned to customer
+
+Status changes to RENTED; GPS tracking active; mileage sync running; rental clock started
+
+System (auto on assignment)
+
+Rented
+
+ACTIVE — MAINTENANCE
+
+Scheduled or breakdown maintenance triggered
+
+Status set to MAINTENANCE; removed from available fleet; work order opened
+
+Operations Staff / System
+
+In Maintenance
+
+RETIRED
+
+Vehicle disposed, sold, or written off
+
+Status set to RETIRED; removed from active fleet; disposal entry posted in accounting; final depreciation calculated
+
+Branch Manager + Country Manager
+
+Retired
+
+
+
+SECTION 3: DETAILED DATA ENTRY CHECKLISTS
+
+3.1  Procurement & Purchase Data
+
+Data Field / Action
+
+Staff Input Required
+
+System Action
+
+Purchase Order Number
+
+Enter PO number manually
+
+System links PO to vehicle record; enables cost tracking
+
+Vendor / Supplier Name
+
+Select from vendor list or create new
+
+Vendor record created/linked; used in expense module
+
+Purchase Date
+
+Enter date
+
+Recorded; used for depreciation start date calculation
+
+Purchase Price (USD or local currency)
+
+Enter amount + select currency
+
+System converts to base reporting currency using live FX rate; records in accounting GL
+
+Payment Method (cash / bank transfer / finance)
+
+Select method
+
+If financed: triggers loan liability account entry in accounting module
+
+Finance / Loan Details (if applicable)
+
+Enter lender name, loan amount, term, monthly instalment
+
+System schedules monthly payment entries and alerts in collection calendar
+
+Vehicle Intended Branch / Country
+
+Select country then branch from hierarchy
+
+Vehicle pre-assigned to branch in system; appears in that branch's pending fleet
+
+Purchase Receipt / Invoice Document
+
+Upload PDF or image
+
+Stored in AWS S3; linked to vehicle cost record; accessible from vehicle document tab
+
+
+
+3.2  Vehicle Basic Details
+
+Field
+
+Data to Enter
+
+System Validation
+
+Vehicle Make
+
+e.g. Toyota, Honda, Ford
+
+Required field — cannot proceed without
+
+Vehicle Model
+
+e.g. Camry, Civic, Ranger
+
+Required field
+
+Year of Manufacture
+
+4-digit year
+
+Must be within acceptable range; warns if > 10 years old
+
+Vehicle Category
+
+Sedan / SUV / Pickup / Van / Luxury / Commercial
+
+Determines rental pricing tier and insurance category
+
+Fuel Type
+
+Petrol / Diesel / Hybrid / Electric
+
+Required for expense category tracking (fuel costs)
+
+Transmission
+
+Automatic / Manual
+
+Recorded in vehicle profile for customer matching
+
+Engine Capacity (CC)
+
+Numeric entry
+
+Used for insurance classification
+
+Colour
+
+Select from dropdown or enter custom
+
+Stored for visual identification
+
+Number of Seats
+
+Numeric entry
+
+Used in vehicle listing for customer bookings
+
+VIN / Chassis Number
+
+Enter full VIN (17 characters)
+
+System validates VIN format; checks for duplicates across entire fleet
+
+Engine Number
+
+Enter engine number
+
+Stored; required for registration and insurance
+
+Body Type
+
+Hatchback / Saloon / Coupe / Convertible / Truck
+
+Stored in vehicle profile
+
+Odometer Reading at Entry
+
+Current mileage in KM or Miles
+
+Sets baseline for maintenance alert calculations
+
+GPS Device Serial Number
+
+Enter GPS unit serial number
+
+Links vehicle to GPS tracking API; live tracking activated
+
+
+
+
+
+3.3  Registration & Legal Documents
+
+Document / Item
+
+Staff Action
+
+Expiry Alert
+
+System Action
+
+Vehicle Registration Certificate
+
+Upload scan; enter registration number and expiry date
+
+60 days before expiry
+
+Stored in S3; alert set; registration number searchable across system
+
+Road Tax / Vehicle Licensing Disc
+
+Upload; enter expiry date
+
+60 days before expiry
+
+Alert created; links to tax expense category
+
+Number Plate (front + rear photo)
+
+Upload photos
+
+N/A
+
+Photos stored; plate number indexed for quick search
+
+Certificate of Roadworthiness / Inspection
+
+Upload; enter valid-from and expiry dates
+
+30 days before expiry
+
+Stored; alert set; required before vehicle can be set Active
+
+Country-Specific Registration (multi-country)
+
+Upload per country if vehicle operates cross-border
+
+60 days before expiry
+
+Separate records per country; Country Manager notified on expiry
+
+Transfer of Ownership Document
+
+Upload if vehicle purchased second-hand
+
+N/A
+
+Stored as legal document; required for audit trail
+
+NOTE: All documents marked with expiry dates have automated alerts. Vehicle is BLOCKED from rental if registration, road tax, or roadworthiness certificate expires without renewal.
+
+
+
+3.4  Insurance Policy Details
+
+Field / Document
+
+Staff Input
+
+Alert Trigger
+
+System Action
+
+Insurance Policy Type
+
+Select: Comprehensive / Third-Party / Fleet Policy
+
+N/A
+
+Insurance category linked to vehicle record
+
+Insurance Provider Name
+
+Enter provider name / select from vendor list
+
+N/A
+
+Provider record linked; used in expense tracking
+
+Policy Number
+
+Enter policy number
+
+N/A
+
+Stored; searchable
+
+Policy Start Date
+
+Enter date
+
+N/A
+
+Recorded
+
+Policy Expiry Date
+
+Enter expiry date
+
+60 days before expiry
+
+Auto-renewal reminder sent to Branch Manager and Country Manager
+
+Insurance Premium Amount
+
+Enter premium + payment frequency
+
+N/A
+
+Posted to insurance expense account in accounting module; recurring entry scheduled
+
+Coverage Amount / Sum Insured
+
+Enter coverage value
+
+N/A
+
+Stored for claims reference
+
+Policy Document Upload
+
+Upload full policy PDF
+
+N/A
+
+Stored in S3; accessible from vehicle insurance tab
+
+Named Drivers on Policy (if applicable)
+
+List driver names covered
+
+N/A
+
+Cross-references driver records; warns if assigned driver not listed
+
+Excess / Deductible Amount
+
+Enter deductible
+
+N/A
+
+Stored for incident and claims calculations
+
+Claims History (if second-hand vehicle)
+
+Upload previous claims docs if available
+
+N/A
+
+Stored under vehicle incidents tab for reference
+
+
+
+
+
+3.5  Importation & Landed Cost (Imported Vehicles Only)
+
+Field / Document
+
+Staff Input
+
+System Action
+
+Import / Locally Purchased
+
+Select: Imported / Local Purchase
+
+If imported: unlocks full importation sub-module; if local: importation section hidden
+
+Country of Origin
+
+Select country
+
+Stored for customs and compliance records
+
+Shipping Reference / Bill of Lading Number
+
+Enter shipping reference
+
+Stored; linked to importation cost record
+
+Port of Entry
+
+Enter port name
+
+Stored for logistics reference
+
+Customs Declaration Number
+
+Enter customs/clearance number
+
+Stored; required for legal and audit trail
+
+Date of Arrival / Clearance Date
+
+Enter dates
+
+Used in landed cost calculation and depreciation start
+
+Shipping Cost (USD or local currency)
+
+Enter amount + currency
+
+Added to landed cost calculation; posted to vehicle acquisition cost in GL
+
+Customs Duty Paid
+
+Enter amount + currency
+
+Added to landed cost; posted to appropriate expense/asset account
+
+Port Handling / Freight Charges
+
+Enter amount
+
+Added to landed cost total
+
+Local Transport to Branch
+
+Enter cost
+
+Added to landed cost total
+
+Other Import Charges
+
+Enter any additional costs
+
+Added to landed cost total
+
+TOTAL LANDED COST (system calculated)
+
+Read-only — system sums all import costs + purchase price
+
+Displayed as total vehicle acquisition cost; posted as fixed asset value in accounting module
+
+Customs Clearance Certificate
+
+Upload document
+
+Stored in S3 under vehicle documents tab
+
+Import Permit / Approval Letter
+
+Upload document
+
+Stored; required for country-specific compliance
+
+NOTE: If vehicle is purchased locally, the importation module is hidden and the vehicle acquisition cost equals the purchase price only. For imported vehicles, the TOTAL LANDED COST is the capitalised fixed asset value posted to the GL.
+
+
+
+
+
+SECTION 4: PRE-ENTRY PHYSICAL INSPECTION CHECKLIST
+
+The pre-entry inspection is a mandatory 23-point check conducted by Operations Staff before any vehicle can be activated. Items rated Poor automatically generate maintenance work orders. The vehicle cannot be set to AVAILABLE status until all mandatory repair work orders are marked complete by the workshop.
+
+
+
+Inspection Item
+
+Check
+
+Condition (Good/Fair/Poor)
+
+Staff Notes
+
+System Flag
+
+Exterior — Front bumper
+
+Staff checks
+
+Good / Fair / Poor
+
+Enter notes if damage
+
+Auto-flag if Poor
+
+Exterior — Rear bumper
+
+Staff checks
+
+Good / Fair / Poor
+
+Enter notes
+
+Auto-flag if Poor
+
+Exterior — Driver-side panels
+
+Staff checks
+
+Good / Fair / Poor
+
+Note scratches, dents
+
+Auto-flag if Poor
+
+Exterior — Passenger-side panels
+
+Staff checks
+
+Good / Fair / Poor
+
+Note scratches, dents
+
+Auto-flag if Poor
+
+Exterior — Roof
+
+Staff checks
+
+Good / Fair / Poor
+
+Enter notes
+
+Auto-flag if Poor
+
+Windscreen — cracks or chips
+
+Staff checks
+
+Good / Fair / Poor
+
+Note chip size/location
+
+Mandatory repair if Poor
+
+All windows — operation and condition
+
+Staff checks
+
+Good / Fair / Poor
+
+Enter notes
+
+Auto-flag if Poor
+
+All four tyres — tread depth and condition
+
+Staff checks
+
+Good / Fair / Poor
+
+Note tread depth mm
+
+Mandatory replacement if Poor
+
+Spare tyre and jack present
+
+Staff checks
+
+Yes / No
+
+Enter notes
+
+Alert if No
+
+Engine — oil level
+
+Staff checks
+
+OK / Low / Leak
+
+Enter notes
+
+Auto-flag if Low or Leak
+
+Engine — coolant level
+
+Staff checks
+
+OK / Low
+
+Enter notes
+
+Auto-flag if Low
+
+Brakes — pedal feel and response
+
+Staff checks
+
+Good / Soft / Grinding
+
+Enter notes
+
+Mandatory service if Grinding
+
+All lights — headlights, brake, indicators
+
+Staff checks
+
+All OK / Partial Fault
+
+Note faults
+
+Auto-flag any fault
+
+Horn — functional
+
+Staff checks
+
+Yes / No
+
+Enter notes
+
+Alert if No
+
+Air conditioning — cooling performance
+
+Staff checks
+
+Good / Weak / Not working
+
+Enter notes
+
+Auto-flag if Not working
+
+Interior — seats and upholstery
+
+Staff checks
+
+Good / Fair / Poor
+
+Note tears, stains
+
+Auto-flag if Poor
+
+Interior — dashboard and controls
+
+Staff checks
+
+Good / Fair / Poor
+
+Enter notes
+
+Auto-flag if Poor
+
+Interior — seatbelts (all seats)
+
+Staff checks
+
+All OK / Fault
+
+Note faulty belt position
+
+Mandatory fix if Fault
+
+GPS device — installed and syncing
+
+Staff checks
+
+Active / Not syncing
+
+Enter serial confirm
+
+Mandatory: vehicle cannot go Active without GPS sync
+
+First aid kit present
+
+Staff checks
+
+Yes / No
+
+Enter notes
+
+Alert if No
+
+Fire extinguisher present
+
+Staff checks
+
+Yes / No
+
+Enter notes
+
+Alert if No
+
+Odometer photograph
+
+Upload photo
+
+N/A
+
+Confirm mileage matches entry
+
+Mandatory upload
+
+Pre-entry photos — full exterior (min 6 angles)
+
+Upload photos
+
+N/A
+
+All 4 sides + front + rear
+
+Mandatory: min 6 photos required
+
+
+
+MANDATORY UPLOADS: Minimum 6 exterior photos (front, rear, driver side, passenger side, interior, odometer) must be uploaded before the inspection can be submitted. System blocks submission if fewer than 6 photos are attached.
+
+GPS SYNC: Vehicle CANNOT be activated without a successful GPS sync test. The system verifies live location data is being received before the activation button is enabled for Branch Manager.
+
+
+
+SECTION 5: ACCOUNTING & DEPRECIATION SETUP
+
+All vehicle financial events are automatically posted to the double-entry accounting module. Finance Staff reviews and confirms each entry. Depreciation is calculated and posted automatically on month-end close.
+
+
+
+Accounting Entry
+
+Debit Account
+
+Credit Account
+
+Trigger / Owner
+
+Vehicle Purchase (cash)
+
+Fixed Assets — Motor Vehicles
+
+Cash / Bank Account
+
+Automatic on vehicle activation — Branch Manager confirms
+
+Vehicle Purchase (bank transfer)
+
+Fixed Assets — Motor Vehicles
+
+Accounts Payable / Bank
+
+Automatic on activation
+
+Vehicle Purchase (financed / loan)
+
+Fixed Assets — Motor Vehicles
+
+Loan Payable (liability)
+
+Auto entry; monthly instalment schedule created
+
+Import Shipping Cost
+
+Fixed Assets — Motor Vehicles (capitalised)
+
+Accounts Payable / Cash
+
+Auto on importation record save
+
+Customs Duty
+
+Fixed Assets — Motor Vehicles (capitalised)
+
+Customs Duty Payable / Cash
+
+Auto on importation record save
+
+Port / Handling Charges
+
+Fixed Assets — Motor Vehicles (capitalised)
+
+Accounts Payable / Cash
+
+Auto on importation record save
+
+Insurance Premium (first payment)
+
+Insurance Expense / Prepaid Insurance
+
+Cash / Bank
+
+Finance Staff records; auto-posted
+
+Road Tax / Licensing Fee
+
+Motor Vehicle Tax Expense
+
+Cash / Bank
+
+Finance Staff records; auto-posted
+
+Pre-delivery Repair / Preparation Cost
+
+Vehicle Preparation Expense
+
+Cash / Accounts Payable
+
+Finance Staff records after inspection
+
+Monthly Depreciation (straight-line)
+
+Depreciation Expense — Vehicles
+
+Accumulated Depreciation — Vehicles
+
+System auto-posts on month-end close
+
+
+
+5.2  Depreciation Methods Supported
+
+Method
+
+How It Works
+
+When to Use
+
+Straight-Line
+
+Equal depreciation charge each year: (Cost - Residual Value) / Useful Life
+
+Standard fleet vehicles with predictable usage; simplest method; default setting
+
+Reducing Balance
+
+Higher depreciation in early years: NBV x Depreciation Rate %
+
+High-use or luxury vehicles that lose value faster in early years
+
+Useful Life (typical)
+
+Cars: 5–8 years  |  SUVs / Pickups: 6–10 years  |  Commercial: 8–12 years
+
+Finance Staff sets per vehicle; Country Manager approves if > standard range
+
+Residual Value
+
+Estimated disposal value at end of useful life; default 10–15% of purchase price
+
+Finance Staff sets on activation; Country Manager approves changes
+
+
+
+SECTION 6: GPS DEVICE ACTIVATION & CONFIGURATION
+
+GPS activation is the final technical step before Branch Manager approval. The vehicle must show a live location ping before activation is permitted. All GPS configuration is done within the system — no separate GPS platform login is required.
+
+
+
+Configuration Item
+
+Staff Action
+
+System Action
+
+GPS Device Installation Confirmation
+
+Confirm device is physically installed in vehicle
+
+Vehicle record linked to GPS serial; live ping test initiated
+
+GPS Provider API Account
+
+Ensure Client GPS API credentials are configured in system settings
+
+System authenticates with GPS provider API using stored credentials
+
+Initial Location Sync Test
+
+Check vehicle appears on GPS map dashboard
+
+System verifies live location data received; logs first ping timestamp
+
+Geofence Zone Assignment
+
+Assign vehicle to branch geofence zone
+
+System registers vehicle in geofence configuration; alerts configured for zone exit
+
+Speed Limit Threshold Setting
+
+Confirm country/branch speed limit rules applied
+
+System uses country-level speed rules; alert triggers on violation
+
+Idle Time Alert Configuration
+
+Confirm idle alert threshold (default: 30 min)
+
+System sends alert to Branch Manager if vehicle idle beyond threshold
+
+After-Hours Usage Alert
+
+Confirm operating hours per branch
+
+System flags GPS movement outside branch operating hours
+
+Mileage Sync Frequency
+
+Default: every 1 hour; confirm or adjust
+
+System auto-updates odometer from GPS mileage data; maintenance alerts recalculate
+
+Driver Behaviour Monitoring
+
+Confirm harsh braking / acceleration threshold
+
+System logs events; contributes to driver behaviour score
+
+GPS Dashboard Visibility
+
+Confirm vehicle appears on GPS & Risk Dashboard
+
+Vehicle icon visible on live map; Branch Manager and Country Manager can view
+
+
+
+SECTION 7: PREVENTIVE MAINTENANCE SCHEDULE SETUP
+
+At the time of vehicle activation, Operations Staff configures the preventive maintenance schedule. The system automatically calculates alert due dates based on the entry odometer reading and activation date. All alerts are sent to Operations Staff and Branch Manager.
+
+
+
+Maintenance Schedule Item
+
+Trigger Type
+
+Default Threshold
+
+Alert Recipients
+
+Staff Action on Alert
+
+Engine Oil Change
+
+Mileage + Time
+
+Every 5,000 KM or 3 months
+
+Operations Staff + Branch Manager
+
+Create workshop work order
+
+Oil Filter Replacement
+
+Mileage
+
+Every 10,000 KM
+
+Operations Staff
+
+Create work order
+
+Air Filter Check/Replace
+
+Time
+
+Every 6 months
+
+Operations Staff
+
+Check and replace if needed
+
+Tyre Rotation
+
+Mileage
+
+Every 10,000 KM
+
+Operations Staff
+
+Schedule with workshop
+
+Tyre Replacement (tread wear)
+
+Condition + Mileage
+
+Tread < 2mm or 40,000 KM
+
+Operations Staff + Branch Manager
+
+Order tyres; create work order
+
+Brake Inspection
+
+Mileage
+
+Every 20,000 KM
+
+Operations Staff
+
+Schedule inspection
+
+Brake Pad Replacement
+
+Mileage + Condition
+
+Every 40,000 KM or worn
+
+Branch Manager
+
+Approve cost; create work order
+
+Transmission Service
+
+Mileage
+
+Every 40,000 KM
+
+Branch Manager
+
+Approve and schedule
+
+Full Vehicle Service
+
+Mileage + Time
+
+Every 15,000 KM or 6 months
+
+Operations Staff + Branch Manager
+
+Schedule full service at workshop
+
+Battery Check/Replace
+
+Time + Condition
+
+Every 2 years or on alert
+
+Operations Staff
+
+Test battery; replace if needed
+
+Air Conditioning Service
+
+Time
+
+Every 12 months
+
+Operations Staff
+
+Schedule with workshop
+
+Windscreen Wiper Replacement
+
+Time
+
+Every 12 months or poor condition
+
+Operations Staff
+
+Replace immediately if visibility affected
+
+Annual Safety Inspection
+
+Time (regulatory)
+
+12 months (country requirement)
+
+Branch Manager + Country Manager
+
+Book inspection; upload certificate
+
+
+
+HOW IT WORKS: Once the vehicle is activated, the system begins counting from the odometer reading entered at onboarding. When a mileage threshold is reached (e.g. 5,000 KM since last service), the system automatically sends an alert and creates a pending work order in the Workshop module. Operations Staff must then create and assign a formal work order to a technician.
+
+
+
+SECTION 8: VEHICLE ONBOARDING APPROVAL AUTHORITY MATRIX
+
+This matrix defines who can perform each action in the vehicle onboarding process. YES = authorised to act. ESCALATE = must seek approval from next level. NO = no access.
+
+
+
+Vehicle Onboarding Action
+
+Ops Staff
+
+Finance Staff
+
+Branch Manager
+
+Country Manager
+
+Create vehicle record and enter basic details
+
+YES
+
+NO
+
+YES
+
+YES
+
+Upload registration, road tax, roadworthiness docs
+
+YES
+
+NO
+
+YES
+
+YES
+
+Enter insurance policy details
+
+YES
+
+YES
+
+YES
+
+YES
+
+Enter importation and landed cost data
+
+YES
+
+YES
+
+YES
+
+YES
+
+Complete pre-entry inspection checklist
+
+YES
+
+NO
+
+YES
+
+YES
+
+Post vehicle acquisition accounting entry
+
+NO
+
+YES
+
+YES
+
+YES
+
+Approve vehicle purchase cost < USD 30,000
+
+NO
+
+NO
+
+YES
+
+YES
+
+Approve vehicle purchase cost > USD 30,000
+
+NO
+
+NO
+
+ESCALATE
+
+YES
+
+Capitalise import / landed costs in GL
+
+NO
+
+YES
+
+YES
+
+YES
+
+Set up depreciation schedule
+
+NO
+
+YES
+
+YES
+
+YES
+
+Link GPS device and run sync test
+
+YES
+
+NO
+
+YES
+
+YES
+
+Configure geofence and alert thresholds
+
+YES
+
+NO
+
+YES
+
+YES
+
+Final activation — set vehicle to AVAILABLE
+
+NO
+
+NO
+
+YES
+
+YES
+
+Set preventive maintenance schedule thresholds
+
+YES
+
+NO
+
+YES
+
+YES
+
+Approve maintenance work order < USD 1,000
+
+NO
+
+NO
+
+YES
+
+YES
+
+Approve maintenance work order > USD 1,000
+
+NO
+
+NO
+
+ESCALATE
+
+YES
+
+Retire / dispose of vehicle
+
+NO
+
+NO
+
+ESCALATE
+
+YES
+
+Post vehicle disposal accounting entry
+
+NO
+
+YES
+
+YES
+
+YES
+
+
+
+SECTION 9: ONGOING DOCUMENT EXPIRY & ALERT SCHEDULE
+
+After vehicle activation, the system continuously monitors document and schedule expiry dates. Vehicles with expired mandatory documents are automatically blocked from rental until the renewed document is uploaded and verified by Branch Manager.
+
+
+
+Document / Item
+
+Alert Lead Time
+
+Notified Party
+
+Action Required
+
+Consequence if Missed
+
+Vehicle Registration Certificate
+
+60 days
+
+Branch Manager + Ops Staff
+
+Renew registration; upload new cert
+
+Vehicle grounded — cannot be rented
+
+Road Tax / Licensing Disc
+
+60 days
+
+Branch Manager + Ops Staff
+
+Pay road tax; upload renewal
+
+Vehicle grounded — regulatory violation
+
+Certificate of Roadworthiness
+
+30 days
+
+Branch Manager + Country Manager
+
+Book inspection; pass and upload
+
+Vehicle grounded — insurance may void
+
+Insurance Policy
+
+60 days
+
+Branch Manager + Country Manager
+
+Renew policy; upload new document
+
+Vehicle grounded — no cover; rental blocked
+
+Annual Safety Inspection
+
+45 days
+
+Branch Manager
+
+Book with transport authority
+
+Vehicle grounded; potential fines
+
+GPS Device Battery / Calibration
+
+System alert when GPS signal drops
+
+Operations Staff
+
+Re-calibrate or replace GPS device
+
+Vehicle removed from GPS dashboard; flagged for manual tracking
+
+Driver on Rental — License Expiry
+
+30 days before driver license expires
+
+Operations Staff + Driver
+
+Notify driver to renew license
+
+Cannot re-assign vehicle to that driver
+
+Depreciation Schedule Review
+
+Annually
+
+Finance Staff + Branch Manager
+
+Review depreciation rate; adjust if needed
+
+Inaccurate fixed asset valuation on balance sheet
+
+Loan / Finance Instalment
+
+7 days before due
+
+Finance Staff
+
+Ensure bank transfer prepared
+
+Late payment penalty; credit risk flag
+
+
+
+SECTION 10: VEHICLE TRANSFER BETWEEN BRANCHES OR COUNTRIES
+
+When a vehicle is transferred between branches or countries, the onboarding process is partially repeated to update branch assignment, re-register in the destination country, and create the appropriate accounting entries.
+
+
+
+Transfer Step
+
+Staff Action
+
+System Action
+
+Approval Required
+
+Initiate Transfer Request
+
+Branch Manager raises transfer request in system; specifies destination branch/country
+
+Transfer request created; vehicle locked — cannot be assigned to new rentals
+
+Source Branch Manager — initiate
+
+Country Manager Approval
+
+Country Manager reviews and approves or rejects request
+
+System sends approval notification; if inter-country, both country managers notified
+
+Country Manager(s) — both source and destination for inter-country
+
+Accounting Entry
+
+Finance Staff posts inter-branch transfer accounting entry
+
+Dr: Destination Branch Asset  |  Cr: Source Branch Asset; elimination entry for consolidation
+
+Finance Staff — both branches
+
+Re-Registration (if inter-country)
+
+Upload destination country registration documents; enter new registration details
+
+New registration record created for destination country; old record archived
+
+Destination Branch Manager
+
+New Insurance (if inter-country)
+
+Arrange local insurance in destination country; upload new policy
+
+New insurance record created; premium expense scheduled for destination branch
+
+Country Manager approves new insurance policy
+
+GPS Geofence Update
+
+Operations Staff at destination updates geofence zone assignment
+
+Vehicle moves from source branch geofence to destination branch geofence on GPS dashboard
+
+Operations Staff — destination branch
+
+Transfer Complete
+
+Destination Branch Manager confirms receipt and activates vehicle in new branch
+
+Vehicle now appears under destination branch fleet; all dashboards and reports updated
+
+Destination Branch Manager — final activation
+
+
+
+Document Ref: OLA-VEH-ONBOARD-03  |  Byteboot Techno Solutions Pvt Ltd  |  February 2026  |  Confidential — Internal Use Only
+

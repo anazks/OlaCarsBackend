@@ -1,8 +1,8 @@
-import mongoose from "mongoose";
+const mongoose = require("mongoose");
 
 const adminSchema = new mongoose.Schema(
   {
-     refreshToken: {
+    refreshToken: {
       type: String,
     },
     fullName: {
@@ -22,7 +22,7 @@ const adminSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["SUPER_ADMIN", "ADMIN", "STAFF"],
+      enum: ["ADMIN"],
       default: "ADMIN",
     },
     status: {
@@ -37,9 +37,20 @@ const adminSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
     },
-    
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: 'creatorRole'
+    },
+    creatorRole: {
+      type: String,
+      enum: ['ADMIN']
+    }
   },
   { timestamps: true }
 );
 
-export default mongoose.model("Admin", adminSchema);
+module.exports = mongoose.model("Admin", adminSchema);

@@ -8,6 +8,16 @@ const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
+const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
+const FinanceAdminRouter = require("./Src/modules/FinanceAdmin/Routes/FinanceAdminRoutes");
+const OperationAdminRouter = require("./Src/modules/OperationAdmin/Routes/OperationAdminRoutes");
+const BranchManagerRouter = require("./Src/modules/BranchManager/Routes/BranchManagerRouter");
+const UserRouter = require("./Src/modules/User/Routes/UserRoutes");
+const OperationStaffRouter = require("./Src/modules/OperationStaff/Routes/OperationStaffRoutes");
+const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceStaffRoutes");
+const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
+const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
+const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -19,7 +29,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/admin", AdminRouter);
-app.use("/api/branches",BranchRouter);
+app.use("/api/branches", BranchRouter);
+app.use("/api/country-manager", CountryManagerRouter);
+app.use("/api/financeadmin", FinanceAdminRouter);
+app.use("/api/operationaladmin", OperationAdminRouter);
+app.use("/api/branchmanager", BranchManagerRouter);
+app.use("/api/user", UserRouter);
+app.use("/api/operationstaff", OperationStaffRouter);
+app.use("/api/financestaff", FinanceStaffRouter);
+app.use("/api/workshopstaff", WorkshopStaffRouter);
+app.use("/api/purchase-order", PurchaseOrderRouter);
+app.use("/api/vehicle", VehicleRouter);
 
 
 app.get("/health", (req, res) => {
