@@ -1,7 +1,7 @@
-import bcrypt from "bcryptjs";
-import Admin from "../modules/Admin/model/adminModel.js";
+const bcrypt = require("bcryptjs");
+const Admin = require("../modules/Admin/model/adminModel.js");
 
-export const createDefaultAdmin = async () => {
+const createDefaultAdmin = async () => {
   try {
     const existingAdmin = await Admin.findOne({
       email: process.env.DEFAULT_ADMIN_EMAIL,
@@ -30,3 +30,5 @@ export const createDefaultAdmin = async () => {
     console.error("Error creating default admin:", error);
   }
 };
+
+module.exports = { createDefaultAdmin };
