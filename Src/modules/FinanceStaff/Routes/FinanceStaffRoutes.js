@@ -21,7 +21,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/financestaff/login:
+ * /api/finance-staff/login:
  *   post:
  *     summary: Finance Staff login
  *     tags: [FinanceStaff]
@@ -47,7 +47,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/financestaff:
+ * /api/finance-staff:
  *   post:
  *     summary: Create new Finance Staff
  *     tags: [FinanceStaff]
@@ -91,7 +91,7 @@ router.post(
 
 /**
  * @swagger
- * /api/financestaff:
+ * /api/finance-staff:
  *   get:
  *     summary: Get all Finance Staff
  *     tags: [FinanceStaff]
@@ -110,7 +110,7 @@ router.get(
 
 /**
  * @swagger
- * /api/financestaff/{id}:
+ * /api/finance-staff/{id}:
  *   get:
  *     summary: Get Finance Staff by ID
  *     tags: [FinanceStaff]
@@ -135,7 +135,7 @@ router.get(
 
 /**
  * @swagger
- * /api/financestaff/update:
+ * /api/finance-staff/update:
  *   put:
  *     summary: Update Finance Staff
  *     tags: [FinanceStaff]
@@ -178,7 +178,7 @@ router.put(
 
 /**
  * @swagger
- * /api/financestaff/{id}:
+ * /api/finance-staff/{id}:
  *   delete:
  *     summary: Soft Delete Finance Staff
  *     tags: [FinanceStaff]

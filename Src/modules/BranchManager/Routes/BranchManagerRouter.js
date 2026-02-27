@@ -21,7 +21,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/branchmanager/login:
+ * /api/branch-manager/login:
  *   post:
  *     summary: Branch Manager login
  *     tags: [BranchManager]
@@ -47,7 +47,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/branchmanager:
+ * /api/branch-manager:
  *   post:
  *     summary: Create new Branch Manager
  *     tags: [BranchManager]
@@ -93,7 +93,7 @@ router.post(
 
 /**
  * @swagger
- * /api/branchmanager:
+ * /api/branch-manager:
  *   get:
  *     summary: Get all Branch Managers
  *     tags: [BranchManager]
@@ -112,7 +112,7 @@ router.get(
 
 /**
  * @swagger
- * /api/branchmanager/{id}:
+ * /api/branch-manager/{id}:
  *   get:
  *     summary: Get Branch Manager by ID
  *     tags: [BranchManager]
@@ -137,7 +137,7 @@ router.get(
 
 /**
  * @swagger
- * /api/branchmanager/update:
+ * /api/branch-manager/update:
  *   put:
  *     summary: Update Branch Manager
  *     tags: [BranchManager]
@@ -182,7 +182,7 @@ router.put(
 
 /**
  * @swagger
- * /api/branchmanager/{id}:
+ * /api/branch-manager/{id}:
  *   delete:
  *     summary: Soft Delete Branch Manager
  *     tags: [BranchManager]

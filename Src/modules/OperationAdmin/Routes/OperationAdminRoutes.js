@@ -22,7 +22,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/operationaladmin/login:
+ * /api/operational-admin/login:
  *   post:
  *     summary: OperationalAdmin login
  *     tags: [OperationalAdmin]
@@ -52,7 +52,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/operationaladmin/refresh:
+ * /api/operational-admin/refresh:
  *   post:
  *     summary: Refresh access token
  *     tags: [OperationalAdmin]
@@ -73,7 +73,7 @@ router.post("/refresh", refreshToken);
 
 /**
  * @swagger
- * /api/operationaladmin:
+ * /api/operational-admin:
  *   post:
  *     summary: Create new Operational Admin
  *     tags: [OperationalAdmin]
@@ -114,7 +114,7 @@ router.post(
 
 /**
  * @swagger
- * /api/operationaladmin:
+ * /api/operational-admin:
  *   get:
  *     summary: Get all Operational Admins
  *     tags: [OperationalAdmin]
@@ -133,7 +133,7 @@ router.get(
 
 /**
  * @swagger
- * /api/operationaladmin/{id}:
+ * /api/operational-admin/{id}:
  *   get:
  *     summary: Get Operational Admin by ID
  *     tags: [OperationalAdmin]
@@ -158,7 +158,7 @@ router.get(
 
 /**
  * @swagger
- * /api/operationaladmin/update:
+ * /api/operational-admin/update:
  *   put:
  *     summary: Update an Operational Admin
  *     tags: [OperationalAdmin]
@@ -199,7 +199,7 @@ router.put(
 
 /**
  * @swagger
- * /api/operationaladmin/{id}:
+ * /api/operational-admin/{id}:
  *   delete:
  *     summary: Soft Delete an Operational Admin
  *     tags: [OperationalAdmin]

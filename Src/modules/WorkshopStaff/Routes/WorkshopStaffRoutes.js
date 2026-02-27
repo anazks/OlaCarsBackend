@@ -21,7 +21,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/workshopstaff/login:
+ * /api/workshop-staff/login:
  *   post:
  *     summary: Workshop Staff login
  *     tags: [WorkshopStaff]
@@ -47,7 +47,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/workshopstaff:
+ * /api/workshop-staff:
  *   post:
  *     summary: Create new Workshop Staff
  *     tags: [WorkshopStaff]
@@ -91,7 +91,7 @@ router.post(
 
 /**
  * @swagger
- * /api/workshopstaff:
+ * /api/workshop-staff:
  *   get:
  *     summary: Get all Workshop Staff
  *     tags: [WorkshopStaff]
@@ -110,7 +110,7 @@ router.get(
 
 /**
  * @swagger
- * /api/workshopstaff/{id}:
+ * /api/workshop-staff/{id}:
  *   get:
  *     summary: Get Workshop Staff by ID
  *     tags: [WorkshopStaff]
@@ -135,7 +135,7 @@ router.get(
 
 /**
  * @swagger
- * /api/workshopstaff/update:
+ * /api/workshop-staff/update:
  *   put:
  *     summary: Update Workshop Staff
  *     tags: [WorkshopStaff]
@@ -178,7 +178,7 @@ router.put(
 
 /**
  * @swagger
- * /api/workshopstaff/{id}:
+ * /api/workshop-staff/{id}:
  *   delete:
  *     summary: Soft Delete Workshop Staff
  *     tags: [WorkshopStaff]

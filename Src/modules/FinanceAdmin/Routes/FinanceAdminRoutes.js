@@ -22,7 +22,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/financeadmin/login:
+ * /api/finance-admin/login:
  *   post:
  *     summary: FinanceAdmin login
  *     tags: [FinanceAdmin]
@@ -52,7 +52,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/financeadmin/refresh:
+ * /api/finance-admin/refresh:
  *   post:
  *     summary: Refresh access token
  *     tags: [FinanceAdmin]
@@ -73,7 +73,7 @@ router.post("/refresh", refreshToken);
 
 /**
  * @swagger
- * /api/financeadmin:
+ * /api/finance-admin:
  *   post:
  *     summary: Create new Finance Admin
  *     tags: [FinanceAdmin]
@@ -114,7 +114,7 @@ router.post(
 
 /**
  * @swagger
- * /api/financeadmin:
+ * /api/finance-admin:
  *   get:
  *     summary: Get all Finance Admins
  *     tags: [FinanceAdmin]
@@ -133,7 +133,7 @@ router.get(
 
 /**
  * @swagger
- * /api/financeadmin/{id}:
+ * /api/finance-admin/{id}:
  *   get:
  *     summary: Get Finance Admin by ID
  *     tags: [FinanceAdmin]
@@ -158,7 +158,7 @@ router.get(
 
 /**
  * @swagger
- * /api/financeadmin/update:
+ * /api/finance-admin/update:
  *   put:
  *     summary: Update a Finance Admin
  *     tags: [FinanceAdmin]
@@ -199,7 +199,7 @@ router.put(
 
 /**
  * @swagger
- * /api/financeadmin/{id}:
+ * /api/finance-admin/{id}:
  *   delete:
  *     summary: Soft Delete a Finance Admin
  *     tags: [FinanceAdmin]

@@ -21,7 +21,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/operationstaff/login:
+ * /api/operation-staff/login:
  *   post:
  *     summary: Operation Staff login
  *     tags: [OperationStaff]
@@ -47,7 +47,7 @@ router.post("/login", login);
 
 /**
  * @swagger
- * /api/operationstaff:
+ * /api/operation-staff:
  *   post:
  *     summary: Create new Operation Staff
  *     tags: [OperationStaff]
@@ -91,7 +91,7 @@ router.post(
 
 /**
  * @swagger
- * /api/operationstaff:
+ * /api/operation-staff:
  *   get:
  *     summary: Get all Operation Staff
  *     tags: [OperationStaff]
@@ -110,7 +110,7 @@ router.get(
 
 /**
  * @swagger
- * /api/operationstaff/{id}:
+ * /api/operation-staff/{id}:
  *   get:
  *     summary: Get Operation Staff by ID
  *     tags: [OperationStaff]
@@ -135,7 +135,7 @@ router.get(
 
 /**
  * @swagger
- * /api/operationstaff/update:
+ * /api/operation-staff/update:
  *   put:
  *     summary: Update Operation Staff
  *     tags: [OperationStaff]
@@ -178,7 +178,7 @@ router.put(
 
 /**
  * @swagger
- * /api/operationstaff/{id}:
+ * /api/operation-staff/{id}:
  *   delete:
  *     summary: Soft Delete Operation Staff
  *     tags: [OperationStaff]
