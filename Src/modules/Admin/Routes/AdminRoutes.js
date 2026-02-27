@@ -96,6 +96,9 @@ router.post("/refresh", refreshToken);
  *                 type: string
  *               password:
  *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
  *     responses:
  *       201:
  *         description: Admin created successfully
@@ -170,6 +173,17 @@ router.get(
  *             properties:
  *               id:
  *                 type: string
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
+ *               twoFactorEnabled:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Admin updated successfully

@@ -75,6 +75,9 @@ router.post("/login", login);
  *                 type: string
  *               branchId:
  *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
  *     responses:
  *       201:
  *         description: Staff created successfully
@@ -149,6 +152,19 @@ router.get(
  *             properties:
  *               id:
  *                 type: string
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               branchId:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
  *     responses:
  *       200:
  *         description: Staff updated successfully

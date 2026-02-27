@@ -49,6 +49,13 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *                 type: string
  *               phone:
  *                 type: string
+ *               email:
+ *                 type: string
+ *               managerId:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, INACTIVE]
  *     responses:
  *       201:
  *         description: Branch created successfully
@@ -129,6 +136,25 @@ router.get(
  *             properties:
  *               id:
  *                 type: string
+ *               name:
+ *                 type: string
+ *               code:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               state:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               managerId:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, INACTIVE]
  *     responses:
  *       200:
  *         description: Branch updated successfully

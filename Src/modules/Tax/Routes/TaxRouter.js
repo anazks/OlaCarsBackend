@@ -23,10 +23,121 @@ const AUTHORIZED_ROLES = [
  *   description: Tax Profile APIs
  */
 
+/**
+ * @swagger
+ * /api/tax:
+ *   post:
+ *     summary: Create new Tax Profile
+ *     tags: [Tax]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - rate
+ *             properties:
+ *               name:
+ *                 type: string
+ *               rate:
+ *                 type: number
+ *               isActive:
+ *                 type: boolean
+ *     responses:
+ *       201:
+ *         description: Tax Profile created successfully
+ */
 router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), addTax);
+
+/**
+ * @swagger
+ * /api/tax:
+ *   get:
+ *     summary: Get all Tax Profiles
+ *     tags: [Tax]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of Tax Profiles
+ */
 router.get("/", authenticate, getTaxes);
+
+/**
+ * @swagger
+ * /api/tax/{id}:
+ *   get:
+ *     summary: Get Tax Profile by ID
+ *     tags: [Tax]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Tax Profile details
+ */
 router.get("/:id", authenticate, getTaxById);
+
+/**
+ * @swagger
+ * /api/tax/{id}:
+ *   put:
+ *     summary: Update a Tax Profile
+ *     tags: [Tax]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               rate:
+ *                 type: number
+ *               isActive:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Tax Profile updated successfully
+ */
 router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateTax);
+
+/**
+ * @swagger
+ * /api/tax/{id}:
+ *   delete:
+ *     summary: Soft Delete a Tax Profile
+ *     tags: [Tax]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Tax Profile deleted successfully
+ */
 router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), deleteTax);
 
 module.exports = router;

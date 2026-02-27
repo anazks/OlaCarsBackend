@@ -54,6 +54,11 @@ const router = express.Router();
  *               country:
  *                 type: string
  *                 example: United States
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
+ *               twoFactorEnabled:
+ *                 type: boolean
  *     responses:
  *       201:
  *         description: Country Manager created successfully
@@ -141,11 +146,17 @@ router.get(
  *                 type: string
  *               phone:
  *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
  *               country:
  *                 type: string
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]
+ *               twoFactorEnabled:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Country Manager updated successfully

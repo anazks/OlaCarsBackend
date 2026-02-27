@@ -18,6 +18,18 @@ const VIEW_ACCESS_ROLES = [
  */
 
 // ONLY GET routes. Ledger is append-only by the system via Service triggers.
+/**
+ * @swagger
+ * /api/ledger:
+ *   get:
+ *     summary: Get all Ledger Entries
+ *     tags: [Ledger]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of Ledger Entries
+ */
 router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), getLedgerEntries);
 
 module.exports = router;

@@ -72,6 +72,9 @@ router.post("/login", login);
  *                 type: string
  *               phone:
  *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
  *     responses:
  *       201:
  *         description: User created successfully
@@ -136,6 +139,17 @@ router.get("/:id", authenticate, getUserById);
  *             properties:
  *               id:
  *                 type: string
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
  *     responses:
  *       200:
  *         description: User updated successfully

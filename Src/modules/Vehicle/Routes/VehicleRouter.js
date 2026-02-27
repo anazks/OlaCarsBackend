@@ -30,7 +30,88 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *       content:
  *         application/json:
  *           schema:
- *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *               purchaseDetails:
+ *                 type: object
+ *                 properties:
+ *                   purchaseOrder:
+ *                     type: string
+ *                   vendorName:
+ *                     type: string
+ *                   purchaseDate:
+ *                     type: string
+ *                     format: date-time
+ *                   purchasePrice:
+ *                     type: number
+ *                   currency:
+ *                     type: string
+ *                   paymentMethod:
+ *                     type: string
+ *                     enum: [Cash, Bank Transfer, Finance]
+ *                   financeDetails:
+ *                     type: object
+ *                     properties:
+ *                       lenderName:
+ *                         type: string
+ *                       loanAmount:
+ *                         type: number
+ *                       termMonths:
+ *                         type: number
+ *                       monthlyInstalment:
+ *                         type: number
+ *                   branch:
+ *                     type: string
+ *                   purchaseReceipt:
+ *                     type: string
+ *               basicDetails:
+ *                 type: object
+ *                 properties:
+ *                   make:
+ *                     type: string
+ *                   model:
+ *                     type: string
+ *                   year:
+ *                     type: number
+ *                   category:
+ *                     type: string
+ *                     enum: [Sedan, SUV, Pickup, Van, Luxury, Commercial]
+ *                   fuelType:
+ *                     type: string
+ *                     enum: [Petrol, Diesel, Hybrid, Electric]
+ *                   transmission:
+ *                     type: string
+ *                     enum: [Automatic, Manual]
+ *                   engineCapacity:
+ *                     type: number
+ *                   colour:
+ *                     type: string
+ *                   seats:
+ *                     type: number
+ *                   vin:
+ *                     type: string
+ *                   engineNumber:
+ *                     type: string
+ *                   bodyType:
+ *                     type: string
+ *                     enum: [Hatchback, Saloon, Coupe, Convertible, Truck]
+ *                   odometer:
+ *                     type: number
+ *                   gpsSerialNumber:
+ *                     type: string
+ *               legalDocs:
+ *                 type: object
+ *               insurancePolicy:
+ *                 type: object
+ *               importationDetails:
+ *                 type: object
+ *               inspection:
+ *                 type: object
+ *               accountingSetup:
+ *                 type: object
+ *               gpsConfiguration:
+ *                 type: object
  *     responses:
  *       201:
  *         description: Vehicle initiated
@@ -112,6 +193,25 @@ router.get(
  *                 type: string
  *               updateData:
  *                 type: object
+ *                 properties:
+ *                   status:
+ *                     type: string
+ *                   purchaseDetails:
+ *                     type: object
+ *                   basicDetails:
+ *                     type: object
+ *                   legalDocs:
+ *                     type: object
+ *                   insurancePolicy:
+ *                     type: object
+ *                   importationDetails:
+ *                     type: object
+ *                   inspection:
+ *                     type: object
+ *                   accountingSetup:
+ *                     type: object
+ *                   gpsConfiguration:
+ *                     type: object
  *     responses:
  *       200:
  *         description: Vehicle status and data updated

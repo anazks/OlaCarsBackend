@@ -33,15 +33,29 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *           schema:
  *             type: object
  *             required:
- *               - priceOfVehicle
- *               - vehicleNumber
+ *               - items
  *               - branch
  *               - supplier
  *             properties:
- *               priceOfVehicle:
- *                 type: number
- *               vehicleNumber:
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - itemName
+ *                     - unitPrice
+ *                   properties:
+ *                     itemName:
+ *                       type: string
+ *                     quantity:
+ *                       type: number
+ *                     description:
+ *                       type: string
+ *                     unitPrice:
+ *                       type: number
+ *               paymentDate:
  *                 type: string
+ *                 format: date-time
  *               branch:
  *                 type: string
  *               supplier:

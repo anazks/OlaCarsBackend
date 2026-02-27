@@ -75,6 +75,11 @@ router.post("/login", login);
  *                 type: string
  *               branchId:
  *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
+ *               twoFactorEnabled:
+ *                 type: boolean
  *     responses:
  *       201:
  *         description: Branch Manager created successfully
@@ -149,6 +154,21 @@ router.get(
  *             properties:
  *               id:
  *                 type: string
+ *               fullName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               branchId:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [ACTIVE, SUSPENDED, LOCKED]
+ *               twoFactorEnabled:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Branch Manager updated successfully
