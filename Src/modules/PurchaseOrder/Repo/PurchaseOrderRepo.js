@@ -46,6 +46,20 @@ exports.getPurchaseOrderByIdService = async (id) => {
 };
 
 /**
+ * Updates a Purchase Order (General Edit).
+ * @param {string} id - PO ID.
+ * @param {Object} updateData - Data to update.
+ * @returns {Promise<Object>} Updated PO.
+ */
+exports.updatePurchaseOrderService = async (id, updateData) => {
+    try {
+        return await PurchaseOrder.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
+    } catch (error) {
+        throw error;
+    }
+};
+
+/**
  * Approves or Rejects a Purchase Order.
  * @param {string} id - PO ID.
  * @param {string} status - New status (APPROVED / REJECTED).

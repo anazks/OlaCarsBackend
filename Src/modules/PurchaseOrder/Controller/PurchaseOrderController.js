@@ -3,6 +3,7 @@ const {
     getPurchaseOrdersService,
     getPurchaseOrderByIdService,
     updatePurchaseOrderStatusService,
+    updatePurchaseOrderService,
 } = require("../Repo/PurchaseOrderRepo.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
@@ -157,9 +158,106 @@ const approvePurchaseOrder = async (req, res) => {
     }
 };
 
+/**
+ * Edits a Purchase Order.
+ * Can be edited by the creator. Resets status to WAITING and tracks changes.
+ * @route PUT /api/purchase-order/:id
+ * @access Private
+ */
+const editPurchaseOrder = async (req, res) => {
+    try {
+        const poId = req.params.id;
+        const updateData = req.body;
+        const editorId = req.user.id;
+        const editorRole = req.user.role;
+
+        const currentPO = await getPurchaseOrderByIdService(poId);
+
+        if (!currentPO) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        // Only the creator (or Admin) can edit
+        if (currentPO.createdBy._id.toString() !== editorId && editorRole !== ROLES.ADMIN) {
+            return res.status(403).json({ success: false, message: "You don't have permission to edit this Purchase Order." });
+        }
+
+        // Generate Human Readable Diff
+        let changesSummary = [];
+
+        // Track Item Changes
+        if (updateData.items) {
+            const oldItems = currentPO.items;
+            const newItems = updateData.items;
+
+            const oldItemNames = oldItems.map(i => i.itemName).sort().join(", ");
+            const newItemNames = newItems.map(i => i.itemName).sort().join(", ");
+
+            if (oldItemNames !== newItemNames) {
+                // Determine added and removed items for precise summary
+                const oldSet = new Set(oldItems.map(i => i.itemName));
+                const newSet = new Set(newItems.map(i => i.itemName));
+                const added = [...newSet].filter(x => !oldSet.has(x));
+                const removed = [...oldSet].filter(x => !newSet.has(x));
+
+                if (added.length) changesSummary.push(`Added items: ${added.join(", ")}`);
+                if (removed.length) changesSummary.push(`Removed items: ${removed.join(", ")}`);
+            } else {
+                // Names matched, maybe quantity/price changed
+                changesSummary.push(`Updated quantities or prices in items list.`);
+            }
+
+            // Recalculate Total
+            let calculatedTotal = 0;
+            updateData.items.forEach(item => {
+                const qty = item.quantity || 1;
+                const price = item.unitPrice || 0;
+                calculatedTotal += (qty * price);
+            });
+            updateData.totalAmount = calculatedTotal;
+        }
+
+        if (updateData.supplier && updateData.supplier !== currentPO.supplier._id.toString()) {
+            changesSummary.push(`Changed supplier.`);
+        }
+
+        if (changesSummary.length === 0) {
+            changesSummary.push(`Made minor field updates.`);
+        }
+
+        // Build History Object
+        const historyRecord = {
+            editedAt: new Date(),
+            editedBy: editorId,
+            editorRole: editorRole,
+            previousStatus: currentPO.status,
+            changesSummary: changesSummary.join(" | "),
+        };
+
+        // Construct explicit Mongoose update object
+        const finalUpdate = {
+            $set: {
+                ...updateData,
+                isEdited: true,
+                status: "WAITING"
+            },
+            $push: {
+                editHistory: historyRecord
+            }
+        };
+
+        const updatedPO = await updatePurchaseOrderService(poId, finalUpdate);
+
+        return res.status(200).json({ success: true, data: updatedPO });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
     getPurchaseOrderById,
     approvePurchaseOrder,
+    editPurchaseOrder,
 };

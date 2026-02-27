@@ -5,6 +5,7 @@ const {
     getPurchaseOrders,
     getPurchaseOrderById,
     approvePurchaseOrder,
+    editPurchaseOrder,
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -133,6 +134,37 @@ router.put(
     authenticate,
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
     approvePurchaseOrder
+);
+
+/**
+ * @swagger
+ * /api/purchase-order/{id}:
+ *   put:
+ *     summary: Edit a Purchase Order (resetting it to WAITING)
+ *     tags: [PurchaseOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: PO edited successfully
+ */
+router.put(
+    "/:id",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.ADMIN),
+    editPurchaseOrder
 );
 
 module.exports = router;

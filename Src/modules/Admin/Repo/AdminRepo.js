@@ -12,7 +12,8 @@ const { jwtConfig } = require('../../../config/jwtConfig.js');
  * @throws {Error} If credentials are invalid or account is not active.
  */
 exports.loginAdmin = async (email, password) => {
-  const admin = await Admin.findOne({ email, isDeleted: false });
+  
+  const admin = await Admin.findOne({ email});
 
   if (!admin) throw new Error("Invalid credentials");
 

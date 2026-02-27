@@ -23,6 +23,7 @@ const createDefaultAdmin = async () => {
       passwordHash: hashedPassword,
       role: "ADMIN",
       status: "ACTIVE",
+      isDeleted: false,
     });
 
     console.log("Default admin created successfully");

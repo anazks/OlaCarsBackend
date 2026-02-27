@@ -65,6 +65,19 @@ const purchaseOrderSchema = new mongoose.Schema(
                 ROLES.ADMIN,
             ],
         },
+        isEdited: {
+            type: Boolean,
+            default: false,
+        },
+        editHistory: [
+            {
+                editedAt: { type: Date, default: Date.now },
+                editedBy: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: "editHistory.editorRole" },
+                editorRole: { type: String, required: true },
+                previousStatus: { type: String, required: true },
+                changesSummary: { type: String, required: true },
+            }
+        ],
     },
     { timestamps: true }
 );
