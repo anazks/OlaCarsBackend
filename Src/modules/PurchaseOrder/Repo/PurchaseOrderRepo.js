@@ -21,7 +21,9 @@ exports.addPurchaseOrderService = async (data) => {
  */
 exports.getPurchaseOrdersService = async (query = {}) => {
     try {
-        return await PurchaseOrder.find(query).populate("branch");
+        return await PurchaseOrder.find(query)
+            .populate("branch")
+            .populate("supplier", "name contactPerson email");
     } catch (error) {
         throw error;
     }
@@ -34,7 +36,10 @@ exports.getPurchaseOrdersService = async (query = {}) => {
  */
 exports.getPurchaseOrderByIdService = async (id) => {
     try {
-        return await PurchaseOrder.findById(id).populate("branch");
+        return await PurchaseOrder.findById(id)
+            .populate("branch")
+            .populate("supplier", "name contactPerson email")
+            .populate("createdBy", "name email");
     } catch (error) {
         throw error;
     }

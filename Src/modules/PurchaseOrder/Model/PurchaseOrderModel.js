@@ -3,18 +3,34 @@ const { ROLES } = require("../../../shared/constants/roles");
 
 const purchaseOrderSchema = new mongoose.Schema(
     {
+        purchaseOrderNumber: {
+            type: String,
+            required: true,
+            unique: true,
+        },
         status: {
             type: String,
             enum: ["WAITING", "APPROVED", "REJECTED"],
             default: "WAITING",
         },
-        priceOfVehicle: {
+        items: [
+            {
+                itemName: { type: String, required: true },
+                quantity: { type: Number, required: true, default: 1 },
+                description: { type: String },
+                unitPrice: { type: Number, required: true },
+            }
+        ],
+        totalAmount: {
             type: Number,
             required: true,
         },
-        vehicleNumber: {
-            type: String,
-            required: true,
+        purchaseOrderDate: {
+            type: Date,
+            default: Date.now,
+        },
+        paymentDate: {
+            type: Date,
         },
         branch: {
             type: mongoose.Schema.Types.ObjectId,
@@ -22,7 +38,8 @@ const purchaseOrderSchema = new mongoose.Schema(
             required: true,
         },
         supplier: {
-            type: String,
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
             required: true,
         },
         createdBy: {

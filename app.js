@@ -18,6 +18,11 @@ const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceSta
 const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
+const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
+const AccountingCodeRouter = require("./Src/modules/AccountingCode/Routes/AccountingCodeRouter");
+const TaxRouter = require("./Src/modules/Tax/Routes/TaxRouter");
+const PaymentRouter = require("./Src/modules/Payment/Routes/PaymentRouter");
+const LedgerRouter = require("./Src/modules/Ledger/Routes/LedgerRouter");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -40,6 +45,11 @@ app.use("/api/financestaff", FinanceStaffRouter);
 app.use("/api/workshopstaff", WorkshopStaffRouter);
 app.use("/api/purchase-order", PurchaseOrderRouter);
 app.use("/api/vehicle", VehicleRouter);
+app.use("/api/supplier", SupplierRouter);
+app.use("/api/accounting-code", AccountingCodeRouter);
+app.use("/api/tax", TaxRouter);
+app.use("/api/payment", PaymentRouter);
+app.use("/api/ledger", LedgerRouter);
 
 
 app.get("/health", (req, res) => {

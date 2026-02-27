@@ -1,0 +1,23 @@
+const express = require("express");
+const router = express.Router();
+const { getLedgerEntries } = require("../Controller/LedgerController");
+const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { ROLES } = require("../../../shared/constants/roles");
+
+const VIEW_ACCESS_ROLES = [
+    ROLES.ADMIN,
+    ROLES.FINANCEADMIN,
+];
+
+/**
+ * @swagger
+ * tags:
+ *   name: Ledger
+ *   description: Immutable Accounting Ledger APIs
+ */
+
+// ONLY GET routes. Ledger is append-only by the system via Service triggers.
+router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), getLedgerEntries);
+
+module.exports = router;

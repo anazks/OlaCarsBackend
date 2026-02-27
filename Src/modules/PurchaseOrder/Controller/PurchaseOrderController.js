@@ -14,6 +14,22 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 const addPurchaseOrder = async (req, res) => {
     try {
         let poData = req.body;
+
+        // Auto-generate unique PO number
+        const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+        poData.purchaseOrderNumber = `PO-${Date.now()}-${randomString}`;
+
+        // Auto-calculate the totalAmount based on the items array
+        let calculatedTotal = 0;
+        if (poData.items && Array.isArray(poData.items)) {
+            poData.items.forEach(item => {
+                const qty = item.quantity || 1;
+                const price = item.unitPrice || 0;
+                calculatedTotal += (qty * price);
+            });
+        }
+        poData.totalAmount = calculatedTotal;
+
         poData.createdBy = req.user.id;
         poData.creatorRole = req.user.role;
 
@@ -47,7 +63,7 @@ const getPurchaseOrders = async (req, res) => {
         ];
 
         if (limitedAuthorities.includes(userRole)) {
-            query.priceOfVehicle = { $lte: 1000 };
+            query.totalAmount = { $lte: 1000 };
         } else if (creators.includes(userRole)) {
             // Creators should only be able to see POs they created themselves (or from their branch if that's the intention, but here we restrict to createdBy)
             query.createdBy = req.user.id;
@@ -104,7 +120,7 @@ const approvePurchaseOrder = async (req, res) => {
         }
 
         // Business Logic for approval based on amount
-        const amount = currentPO.priceOfVehicle;
+        const amount = currentPO.totalAmount;
 
         if (amount > 1000) {
             if (approverRole !== ROLES.ADMIN) {
