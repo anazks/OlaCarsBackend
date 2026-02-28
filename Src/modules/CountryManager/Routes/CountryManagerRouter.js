@@ -66,7 +66,7 @@ const router = express.Router();
  *         description: Internal Server Error
  */
 router.post(
-    "/country-manager",
+    "/",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     addCountryManager
