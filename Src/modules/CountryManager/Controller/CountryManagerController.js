@@ -3,7 +3,9 @@ const {
     editCountryManagerService,
     deleteCountryManagerService,
     getCountryManagersService,
-    getCountryManagerByIdService
+    getCountryManagerByIdService,
+    loginCountryManager,
+    refreshAccessToken
 } = require('../Repo/CountryManagerRepo.js');
 
 /**
@@ -122,7 +124,51 @@ const getCountryManagerById = async (req, res) => {
     }
 };
 
+/**
+ * Handles Country Manager login request.
+ * @route POST /api/country-manager/login
+ * @access Public
+ */
+const login = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        const tokens = await loginCountryManager(email, password);
+
+        return res.status(200).json({
+            success: true,
+            ...tokens,
+        });
+    } catch (error) {
+        return res.status(401).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+/**
+ * Handles Country Manager token refresh request.
+ * @route POST /api/country-manager/refresh
+ * @access Public
+ */
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken: token } = req.body;
+
+        const newToken = await refreshAccessToken(token);
+
+        return res.json(newToken);
+    } catch (error) {
+        return res.status(403).json({
+            message: "Invalid refresh token",
+        });
+    }
+};
+
 module.exports = {
+    login,
+    refreshToken,
     addCountryManager,
     editCountryManager,
     deleteCountryManager,

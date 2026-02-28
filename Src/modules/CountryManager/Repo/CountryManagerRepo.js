@@ -1,5 +1,7 @@
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const CountryManager = require("../Model/CountryManagerModel.js");
+const { jwtConfig } = require('../../../config/jwtConfig.js');
 
 /**
  * Creates a new Country Manager in the database.
@@ -96,4 +98,66 @@ exports.getCountryManagerByIdService = async (id) => {
     } catch (error) {
         throw error;
     }
+};
+
+/**
+ * Authenticates a Country Manager using email and password.
+ * @param {string} email - Manager's email address.
+ * @param {string} password - Manager's plaintext password.
+ * @returns {Promise<Object>} Object containing accessToken and refreshToken.
+ * @throws {Error} If credentials are invalid or account is not active.
+ */
+exports.loginCountryManager = async (email, password) => {
+    const manager = await CountryManager.findOne({ email });
+
+    if (!manager) throw new Error("Invalid credentials");
+
+    const isMatch = await bcrypt.compare(password, manager.passwordHash);
+    if (!isMatch) throw new Error("Invalid credentials");
+
+    if (manager.status !== "ACTIVE")
+        throw new Error("Account not active");
+
+    const accessToken = jwt.sign(
+        { id: manager._id, role: manager.role },
+        process.env.JWT_SECRET,
+        { expiresIn: jwtConfig.accessTokenExpiry }
+    );
+
+    const refreshToken = jwt.sign(
+        { id: manager._id },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: jwtConfig.refreshTokenExpiry }
+    );
+
+    manager.refreshToken = refreshToken;
+    await manager.save();
+
+    return { accessToken, refreshToken };
+};
+
+/**
+ * Refreshes the access token using a valid refresh token for Country Manager.
+ * @param {string} token - The refresh token.
+ * @returns {Promise<Object>} Object containing the new accessToken.
+ * @throws {Error} If the refresh token is invalid or does not match the stored token.
+ */
+exports.refreshAccessToken = async (token) => {
+    const decoded = jwt.verify(
+        token,
+        process.env.JWT_REFRESH_SECRET
+    );
+
+    const manager = await CountryManager.findById(decoded.id);
+
+    if (!manager || manager.refreshToken !== token)
+        throw new Error("Invalid refresh token");
+
+    const newAccessToken = jwt.sign(
+        { id: manager._id, role: manager.role },
+        process.env.JWT_SECRET,
+        { expiresIn: jwtConfig.accessTokenExpiry }
+    );
+
+    return { accessToken: newAccessToken };
 };

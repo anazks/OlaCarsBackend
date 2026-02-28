@@ -1,5 +1,7 @@
 const express = require("express");
 const {
+    login,
+    refreshToken,
     addCountryManager,
     editCountryManager,
     deleteCountryManager,
@@ -18,6 +20,57 @@ const router = express.Router();
  *   name: CountryManager
  *   description: Country Manager Management APIs
  */
+
+/**
+ * @swagger
+ * /api/country-manager/login:
+ *   post:
+ *     summary: Country Manager login
+ *     tags: [CountryManager]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: manager@olacars.com
+ *               password:
+ *                 type: string
+ *                 example: StrongPassword@123
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *       401:
+ *         description: Invalid credentials
+ */
+router.post("/login", login);
+
+/**
+ * @swagger
+ * /api/country-manager/refresh:
+ *   post:
+ *     summary: Refresh access token
+ *     tags: [CountryManager]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New access token generated
+ */
+router.post("/refresh", refreshToken);
 
 /**
  * @swagger
@@ -196,5 +249,7 @@ router.delete(
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     deleteCountryManager
 );
+
+
 
 module.exports = router;

@@ -8,13 +8,20 @@ const options = {
       version: "1.0.0",
       description: "Multi-Branch Fleet ERP API Documentation",
     },
-    securitySchemes: {
-      bearerAuth: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "JWT"
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT"
+        }
       }
     },
+    security: [
+      {
+        bearerAuth: []
+      }
+    ],
     servers: [
       {
         url: "http://localhost:3000",
