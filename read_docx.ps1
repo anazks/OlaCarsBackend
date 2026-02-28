@@ -1,21 +1,26 @@
-$path = "C:\Users\leno2\Downloads\ola_cars_vehicle_onboarding.docx"
-if (-not (Test-Path $path)) {
-    Write-Output "File not found: $path"
-    exit 1
-}
-
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead($path)
-$entry = $zip.GetEntry("word/document.xml")
-$stream = $entry.Open()
-$reader = New-Object System.IO.StreamReader($stream)
-$xmlStr = $reader.ReadToEnd()
-$reader.Close()
-$zip.Dispose()
+$zipPath = "C:\Users\leno2\Downloads\ola_cars_vehicle_onboarding.docx"
 
-# Replace paragraph tags with newlines for readability 
-$xmlStr = $xmlStr -replace '<w:p\b[^>]*>', "`r`n"
-# Remove all other XML tags
-$xmlStr = $xmlStr -replace '<[^>]+>', ""
-
-Write-Output $xmlStr
+try {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    $entry = $zip.GetEntry("word/document.xml")
+    $stream = $entry.Open()
+    $reader = New-Object System.IO.StreamReader($stream)
+    $xmlString = $reader.ReadToEnd()
+    $reader.Close()
+    $stream.Close()
+    
+    [xml]$xml = $xmlString
+    $text = $xml.document.body.InnerXml -replace '<[^>]+>', ''
+    
+    # decode HTML entities if any
+    $text = [System.Net.WebUtility]::HtmlDecode($text)
+    
+    Write-Output "--- DOC CONTENT START ---"
+    Write-Output $text
+    Write-Output "--- DOC CONTENT END ---"
+} catch {
+    Write-Error $_.Exception.Message
+} finally {
+    if ($zip) { $zip.Dispose() }
+}

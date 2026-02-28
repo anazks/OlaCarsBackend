@@ -4,6 +4,7 @@ const {
     getVehicleByIdService,
 } = require("../Repo/VehicleRepo");
 const { processVehicleProgress } = require("../Service/VehicleWorkflowService");
+const uploadToS3 = require("../../../utils/uploadToS3");
 
 /**
  * Create a new Vehicle Outline. (Step 1 & 2)
@@ -73,9 +74,64 @@ const progressVehicleStatus = async (req, res) => {
     }
 };
 
+/**
+ * Upload Vehicle Documents and Photos to AWS S3.
+ * Accepts multiple document fields in formData.
+ * @route POST /api/vehicle/:id/upload-documents
+ * @access Private
+ */
+const uploadVehicleDocuments = async (req, res) => {
+    try {
+        const vehicleId = req.params.id;
+
+        // Ensure vehicle exists
+        const vehicle = await getVehicleByIdService(vehicleId);
+        if (!vehicle) {
+            return res.status(404).json({ success: false, message: "Vehicle not found" });
+        }
+
+        const files = req.files;
+        if (!files || Object.keys(files).length === 0) {
+            return res.status(400).json({ success: false, message: "No documents uploaded" });
+        }
+
+        const uploadedKeys = {};
+
+        // Loop through all file fields gracefully
+        for (const [fieldName, fileArray] of Object.entries(files)) {
+            if (!fileArray || fileArray.length === 0) continue;
+
+            if (fieldName === "exteriorPhotos") {
+                uploadedKeys[fieldName] = [];
+                for (const file of fileArray) {
+                    const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
+                    const uploadedKey = await uploadToS3(file, key);
+                    uploadedKeys[fieldName].push(uploadedKey);
+                }
+            } else {
+                // For all single file uploads
+                const file = fileArray[0];
+                const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
+                const uploadedKey = await uploadToS3(file, key);
+                uploadedKeys[fieldName] = uploadedKey;
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Documents uploaded successfully to S3.",
+            data: uploadedKeys
+        });
+
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
     getVehicleById,
     progressVehicleStatus,
+    uploadVehicleDocuments
 };

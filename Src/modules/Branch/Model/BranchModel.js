@@ -47,10 +47,15 @@ const branchSchema = new mongoose.Schema(
       lowercase: true,
     },
 
-    managerId: {
+    createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Admin", // Branch admin reference
-      default: null,
+      refPath: "creatorRole",
+      required: true,
+    },
+    creatorRole: {
+      type: String,
+      required: true,
+      enum: ["ADMIN", "OPERATIONADMIN", "FINANCEADMIN", "COUNTRYMANAGER"],
     },
 
     status: {

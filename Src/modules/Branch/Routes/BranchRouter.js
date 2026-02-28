@@ -51,8 +51,11 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *                 type: string
  *               email:
  *                 type: string
- *               managerId:
+ *               createdBy:
  *                 type: string
+ *               creatorRole:
+ *                 type: string
+ *                 enum: [ADMIN, OPERATIONADMIN, FINANCEADMIN, COUNTRYMANAGER]
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, INACTIVE]
@@ -150,8 +153,11 @@ router.get(
  *                 type: string
  *               email:
  *                 type: string
- *               managerId:
+ *               createdBy:
  *                 type: string
+ *               creatorRole:
+ *                 type: string
+ *                 enum: [ADMIN, OPERATIONADMIN, FINANCEADMIN, COUNTRYMANAGER]
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, INACTIVE]

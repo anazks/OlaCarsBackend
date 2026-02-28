@@ -10,6 +10,8 @@ const addBranch = async (req, res) => {
         console.log("addBranch called with body:", req.body); // Debug log  
         let branchData = req.body;
         console.log("Received branch data:", branchData); // Debug log
+        branchData.createdBy = req.user.id;
+        branchData.creatorRole = req.user.role;
         const newBranch = await addBranchService(branchData);
         return res.status(201).json({
             success: true,
@@ -31,6 +33,8 @@ const editBranch = async (req, res) => {
     try {
         const branchData = req.body;
         console.log("editBranch called with body:", req.body); // Debug log
+        branchData.createdBy = req.user.id;
+        branchData.creatorRole = req.user.role;
         const updatedBranch = await editBranchService(branchData);
         return res.status(200).json({
             success: true,

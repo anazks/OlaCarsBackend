@@ -5,7 +5,9 @@ const {
     getVehicles,
     getVehicleById,
     progressVehicleStatus,
+    uploadVehicleDocuments
 } = require("../Controller/VehicleController.js");
+const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
@@ -228,6 +230,103 @@ router.put(
         ROLES.ADMIN
     ),
     progressVehicleStatus
+);
+
+/**
+ * @swagger
+ * /api/vehicle/{id}/upload-documents:
+ *   post:
+ *     summary: Upload vehicle documents and photos to AWS S3
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Vehicle ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               purchaseReceipt:
+ *                 type: string
+ *                 format: binary
+ *               registrationCertificate:
+ *                 type: string
+ *                 format: binary
+ *               roadTaxDisc:
+ *                 type: string
+ *                 format: binary
+ *               numberPlateFront:
+ *                 type: string
+ *                 format: binary
+ *               numberPlateRear:
+ *                 type: string
+ *                 format: binary
+ *               roadworthinessCertificate:
+ *                 type: string
+ *                 format: binary
+ *               transferOfOwnership:
+ *                 type: string
+ *                 format: binary
+ *               policyDocument:
+ *                 type: string
+ *                 format: binary
+ *               customsClearanceCertificate:
+ *                 type: string
+ *                 format: binary
+ *               importPermit:
+ *                 type: string
+ *                 format: binary
+ *               odometerPhoto:
+ *                 type: string
+ *                 format: binary
+ *               exteriorPhotos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Documents uploaded successfully
+ *       400:
+ *         description: No documents uploaded
+ *       404:
+ *         description: Vehicle not found
+ *       500:
+ *         description: Internal server error
+ */
+router.post(
+    "/:id/upload-documents",
+    authenticate,
+    authorize(
+        ROLES.OPERATIONSTAFF,
+        ROLES.BRANCHMANAGER,
+        ROLES.FINANCESTAFF,
+        ROLES.COUNTRYMANAGER,
+        ROLES.ADMIN
+    ),
+    upload.fields([
+        { name: "purchaseReceipt", maxCount: 1 },
+        { name: "registrationCertificate", maxCount: 1 },
+        { name: "roadTaxDisc", maxCount: 1 },
+        { name: "numberPlateFront", maxCount: 1 },
+        { name: "numberPlateRear", maxCount: 1 },
+        { name: "roadworthinessCertificate", maxCount: 1 },
+        { name: "transferOfOwnership", maxCount: 1 },
+        { name: "policyDocument", maxCount: 1 },
+        { name: "customsClearanceCertificate", maxCount: 1 },
+        { name: "importPermit", maxCount: 1 },
+        { name: "odometerPhoto", maxCount: 1 },
+        { name: "exteriorPhotos", maxCount: 20 }
+    ]),
+    uploadVehicleDocuments
 );
 
 module.exports = router;
