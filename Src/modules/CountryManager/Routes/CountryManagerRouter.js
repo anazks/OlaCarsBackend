@@ -72,7 +72,7 @@ router.post(
     addCountryManager
 );
 
-/**
+/**    
  * @swagger
  * /api/country-manager:
  *   get:
@@ -87,7 +87,7 @@ router.post(
  *         description: Internal Server Error
  */
 router.get(
-    "/country-manager",
+    "/",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     getCountryManagers
@@ -116,7 +116,7 @@ router.get(
  *         description: Internal Server Error
  */
 router.get(
-    "/country-manager/:id",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     getCountryManagerById
@@ -164,7 +164,7 @@ router.get(
  *         description: Internal Server Error
  */
 router.put(
-    "/country-manager/update",
+    "/update",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     editCountryManager
@@ -191,7 +191,7 @@ router.put(
  *         description: Internal Server Error
  */
 router.delete(
-    "/country-manager/:id",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     deleteCountryManager

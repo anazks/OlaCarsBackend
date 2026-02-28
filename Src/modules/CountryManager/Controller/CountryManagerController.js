@@ -81,6 +81,7 @@ const deleteCountryManager = async (req, res) => {
  */
 const getCountryManagers = async (req, res) => {
     try {
+        console.log("getCountryManagers");
         const managers = await getCountryManagersService();
         return res.status(200).json({
             success: true,

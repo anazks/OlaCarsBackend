@@ -48,6 +48,23 @@ const STATUS_RULES = {
         allowedFrom: ["DOCUMENTS REVIEW", "REPAIR IN PROGRESS"],
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
+        gateValidator: (vehicle, payload) => {
+            const inspection = { ...vehicle.inspection, ...payload.inspection };
+
+            if (!inspection.checklistItems || inspection.checklistItems.length < 23) {
+                return "All 23 inspection checklist items must be completed.";
+            }
+
+            if (!inspection.exteriorPhotos || inspection.exteriorPhotos.length < 6) {
+                return "Minimum 6 exterior photos are required.";
+            }
+
+            if (!inspection.odometerPhoto) {
+                return "Odometer photo is mandatory.";
+            }
+
+            return null;
+        }
     },
     "INSPECTION FAILED": {
         allowedFrom: ["INSPECTION REQUIRED"],
