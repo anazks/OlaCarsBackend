@@ -97,28 +97,4 @@ const branchManagerSchema = new mongoose.Schema(
     }
 );
 
-branchManagerSchema.post(['find', 'findOne'], async function (docs) {
-    if (!docs) return;
-
-    // Map of role enum to actual mongoose model names
-    const roleToModelMapping = {
-        'ADMIN': 'Admin',
-        'OPERATIONADMIN': 'OperationalAdmin',
-        'FINANCEADMIN': 'FinanceAdmin',
-        'COUNTRYMANAGER': 'CountryManager'
-    };
-
-    const processDoc = (doc) => {
-        if (doc && doc.creatorRole && roleToModelMapping[doc.creatorRole]) {
-            doc.creatorRole = roleToModelMapping[doc.creatorRole];
-        }
-    };
-
-    if (Array.isArray(docs)) {
-        docs.forEach(processDoc);
-    } else {
-        processDoc(docs);
-    }
-});
-
 module.exports = mongoose.model("BranchManager", branchManagerSchema);
