@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     addBranchManager,
     editBranchManager,
+    changePassword,
     deleteBranchManager,
     getBranchManagers,
     getBranchManagerById,
@@ -174,10 +175,49 @@ router.get(
  *         description: Branch Manager updated successfully
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
     editBranchManager
+);
+
+/**
+ * @swagger
+ * /api/branch-manager/{id}/change-password:
+ *   post:
+ *     summary: Change Branch Manager password
+ *     tags: [BranchManager]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+    changePassword
 );
 
 /**

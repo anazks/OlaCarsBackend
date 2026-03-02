@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     addFinanceStaff,
     editFinanceStaff,
+    changePassword,
     deleteFinanceStaff,
     getFinanceStaff,
     getFinanceStaffById,
@@ -170,10 +171,49 @@ router.get(
  *         description: Staff updated successfully
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
     editFinanceStaff
+);
+
+/**
+ * @swagger
+ * /api/finance-staff/{id}/change-password:
+ *   post:
+ *     summary: Change Finance Staff password
+ *     tags: [FinanceStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    changePassword
 );
 
 /**

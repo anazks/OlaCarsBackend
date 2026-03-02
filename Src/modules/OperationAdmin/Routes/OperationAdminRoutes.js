@@ -7,6 +7,7 @@ const {
     getOperationalAdmins,
     getOperationalAdminById,
     editOperationalAdmin,
+    changePassword,
     deleteOperationalAdmin
 } = require("../Controller/OperationAdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -191,10 +192,49 @@ router.get(
  *         description: Operational Admin updated successfully
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
     editOperationalAdmin
+);
+
+/**
+ * @swagger
+ * /api/operational-admin/{id}/change-password:
+ *   post:
+ *     summary: Change Operational Admin password
+ *     tags: [OperationalAdmin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.ADMIN),
+    changePassword
 );
 
 /**

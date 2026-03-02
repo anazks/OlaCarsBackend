@@ -1,107 +1,85 @@
-const {
-    addWorkshopStaffService,
-    editWorkshopStaffService,
-    deleteWorkshopStaffService,
-    getWorkshopStaffService,
-    getWorkshopStaffByIdService,
-    loginWorkshopStaff
-} = require('../Repo/WorkshopStaffRepo.js');
+const WorkshopStaffService = require('../Service/WorkshopStaffService.js');
 
-/**
- * Handles Workshop Staff login.
- * @route POST /api/workshopstaff/login
- * @access Public
- */
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const tokens = await loginWorkshopStaff(email, password);
+        const tokens = await WorkshopStaffService.login(email, password);
         return res.status(200).json({ success: true, ...tokens });
     } catch (error) {
-        return res.status(401).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Adds a Workshop Staff member.
- * @route POST /api/workshopstaff/
- * @access Private
- */
 const addWorkshopStaff = async (req, res) => {
     try {
-        let staffData = req.body;
-        staffData.createdBy = req.user.id;
-        staffData.creatorRole = req.user.role;
-
-        const newStaff = await addWorkshopStaffService(staffData);
+        const data = { ...req.body };
+        data.createdBy = req.user.id;
+        data.creatorRole = req.user.role;
+        const newStaff = await WorkshopStaffService.create(data);
         return res.status(201).json({ success: true, data: newStaff });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Gets all Workshop Staff members.
- * @route GET /api/workshopstaff/
- * @access Private
- */
 const getWorkshopStaff = async (req, res) => {
     try {
-        const staff = await getWorkshopStaffService();
+        const staff = await WorkshopStaffService.getAll();
         return res.status(200).json({ success: true, data: staff });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Gets a Workshop Staff member by ID.
- * @route GET /api/workshopstaff/:id
- * @access Private
- */
 const getWorkshopStaffById = async (req, res) => {
     try {
-        const staff = await getWorkshopStaffByIdService(req.params.id);
-        if (!staff) return res.status(404).json({ success: false, message: "Staff not found" });
+        const staff = await WorkshopStaffService.getById(req.params.id);
+        if (!staff) return res.status(404).json({ success: false, message: 'Workshop Staff not found' });
         return res.status(200).json({ success: true, data: staff });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Updates a Workshop Staff member.
- * @route PUT /api/workshopstaff/update
- * @access Private
- */
 const editWorkshopStaff = async (req, res) => {
     try {
-        const updatedStaff = await editWorkshopStaffService(req.body);
+        const updatedStaff = await WorkshopStaffService.update(req.params.id, req.body);
         return res.status(200).json({ success: true, data: updatedStaff });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Deletes a Workshop Staff member.
- * @route DELETE /api/workshopstaff/:id
- * @access Private
- */
+const changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const result = await WorkshopStaffService.changePassword(req.params.id, currentPassword, newPassword);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 const deleteWorkshopStaff = async (req, res) => {
     try {
-        await deleteWorkshopStaffService(req.params.id);
-        return res.status(200).json({ success: true, message: "Staff deleted successfully" });
+        await WorkshopStaffService.remove(req.params.id);
+        return res.status(200).json({ success: true, message: 'Workshop Staff deleted successfully' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
 module.exports = {
+    login,
     addWorkshopStaff,
-    editWorkshopStaff,
-    deleteWorkshopStaff,
     getWorkshopStaff,
     getWorkshopStaffById,
-    login
+    editWorkshopStaff,
+    changePassword,
+    deleteWorkshopStaff
 };

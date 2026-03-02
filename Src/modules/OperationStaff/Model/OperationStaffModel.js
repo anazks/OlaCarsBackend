@@ -47,6 +47,16 @@ const operationStaffSchema = new mongoose.Schema(
         lastLoginAt: {
             type: Date,
         },
+        passwordChangedAt: {
+            type: Date,
+        },
+        failedLoginAttempts: {
+            type: Number,
+            default: 0,
+        },
+        lockUntil: {
+            type: Date,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: true,
@@ -58,7 +68,29 @@ const operationStaffSchema = new mongoose.Schema(
             enum: ['BRANCHMANAGER', 'ADMIN', 'OPERATIONADMIN', 'FINANCEADMIN', 'COUNTRYMANAGER']
         }
     },
-    { timestamps: true }
+    {
+        timestamps: true,
+        toJSON: {
+            transform(doc, ret) {
+                delete ret.passwordHash;
+                delete ret.refreshToken;
+                delete ret.failedLoginAttempts;
+                delete ret.lockUntil;
+                delete ret.__v;
+                return ret;
+            }
+        },
+        toObject: {
+            transform(doc, ret) {
+                delete ret.passwordHash;
+                delete ret.refreshToken;
+                delete ret.failedLoginAttempts;
+                delete ret.lockUntil;
+                delete ret.__v;
+                return ret;
+            }
+        }
+    }
 );
 
 module.exports = mongoose.model("OperationStaff", operationStaffSchema);

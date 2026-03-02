@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     addOperationStaff,
     editOperationStaff,
+    changePassword,
     deleteOperationStaff,
     getOperationStaff,
     getOperationStaffById,
@@ -170,10 +171,49 @@ router.get(
  *         description: Staff updated successfully
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
     editOperationStaff
+);
+
+/**
+ * @swagger
+ * /api/operation-staff/{id}/change-password:
+ *   post:
+ *     summary: Change Operation Staff password
+ *     tags: [OperationStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    changePassword
 );
 
 /**

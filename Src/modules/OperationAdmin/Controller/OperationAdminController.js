@@ -1,125 +1,86 @@
-const {
-  loginOperationalAdmin,
-  refreshAccessTokenOperationalAdmin,
-  addOperationalAdminService,
-  editOperationalAdminService,
-  deleteOperationalAdminService,
-  getOperationalAdminsService,
-  getOperationalAdminByIdService
-} = require('../Repo/OperationAdminRepo.js');
-/**
- * Handles Operational Admin login request.
- * @route POST /api/operationaladmin/login
- * @access Public
- */
+const OperationAdminService = require('../Service/OperationAdminService.js');
+
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    const tokens = await loginOperationalAdmin(email, password);
-
-    return res.status(200).json({
-      success: true,
-      ...tokens,
-    });
+    const tokens = await OperationAdminService.login(email, password);
+    return res.status(200).json({ success: true, ...tokens });
   } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: error.message,
-    });
+    const statusCode = error.statusCode || 401;
+    return res.status(statusCode).json({ success: false, message: error.message });
   }
 };
-/**
- * Handles Operational Admin token refresh request.
- * @route POST /api/operationaladmin/refresh
- * @access Public
- */
+
 const refreshToken = async (req, res) => {
   try {
     const { refreshToken } = req.body;
-
-    const newToken = await refreshAccessTokenOperationalAdmin(refreshToken);
-
+    const newToken = await OperationAdminService.refreshAccessToken(refreshToken);
     return res.json(newToken);
   } catch (error) {
-    return res.status(403).json({
-      message: "Invalid refresh token",
-    });
+    return res.status(403).json({ message: 'Invalid refresh token' });
   }
 };
 
-/**
- * Creates a new Operational Admin.
- * @route POST /api/operationaladmin/
- * @access Private
- */
 const addOperationalAdmin = async (req, res) => {
   try {
-    let adminData = req.body;
+    const adminData = { ...req.body };
     adminData.createdBy = req.user.id;
     adminData.creatorRole = req.user.role;
-
-    const newAdmin = await addOperationalAdminService(adminData);
+    const newAdmin = await OperationAdminService.create(adminData);
     return res.status(201).json({ success: true, data: newAdmin });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ success: false, message: error.message });
   }
 };
 
-/**
- * Gets all Operational Admins.
- * @route GET /api/operationaladmin/
- * @access Private
- */
 const getOperationalAdmins = async (req, res) => {
   try {
-    const admins = await getOperationalAdminsService();
+    const admins = await OperationAdminService.getAll();
     return res.status(200).json({ success: true, data: admins });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-/**
- * Gets an Operational Admin by ID.
- * @route GET /api/operationaladmin/:id
- * @access Private
- */
 const getOperationalAdminById = async (req, res) => {
   try {
-    const admin = await getOperationalAdminByIdService(req.params.id);
-    if (!admin) return res.status(404).json({ success: false, message: "Operational Admin not found" });
+    const admin = await OperationAdminService.getById(req.params.id);
+    if (!admin) return res.status(404).json({ success: false, message: 'Operational Admin not found' });
     return res.status(200).json({ success: true, data: admin });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-/**
- * Updates an Operational Admin.
- * @route PUT /api/operationaladmin/update
- * @access Private
- */
 const editOperationalAdmin = async (req, res) => {
   try {
-    const updatedAdmin = await editOperationalAdminService(req.body);
+    const updatedAdmin = await OperationAdminService.update(req.params.id, req.body);
     return res.status(200).json({ success: true, data: updatedAdmin });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ success: false, message: error.message });
   }
 };
 
-/**
- * Deletes an Operational Admin.
- * @route DELETE /api/operationaladmin/:id
- * @access Private
- */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const result = await OperationAdminService.changePassword(req.params.id, currentPassword, newPassword);
+    return res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ success: false, message: error.message });
+  }
+};
+
 const deleteOperationalAdmin = async (req, res) => {
   try {
-    await deleteOperationalAdminService(req.params.id);
-    return res.status(200).json({ success: true, message: "Operational Admin deleted successfully" });
+    await OperationAdminService.remove(req.params.id);
+    return res.status(200).json({ success: true, message: 'Operational Admin deleted successfully' });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ success: false, message: error.message });
   }
 };
 
@@ -130,5 +91,6 @@ module.exports = {
   getOperationalAdmins,
   getOperationalAdminById,
   editOperationalAdmin,
+  changePassword,
   deleteOperationalAdmin
 };

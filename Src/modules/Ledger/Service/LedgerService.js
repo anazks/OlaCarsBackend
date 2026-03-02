@@ -1,4 +1,22 @@
-const { addLedgerEntryService } = require("../Repo/LedgerRepo");
+const { addLedgerEntryService, getLedgerEntriesService } = require("../Repo/LedgerRepo");
+const filterBody = require('../../../shared/utils/filterBody.js');
+
+const ALLOWED_CREATE_FIELDS = ['transaction', 'accountingCode', 'type', 'amount', 'description', 'entryDate'];
+
+/**
+ * Creates a ledger entry with field whitelisting.
+ */
+exports.create = async (data) => {
+    const filtered = filterBody(data, ...ALLOWED_CREATE_FIELDS);
+    return await addLedgerEntryService(filtered);
+};
+
+/**
+ * Retrieves all ledger entries.
+ */
+exports.getAll = async (query = {}) => {
+    return await getLedgerEntriesService(query);
+};
 
 /**
  * Automatically generates a Ledger Entry from a completed PaymentTransaction.

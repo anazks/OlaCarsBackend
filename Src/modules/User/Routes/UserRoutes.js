@@ -3,6 +3,7 @@ const router = express.Router();
 const {
     addUser,
     editUser,
+    changePassword,
     deleteUser,
     getUsers,
     getUserById,
@@ -154,7 +155,41 @@ router.get("/:id", authenticate, getUserById);
  *       200:
  *         description: User updated successfully
  */
-router.put("/update", authenticate, editUser);
+router.put("/:id", authenticate, editUser);
+
+/**
+ * @swagger
+ * /api/user/{id}/change-password:
+ *   post:
+ *     summary: Change User password
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post("/:id/change-password", authenticate, changePassword);
 
 /**
  * @swagger

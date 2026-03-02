@@ -7,6 +7,7 @@ const {
     getAdmins,
     getAdminById,
     editAdmin,
+    changePassword,
     deleteAdmin
 } = require("../Controller/AdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -156,28 +157,28 @@ router.get(
 
 /**
  * @swagger
- * /api/admin/update:
+ * /api/admin/{id}:
  *   put:
- *     summary: Update an Admin
+ *     summary: Update an Admin (whitelisted fields only)
  *     tags: [Admin]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
  *               fullName:
  *                 type: string
  *               email:
- *                 type: string
- *               password:
  *                 type: string
  *               status:
  *                 type: string
@@ -189,10 +190,51 @@ router.get(
  *         description: Admin updated successfully
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
     editAdmin
+);
+
+/**
+ * @swagger
+ * /api/admin/{id}/change-password:
+ *   post:
+ *     summary: Change Admin password
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *       401:
+ *         description: Current password incorrect
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.ADMIN),
+    changePassword
 );
 
 /**

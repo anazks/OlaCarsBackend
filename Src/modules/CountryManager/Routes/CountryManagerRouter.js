@@ -4,6 +4,7 @@ const {
     refreshToken,
     addCountryManager,
     editCountryManager,
+    changePassword,
     deleteCountryManager,
     getCountryManagers,
     getCountryManagerById
@@ -217,10 +218,49 @@ router.get(
  *         description: Internal Server Error
  */
 router.put(
-    "/update",
+    "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     editCountryManager
+);
+
+/**
+ * @swagger
+ * /api/country-manager/{id}/change-password:
+ *   post:
+ *     summary: Change Country Manager password
+ *     tags: [CountryManager]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ */
+router.post(
+    "/:id/change-password",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    changePassword
 );
 
 /**
