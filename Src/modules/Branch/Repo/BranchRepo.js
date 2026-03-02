@@ -57,28 +57,28 @@ exports.deleteBranchService = async (branchId) => {
 exports.getBranchesService = async () => {
     try {
         const branches = await Branch.find();
-        const roleMapping = {
-            'ADMIN': 'Admin',
-            'OPERATIONADMIN': 'OperationalAdmin',
-            'FINANCEADMIN': 'FinanceAdmin',
-            'COUNTRYMANAGER': 'CountryManager'
-        };
+        // const roleMapping = {
+        //     'ADMIN': 'Admin',
+        //     'OPERATIONADMIN': 'OperationalAdmin',
+        //     'FINANCEADMIN': 'FinanceAdmin',
+        //     'COUNTRYMANAGER': 'CountryManager'
+        // };
 
-        // Populate manually by grouping by model
-        const populatedBranches = await Promise.all(branches.map(async (branch) => {
-            const modelName = roleMapping[branch.creatorRole];
-            if (modelName) {
-                await branch.populate({
-                    path: 'createdBy',
-                    model: modelName,
-                    select: 'name fullName email role'
-                });
-            }
-            return branch;
-        }));
+        // // Populate manually by grouping by model
+        // const populatedBranches = await Promise.all(branches.map(async (branch) => {
+        //     const modelName = roleMapping[branch.creatorRole];
+        //     if (modelName) {
+        //         await branch.populate({
+        //             path: 'createdBy',
+        //             model: modelName,
+        //             select: 'name fullName email role'
+        //         });
+        //     }
+        //     return branch;
+        // }));
 
-        return populatedBranches;
-        // return branches;
+        // return populatedBranches;
+        return branches;
     } catch (error) {
         throw error;
     }
@@ -94,21 +94,21 @@ exports.getBranchByIdService = async (branchId) => {
         const branch = await Branch.findById(branchId);
         if (!branch) return null;
 
-        const roleMapping = {
-            'ADMIN': 'Admin',
-            'OPERATIONADMIN': 'OperationalAdmin',
-            'FINANCEADMIN': 'FinanceAdmin',
-            'COUNTRYMANAGER': 'CountryManager'
-        };
+        // const roleMapping = {
+        //     'ADMIN': 'Admin',
+        //     'OPERATIONADMIN': 'OperationalAdmin',
+        //     'FINANCEADMIN': 'FinanceAdmin',
+        //     'COUNTRYMANAGER': 'CountryManager'
+        // };
 
-        const modelName = roleMapping[branch.creatorRole];
-        if (modelName) {
-            await branch.populate({
-                path: 'createdBy',
-                model: modelName,
-                select: 'name fullName email role'
-            });
-        }
+        // const modelName = roleMapping[branch.creatorRole];
+        // if (modelName) {
+        //     await branch.populate({
+        //         path: 'createdBy',
+        //         model: modelName,
+        //         select: 'name fullName email role'
+        //     });
+        // }
 
         return branch;
     } catch (error) {

@@ -22,7 +22,8 @@ const checkRoleAuth = (userRole, allowedRoles, minimumHierarchyRole) => {
 
 // System statuses that cannot be directly forced manually by users besides ADMINs
 const SYSTEM_STATUSES = [
-    "ACTIVE — RENTED"
+    "ACTIVE — RENTED",
+    "INSPECTION FAILED",
 ];
 
 // Configuration object containing workflow transitions, validations, and auth
@@ -33,7 +34,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
     },
     "DOCUMENTS REVIEW": {
-        allowedFrom: ["PENDING ENTRY", "INSPECTION REQUIRED"], // From start or returned
+        allowedFrom: ["PENDING ENTRY", "INSURANCE VERIFICATION"], // From start or insurance rejection
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -44,8 +45,20 @@ const STATUS_RULES = {
             return null;
         }
     },
+    "INSURANCE VERIFICATION": {
+        allowedFrom: ["DOCUMENTS REVIEW"],
+        allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF],
+        minHierarchy: ROLES.BRANCHMANAGER,
+        gateValidator: (vehicle, payload) => {
+            const insurance = { ...vehicle.insurancePolicy, ...payload.insurancePolicy };
+            if (!insurance.insuranceType || !insurance.providerName || !insurance.policyNumber || !insurance.startDate || !insurance.expiryDate) {
+                return "Insurance policy details are incomplete. Type, provider, policy number, start and expiry dates are all required.";
+            }
+            return null;
+        }
+    },
     "INSPECTION REQUIRED": {
-        allowedFrom: ["DOCUMENTS REVIEW", "REPAIR IN PROGRESS"],
+        allowedFrom: ["INSURANCE VERIFICATION", "REPAIR IN PROGRESS"],
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -77,9 +90,16 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     "ACCOUNTING SETUP": {
-        allowedFrom: ["INSPECTION REQUIRED", "REPAIR IN PROGRESS"],
+        allowedFrom: ["INSPECTION REQUIRED"],
         allowedRoles: [ROLES.FINANCESTAFF],
-        minHierarchy: ROLES.ADMIN,
+        minHierarchy: ROLES.FINANCEADMIN,
+        gateValidator: (vehicle, payload) => {
+            const inspection = { ...vehicle.inspection, ...payload.inspection };
+            if (inspection.status !== "Passed") {
+                return "Vehicle did not pass inspection. Cannot proceed to accounting.";
+            }
+            return null;
+        }
     },
     "GPS ACTIVATION": {
         allowedFrom: ["ACCOUNTING SETUP"],
@@ -94,7 +114,7 @@ const STATUS_RULES = {
         }
     },
     "BRANCH MANAGER APPROVAL": {
-        allowedFrom: ["GPS ACTIVATION", "ACTIVE — AVAILABLE"],
+        allowedFrom: ["GPS ACTIVATION"],
         allowedRoles: [ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
@@ -106,7 +126,7 @@ const STATUS_RULES = {
         }
     },
     "ACTIVE — AVAILABLE": {
-        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE"],
+        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
         allowedRoles: [ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.ADMIN,
     },
@@ -136,10 +156,50 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.ADMIN,
     },
-    "RETIRED": {
+    "SUSPENDED": {
         allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE"],
+        allowedRoles: [ROLES.BRANCHMANAGER],
+        minHierarchy: ROLES.COUNTRYMANAGER,
+        gateValidator: (vehicle, payload) => {
+            const suspension = payload.suspensionDetails || {};
+            if (!suspension.reason) {
+                return "Suspension reason is required.";
+            }
+            return null;
+        }
+    },
+    "TRANSFER PENDING": {
+        allowedFrom: ["ACTIVE — AVAILABLE"],
+        allowedRoles: [ROLES.BRANCHMANAGER],
+        minHierarchy: ROLES.COUNTRYMANAGER,
+        gateValidator: (vehicle, payload) => {
+            const transfer = payload.transferDetails || {};
+            if (!transfer.toBranch) {
+                return "Destination branch is required for transfer.";
+            }
+            const currentBranch = vehicle.purchaseDetails?.branch?.toString();
+            if (transfer.toBranch.toString() === currentBranch) {
+                return "Destination branch must be different from current branch.";
+            }
+            return null;
+        }
+    },
+    "TRANSFER COMPLETE": {
+        allowedFrom: ["TRANSFER PENDING"],
+        allowedRoles: [ROLES.BRANCHMANAGER],
+        minHierarchy: ROLES.COUNTRYMANAGER,
+    },
+    "RETIRED": {
+        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — MAINTENANCE", "SUSPENDED"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
         minHierarchy: ROLES.ADMIN,
+        gateValidator: (vehicle, payload) => {
+            const retirement = payload.retirementDetails || {};
+            if (!retirement.reason) {
+                return "Retirement reason is required.";
+            }
+            return null;
+        }
     }
 };
 
@@ -153,6 +213,12 @@ const triggerExternalActions = (targetStatus, vehicleId) => {
         console.log(`[Event Action] Pinging physical GPS APIs to confirm active sync mapping for Vehicle ${vehicleId}...`);
     } else if (targetStatus === "ACTIVE — AVAILABLE") {
         console.log(`[Event Action] Auto-generating preventative maintenance schedule blocks for Vehicle ${vehicleId}...`);
+    } else if (targetStatus === "SUSPENDED") {
+        console.log(`[Event Action] Vehicle ${vehicleId} suspended. Previous status captured for restoration.`);
+    } else if (targetStatus === "TRANSFER PENDING") {
+        console.log(`[Event Action] Transfer initiated for Vehicle ${vehicleId}. Notifying destination branch...`);
+    } else if (targetStatus === "RETIRED") {
+        console.log(`[Event Action] Vehicle ${vehicleId} retired. Triggering final depreciation entry and archival...`);
     }
 };
 
@@ -199,6 +265,8 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
         }
     }
 
+    // --- Pre-transition logic ---
+
     // Auto-calculate landed cost if importation details are modified
     if (payload.importationDetails && payload.importationDetails.isImported) {
         const imp = payload.importationDetails;
@@ -210,6 +278,27 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
             (imp.otherCharges || 0);
     }
 
+    // Capture previousStatus before suspension
+    if (targetStatus === "SUSPENDED") {
+        payload.suspensionDetails = payload.suspensionDetails || {};
+        payload.suspensionDetails.previousStatus = currentVehicle.status;
+    }
+
+    // Auto-populate transfer metadata
+    if (targetStatus === "TRANSFER PENDING") {
+        payload.transferDetails = payload.transferDetails || {};
+        payload.transferDetails.fromBranch = currentVehicle.purchaseDetails?.branch;
+        payload.transferDetails.initiatedBy = user.id;
+        payload.transferDetails.initiatedByRole = user.role;
+        payload.transferDetails.transferDate = new Date();
+    }
+
+    // Reassign branch on transfer acceptance
+    if (targetStatus === "ACTIVE — AVAILABLE" && currentVehicle.status === "TRANSFER COMPLETE") {
+        payload["purchaseDetails.branch"] = currentVehicle.transferDetails?.toBranch;
+    }
+
+    // --- Apply status change ---
     payload.status = targetStatus;
     const updatedVehicle = await updateVehicleService(vehicleId, payload);
 
@@ -221,6 +310,31 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
     });
 
     await updatedVehicle.save();
+
+    // --- Post-transition logic ---
+
+    // Auto-detect inspection failures after saving inspection data
+    if (targetStatus === "INSPECTION REQUIRED") {
+        const hasMandatoryFail = updatedVehicle.inspection?.checklistItems?.some(
+            item => item.condition === "Poor" && item.isMandatoryFail
+        );
+        if (hasMandatoryFail) {
+            updatedVehicle.inspection.status = "Failed";
+            updatedVehicle.status = "INSPECTION FAILED";
+            updatedVehicle.statusHistory.push({
+                status: "INSPECTION FAILED",
+                changedBy: user.id,
+                changedByRole: user.role,
+                notes: "Auto-failed: mandatory inspection item(s) rated Poor.",
+            });
+            await updatedVehicle.save();
+            triggerExternalActions("INSPECTION FAILED", vehicleId);
+            return updatedVehicle;
+        } else {
+            updatedVehicle.inspection.status = "Passed";
+            await updatedVehicle.save();
+        }
+    }
 
     // Side effects logic separated from pure validation
     triggerExternalActions(targetStatus, vehicleId);

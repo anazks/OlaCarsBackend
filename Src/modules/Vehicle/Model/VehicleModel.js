@@ -4,6 +4,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 const VEHICLE_STATUSES = [
     "PENDING ENTRY",
     "DOCUMENTS REVIEW",
+    "INSURANCE VERIFICATION",
     "INSPECTION REQUIRED",
     "INSPECTION FAILED",
     "REPAIR IN PROGRESS",
@@ -13,6 +14,9 @@ const VEHICLE_STATUSES = [
     "ACTIVE — AVAILABLE",
     "ACTIVE — RENTED",
     "ACTIVE — MAINTENANCE",
+    "SUSPENDED",
+    "TRANSFER PENDING",
+    "TRANSFER COMPLETE",
     "RETIRED",
 ];
 
@@ -162,6 +166,52 @@ const vehicleSchema = new mongoose.Schema(
             mileageSyncFrequencyHrs: { type: Number, default: 1 },
         },
 
+        // 9. Suspension Tracking
+        suspensionDetails: {
+            reason: {
+                type: String,
+                enum: ["Accident", "Legal", "Police", "Dispute", "Other"],
+            },
+            suspendedUntil: { type: Date },
+            previousStatus: { type: String, enum: VEHICLE_STATUSES },
+        },
+
+        // 10. Transfer Tracking
+        transferDetails: {
+            fromBranch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+            toBranch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+            reason: { type: String },
+            estimatedArrival: { type: Date },
+            transportMethod: {
+                type: String,
+                enum: ["Driven", "Flatbed", "Shipping"],
+            },
+            initiatedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "transferDetails.initiatedByRole" },
+            initiatedByRole: { type: String },
+            transferDate: { type: Date },
+        },
+
+        // 11. Retirement Tracking
+        retirementDetails: {
+            reason: {
+                type: String,
+                enum: ["Sold", "Written Off", "End of Life", "Beyond Repair"],
+            },
+            disposalDate: { type: Date },
+            disposalValue: { type: Number },
+        },
+
+        // 12. Maintenance Tracking
+        maintenanceDetails: {
+            type: {
+                type: String,
+                enum: ["Scheduled", "Unscheduled", "Emergency"],
+            },
+            estimatedCompletionDate: { type: Date },
+            assignedTo: { type: mongoose.Schema.Types.ObjectId, refPath: "maintenanceDetails.assignedToRole" },
+            assignedToRole: { type: String },
+        },
+
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: true,
@@ -199,6 +249,11 @@ vehicleSchema.index({ status: 1 });
 vehicleSchema.index({ "purchaseDetails.branch": 1 });
 vehicleSchema.index({ "legalDocs.registrationNumber": 1 });
 vehicleSchema.index({ "basicDetails.vin": 1 });
+
+// Expiry Alert Indexes
+vehicleSchema.index({ "insurancePolicy.expiryDate": 1 });
+vehicleSchema.index({ "legalDocs.registrationExpiry": 1 });
+vehicleSchema.index({ "legalDocs.roadTaxExpiry": 1 });
 
 module.exports = {
     Vehicle: mongoose.model("Vehicle", vehicleSchema),

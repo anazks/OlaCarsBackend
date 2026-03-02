@@ -171,7 +171,11 @@ router.get(
  * @swagger
  * /api/vehicle/{id}/progress:
  *   put:
- *     summary: Progress vehicle onboarding status
+ *     summary: Progress vehicle onboarding status through the workflow pipeline
+ *     description: |
+ *       Unified workflow endpoint. Validates transition rules, role access,
+ *       gate validators, applies data updates, changes status, records audit trail,
+ *       and triggers side effects. See SPEC.md v3.0 for full documentation.
  *     tags: [Vehicle]
  *     security:
  *       - bearerAuth: []
@@ -189,34 +193,161 @@ router.get(
  *             type: object
  *             required:
  *               - targetStatus
- *               - updateData
  *             properties:
  *               targetStatus:
  *                 type: string
+ *                 enum:
+ *                   - PENDING ENTRY
+ *                   - DOCUMENTS REVIEW
+ *                   - INSURANCE VERIFICATION
+ *                   - INSPECTION REQUIRED
+ *                   - INSPECTION FAILED
+ *                   - REPAIR IN PROGRESS
+ *                   - ACCOUNTING SETUP
+ *                   - GPS ACTIVATION
+ *                   - BRANCH MANAGER APPROVAL
+ *                   - ACTIVE — AVAILABLE
+ *                   - ACTIVE — RENTED
+ *                   - ACTIVE — MAINTENANCE
+ *                   - SUSPENDED
+ *                   - TRANSFER PENDING
+ *                   - TRANSFER COMPLETE
+ *                   - RETIRED
+ *               notes:
+ *                 type: string
+ *                 description: Optional transition notes (recorded in audit trail)
  *               updateData:
  *                 type: object
  *                 properties:
- *                   status:
- *                     type: string
  *                   purchaseDetails:
  *                     type: object
  *                   basicDetails:
  *                     type: object
  *                   legalDocs:
  *                     type: object
+ *                     description: Required for DOCUMENTS REVIEW (regCert, roadTax, roadworthiness)
  *                   insurancePolicy:
  *                     type: object
+ *                     description: Required for INSURANCE VERIFICATION
+ *                     properties:
+ *                       insuranceType:
+ *                         type: string
+ *                         enum: [Comprehensive, Third-Party, Fleet Policy]
+ *                       providerName:
+ *                         type: string
+ *                       policyNumber:
+ *                         type: string
+ *                       startDate:
+ *                         type: string
+ *                         format: date-time
+ *                       expiryDate:
+ *                         type: string
+ *                         format: date-time
+ *                       premiumAmount:
+ *                         type: number
+ *                       coverageAmount:
+ *                         type: number
+ *                       policyDocument:
+ *                         type: string
+ *                       excessAmount:
+ *                         type: number
+ *                       namedDrivers:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                       claimsHistory:
+ *                         type: string
  *                   importationDetails:
  *                     type: object
+ *                     description: Optional, only if vehicle is imported
  *                   inspection:
  *                     type: object
+ *                     description: Required for INSPECTION REQUIRED (23 items + 6 photos)
  *                   accountingSetup:
  *                     type: object
+ *                     description: Required for ACCOUNTING SETUP
+ *                     properties:
+ *                       depreciationMethod:
+ *                         type: string
+ *                         enum: [Straight-Line, Reducing Balance]
+ *                       usefulLifeYears:
+ *                         type: number
+ *                       residualValue:
+ *                         type: number
+ *                       isSetupComplete:
+ *                         type: boolean
  *                   gpsConfiguration:
  *                     type: object
+ *                     description: Required for GPS ACTIVATION
+ *                     properties:
+ *                       isActivated:
+ *                         type: boolean
+ *                       geofenceZone:
+ *                         type: string
+ *                       speedLimitThreshold:
+ *                         type: number
+ *                       idleTimeAlertMins:
+ *                         type: number
+ *                       mileageSyncFrequencyHrs:
+ *                         type: number
+ *                   suspensionDetails:
+ *                     type: object
+ *                     description: Required for SUSPENDED transition
+ *                     properties:
+ *                       reason:
+ *                         type: string
+ *                         enum: [Accident, Legal, Police, Dispute, Other]
+ *                       suspendedUntil:
+ *                         type: string
+ *                         format: date-time
+ *                   transferDetails:
+ *                     type: object
+ *                     description: Required for TRANSFER PENDING transition
+ *                     properties:
+ *                       toBranch:
+ *                         type: string
+ *                         description: Destination Branch ObjectId (required)
+ *                       reason:
+ *                         type: string
+ *                       estimatedArrival:
+ *                         type: string
+ *                         format: date-time
+ *                       transportMethod:
+ *                         type: string
+ *                         enum: [Driven, Flatbed, Shipping]
+ *                   retirementDetails:
+ *                     type: object
+ *                     description: Required for RETIRED transition
+ *                     properties:
+ *                       reason:
+ *                         type: string
+ *                         enum: [Sold, Written Off, End of Life, Beyond Repair]
+ *                       disposalDate:
+ *                         type: string
+ *                         format: date-time
+ *                       disposalValue:
+ *                         type: number
+ *                   maintenanceDetails:
+ *                     type: object
+ *                     description: Optional for ACTIVE — MAINTENANCE transition
+ *                     properties:
+ *                       type:
+ *                         type: string
+ *                         enum: [Scheduled, Unscheduled, Emergency]
+ *                       estimatedCompletionDate:
+ *                         type: string
+ *                         format: date-time
+ *                       assignedTo:
+ *                         type: string
  *     responses:
  *       200:
  *         description: Vehicle status and data updated
+ *       400:
+ *         description: Invalid transition, missing data, or gate validation failed
+ *       403:
+ *         description: Role not authorized for this transition
+ *       404:
+ *         description: Vehicle not found
  */
 router.put(
     "/:id/progress",

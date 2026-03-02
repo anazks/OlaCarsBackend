@@ -62,10 +62,14 @@ const getVehicleById = async (req, res) => {
 const progressVehicleStatus = async (req, res) => {
     try {
         const vehicleId = req.params.id;
-        const { targetStatus, updateData } = req.body;
+        const { targetStatus, updateData, notes } = req.body;
         const user = req.user;
 
-        const updatedVehicle = await processVehicleProgress(vehicleId, targetStatus, updateData, user);
+        // Merge top-level notes into updateData
+        const payload = { ...updateData };
+        if (notes) payload.notes = notes;
+
+        const updatedVehicle = await processVehicleProgress(vehicleId, targetStatus, payload, user);
 
         return res.status(200).json({ success: true, data: updatedVehicle });
     } catch (error) {
