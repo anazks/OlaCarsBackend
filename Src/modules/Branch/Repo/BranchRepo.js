@@ -49,3 +49,15 @@ exports.deleteBranchService = async (branchId) => {
     }
 }
 
+/**
+ * Retrieves all branches.
+ * @param {Object} query - Optional query filters
+ * @returns {Promise<Array>} List of branches
+ */
+exports.getBranchesService = async (query = {}) => {
+    try {
+        return await Branch.find(query).populate("createdBy", "name email role");
+    } catch (error) {
+        throw error;
+    }
+}

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch, editBranch, deleteBranch } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch, getBranches } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
@@ -88,9 +88,7 @@ router.get(
   "/branch",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
-  (req, res) => {
-    res.send("Get branches");
-  }
+  getBranches
 );
 
 /**
