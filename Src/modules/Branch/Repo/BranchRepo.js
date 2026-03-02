@@ -54,9 +54,31 @@ exports.deleteBranchService = async (branchId) => {
  * @param {Object} query - Optional query filters
  * @returns {Promise<Array>} List of branches
  */
-exports.getBranchesService = async (query = {}) => {
+exports.getBranchesService = async () => {
     try {
-        return await Branch.find(query).populate("createdBy", "name email role");
+        const branches = await Branch.find();
+        const roleMapping = {
+            'ADMIN': 'Admin',
+            'OPERATIONADMIN': 'OperationalAdmin',
+            'FINANCEADMIN': 'FinanceAdmin',
+            'COUNTRYMANAGER': 'CountryManager'
+        };
+
+        // Populate manually by grouping by model
+        const populatedBranches = await Promise.all(branches.map(async (branch) => {
+            const modelName = roleMapping[branch.creatorRole];
+            if (modelName) {
+                await branch.populate({
+                    path: 'createdBy',
+                    model: modelName,
+                    select: 'name fullName email role'
+                });
+            }
+            return branch;
+        }));
+
+        return populatedBranches;
+        // return branches;
     } catch (error) {
         throw error;
     }
@@ -69,7 +91,26 @@ exports.getBranchesService = async (query = {}) => {
  */
 exports.getBranchByIdService = async (branchId) => {
     try {
-        return await Branch.findById(branchId).populate("createdBy", "name email role");
+        const branch = await Branch.findById(branchId);
+        if (!branch) return null;
+
+        const roleMapping = {
+            'ADMIN': 'Admin',
+            'OPERATIONADMIN': 'OperationalAdmin',
+            'FINANCEADMIN': 'FinanceAdmin',
+            'COUNTRYMANAGER': 'CountryManager'
+        };
+
+        const modelName = roleMapping[branch.creatorRole];
+        if (modelName) {
+            await branch.populate({
+                path: 'createdBy',
+                model: modelName,
+                select: 'name fullName email role'
+            });
+        }
+
+        return branch;
     } catch (error) {
         throw error;
     }

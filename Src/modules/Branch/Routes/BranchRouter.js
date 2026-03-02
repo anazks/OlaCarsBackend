@@ -118,7 +118,7 @@ router.get(
 
 /**
  * @swagger
- * /api/branch/:
+ *  /api/branch/:
  *   put:
  *     summary: Update branch
  *     tags: [Branch]

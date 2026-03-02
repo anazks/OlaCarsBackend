@@ -27,7 +27,7 @@ const addBranch = async (req, res) => {
 
 /**
  * Handles fetching all branches.
- * @route GET /api/branches/branch
+ * @route GET /api/branch
  * @access Private
  */
 const getBranches = async (req, res) => {
@@ -71,7 +71,7 @@ const getBranchById = async (req, res) => {
 
 /**
  * Handles updating of a branch.
- * @route PUT /api/branches/Updatebranch
+ * @route PUT /api/Updatebranch
  * @access Private
  */
 const editBranch = async (req, res) => {
@@ -94,7 +94,7 @@ const editBranch = async (req, res) => {
 }
 /**
  * Handles soft deletion of a branch.
- * @route DELETE /api/branches/branch/:id
+ * @route DELETE /api/branch/:id
  * @access Private
  */
 const deleteBranch = async (req, res) => {

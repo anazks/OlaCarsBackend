@@ -55,4 +55,6 @@ const financeAdminSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("FinanceAdmin", financeAdminSchema);
+const FinanceAdmin = mongoose.model("FinanceAdmin", financeAdminSchema);
+mongoose.model("FINANCEADMIN", financeAdminSchema, "financeadmins");
+module.exports = FinanceAdmin;

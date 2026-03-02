@@ -65,4 +65,6 @@ const countryManagerSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-module.exports = mongoose.model("CountryManager", countryManagerSchema);
+const CountryManager = mongoose.model("CountryManager", countryManagerSchema);
+mongoose.model("COUNTRYMANAGER", countryManagerSchema, "countrymanagers");
+module.exports = CountryManager;

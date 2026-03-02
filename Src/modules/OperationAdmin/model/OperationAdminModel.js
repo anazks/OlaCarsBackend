@@ -55,4 +55,6 @@ const operationalAdminSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("OperationalAdmin", operationalAdminSchema);
+const OperationalAdmin = mongoose.model("OperationalAdmin", operationalAdminSchema);
+mongoose.model("OPERATIONADMIN", operationalAdminSchema, "operationaladmins");
+module.exports = OperationalAdmin;

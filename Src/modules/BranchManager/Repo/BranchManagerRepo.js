@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const BranchManager = require("../Model/BranchManagerModel.js");
-const { jwtConfig  } = require("../../../config/jwtConfig.js");
+const { jwtConfig } = require("../../../config/jwtConfig.js");
 
 /**
  * Adds a new Branch Manager to the database.
@@ -56,7 +56,28 @@ exports.deleteBranchManagerService = async (id) => {
 
 exports.getBranchManagersService = async () => {
     try {
-        return await BranchManager.find({ isDeleted: false });
+        const managers = await BranchManager.find({ isDeleted: false });
+
+        const roleMapping = {
+            'ADMIN': 'Admin',
+            'OPERATIONADMIN': 'OperationalAdmin',
+            'FINANCEADMIN': 'FinanceAdmin',
+            'COUNTRYMANAGER': 'CountryManager'
+        };
+
+        const populatedManagers = await Promise.all(managers.map(async (manager) => {
+            const modelName = roleMapping[manager.creatorRole];
+            if (modelName) {
+                await manager.populate({
+                    path: 'createdBy',
+                    model: modelName,
+                    select: 'name fullName email role'
+                });
+            }
+            return manager;
+        }));
+
+        return populatedManagers;
     } catch (error) {
         throw error;
     }
@@ -64,7 +85,26 @@ exports.getBranchManagersService = async () => {
 
 exports.getBranchManagerByIdService = async (id) => {
     try {
-        return await BranchManager.findOne({ _id: id, isDeleted: false });
+        const manager = await BranchManager.findOne({ _id: id, isDeleted: false });
+        if (!manager) return null;
+
+        const roleMapping = {
+            'ADMIN': 'Admin',
+            'OPERATIONADMIN': 'OperationalAdmin',
+            'FINANCEADMIN': 'FinanceAdmin',
+            'COUNTRYMANAGER': 'CountryManager'
+        };
+
+        const modelName = roleMapping[manager.creatorRole];
+        if (modelName) {
+            await manager.populate({
+                path: 'createdBy',
+                model: modelName,
+                select: 'name fullName email role'
+            });
+        }
+
+        return manager;
     } catch (error) {
         throw error;
     }
