@@ -1,4 +1,4 @@
-const { addBranchService, deleteBranchService, editBranchService, getBranchesService } = require('../Repo/BranchRepo.js');
+const { addBranchService, deleteBranchService, editBranchService, getBranchesService, getBranchByIdService } = require('../Repo/BranchRepo.js');
 
 /**
  * Handles creation of a new branch.
@@ -36,6 +36,30 @@ const getBranches = async (req, res) => {
         return res.status(200).json({
             success: true,
             data: branches
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+/**
+ * Handles fetching a branch by ID.
+ * @route GET /api/branch/:id
+ * @access Private
+ */
+const getBranchById = async (req, res) => {
+    try {
+        const branchId = req.params.id;
+        const branch = await getBranchByIdService(branchId);
+        if (!branch) {
+            return res.status(404).json({ success: false, message: "Branch not found" });
+        }
+        return res.status(200).json({
+            success: true,
+            data: branch
         });
     } catch (error) {
         return res.status(500).json({
@@ -93,5 +117,6 @@ module.exports = {
     addBranch,
     editBranch,
     deleteBranch,
-    getBranches
+    getBranches,
+    getBranchById
 }

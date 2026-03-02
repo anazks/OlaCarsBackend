@@ -34,7 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/admin", AdminRouter);
-app.use("/api/branches", BranchRouter);
+app.use("/api/branch", BranchRouter);
 app.use("/api/country-manager", CountryManagerRouter);
 app.use("/api/finance-admin", FinanceAdminRouter);
 app.use("/api/operational-admin", OperationAdminRouter);

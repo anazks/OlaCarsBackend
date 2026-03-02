@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch, editBranch, deleteBranch, getBranches } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch, getBranches, getBranchById } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
@@ -15,7 +15,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
  * @swagger
- * /api/branches/branch:
+ * /api/branch/:
  *   post:
  *     summary: Create new branch
  *     tags: [Branch]
@@ -66,7 +66,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *         description: Forbidden
  */
 router.post(
-  "/branch",
+  "/",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   addBranch
@@ -74,7 +74,7 @@ router.post(
 
 /**
  * @swagger
- * /api/branches/branch:
+ * /api/branch/:
  *   get:
  *     summary: Get all branches
  *     tags: [Branch]
@@ -85,7 +85,7 @@ router.post(
  *         description: List of branches
  */
 router.get(
-  "/branch",
+  "/",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   getBranches
@@ -93,7 +93,7 @@ router.get(
 
 /**
  * @swagger
- * /api/branches/branch/{id}:
+ * /api/branch/{id}:
  *   get:
  *     summary: Get branch by ID
  *     tags: [Branch]
@@ -110,17 +110,15 @@ router.get(
  *         description: Branch details
  */
 router.get(
-  "/branch/:id",
+  "/:id",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
-  (req, res) => {
-    res.send("Get branch by id");
-  }
+  getBranchById
 );
 
 /**
  * @swagger
- * /api/branches/Updatebranch:
+ * /api/branch/:
  *   put:
  *     summary: Update branch
  *     tags: [Branch]
@@ -164,7 +162,7 @@ router.get(
  *         description: Branch updated successfully
  */
 router.put(
-  "/Updatebranch",
+  "/",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   editBranch
@@ -172,7 +170,7 @@ router.put(
 
 /**
  * @swagger
- * /api/branches/branch/{id}:
+ * /api/branch/{id}:
  *   delete:
  *     summary: Delete branch
  *     tags: [Branch]
@@ -189,7 +187,7 @@ router.put(
  *         description: Branch deleted successfully
  */
 router.delete(
-  "/branch/:id",
+  "/:id",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   deleteBranch

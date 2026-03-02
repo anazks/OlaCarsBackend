@@ -61,3 +61,16 @@ exports.getBranchesService = async (query = {}) => {
         throw error;
     }
 }
+
+/**
+ * Retrieves a single branch by ID.
+ * @param {string} branchId - The ID of the branch.
+ * @returns {Promise<Object>} The branch document.
+ */
+exports.getBranchByIdService = async (branchId) => {
+    try {
+        return await Branch.findById(branchId).populate("createdBy", "name email role");
+    } catch (error) {
+        throw error;
+    }
+}
