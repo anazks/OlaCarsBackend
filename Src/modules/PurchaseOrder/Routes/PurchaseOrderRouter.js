@@ -206,7 +206,6 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     addPurchaseOrder
 );
 
@@ -384,7 +383,7 @@ router.get(
 router.put(
     "/:id/approve",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
     approvePurchaseOrder
 );
 
@@ -459,7 +458,6 @@ router.put(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.ADMIN),
     editPurchaseOrder
 );
 

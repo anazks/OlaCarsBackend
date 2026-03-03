@@ -36,7 +36,7 @@ exports.login = async (email, password) => {
     manager.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: manager._id, role: manager.role },
+        { id: manager._id, role: manager.role, country: manager.country },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -62,7 +62,7 @@ exports.refreshAccessToken = async (token) => {
     }
 
     const newAccessToken = jwt.sign(
-        { id: manager._id, role: manager.role },
+        { id: manager._id, role: manager.role, country: manager.country },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );

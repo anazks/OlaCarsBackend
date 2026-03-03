@@ -50,7 +50,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF],
+            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF],
         },
         approvedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -58,12 +58,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         },
         approverRole: {
             type: String,
-            enum: [
-                ROLES.COUNTRYMANAGER,
-                ROLES.OPERATIONADMIN,
-                ROLES.FINANCEADMIN,
-                ROLES.ADMIN,
-            ],
+            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER],
         },
         isEdited: {
             type: Boolean,

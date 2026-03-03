@@ -47,6 +47,12 @@ const branchSchema = new mongoose.Schema(
       lowercase: true,
     },
 
+    country: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       refPath: "creatorRole",
