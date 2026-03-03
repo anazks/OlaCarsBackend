@@ -93,4 +93,6 @@ const financeStaffSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("FinanceStaff", financeStaffSchema);
+const FinanceStaff = mongoose.model("FinanceStaff", financeStaffSchema);
+mongoose.model("FINANCESTAFF", financeStaffSchema, "financestaffs");
+module.exports = FinanceStaff;

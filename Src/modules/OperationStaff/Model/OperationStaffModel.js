@@ -93,4 +93,6 @@ const operationStaffSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("OperationStaff", operationStaffSchema);
+const OperationStaff = mongoose.model("OperationStaff", operationStaffSchema);
+mongoose.model("OPERATIONSTAFF", operationStaffSchema, "operationstaffs");
+module.exports = OperationStaff;

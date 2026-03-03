@@ -93,4 +93,6 @@ const workshopStaffSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("WorkshopStaff", workshopStaffSchema);
+const WorkshopStaff = mongoose.model("WorkshopStaff", workshopStaffSchema);
+mongoose.model("WORKSHOPSTAFF", workshopStaffSchema, "workshopstaffs");
+module.exports = WorkshopStaff;

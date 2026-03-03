@@ -97,4 +97,6 @@ const branchManagerSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("BranchManager", branchManagerSchema);
+const BranchManager = mongoose.model("BranchManager", branchManagerSchema);
+mongoose.model("BRANCHMANAGER", branchManagerSchema, "branchmanagers");
+module.exports = BranchManager;
