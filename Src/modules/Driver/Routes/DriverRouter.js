@@ -1,0 +1,386 @@
+const express = require("express");
+const router = express.Router();
+const {
+    addDriver,
+    getDrivers,
+    getDriverById,
+    editDriver,
+    progressDriverStatus,
+    uploadDriverDocuments,
+    deleteDriver,
+} = require("../Controller/DriverController");
+const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { ROLES } = require("../../../shared/constants/roles");
+const upload = require("../../../utils/multerConfig");
+
+/**
+ * @swagger
+ * tags:
+ *   name: Driver
+ *   description: Driver Onboarding & Lifecycle Management
+ */
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     DriverPersonalInfo:
+ *       type: object
+ *       properties:
+ *         fullName:
+ *           type: string
+ *         dateOfBirth:
+ *           type: string
+ *           format: date
+ *         nationality:
+ *           type: string
+ *         email:
+ *           type: string
+ *         phone:
+ *           type: string
+ *         whatsappNumber:
+ *           type: string
+ *     DriverStatus:
+ *       type: string
+ *       enum:
+ *         - DRAFT
+ *         - PENDING REVIEW
+ *         - VERIFICATION
+ *         - CREDIT CHECK
+ *         - MANAGER REVIEW
+ *         - APPROVED
+ *         - CONTRACT PENDING
+ *         - ACTIVE
+ *         - SUSPENDED
+ *         - REJECTED
+ */
+
+// ─── POST /api/driver — Create New Driver Application ─────────────────
+/**
+ * @swagger
+ * /api/driver:
+ *   post:
+ *     summary: Create a new driver application
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - personalInfo
+ *               - branch
+ *             properties:
+ *               personalInfo:
+ *                 $ref: '#/components/schemas/DriverPersonalInfo'
+ *               branch:
+ *                 type: string
+ *                 description: Branch ObjectId
+ *               identityDocs:
+ *                 type: object
+ *                 properties:
+ *                   idType:
+ *                     type: string
+ *                     enum: [National ID, Passport]
+ *                   idNumber:
+ *                     type: string
+ *               emergencyContact:
+ *                 type: object
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                   relationship:
+ *                     type: string
+ *                   phone:
+ *                     type: string
+ *     responses:
+ *       201:
+ *         description: Driver application created with DRAFT status
+ *       500:
+ *         description: Server error
+ */
+router.post(
+    "/",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    addDriver
+);
+
+// ─── GET /api/driver — List Drivers ───────────────────────────────────
+/**
+ * @swagger
+ * /api/driver:
+ *   get:
+ *     summary: List all drivers (filterable by status, branch)
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           $ref: '#/components/schemas/DriverStatus'
+ *         description: Filter by onboarding status
+ *       - in: query
+ *         name: branch
+ *         schema:
+ *           type: string
+ *         description: Filter by branch ObjectId
+ *     responses:
+ *       200:
+ *         description: List of drivers
+ */
+router.get(
+    "/",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    getDrivers
+);
+
+// ─── GET /api/driver/:id — Get Single Driver ─────────────────────────
+/**
+ * @swagger
+ * /api/driver/{id}:
+ *   get:
+ *     summary: Get driver by ID
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Driver details
+ *       404:
+ *         description: Driver not found
+ */
+router.get(
+    "/:id",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    getDriverById
+);
+
+// ─── PUT /api/driver/:id — Edit Driver Fields ────────────────────────
+/**
+ * @swagger
+ * /api/driver/{id}:
+ *   put:
+ *     summary: Update driver fields (non-workflow, e.g. personal info edits)
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               personalInfo:
+ *                 $ref: '#/components/schemas/DriverPersonalInfo'
+ *               identityDocs:
+ *                 type: object
+ *               drivingLicense:
+ *                 type: object
+ *               emergencyContact:
+ *                 type: object
+ *               bankDetails:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Driver updated
+ *       404:
+ *         description: Driver not found
+ */
+router.put(
+    "/:id",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    editDriver
+);
+
+// ─── PUT /api/driver/:id/progress — Workflow Status Transition ───────
+/**
+ * @swagger
+ * /api/driver/{id}/progress:
+ *   put:
+ *     summary: Progress driver through onboarding workflow
+ *     description: |
+ *       Transitions a driver to a new status.
+ *       Valid flow: DRAFT → PENDING REVIEW → VERIFICATION → CREDIT CHECK → APPROVED → CONTRACT PENDING → ACTIVE.
+ *       Branching: CREDIT CHECK → MANAGER REVIEW → APPROVED/REJECTED.
+ *       Any stage can be REJECTED by a Branch Manager.
+ *       ACTIVE drivers can be SUSPENDED and reactivated.
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - targetStatus
+ *             properties:
+ *               targetStatus:
+ *                 $ref: '#/components/schemas/DriverStatus'
+ *               updateData:
+ *                 type: object
+ *                 description: Additional data to save with the transition (e.g. creditCheck.score, rejection.reason)
+ *               notes:
+ *                 type: string
+ *                 description: Optional notes for the audit trail
+ *     responses:
+ *       200:
+ *         description: Driver status updated
+ *       400:
+ *         description: Invalid transition
+ *       403:
+ *         description: Unauthorized role
+ *       422:
+ *         description: Gate validation failed (missing prerequisites)
+ */
+router.put(
+    "/:id/progress",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    progressDriverStatus
+);
+
+// ─── POST /api/driver/:id/upload-documents — S3 Upload ───────────────
+/**
+ * @swagger
+ * /api/driver/{id}/upload-documents:
+ *   post:
+ *     summary: Upload driver documents to AWS S3
+ *     description: |
+ *       Upload one or more document files. Use field names matching the schema:
+ *       photograph, idFrontImage, idBackImage, licenseFront, licenseBack,
+ *       backgroundCheckDocument, addressProofDocument, medicalCertificate,
+ *       consentForm, contractPDF, signedContract
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               photograph:
+ *                 type: string
+ *                 format: binary
+ *               idFrontImage:
+ *                 type: string
+ *                 format: binary
+ *               idBackImage:
+ *                 type: string
+ *                 format: binary
+ *               licenseFront:
+ *                 type: string
+ *                 format: binary
+ *               licenseBack:
+ *                 type: string
+ *                 format: binary
+ *               backgroundCheckDocument:
+ *                 type: string
+ *                 format: binary
+ *               addressProofDocument:
+ *                 type: string
+ *                 format: binary
+ *               medicalCertificate:
+ *                 type: string
+ *                 format: binary
+ *               consentForm:
+ *                 type: string
+ *                 format: binary
+ *               contractPDF:
+ *                 type: string
+ *                 format: binary
+ *               signedContract:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Documents uploaded successfully
+ *       400:
+ *         description: No documents provided
+ *       404:
+ *         description: Driver not found
+ */
+router.post(
+    "/:id/upload-documents",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    upload.fields([
+        { name: "photograph", maxCount: 1 },
+        { name: "idFrontImage", maxCount: 1 },
+        { name: "idBackImage", maxCount: 1 },
+        { name: "licenseFront", maxCount: 1 },
+        { name: "licenseBack", maxCount: 1 },
+        { name: "backgroundCheckDocument", maxCount: 1 },
+        { name: "addressProofDocument", maxCount: 1 },
+        { name: "medicalCertificate", maxCount: 1 },
+        { name: "consentForm", maxCount: 1 },
+        { name: "contractPDF", maxCount: 1 },
+        { name: "signedContract", maxCount: 1 },
+    ]),
+    uploadDriverDocuments
+);
+
+// ─── DELETE /api/driver/:id — Soft Delete ────────────────────────────
+/**
+ * @swagger
+ * /api/driver/{id}:
+ *   delete:
+ *     summary: Soft-delete a driver record
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Driver deleted successfully
+ */
+router.delete(
+    "/:id",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    deleteDriver
+);
+
+module.exports = router;

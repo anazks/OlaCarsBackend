@@ -23,6 +23,7 @@ const AccountingCodeRouter = require("./Src/modules/AccountingCode/Routes/Accoun
 const TaxRouter = require("./Src/modules/Tax/Routes/TaxRouter");
 const PaymentRouter = require("./Src/modules/Payment/Routes/PaymentRouter");
 const LedgerRouter = require("./Src/modules/Ledger/Routes/LedgerRouter");
+const DriverRouter = require("./Src/modules/Driver/Routes/DriverRouter");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -50,6 +51,7 @@ app.use("/api/accounting-code", AccountingCodeRouter);
 app.use("/api/tax", TaxRouter);
 app.use("/api/payment", PaymentRouter);
 app.use("/api/ledger", LedgerRouter);
+app.use("/api/driver", DriverRouter);
 
 
 app.get("/health", (req, res) => {

@@ -116,47 +116,49 @@ exports.remove = async (id) => {
 exports.getAll = async () => {
     const managers = await BranchManager.find({ isDeleted: false }).select('-passwordHash -refreshToken');
 
-    const roleMapping = {
-        'ADMIN': 'Admin',
-        'OPERATIONADMIN': 'OperationalAdmin',
-        'FINANCEADMIN': 'FinanceAdmin',
-        'COUNTRYMANAGER': 'CountryManager'
-    };
+    // const roleMapping = {
+    //     'ADMIN': 'Admin',
+    //     'OPERATIONADMIN': 'OperationalAdmin',
+    //     'FINANCEADMIN': 'FinanceAdmin',
+    //     'COUNTRYMANAGER': 'CountryManager'
+    // };
 
-    const populatedManagers = await Promise.all(managers.map(async (manager) => {
-        const modelName = roleMapping[manager.creatorRole];
-        if (modelName) {
-            await manager.populate({
-                path: 'createdBy',
-                model: modelName,
-                select: 'name fullName email role'
-            });
-        }
-        return manager;
-    }));
+    // const populatedManagers = await Promise.all(managers.map(async (manager) => {
+    //     const modelName = roleMapping[manager.creatorRole];
+    //     if (modelName) {
+    //         await manager.populate({
+    //             path: 'createdBy',
+    //             model: modelName,
+    //             select: 'name fullName email role'
+    //         });
+    //     }
+    //     return manager;
+    // }));
 
-    return populatedManagers;
+
+    // return populatedManagers;
+    return managers;
 };
 
 exports.getById = async (id) => {
     const manager = await BranchManager.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
     if (!manager) return null;
 
-    const roleMapping = {
-        'ADMIN': 'Admin',
-        'OPERATIONADMIN': 'OperationalAdmin',
-        'FINANCEADMIN': 'FinanceAdmin',
-        'COUNTRYMANAGER': 'CountryManager'
-    };
+    // const roleMapping = {
+    //     'ADMIN': 'Admin',
+    //     'OPERATIONADMIN': 'OperationalAdmin',
+    //     'FINANCEADMIN': 'FinanceAdmin',
+    //     'COUNTRYMANAGER': 'CountryManager'
+    // };
 
-    const modelName = roleMapping[manager.creatorRole];
-    if (modelName) {
-        await manager.populate({
-            path: 'createdBy',
-            model: modelName,
-            select: 'name fullName email role'
-        });
-    }
+    // const modelName = roleMapping[manager.creatorRole];
+    // if (modelName) {
+    //     await manager.populate({
+    //         path: 'createdBy',
+    //         model: modelName,
+    //         select: 'name fullName email role'
+    //     });
+    // }
 
     return manager;
 };
