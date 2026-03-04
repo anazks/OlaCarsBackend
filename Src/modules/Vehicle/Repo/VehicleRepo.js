@@ -44,14 +44,67 @@ exports.getVehicleByIdService = async (id) => {
 };
 
 /**
- * Updates a Vehicle record. Typically used for progressing through the onboarding states.
+ * Helper to recursively flatten an object into dot-notation for MongoDB $set.
+ * Prevents full sub-document overwrites when making partial updates.
+ */
+const flattenForSet = (obj, parentKey = '') => {
+    let result = {};
+    for (const key in obj) {
+        if (!obj.hasOwnProperty(key)) continue;
+
+        const val = obj[key];
+        const newKey = parentKey ? `${parentKey}.${key}` : key;
+
+        // Don't flatten arrays, nulls, Dates, or MongoDB ObjectIds
+        if (
+            val !== null &&
+            typeof val === 'object' &&
+            !Array.isArray(val) &&
+            !(val instanceof Date) &&
+            !val._bsontype
+        ) {
+            Object.assign(result, flattenForSet(val, newKey));
+        } else {
+            result[newKey] = val;
+        }
+    }
+    return result;
+};
+
+/**
+ * Updates a Vehicle record safely.
  * @param {string} id - Vehicle ID
- * @param {Object} updateData - Data to update
+ * @param {Object} updateData - Data to update (supports nested objects and $push/$pull)
+ * @param {Object} [session] - Optional MongoDB session for transactions
  * @returns {Promise<Object>}
  */
-exports.updateVehicleService = async (id, updateData) => {
+exports.updateVehicleService = async (id, updateData, session = null) => {
     try {
-        return await Vehicle.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
+        const operators = {};
+        const regularFields = {};
+
+        // Separate MongoDB operators from regular fields
+        for (const key in updateData) {
+            if (key.startsWith('$')) {
+                operators[key] = updateData[key];
+            } else {
+                regularFields[key] = updateData[key];
+            }
+        }
+
+        // Flatten regular fields to prevent sub-document overwriting
+        const flatSet = flattenForSet(regularFields);
+
+        // Build the final query
+        const finalUpdate = { ...operators };
+        if (Object.keys(flatSet).length > 0) {
+            finalUpdate.$set = { ...(finalUpdate.$set || {}), ...flatSet };
+        }
+
+        const options = { new: true, runValidators: true };
+        if (session) options.session = session;
+
+        return await Vehicle.findByIdAndUpdate(id, finalUpdate, options);
     } catch (error) {
         throw error;
     }

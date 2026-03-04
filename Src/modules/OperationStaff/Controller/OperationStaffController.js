@@ -74,6 +74,19 @@ const deleteOperationStaff = async (req, res) => {
     }
 };
 
+const refreshStaffToken = async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token) throw new AppError('Refresh token is required', 400);
+
+        const tokens = await OperationStaffService.refreshSession(token);
+        return res.status(200).json({ success: true, ...tokens });
+    } catch (error) {
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
     addOperationStaff,
@@ -81,5 +94,6 @@ module.exports = {
     getOperationStaffById,
     editOperationStaff,
     changePassword,
-    deleteOperationStaff
+    deleteOperationStaff,
+    refreshStaffToken
 };

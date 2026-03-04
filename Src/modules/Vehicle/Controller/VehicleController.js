@@ -26,7 +26,7 @@ const addVehicle = async (req, res) => {
 };
 
 /**
- * Get all Vehicles
+ * Get all Vehiclesf
  * @route GET /api/vehicle/
  * @access Private
  */
@@ -70,7 +70,7 @@ const progressVehicleStatus = async (req, res) => {
         if (notes) payload.notes = notes;
 
         const updatedVehicle = await processVehicleProgress(vehicleId, targetStatus, payload, user);
-
+        
         return res.status(200).json({ success: true, data: updatedVehicle });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -80,6 +80,7 @@ const progressVehicleStatus = async (req, res) => {
 
 /**
  * Upload Vehicle Documents and Photos to AWS S3.
+ * Automatically updates the Vehicle database record with the new S3 keys.
  * Accepts multiple document fields in formData.
  * @route POST /api/vehicle/:id/upload-documents
  * @access Private
@@ -99,31 +100,62 @@ const uploadVehicleDocuments = async (req, res) => {
             return res.status(400).json({ success: false, message: "No documents uploaded" });
         }
 
+        // Mapping frontend field names to DB dot-notation paths
+        const S3_FIELD_MAP = {
+            exteriorPhotos: "inspection.exteriorPhotos",
+            interiorPhotos: "inspection.interiorPhotos",
+            odometerPhoto: "inspection.odometerPhoto",
+            registrationDocument: "legalDocs.registrationDocument",
+            roadTaxDocument: "legalDocs.roadTaxDisc", // Actually roadTaxDisc in schema
+            roadworthinessCertificate: "legalDocs.roadworthinessCertificate",
+            insuranceDocument: "insurancePolicy.policyDocument",
+            importDeclaration: "importationDetails.customsDeclarationNumber", // Assuming they meant document
+            customsReceipt: "importationDetails.customsReceipt",
+            gatePass: "importationDetails.gatePass"
+        };
+
         const uploadedKeys = {};
+        const dbUpdatePayload = {};
 
         // Loop through all file fields gracefully
         for (const [fieldName, fileArray] of Object.entries(files)) {
             if (!fileArray || fileArray.length === 0) continue;
 
-            if (fieldName === "exteriorPhotos") {
+            const dbPath = S3_FIELD_MAP[fieldName];
+
+            if (fieldName === "exteriorPhotos" || fieldName === "interiorPhotos") {
                 uploadedKeys[fieldName] = [];
                 for (const file of fileArray) {
-                    const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
+                    const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
                     const uploadedKey = await uploadToS3(file, key);
                     uploadedKeys[fieldName].push(uploadedKey);
+                }
+                if (dbPath) {
+                    dbUpdatePayload.$push = dbUpdatePayload.$push || {};
+                    dbUpdatePayload.$push[dbPath] = { $each: uploadedKeys[fieldName] };
                 }
             } else {
                 // For all single file uploads
                 const file = fileArray[0];
-                const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
+                const key = `vehicles/${vehicleId}/documents/${fieldName}_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
                 const uploadedKey = await uploadToS3(file, key);
                 uploadedKeys[fieldName] = uploadedKey;
+
+                if (dbPath) {
+                    dbUpdatePayload[dbPath] = uploadedKey;
+                }
             }
+        }
+
+        // Auto-update DB if mapping exists
+        if (Object.keys(dbUpdatePayload).length > 0) {
+            const { updateVehicleService } = require("../Repo/VehicleRepo");
+            await updateVehicleService(vehicleId, dbUpdatePayload);
         }
 
         return res.status(200).json({
             success: true,
-            message: "Documents uploaded successfully to S3.",
+            message: "Documents uploaded and vehicle record mapped successfully.",
             data: uploadedKeys
         });
 

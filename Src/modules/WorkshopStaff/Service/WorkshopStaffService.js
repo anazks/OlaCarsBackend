@@ -119,3 +119,35 @@ exports.getAll = async () => {
 exports.getById = async (id) => {
     return await WorkshopStaff.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
 };
+exports.refreshSession = async (token) => {
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+        const staff = await WorkshopStaff.findById(decoded.id);
+
+        if (!staff || staff.refreshToken !== token) {
+            throw new AppError('Invalid refresh token', 401);
+        }
+
+        const accessToken = jwt.sign(
+            { id: staff._id, role: staff.role, branchId: staff.branchId },
+            process.env.JWT_SECRET,
+            { expiresIn: jwtConfig.accessTokenExpiry }
+        );
+
+        const newRefreshToken = jwt.sign(
+            { id: staff._id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: jwtConfig.refreshTokenExpiry }
+        );
+
+        staff.refreshToken = newRefreshToken;
+        await staff.save();
+
+        return { accessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+            throw new AppError('Invalid or expired refresh token', 401);
+        }
+        throw error;
+    }
+};

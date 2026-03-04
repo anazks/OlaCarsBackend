@@ -7,7 +7,8 @@ const {
     deleteOperationStaff,
     getOperationStaff,
     getOperationStaffById,
-    login
+    login,
+    refreshStaffToken
 } = require("../Controller/OperationStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -240,5 +241,28 @@ router.delete(
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
     deleteOperationStaff
 );
+
+/**
+ * @swagger
+ * /api/operation-staff/refresh-token:
+ *   post:
+ *     summary: Refresh access token
+ *     tags: [OperationStaff]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New tokens generated
+ */
+router.post("/refresh-token", refreshStaffToken);
 
 module.exports = router;

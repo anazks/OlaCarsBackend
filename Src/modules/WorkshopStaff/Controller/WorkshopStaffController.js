@@ -74,6 +74,19 @@ const deleteWorkshopStaff = async (req, res) => {
     }
 };
 
+const refreshStaffToken = async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token) throw new AppError('Refresh token is required', 400);
+
+        const tokens = await WorkshopStaffService.refreshSession(token);
+        return res.status(200).json({ success: true, ...tokens });
+    } catch (error) {
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
     addWorkshopStaff,
@@ -81,5 +94,6 @@ module.exports = {
     getWorkshopStaffById,
     editWorkshopStaff,
     changePassword,
-    deleteWorkshopStaff
+    deleteWorkshopStaff,
+    refreshStaffToken
 };

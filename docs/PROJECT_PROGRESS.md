@@ -1,6 +1,6 @@
 # OlaCars Backend — Project Progress Summary
 
-**Last Updated:** March 3, 2026  
+**Last Updated:** March 4, 2026  
 **Project:** OlaCarsBackend (Node.js + Express + MongoDB)
 
 ---
@@ -107,6 +107,10 @@ This was a **4-phase implementation** of a full state-machine workflow engine:
 - Fixed validation error: `creatorRole: 'Admin' is not a valid enum value`
 - Resolved enum mismatch in the BranchManager model
 
+### 8. Hardening Vehicle Updates
+- Implemented `flattenForSet` pattern in `VehicleRepo.js` to safeguard against accidental overwrites of nested sub-documents during updates.
+- Ensured nested fields are updated safely using MongoDB's dot notation.
+
 ---
 
 ## Key API Endpoints
@@ -132,7 +136,6 @@ This was a **4-phase implementation** of a full state-machine workflow engine:
 | S3 Integration | ✅ Complete |
 | Architecture Docs | ✅ Generated |
 | Security Refactoring | 📋 Planned (not yet executed) |
-| Live API Testing | ⏳ Pending (requires MongoDB connection) |
 | Automated Test Suite | ⏳ Not yet built |
 
 ---

@@ -107,7 +107,7 @@ Fields (pick any combination):
 ```json
 {
   "success": true,
-  "message": "Documents uploaded successfully to S3.",
+  "message": "Documents uploaded and driver record updated.",
   "data": {
     "idFrontImage": "drivers/6xxx/documents/idFrontImage_17xxx_scan.jpg",
     "idBackImage": "drivers/6xxx/documents/idBackImage_17xxx_scan.jpg"
@@ -115,15 +115,7 @@ Fields (pick any combination):
 }
 ```
 
-**After upload:** Use `PUT /api/driver/:id` to save the S3 keys into the driver record:
-```json
-{
-  "identityDocs": {
-    "idFrontImage": "drivers/6xxx/documents/idFrontImage_17xxx_scan.jpg",
-    "idBackImage": "drivers/6xxx/documents/idBackImage_17xxx_scan.jpg"
-  }
-}
-```
+> **Note:** The S3 upload endpoint **automatically updates the driver record** with the S3 keys. You do NOT need to call `PUT /api/driver/:id` separately after uploading — the DB is updated for you.
 
 **UI Notes:**
 - Show upload progress indicators
@@ -237,16 +229,7 @@ PUT /api/driver/:id/progress
 ```
 POST /api/driver/:id/upload-documents  → consentForm
 ```
-Then update:
-```
-PUT /api/driver/:id
-
-{
-  "creditCheck": {
-    "consentForm": "drivers/6xxx/documents/consentForm_17xxx.pdf"
-  }
-}
-```
+> The driver record is auto-updated with the S3 key — no separate PUT needed.
 
 **Step 2 — Progress to CREDIT CHECK and record score:**
 ```
@@ -264,8 +247,10 @@ PUT /api/driver/:id/progress
 ```
 
 The system **automatically evaluates** the score and sets:
-- `rating`: EXCELLENT / GOOD / FAIR / POOR / VERY POOR
+- `rating`: EXCELLENT / GOOD / FAIR / POOR / VERY POOR / **FRAUD**
 - `decision`: AUTO_APPROVED / MANUAL_REVIEW / DECLINED
+
+> **⚠️ Important:** The `rating` and `decision` are **always set by the server** — you cannot override them from the frontend. The system auto-decides based on the score.
 
 **Score Brackets:**
 | Score | Rating | Decision | What Happens |
@@ -275,12 +260,29 @@ The system **automatically evaluates** the score and sets:
 | 500–649 | FAIR | MANUAL_REVIEW | Must go to MANAGER REVIEW |
 | 350–499 | POOR | DECLINED | Should go to REJECTED |
 | < 350 | VERY POOR | DECLINED | Should go to REJECTED |
+| Any (fraud flagged) | **FRAUD** | **DECLINED** | **Auto-rejected immediately** |
+
+**🚨 Fraud Alert Handling:**
+If Experian returns a fraud alert, send `fraudAlert: true` in the credit check payload:
+```json
+{
+  "targetStatus": "CREDIT CHECK",
+  "updateData": {
+    "creditCheck": {
+      "score": 650,
+      "fraudAlert": true
+    }
+  }
+}
+```
+The system will **automatically reject** the application — status goes straight to `REJECTED` with reason `"FRAUD ALERT"`. No manual override is possible.
 
 **UI Notes:**
 - Show a "Run Credit Check" button
 - After result, display the score with a color-coded badge (green/yellow/red)
 - If `MANUAL_REVIEW`: show a banner "Branch Manager review required"
 - If `DECLINED`: show a red alert and offer a "Reject Application" button
+- If `FRAUD`: show a **red danger alert** "Fraud Detected — Application Auto-Rejected"
 
 ---
 
@@ -374,16 +376,7 @@ PUT /api/driver/:id/progress
 ```
 POST /api/driver/:id/upload-documents  → contractPDF
 ```
-Then update:
-```
-PUT /api/driver/:id
-
-{
-  "contract": {
-    "generatedS3Key": "drivers/6xxx/documents/contractPDF_17xxx.pdf"
-  }
-}
-```
+> The driver record is auto-updated with the S3 key — no separate PUT needed.
 
 **Step 2 — Progress:**
 ```
@@ -538,6 +531,8 @@ GET /api/driver?branch={{branchObjectId}}
 GET /api/driver?status=PENDING REVIEW&branch={{branchObjectId}}
 ```
 
+> **🔒 Sensitive Field Restriction:** The `bankDetails` and `creditCheck.reportS3Key` fields are **hidden by default** in GET responses. Only users with **FINANCESTAFF**, **FINANCEADMIN**, or **ADMIN** roles will see these fields. If your frontend needs to show bank details, the logged-in user must have a finance role — otherwise those fields will be absent from the response.
+
 **UI Notes:**
 - Build a dashboard table with columns: Name, Status, Branch, Created, Last Updated
 - Color-code status badges:
@@ -547,6 +542,7 @@ GET /api/driver?status=PENDING REVIEW&branch={{branchObjectId}}
   - 🔴 REJECTED, SUSPENDED
 - Add a filter bar with status dropdown and branch selector
 - Clicking a row opens the driver detail page
+- **Bank details section:** Only render if `data.bankDetails` exists in the response (finance roles only)
 
 ---
 
