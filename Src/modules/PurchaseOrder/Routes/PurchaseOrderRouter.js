@@ -236,6 +236,14 @@ router.post(
  *     tags: [PurchaseOrder]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: purpose
+ *         schema:
+ *           type: string
+ *           enum: [Vehicle, "Spare Parts", Others]
+ *         required: false
+ *         description: Optional filter to retrieve POs by a specific purpose
  *     responses:
  *       200:
  *         description: List of Purchase Orders

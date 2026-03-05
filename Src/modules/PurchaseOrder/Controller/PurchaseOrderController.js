@@ -80,7 +80,13 @@ const addPurchaseOrder = async (req, res) => {
 const getPurchaseOrders = async (req, res) => {
     try {
         const { role } = req.user;
+        const { purpose } = req.query; // Extract purpose from query string
         let query = {};
+
+        // Filter by purpose if provided
+        if (purpose) {
+            query.purpose = purpose;
+        }
 
         if (role === ROLES.BRANCHMANAGER) {
             // BM sees all POs from their branch
