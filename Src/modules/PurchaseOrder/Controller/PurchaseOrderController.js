@@ -86,6 +86,9 @@ const getPurchaseOrders = async (req, res) => {
         // Filter by purpose if provided
         if (purpose) {
             query.purpose = purpose;
+            if (purpose === "Vehicle") {
+                query.status = "APPROVED"; // Vehicle onboarding only uses approved POs
+            }
         }
 
         if (role === ROLES.BRANCHMANAGER) {
@@ -95,10 +98,15 @@ const getPurchaseOrders = async (req, res) => {
             // Staff sees only their own POs
             query.createdBy = req.user.id;
         } else if (role === ROLES.COUNTRYMANAGER) {
-            // CM sees POs from all branches in their country
+            // CM sees POs from all branches in their country AND POs they created themselves
             const branches = await Branch.find({ country: req.user.country, isDeleted: false }).select("_id");
             const branchIds = branches.map(b => b._id);
-            query.branch = { $in: branchIds };
+
+            // Override the root query with an $or condition for CMs
+            query.$or = [
+                { branch: { $in: branchIds } },
+                { createdBy: req.user.id }
+            ];
         }
         // Admin, OperationAdmin, FinanceAdmin → no filter (see all)
 
