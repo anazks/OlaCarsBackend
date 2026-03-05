@@ -13,6 +13,12 @@ const purchaseOrderSchema = new mongoose.Schema(
             enum: ["WAITING", "APPROVED", "REJECTED"],
             default: "WAITING",
         },
+        purpose: {
+            type: String,
+            enum: ["Vehicle", "Spare Parts", "Others"],
+            default: "Others",
+            required: true,
+        },
         items: [
             {
                 itemName: { type: String, required: true },

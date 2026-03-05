@@ -82,6 +82,10 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *           example: PO-1709467200000-A1B2
  *         status:
  *           $ref: '#/components/schemas/PurchaseOrderStatus'
+ *         purpose:
+ *           type: string
+ *           enum: [Vehicle, Spare Parts, Others]
+ *           example: Spare Parts
  *         items:
  *           type: array
  *           items:
@@ -150,10 +154,15 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *           schema:
  *             type: object
  *             required:
+ *               - purpose
  *               - items
  *               - branch
  *               - supplier
  *             properties:
+ *               purpose:
+ *                 type: string
+ *                 enum: [Vehicle, Spare Parts, Others]
+ *                 example: Spare Parts
  *               items:
  *                 type: array
  *                 minItems: 1
@@ -172,6 +181,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *                 format: date-time
  *                 description: Expected payment date (optional)
  *           example:
+ *             purpose: Spare Parts
  *             items:
  *               - itemName: Brake Pads
  *                 quantity: 4

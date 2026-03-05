@@ -258,6 +258,10 @@ const editPurchaseOrder = async (req, res) => {
             changesSummary.push(`Changed supplier.`);
         }
 
+        if (updateData.purpose && updateData.purpose !== currentPO.purpose) {
+            changesSummary.push(`Changed purpose to ${updateData.purpose}.`);
+        }
+
         if (changesSummary.length === 0) {
             changesSummary.push(`Made minor field updates.`);
         }

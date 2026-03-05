@@ -18,6 +18,21 @@ const addVehicle = async (req, res) => {
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
 
+        const branchRoles = [
+            "BRANCHMANAGER",
+            "OPERATIONSTAFF",
+            "FINANCESTAFF",
+            "WORKSHOPSTAFF"
+        ];
+
+        // If created by branch manager or roles under him, branch ID comes from token
+        if (branchRoles.includes(req.user.role) && req.user.branchId) {
+            if (!vehicleData.purchaseDetails) {
+                vehicleData.purchaseDetails = {};
+            }
+            vehicleData.purchaseDetails.branch = req.user.branchId;
+        }
+
         const newVehicle = await addVehicleService(vehicleData);
         return res.status(201).json({ success: true, data: newVehicle });
     } catch (error) {
@@ -70,7 +85,7 @@ const progressVehicleStatus = async (req, res) => {
         if (notes) payload.notes = notes;
 
         const updatedVehicle = await processVehicleProgress(vehicleId, targetStatus, payload, user);
-        
+
         return res.status(200).json({ success: true, data: updatedVehicle });
     } catch (error) {
         const statusCode = error.cause || 500;

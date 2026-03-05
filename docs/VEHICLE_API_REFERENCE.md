@@ -77,26 +77,27 @@ Content-Type: multipart/form-data
 
 **Form fields (all are file uploads):**
 
-| Field Name | Type | Notes |
-|------------|------|-------|
-| `purchaseReceipt` | single file | Purchase receipt scan |
-| `registrationCertificate` | single file | Registration certificate |
-| `roadTaxDisc` | single file | Road tax disc |
-| `numberPlateFront` | single file | Front plate photo |
-| `numberPlateRear` | single file | Rear plate photo |
-| `roadworthinessCertificate` | single file | Roadworthiness cert |
-| `transferOfOwnership` | single file | Ownership transfer doc |
-| `policyDocument` | single file | Insurance policy doc |
-| `customsClearanceCertificate` | single file | Customs clearance cert |
-| `importPermit` | single file | Import permit |
-| `odometerPhoto` | single file | Odometer reading photo |
-| `exteriorPhotos` | **multiple files (min 6)** | Vehicle exterior photos |
+| Field Name | DB Mapping | Notes |
+|------------|-------------|-------|
+| `purchaseReceipt` | `purchaseDetails.purchaseReceipt` | Purchase receipt scan |
+| `registrationCertificate` | `legalDocs.registrationDocument` | Registration certificate |
+| `roadTaxDisc` | `legalDocs.roadTaxDisc` | Road tax disc |
+| `numberPlateFront` | (No auto-mapping) | Front plate photo |
+| `numberPlateRear` | (No auto-mapping) | Rear plate photo |
+| `roadworthinessCertificate` | `legalDocs.roadworthinessCertificate` | Roadworthiness cert |
+| `transferOfOwnership` | (No auto-mapping) | Ownership transfer doc |
+| `policyDocument` | `insurancePolicy.policyDocument` | Insurance policy doc |
+| `customsClearanceCertificate` | (No auto-mapping) | Customs clearance cert |
+| `importPermit` | (No auto-mapping) | Import permit |
+| `odometerPhoto` | `inspection.odometerPhoto` | Odometer reading photo |
+| `exteriorPhotos` | `inspection.exteriorPhotos` | **multiple files (max 20)** |
+| `interiorPhotos` | `inspection.interiorPhotos` | **multiple files** |
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Documents uploaded successfully to S3.",
+  "message": "Documents uploaded and vehicle record mapped successfully.",
   "data": {
     "registrationCertificate": "vehicles/abc123/documents/registrationCertificate_1709...",
     "exteriorPhotos": ["vehicles/abc123/documents/exteriorPhotos_1709...", "..."]
@@ -104,7 +105,7 @@ Content-Type: multipart/form-data
 }
 ```
 
-> ⚠️ **Upload files first**, then use the returned S3 URLs in the progress endpoint payloads below.
+> ⚠️ **Upload files first.** The backend will automatically map most files to the vehicle record based on the field name. You can use the returned S3 URLs in the progress payload if you need to manually set a field not mapped automatically.
 
 ---
 
@@ -216,28 +217,7 @@ Content-Type: application/json
       "date": "2024-03-15T00:00:00Z",
       "checklistItems": [
         { "name": "Engine Oil Level", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Coolant Level", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Brake Fluid", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Power Steering Fluid", "condition": "Fair", "notes": "Slightly low", "isMandatoryFail": false },
-        { "name": "Transmission Fluid", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Tyre Condition - Front Left", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Tyre Condition - Front Right", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Tyre Condition - Rear Left", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Tyre Condition - Rear Right", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Spare Tyre", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Brake Pads - Front", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Brake Pads - Rear", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Headlights", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Tail Lights", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Indicators", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Windshield Condition", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Wipers", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Side Mirrors", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Air Conditioning", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Horn", "condition": "Good", "notes": "", "isMandatoryFail": false },
-        { "name": "Seatbelts", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Battery Condition", "condition": "Good", "notes": "", "isMandatoryFail": true },
-        { "name": "Exhaust System", "condition": "Good", "notes": "", "isMandatoryFail": true }
+        // ... (all 23 items required)
       ],
       "exteriorPhotos": [
         "S3_URL_1", "S3_URL_2", "S3_URL_3",
@@ -249,7 +229,7 @@ Content-Type: application/json
 }
 ```
 
-> 🔒 **Gate:** Exactly 23 checklist items + min 6 exterior photos + odometer photo required.
+> 🔒 **Gate:** Exactly 23 checklist items + min 6 exterior photos + odometer photo required. Note: photos can be mapped automatically via the `/upload-documents` endpoint.
 >
 > ⚡ **Auto-fail:** If ANY item has `condition: "Poor"` AND `isMandatoryFail: true`, the backend auto-transitions to `INSPECTION FAILED` instead.
 
