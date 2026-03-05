@@ -344,6 +344,21 @@ After repairs, progress back to `INSPECTION REQUIRED` with new inspection data (
 
 These are used after the vehicle is active in the fleet.
 
+---
+
+## 🚀 Testing API without Documents
+
+If you are testing the onboarding flow and want to skip uploading documents and photos for every vehicle, the Backend has a bypass flag.
+
+If the backend server is running with `BYPASS_DOCS=true` or `NODE_ENV=test`:
+- **Stage 2** (Documents Review) will **NOT** require `registrationCertificate`, `roadTaxDisc`, or `roadworthinessCertificate`.
+- **Stage 3** (Insurance) will **NOT** require all the insurance fields.
+- **Stage 4** (Inspection) will **NOT** require the 23 checklist items, 6 exterior photos, or odometer photo.
+
+This allows frontend devs and QA to rapidly blast vehicles through the workflow during testing without dealing with S3 file uploads and massive payloads.
+
+---
+
 ### Suspend Vehicle
 
 ```json
