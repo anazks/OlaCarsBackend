@@ -226,7 +226,6 @@ workOrderPartSchema.pre("validate", function (next) {
 workOrderSchema.index({ status: 1 });
 workOrderSchema.index({ branchId: 1 });
 workOrderSchema.index({ vehicleId: 1 });
-workOrderSchema.index({ workOrderNumber: 1 });
 workOrderSchema.index({ priority: 1, slaDeadline: 1 });
 workOrderSchema.index({ assignedTechnician: 1 });
 
