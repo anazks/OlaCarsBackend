@@ -126,7 +126,8 @@ const uploadVehicleDocuments = async (req, res) => {
             insuranceDocument: "insurancePolicy.policyDocument",
             importDeclaration: "importationDetails.customsDeclarationNumber", // Assuming they meant document
             customsReceipt: "importationDetails.customsReceipt",
-            gatePass: "importationDetails.gatePass"
+            gatePass: "importationDetails.gatePass",
+            purchaseReceipt: "purchaseDetails.purchaseReceipt"
         };
 
         const uploadedKeys = {};
