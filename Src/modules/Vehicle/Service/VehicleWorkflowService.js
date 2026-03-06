@@ -94,7 +94,7 @@ const STATUS_RULES = {
     },
     "ACCOUNTING SETUP": {
         allowedFrom: ["INSPECTION REQUIRED"],
-        allowedRoles: [ROLES.FINANCESTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.FINANCEADMIN,
         gateValidator: (vehicle, payload) => {
             const inspection = { ...vehicle.inspection, ...payload.inspection };
@@ -106,7 +106,7 @@ const STATUS_RULES = {
     },
     "GPS ACTIVATION": {
         allowedFrom: ["ACCOUNTING SETUP"],
-        allowedRoles: [ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
             const combinedAcct = { ...vehicle.accountingSetup, ...payload.accountingSetup };
@@ -118,7 +118,7 @@ const STATUS_RULES = {
     },
     "BRANCH MANAGER APPROVAL": {
         allowedFrom: ["GPS ACTIVATION"],
-        allowedRoles: [ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
             const combinedGps = { ...vehicle.gpsConfiguration, ...payload.gpsConfiguration };
@@ -130,7 +130,7 @@ const STATUS_RULES = {
     },
     "ACTIVE — AVAILABLE": {
         allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
-        allowedRoles: [ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
     },
     "ACTIVE — RENTED": {
