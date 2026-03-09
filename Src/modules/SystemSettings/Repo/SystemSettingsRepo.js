@@ -25,7 +25,16 @@ const updateSetting = async (key, value, adminId) => {
     );
 };
 
+/**
+ * Fetches all system settings.
+ * @returns {Promise<Array>}
+ */
+const getAllSettings = async () => {
+    return await SystemSettings.find({});
+};
+
 module.exports = {
     getSetting,
     updateSetting,
+    getAllSettings,
 };

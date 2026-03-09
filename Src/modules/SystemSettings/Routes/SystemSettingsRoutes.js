@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getPOThreshold, updatePOThreshold } = require("../Controller/SystemSettingsController");
+const { getSystemSetting, updateSystemSetting, listSystemSettings } = require("../Controller/SystemSettingsController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
@@ -14,27 +14,57 @@ const { ROLES } = require("../../../shared/constants/roles");
 
 /**
  * @swagger
- * /api/system-settings/po-threshold:
+ * /api/system-settings/{key}:
  *   get:
- *     summary: Get the dynamic PO threshold
+ *     summary: Get a system setting by key
+ *     description: Retrieves the value of a specific system configuration.
+ *     tags: [SystemSettings]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: key
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The configuration key (e.g., poApprovalThreshold)
+ *     responses:
+ *       200:
+ *         description: Setting value retrieved
+ */
+/**
+ * @swagger
+ * /api/system-settings:
+ *   get:
+ *     summary: List all system settings
+ *     description: Returns an array of all configuration items currently in the database.
  *     tags: [SystemSettings]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Current threshold value
+ *         description: List of settings retrieved
  */
-router.get("/po-threshold", authenticate, getPOThreshold);
+router.get("/", authenticate, listSystemSettings);
+
+router.get("/:key", authenticate, getSystemSetting);
 
 /**
  * @swagger
- * /api/system-settings/po-threshold:
+ * /api/system-settings/{key}:
  *   put:
- *     summary: Update the dynamic PO threshold
- *     description: Set the limit above which only ADMIN can approve Purchase Orders.
+ *     summary: Update or create a system setting
+ *     description: Set the value for a specific configuration key.
  *     tags: [SystemSettings]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: key
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The configuration key to update
  *     requestBody:
  *       required: true
  *       content:
@@ -42,15 +72,15 @@ router.get("/po-threshold", authenticate, getPOThreshold);
  *           schema:
  *             type: object
  *             required:
- *               - threshold
+ *               - value
  *             properties:
- *               threshold:
- *                 type: number
- *                 example: 1500
+ *               value:
+ *                 type: any
+ *                 description: The value to set (can be number, string, object, etc.)
  *     responses:
  *       200:
- *         description: Threshold updated successfully
+ *         description: Setting updated successfully
  */
-router.put("/po-threshold", authenticate, authorize(ROLES.ADMIN), updatePOThreshold);
+router.put("/:key", authenticate, authorize(ROLES.ADMIN), updateSystemSetting);
 
 module.exports = router;
