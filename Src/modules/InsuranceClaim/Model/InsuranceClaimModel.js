@@ -86,7 +86,6 @@ const insuranceClaimSchema = new mongoose.Schema(
 );
 
 // Indexes
-insuranceClaimSchema.index({ claimNumber: 1 });
 insuranceClaimSchema.index({ workOrderId: 1 });
 insuranceClaimSchema.index({ vehicleId: 1 });
 insuranceClaimSchema.index({ status: 1 });

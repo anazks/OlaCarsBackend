@@ -102,7 +102,7 @@ const getPurchaseOrders = async (req, res) => {
             // CM sees POs from all branches in their country AND POs they created themselves
             const branches = await Branch.find({ country: req.user.country, isDeleted: false }).select("_id");
             const branchIds = branches.map(b => b._id);
-
+            
             // Override the root query with an $or condition for CMs
             query.$or = [
                 { branch: { $in: branchIds } },

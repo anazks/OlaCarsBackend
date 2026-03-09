@@ -23,7 +23,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *     - **Approve/Reject (≤ Threshold):** CountryManager, OperationAdmin, FinanceAdmin, Admin
  *     - **Approve/Reject (> Threshold):** Admin only (Default threshold: $1000)
  *     - **Edit:** Original creator or Admin (resets status to WAITING)
- *     - **View:** All authenticated users (filtered by role — creators see own POs, semi-admins see ≤$1000, Admin sees all)
+ *     - **View:** All authenticated users (scoped by role — creators see own POs, Managers see their branch/country, Admins see all)
  */
 
 /**
@@ -231,9 +231,11 @@ router.post(
  *
  *       | Role | What they see |
  *       |------|--------------|
- *       | **Admin** | All POs (no filter) |
- *       | **CountryManager / OperationAdmin / FinanceAdmin** | Only POs with totalAmount ≤ Threshold |
- *       | **BranchManager / OperationStaff / FinanceStaff** | Only POs they created |
+ *       | Role | What they see |
+ *       |------|--------------|
+ *       | **Admin / OpAdmin / FinanceAdmin** | All POs (no filter) |
+ *       | **CountryManager** | All POs from branches in their country |
+ *       | **BranchManager / Staff** | Only POs they created |
  *     tags: [PurchaseOrder]
  *     security:
  *       - bearerAuth: []

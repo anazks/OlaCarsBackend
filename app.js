@@ -6,6 +6,7 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
+const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -83,6 +84,9 @@ const startServer = async () => {
 
     await createDefaultAdmin();
     console.log("Default admin verified");
+
+    await seedSystemSettings();
+    console.log("System settings verified/seeded");
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
