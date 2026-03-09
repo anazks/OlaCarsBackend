@@ -100,9 +100,18 @@ const getPurchaseOrders = async (req, res) => {
             query.createdBy = req.user.id;
         } else if (role === ROLES.COUNTRYMANAGER) {
             // CM sees POs from all branches in their country AND POs they created themselves
-            const branches = await Branch.find({ country: req.user.country, isDeleted: false }).select("_id");
+            if (!req.user.country) {
+                return res.status(400).json({ success: false, message: "Country not assigned to your profile. Contact admin." });
+            }
+
+            // Find branches in the same country (case-insensitive)
+            const branches = await Branch.find({
+                country: { $regex: new RegExp(`^${req.user.country}$`, "i") },
+                isDeleted: false
+            }).select("_id");
+
             const branchIds = branches.map(b => b._id);
-            
+
             // Override the root query with an $or condition for CMs
             query.$or = [
                 { branch: { $in: branchIds } },
