@@ -121,7 +121,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
     addVehicle
 );
 
@@ -437,11 +437,7 @@ router.post(
     "/:id/upload-documents",
     authenticate,
     authorize(
-        ROLES.OPERATIONSTAFF,
-        ROLES.BRANCHMANAGER,
-        ROLES.FINANCESTAFF,
-        ROLES.COUNTRYMANAGER,
-        ROLES.ADMIN
+        ROLES.OPERATIONSTAFF
     ),
     upload.fields([
         { name: "purchaseReceipt", maxCount: 1 },

@@ -20,8 +20,8 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *
  *     **Workflow:**
  *     - **Create:** CountryManager, BranchManager, OperationStaff, FinanceStaff
- *     - **Approve/Reject (≤ $1000):** CountryManager, OperationAdmin, FinanceAdmin, Admin
- *     - **Approve/Reject (> $1000):** Admin only
+ *     - **Approve/Reject (≤ Threshold):** CountryManager, OperationAdmin, FinanceAdmin, Admin
+ *     - **Approve/Reject (> Threshold):** Admin only (Default threshold: $1000)
  *     - **Edit:** Original creator or Admin (resets status to WAITING)
  *     - **View:** All authenticated users (filtered by role — creators see own POs, semi-admins see ≤$1000, Admin sees all)
  */
@@ -216,6 +216,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 router.post(
     "/",
     authenticate,
+    authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     addPurchaseOrder
 );
 
@@ -231,7 +232,7 @@ router.post(
  *       | Role | What they see |
  *       |------|--------------|
  *       | **Admin** | All POs (no filter) |
- *       | **CountryManager / OperationAdmin / FinanceAdmin** | Only POs with totalAmount ≤ $1000 |
+ *       | **CountryManager / OperationAdmin / FinanceAdmin** | Only POs with totalAmount ≤ Threshold |
  *       | **BranchManager / OperationStaff / FinanceStaff** | Only POs they created |
  *     tags: [PurchaseOrder]
  *     security:
@@ -322,8 +323,8 @@ router.get(
  *
  *       | PO Amount | Who Can Approve/Reject |
  *       |-----------|----------------------|
- *       | **≤ $1,000** | CountryManager, OperationAdmin, FinanceAdmin, Admin |
- *       | **> $1,000** | **Admin only** |
+ *       | **≤ Threshold** | CountryManager, OperationAdmin, FinanceAdmin, Admin |
+ *       | **> Threshold** | **Admin only** (Default threshold: $1000) |
  *
  *       - PO must be in `WAITING` status (already processed POs are rejected)
  *       - The approver's ID and role are recorded on the PO
@@ -394,7 +395,7 @@ router.get(
  *           application/json:
  *             example:
  *               success: false
- *               message: "Purchase Orders over 1000 can only be approved by ADMIN."
+ *               message: "Purchase Orders over threshold can only be approved by ADMIN."
  *       404:
  *         description: PO not found
  */

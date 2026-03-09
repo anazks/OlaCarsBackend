@@ -28,6 +28,7 @@ const WorkOrderRouter = require("./Src/modules/WorkOrder/Routes/WorkOrderRouter"
 const InventoryRouter = require("./Src/modules/Inventory/Routes/InventoryRouter");
 const ServiceBillRouter = require("./Src/modules/ServiceBill/Routes/ServiceBillRouter");
 const InsuranceClaimRouter = require("./Src/modules/InsuranceClaim/Routes/InsuranceClaimRouter");
+const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/SystemSettingsRoutes");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -60,6 +61,7 @@ app.use("/api/work-orders", WorkOrderRouter);
 app.use("/api/inventory", InventoryRouter);
 app.use("/api/service-bills", ServiceBillRouter);
 app.use("/api/insurance-claims", InsuranceClaimRouter);
+app.use("/api/system-settings", SystemSettingsRouter);
 
 
 app.get("/health", (req, res) => {

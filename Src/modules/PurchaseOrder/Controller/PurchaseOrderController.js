@@ -7,6 +7,7 @@ const {
 } = require("../Repo/PurchaseOrderRepo.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const Branch = require("../../Branch/Model/BranchModel.js");
+const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -180,11 +181,12 @@ const approvePurchaseOrder = async (req, res) => {
             });
         }
 
-        // Rule 5: Over $1000 → Admin only
-        if (currentPO.totalAmount > 1000 && approverRole !== ROLES.ADMIN) {
+        // Rule 5: Dynamic threshold check (Default $1000)
+        const threshold = (await getSetting("poApprovalThreshold")) || 1000;
+        if (currentPO.totalAmount > threshold && approverRole !== ROLES.ADMIN) {
             return res.status(403).json({
                 success: false,
-                message: `Purchase Orders over $1000 can only be approved by ADMIN. This PO total: $${currentPO.totalAmount}.`,
+                message: `Purchase Orders over ${threshold} can only be approved by ADMIN. This PO total: $${currentPO.totalAmount}.`,
             });
         }
 
