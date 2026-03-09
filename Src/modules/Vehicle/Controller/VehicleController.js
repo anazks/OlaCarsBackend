@@ -34,6 +34,13 @@ const addVehicle = async (req, res) => {
         }
 
         const newVehicle = await addVehicleService(vehicleData);
+
+        // If a Purchase Order is linked, mark it as used
+        if (newVehicle.purchaseDetails && newVehicle.purchaseDetails.purchaseOrder) {
+            const { updatePurchaseOrderService } = require("../../PurchaseOrder/Repo/PurchaseOrderRepo");
+            await updatePurchaseOrderService(newVehicle.purchaseDetails.purchaseOrder, { isUsed: true });
+        }
+
         return res.status(201).json({ success: true, data: newVehicle });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

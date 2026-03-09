@@ -70,6 +70,10 @@ const purchaseOrderSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        isUsed: {
+            type: Boolean,
+            default: false,
+        },
         editHistory: [
             {
                 editedAt: { type: Date, default: Date.now },

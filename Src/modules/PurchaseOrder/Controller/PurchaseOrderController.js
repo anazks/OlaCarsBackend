@@ -81,7 +81,7 @@ const addPurchaseOrder = async (req, res) => {
 const getPurchaseOrders = async (req, res) => {
     try {
         const { role } = req.user;
-        const { purpose } = req.query; // Extract purpose from query string
+        const { purpose, isUsed } = req.query; // Extract purpose and isUsed from query string
         let query = {};
 
         // Filter by purpose if provided
@@ -90,6 +90,11 @@ const getPurchaseOrders = async (req, res) => {
             if (purpose === "Vehicle") {
                 query.status = "APPROVED"; // Vehicle onboarding only uses approved POs
             }
+        }
+
+        // Filter by isUsed if provided
+        if (isUsed !== undefined) {
+            query.isUsed = isUsed === "true";
         }
 
         if (role === ROLES.BRANCHMANAGER) {
