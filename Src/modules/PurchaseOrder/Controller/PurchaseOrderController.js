@@ -94,7 +94,11 @@ const getPurchaseOrders = async (req, res) => {
 
         // Filter by isUsed if provided
         if (isUsed !== undefined) {
-            query.isUsed = isUsed === "true";
+            if (isUsed === "false") {
+                query.isUsed = { $ne: true };
+            } else {
+                query.isUsed = true;
+            }
         }
 
         if (role === ROLES.BRANCHMANAGER) {
