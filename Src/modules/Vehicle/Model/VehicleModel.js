@@ -55,9 +55,9 @@ const vehicleSchema = new mongoose.Schema(
 
         // 2. Basic Details
         basicDetails: {
-            make: { type: String, required: true },
-            model: { type: String, required: true },
-            year: { type: Number, required: true },
+            make: { type: String },
+            model: { type: String },
+            year: { type: Number },
             category: {
                 type: String,
                 enum: ["Sedan", "SUV", "Pickup", "Van", "Luxury", "Commercial"],
@@ -72,7 +72,6 @@ const vehicleSchema = new mongoose.Schema(
             seats: { type: Number },
             vin: {
                 type: String,
-                required: true,
                 uppercase: true,
                 trim: true
             },

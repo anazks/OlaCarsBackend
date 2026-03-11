@@ -39,6 +39,12 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
             if (process.env.NODE_ENV === 'test' || process.env.BYPASS_DOCS === 'true') return null;
+
+            const basic = { ...(vehicle.basicDetails || {}), ...(payload.basicDetails || {}) };
+            if (!basic.make || !basic.model || !basic.year || !basic.vin) {
+                return "Basic details (make, model, year, vin) must be completed before reviewing documents.";
+            }
+
             const combinedDocs = { ...vehicle.legalDocs, ...payload.legalDocs };
             if (!combinedDocs.registrationCertificate || !combinedDocs.roadTaxDisc || !combinedDocs.roadworthinessCertificate) {
                 return "All mandatory documents (Reg Cert, Road Tax, Roadworthiness) must be uploaded.";
