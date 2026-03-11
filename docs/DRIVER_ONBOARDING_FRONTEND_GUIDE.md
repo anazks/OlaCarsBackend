@@ -39,9 +39,9 @@ An **ACTIVE** driver can be **SUSPENDED** and later **reactivated**.
 
 ### Stage 1: DRAFT
 
-> *"Operations Staff creates the driver profile and begins entering information."*
+> *"Finance Staff creates the driver profile and begins entering information."*
 
-**Who:** Operations Staff / Branch Manager
+**Who:** Finance Staff / Branch Manager
 **UI:** A multi-section form to capture the driver's basic info.
 
 **API Call — Create Driver:**
@@ -82,7 +82,7 @@ Content-Type: application/json
 
 ### Uploading Documents (applies across all stages)
 
-Before moving from DRAFT → PENDING REVIEW, the staff needs to upload identity & license images.
+Before moving from DRAFT → PENDING REVIEW, the finance staff needs to upload identity & license images.
 
 **API Call — Upload Documents:**
 ```
@@ -127,9 +127,9 @@ Fields (pick any combination):
 
 ### Stage 2: PENDING REVIEW
 
-> *"All required documents are uploaded — staff submits the application for review."*
+> *"All required documents are uploaded — finance staff submits the application for review."*
 
-**Who:** Operations Staff
+**Who:** Finance Staff
 **Prerequisite:** These fields must be populated before this transition will succeed:
 - `personalInfo.fullName`, `.email`, `.phone`
 - `identityDocs.idFrontImage`, `.idBackImage`
@@ -164,9 +164,9 @@ Content-Type: application/json
 
 ### Stage 3: VERIFICATION
 
-> *"Staff verifies the driving license and reviews the background check."*
+> *"Finance Staff verifies the driving license and reviews the background check."*
 
-**Who:** Operations Staff
+**Who:** Finance Staff
 **Prerequisites:**
 - Driving license `verificationStatus` must be `"VERIFIED"`
 - Background check document must be uploaded
@@ -220,9 +220,9 @@ PUT /api/driver/:id/progress
 
 ### Stage 4: CREDIT CHECK
 
-> *"Staff initiates the Experian credit check."*
+> *"Finance Staff initiates the Experian credit check."*
 
-**Who:** Operations Staff
+**Who:** Finance Staff
 **Prerequisite:** Signed credit check consent form must be uploaded.
 
 **Step 1 — Upload consent form** (if not already done):
@@ -347,7 +347,7 @@ PUT /api/driver/:id/progress
 
 > *"Credit check is cleared — driver is approved for contract."*
 
-**Who:** Operations Staff (auto-approved) / Branch Manager (after review)
+**Who:** Finance Staff (auto-approved) / Branch Manager (after review)
 
 **API Call (if auto-approved, skip MANAGER REVIEW):**
 ```
@@ -369,7 +369,7 @@ PUT /api/driver/:id/progress
 
 > *"Contract is generated and sent to the driver for signature."*
 
-**Who:** Operations Staff
+**Who:** Finance Staff
 **Prerequisite:** Contract PDF must be uploaded (generated or manually created).
 
 **Step 1 — Upload contract PDF:**
@@ -568,7 +568,7 @@ All error responses follow:
 
 ## Role Permissions Summary
 
-| Action | Operations Staff | Branch Manager | Country Manager | Admin |
+| Action | Finance Staff | Branch Manager | Country Manager | Admin |
 |--------|:---:|:---:|:---:|:---:|
 | Create driver | ✅ | ✅ | — | — |
 | Edit driver fields | ✅ | ✅ | — | — |

@@ -62,7 +62,7 @@ function workflowError(message, statusCode) {
 const STATUS_RULES = {
     "PENDING REVIEW": {
         allowedFrom: ["DRAFT"],
-        allowedRoles: [ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver, payload) {
             const p = driver.personalInfo || {};
@@ -92,7 +92,7 @@ const STATUS_RULES = {
 
     "VERIFICATION": {
         allowedFrom: ["PENDING REVIEW"],
-        allowedRoles: [ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const dl = driver.drivingLicense || {};
@@ -110,7 +110,7 @@ const STATUS_RULES = {
 
     "CREDIT CHECK": {
         allowedFrom: ["VERIFICATION"],
-        allowedRoles: [ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
@@ -139,7 +139,7 @@ const STATUS_RULES = {
 
     "APPROVED": {
         allowedFrom: ["CREDIT CHECK", "MANAGER REVIEW"],
-        allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
@@ -168,7 +168,7 @@ const STATUS_RULES = {
 
     "CONTRACT PENDING": {
         allowedFrom: ["APPROVED"],
-        allowedRoles: [ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const c = driver.contract || {};

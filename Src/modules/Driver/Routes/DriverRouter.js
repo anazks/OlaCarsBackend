@@ -106,7 +106,7 @@ const upload = require("../../../utils/multerConfig");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER),
     addDriver
 );
 
@@ -137,7 +137,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     getDrivers
 );
 
@@ -165,7 +165,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     getDriverById
 );
 
@@ -210,7 +210,7 @@ router.get(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER),
     editDriver
 );
 
@@ -265,7 +265,7 @@ router.put(
 router.put(
     "/:id/progress",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     progressDriverStatus
 );
 
@@ -340,7 +340,7 @@ router.put(
 router.post(
     "/:id/upload-documents",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER),
     upload.fields([
         { name: "photograph", maxCount: 1 },
         { name: "idFrontImage", maxCount: 1 },
