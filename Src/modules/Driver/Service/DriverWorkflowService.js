@@ -244,7 +244,14 @@ function applySideEffects(targetStatus, driver, updatePayload) {
     switch (targetStatus) {
         case "CREDIT CHECK":
             // #6 — System auto-decides: rating & decision are always set by engine, never from payload
-            if (updatePayload?.creditCheck?.score) {
+            if (updatePayload?.creditCheck) {
+                // If api for experian is not yet available, we use dummy score
+                if (!updatePayload.creditCheck.score) {
+                    updatePayload.creditCheck.score = Math.floor(Math.random() * (850 - 300 + 1)) + 300;
+                    updatePayload.creditCheck.isDummy = true;
+                    updatePayload.creditCheck.notes = (updatePayload.creditCheck.notes || "") + " [System: Generated dummy score as API is unavailable]";
+                }
+
                 const hasFraud = updatePayload.creditCheck.fraudAlert === true;
                 const evaluation = evaluateCreditScore(updatePayload.creditCheck.score, hasFraud);
                 if (evaluation) {
