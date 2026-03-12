@@ -112,8 +112,8 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Operation Staff not found', 404);
 };
 
-exports.getAll = async () => {
-    return await OperationStaff.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+exports.getAll = async (filter = {}) => {
+    return await OperationStaff.find({ isDeleted: false, ...filter }).select('-passwordHash -refreshToken');
 };
 
 exports.getById = async (id) => {

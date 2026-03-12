@@ -1,4 +1,5 @@
 const FinanceStaffService = require('../Service/FinanceStaffService.js');
+const BranchService = require('../../Branch/Service/BranchService.js');
 
 const login = async (req, res) => {
     try {
@@ -26,7 +27,16 @@ const addFinanceStaff = async (req, res) => {
 
 const getFinanceStaff = async (req, res) => {
     try {
-        const staff = await FinanceStaffService.getAll();
+        const filter = {};
+        
+        // If user is COUNTRYMANAGER, restrict staff to branches in their country
+        if (req.user.role === 'COUNTRYMANAGER' && req.user.country) {
+            const countryBranches = await BranchService.getAll({ country: req.user.country });
+            const branchIds = countryBranches.map(b => b._id);
+            filter.branchId = { $in: branchIds };
+        }
+
+        const staff = await FinanceStaffService.getAll(filter);
         return res.status(200).json({ success: true, data: staff });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

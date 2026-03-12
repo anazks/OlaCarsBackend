@@ -105,7 +105,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
     getFinanceStaff
 );
 
@@ -130,7 +130,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
     getFinanceStaffById
 );
 

@@ -1,4 +1,5 @@
 const OperationStaffService = require('../Service/OperationStaffService.js');
+const BranchService = require('../../Branch/Service/BranchService.js');
 
 const login = async (req, res) => {
     try {
@@ -26,7 +27,16 @@ const addOperationStaff = async (req, res) => {
 
 const getOperationStaff = async (req, res) => {
     try {
-        const staff = await OperationStaffService.getAll();
+        const filter = {};
+        
+        // If user is COUNTRYMANAGER, restrict staff to branches in their country
+        if (req.user.role === 'COUNTRYMANAGER' && req.user.country) {
+            const countryBranches = await BranchService.getAll({ country: req.user.country });
+            const branchIds = countryBranches.map(b => b._id);
+            filter.branchId = { $in: branchIds };
+        }
+
+        const staff = await OperationStaffService.getAll(filter);
         return res.status(200).json({ success: true, data: staff });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
