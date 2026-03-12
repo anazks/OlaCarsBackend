@@ -124,7 +124,7 @@ const STATUS_RULES = {
     "MANAGER REVIEW": {
         allowedFrom: ["CREDIT CHECK"],
         allowedRoles: [], // System-triggered only
-        minHierarchy: ROLES.ADMIN,
+        minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
             if (!cc.score) {
