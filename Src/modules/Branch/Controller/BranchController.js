@@ -15,7 +15,17 @@ const addBranch = async (req, res) => {
 
 const getBranches = async (req, res) => {
     try {
-        const branches = await BranchService.getAll();
+        const filter = {};
+        
+        // If user is FINANCESTAFF, restrict branches to their country
+        if (req.user.role === 'FINANCESTAFF' && req.user.branchId) {
+            const staffBranch = await BranchService.getById(req.user.branchId);
+            if (staffBranch && staffBranch.country) {
+                filter.country = staffBranch.country;
+            }
+        }
+
+        const branches = await BranchService.getAll(filter);
         return res.status(200).json({ success: true, data: branches });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

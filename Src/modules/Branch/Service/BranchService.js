@@ -14,8 +14,8 @@ exports.create = async (data) => {
     return newBranch;
 };
 
-exports.getAll = async () => {
-    return await Branch.find({ isDeleted: false });
+exports.getAll = async (filter = {}) => {
+    return await Branch.find({ isDeleted: false, ...filter });
 };
 
 exports.getById = async (id) => {

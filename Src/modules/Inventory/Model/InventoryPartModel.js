@@ -66,7 +66,6 @@ inventoryPartSchema.set("toJSON", { virtuals: true });
 inventoryPartSchema.set("toObject", { virtuals: true });
 
 // Indexes
-inventoryPartSchema.index({ partNumber: 1 });
 inventoryPartSchema.index({ branchId: 1 });
 inventoryPartSchema.index({ category: 1 });
 inventoryPartSchema.index({ branchId: 1, quantityOnHand: 1 }); // low stock queries

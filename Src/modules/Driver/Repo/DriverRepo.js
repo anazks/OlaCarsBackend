@@ -81,7 +81,7 @@ exports.deleteDriverService = async (id) => {
  */
 exports.getDriversService = async (filter = {}, options = {}) => {
     const query = { isDeleted: false, ...filter };
-    let q = Driver.find(query).populate("branch", "branchName location");
+    let q = Driver.find(query).populate("branch", "name code city state country");
 
     if (!options.includeSensitive) {
         q = q.select(SENSITIVE_FIELDS);
@@ -96,7 +96,7 @@ exports.getDriversService = async (filter = {}, options = {}) => {
  * @param {Object} options - { includeSensitive: false } to strip finance-only fields.
  */
 exports.getDriverByIdService = async (id, options = {}) => {
-    let q = Driver.findOne({ _id: id, isDeleted: false }).populate("branch", "branchName location");
+    let q = Driver.findOne({ _id: id, isDeleted: false }).populate("branch", "name code city state country");
 
     if (!options.includeSensitive) {
         q = q.select(SENSITIVE_FIELDS);
