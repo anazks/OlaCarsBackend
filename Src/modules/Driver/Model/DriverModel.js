@@ -217,7 +217,7 @@ const driverSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN],
+            enum: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN,ROLES.FINANCESTAFF],
         },
 
         isDeleted: { type: Boolean, default: false },
