@@ -38,11 +38,17 @@ const GLOBAL_ROLES = [ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.ADMIN];
 const addPurchaseOrder = async (req, res) => {
     try {
         console.log("=========== PO INCOMING ===========");
-        console.log("INCOMING PO BODY:", req.body);
-        console.log("INCOMING PO FILES:", req.files);
+        console.log("Headers:", req.headers['content-type']);
+        console.log("INCOMING PO BODY (Keys):", Object.keys(req.body));
+        console.log("INCOMING PO FILES (Count):", req.files ? req.files.length : 'undefined');
         console.log("===================================");
 
         let poData = req.body;
+        
+        // Safety check: if req.files is undefined, the frontend did NOT send multipart/form-data
+        if (!req.files && req.headers['content-type']?.includes('application/json')) {
+            console.log("WARNING: Received JSON. Images cannot be uploaded via JSON.");
+        }
 
         // Parse items if they are sent as flat indexed keys (items[0][itemName], items[0][quantity])
         if (!poData.items || !Array.isArray(poData.items)) {
