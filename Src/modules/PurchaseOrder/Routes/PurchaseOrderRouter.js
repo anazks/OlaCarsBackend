@@ -6,10 +6,12 @@ const {
     getPurchaseOrderById,
     approvePurchaseOrder,
     editPurchaseOrder,
+    uploadPurchaseOrderItemImages,
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const upload = require("../../../utils/multerConfig.js");
 
 /**
  * @swagger
@@ -49,6 +51,13 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *         unitPrice:
  *           type: number
  *           example: 45.00
+ *         images:
+ *           type: array
+ *           description: Array of image URLs for the item (max 8)
+ *           maxItems: 8
+ *           items:
+ *             type: string
+ *             example: "https://example.com/image.jpg"
  *     PurchaseOrderStatus:
  *       type: string
  *       enum: [WAITING, APPROVED, REJECTED]
@@ -140,10 +149,9 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *   post:
  *     summary: Create a new Purchase Order
  *     description: |
- *       Creates a PO with status `WAITING`. The `purchaseOrderNumber` and `totalAmount`
- *       are auto-generated — do NOT send them in the request body.
- *
- *       **Who can create:** CountryManager, BranchManager, OperationStaff, FinanceStaff
+ *       Creates a PO with status `WAITING`. 
+ *       Accepts JSON normally, OR `multipart/form-data` if uploading images.
+ *       If sending images, send `items` as a stringified JSON array, and attach files with keys named `items[0][images]`, `items[1][images]`, etc.
  *     tags: [PurchaseOrder]
  *     security:
  *       - bearerAuth: []
@@ -161,62 +169,47 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *             properties:
  *               purpose:
  *                 type: string
- *                 enum: [Vehicle, Spare Parts, Others]
- *                 example: Spare Parts
  *               items:
  *                 type: array
- *                 minItems: 1
  *                 items:
  *                   $ref: '#/components/schemas/PurchaseOrderItem'
  *               branch:
  *                 type: string
- *                 description: Branch ObjectId
- *                 example: 65f1a2b3c4d5e6f7a8b9c0d1
  *               supplier:
  *                 type: string
- *                 description: Supplier ObjectId
- *                 example: 65f1a2b3c4d5e6f7a8b9c0d2
- *               paymentDate:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - purpose
+ *               - items
+ *               - branch
+ *               - supplier
+ *             properties:
+ *               purpose:
  *                 type: string
- *                 format: date-time
- *                 description: Expected payment date (optional)
- *           example:
- *             purpose: Spare Parts
- *             items:
- *               - itemName: Brake Pads
- *                 quantity: 4
- *                 description: Ceramic brake pads for Toyota Corolla
- *                 unitPrice: 45.00
- *               - itemName: Oil Filter
- *                 quantity: 2
- *                 unitPrice: 12.50
- *             branch: 65f1a2b3c4d5e6f7a8b9c0d1
- *             supplier: 65f1a2b3c4d5e6f7a8b9c0d2
- *             paymentDate: "2026-03-15T00:00:00.000Z"
+ *               branch:
+ *                 type: string
+ *               supplier:
+ *                 type: string
+ *               items:
+ *                 type: string
+ *                 description: Stringified JSON array of items
+ *               items[0][images]:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Images for the first item
  *     responses:
  *       201:
- *         description: PO created successfully with auto-generated PO number and calculated total
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/PurchaseOrder'
- *       401:
- *         description: Unauthorized — missing or invalid token
- *       403:
- *         description: Forbidden — role not permitted to create POs
- *       500:
- *         description: Server error
+ *         description: PO created successfully
  */
 router.post(
     "/",
     authenticate,
     authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    upload.any(),
     addPurchaseOrder
 );
 
@@ -480,6 +473,81 @@ router.put(
     "/:id",
     authenticate,
     editPurchaseOrder
+);
+
+// ─── POST /api/purchase-order/:id/item/:itemId/upload-images — Upload Images ───
+/**
+ * @swagger
+ * /api/purchase-order/{id}/item/{itemId}/upload-images:
+ *   post:
+ *     summary: Upload images for a specific item in a Purchase Order
+ *     description: |
+ *       Uploads up to 8 images for a specific PO item to AWS S3.
+ *       - Only allows images (jpg, png, jpeg, etc.)
+ *       - Max 5MB per file
+ *       - Automatically records edit history and resets PO status to `WAITING`
+ *     tags: [PurchaseOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: PO ObjectId
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         description: The `_id` of the specific item inside the PO
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Select up to 8 images to upload
+ *     responses:
+ *       200:
+ *         description: Images uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Images uploaded successfully."
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                     example: "https://bucket.s3.region.amazonaws.com/purchase-orders/..."
+ *       400:
+ *         description: Bad request (no images, exceeding limits)
+ *       403:
+ *         description: Unauthorized to edit this PO
+ *       404:
+ *         description: PO or Item not found
+ *       500:
+ *         description: Server/S3 error
+ */
+router.post(
+    "/:id/item/:itemId/upload-images",
+    authenticate,
+    upload.array("images", 8),
+    uploadPurchaseOrderItemImages
 );
 
 module.exports = router;

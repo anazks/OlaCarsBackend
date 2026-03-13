@@ -25,6 +25,16 @@ const purchaseOrderSchema = new mongoose.Schema(
                 quantity: { type: Number, required: true, default: 1 },
                 description: { type: String },
                 unitPrice: { type: Number, required: true },
+                images: {
+                    type: [String],
+                    validate: {
+                        validator: function(v) {
+                            return v.length <= 8;
+                        },
+                        message: props => `${props.path} exceeds the limit of 8 images.`
+                    },
+                    default: []
+                }
             }
         ],
         totalAmount: {

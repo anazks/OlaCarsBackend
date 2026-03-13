@@ -8,6 +8,7 @@ const {
 const { ROLES } = require("../../../shared/constants/roles.js");
 const Branch = require("../../Branch/Model/BranchModel.js");
 const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
+const uploadToS3 = require("../../../utils/uploadToS3.js");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -31,10 +32,21 @@ const GLOBAL_ROLES = [ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.ADMIN];
  * Any authenticated role can create a PO.
  * Branch-level staff: branch auto-assigned from JWT.
  * CountryManager+: must send branch in body.
+ * Expects `multipart/form-data` if images are included.
+ * `items` should be a JSON string.
  */
 const addPurchaseOrder = async (req, res) => {
     try {
         let poData = req.body;
+
+        // Parse items if it's sent as a JSON string (due to multipart/form-data)
+        if (typeof poData.items === "string") {
+            try {
+                poData.items = JSON.parse(poData.items);
+            } catch (err) {
+                return res.status(400).json({ success: false, message: "Invalid JSON format for items array." });
+            }
+        }
 
         // Branch assignment
         if (BRANCH_SCOPED_ROLES.includes(req.user.role)) {
@@ -52,12 +64,33 @@ const addPurchaseOrder = async (req, res) => {
         const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
         poData.purchaseOrderNumber = `PO-${Date.now()}-${randomString}`;
 
-        // Auto-calculate total
+        // Auto-calculate total and setup images
         let calculatedTotal = 0;
         if (poData.items && Array.isArray(poData.items)) {
-            poData.items.forEach(item => {
+            const awsRegion = process.env.AWS_REGION || "ap-south-1";
+            const awsBucket = process.env.AWS_BUCKET_NAME || "ola-cars-uploads-2026";
+            const s3Domain = `https://${awsBucket}.s3.${awsRegion}.amazonaws.com`;
+            
+            for (let i = 0; i < poData.items.length; i++) {
+                const item = poData.items[i];
                 calculatedTotal += (item.quantity || 1) * (item.unitPrice || 0);
-            });
+
+                // Handle image uploads for this specific item if files exist
+                const fieldName = `items[${i}][images]`;
+                const itemFiles = req.files && req.files[fieldName] ? req.files[fieldName] : [];
+                
+                if (itemFiles.length > 8) {
+                    return res.status(400).json({ success: false, message: `Cannot upload more than 8 images for item: ${item.itemName}` });
+                }
+
+                item.images = [];
+                for (const file of itemFiles) {
+                    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
+                    const key = `purchase-orders/temp-${poData.purchaseOrderNumber}/items/${i}/${Date.now()}_${cleanName}`;
+                    const uploadedKey = await uploadToS3(file, key);
+                    item.images.push(`${s3Domain}/${uploadedKey}`);
+                }
+            }
         }
         poData.totalAmount = calculatedTotal;
 
@@ -326,10 +359,101 @@ const editPurchaseOrder = async (req, res) => {
     }
 };
 
+/**
+ * Upload images for a specific item in a Purchase Order.
+ * Supports up to 8 images per item.
+ */
+const uploadPurchaseOrderItemImages = async (req, res) => {
+    try {
+        const { id, itemId } = req.params;
+        const files = req.files?.images || req.files; // Depending on multer config
+        
+        // Ensure array of files
+        let imageFiles = [];
+        if (Array.isArray(files)) {
+            imageFiles = files;
+        } else if (files && files.images) {
+            imageFiles = files.images;
+        }
+
+        if (!imageFiles || imageFiles.length === 0) {
+            return res.status(400).json({ success: false, message: "No images provided for upload." });
+        }
+
+        // Fetch Po
+        const po = await getPurchaseOrderByIdService(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found." });
+        }
+
+        // Check Permissions: original creator or Admin can edit.
+        if (po.createdBy._id.toString() !== req.user.id && req.user.role !== ROLES.ADMIN) {
+            return res.status(403).json({ success: false, message: "You don't have permission to upload images for this Purchase Order." });
+        }
+
+        // Check Item exists
+        const item = po.items.find((i) => i._id.toString() === itemId);
+        if (!item) {
+            return res.status(404).json({ success: false, message: "Item not found in this Purchase Order." });
+        }
+
+        // Check limit
+        if (item.images.length + imageFiles.length > 8) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Cannot upload more than 8 images. Item currently has ${item.images.length} images.` 
+            });
+        }
+
+        const uploadedUrls = [];
+        const awsRegion = process.env.AWS_REGION || "ap-south-1";
+        const awsBucket = process.env.AWS_BUCKET_NAME || "ola-cars-uploads-2026";
+        const s3Domain = `https://${awsBucket}.s3.${awsRegion}.amazonaws.com`;
+
+        // Upload loop
+        for (const file of imageFiles) {
+            const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
+            const key = `purchase-orders/${po._id}/items/${item._id}/${Date.now()}_${cleanName}`;
+            const uploadedKey = await uploadToS3(file, key);
+            uploadedUrls.push(`${s3Domain}/${uploadedKey}`);
+        }
+
+        // Update item images array
+        item.images.push(...uploadedUrls);
+        
+        // PO standard edit rules: mark as edited, reset status to waiting, record history
+        po.isEdited = true;
+        const previousStatus = po.status;
+        po.status = "WAITING";
+        
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            previousStatus: previousStatus,
+            changesSummary: `Uploaded ${imageFiles.length} images for item: ${item.itemName}.`,
+        });
+
+        // Save
+        await po.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Images uploaded successfully.",
+            data: uploadedUrls,
+            po: po
+        });
+
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
     getPurchaseOrderById,
     approvePurchaseOrder,
     editPurchaseOrder,
+    uploadPurchaseOrderItemImages,
 };
