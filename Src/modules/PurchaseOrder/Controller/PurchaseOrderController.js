@@ -8,7 +8,7 @@ const {
 const { ROLES } = require("../../../shared/constants/roles.js");
 const Branch = require("../../Branch/Model/BranchModel.js");
 const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
-const uploadToS3 = require("../../../utils/uploadToS3.js");
+const uploadToS3 = require("../../../utils/uploadToS3");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
