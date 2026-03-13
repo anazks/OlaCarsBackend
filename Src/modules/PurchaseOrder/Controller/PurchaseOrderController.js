@@ -37,6 +37,11 @@ const GLOBAL_ROLES = [ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.ADMIN];
  */
 const addPurchaseOrder = async (req, res) => {
     try {
+        console.log("=========== PO INCOMING ===========");
+        console.log("INCOMING PO BODY:", req.body);
+        console.log("INCOMING PO FILES:", req.files);
+        console.log("===================================");
+
         let poData = req.body;
 
         // Parse items if they are sent as flat indexed keys (items[0][itemName], items[0][quantity])
@@ -98,14 +103,21 @@ const addPurchaseOrder = async (req, res) => {
             
             for (let i = 0; i < poData.items.length; i++) {
                 const item = poData.items[i];
-                calculatedTotal += (item.quantity || 1) * (item.unitPrice || 0);
+                // Ensure numeric types for calculation if they came as strings from FormData
+                const qty = Number(item.quantity) || 0;
+                const price = Number(item.unitPrice) || 0;
+                calculatedTotal += qty * price;
 
                 // Handle image uploads for this specific item if files exist
+                // Since we use upload.any(), req.files is an ARRAY. 
+                // We need to filter it for the specific fieldname: items[i][images]
                 const fieldName = `items[${i}][images]`;
-                const itemFiles = req.files && req.files[fieldName] ? req.files[fieldName] : [];
+                const itemFiles = Array.isArray(req.files) 
+                    ? req.files.filter(f => f.fieldname === fieldName)
+                    : [];
                 
                 if (itemFiles.length > 8) {
-                    return res.status(400).json({ success: false, message: `Cannot upload more than 8 images for item: ${item.itemName}` });
+                    return res.status(400).json({ success: false, message: `Cannot upload more than 8 images for item: ${item.itemName || i}` });
                 }
 
                 const uploadedUrls = [];
