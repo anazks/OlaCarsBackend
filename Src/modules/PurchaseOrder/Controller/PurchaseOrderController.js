@@ -83,13 +83,15 @@ const addPurchaseOrder = async (req, res) => {
                     return res.status(400).json({ success: false, message: `Cannot upload more than 8 images for item: ${item.itemName}` });
                 }
 
-                item.images = [];
+                const uploadedUrls = [];
                 for (const file of itemFiles) {
                     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
                     const key = `purchase-orders/temp-${poData.purchaseOrderNumber}/items/${i}/${Date.now()}_${cleanName}`;
                     const uploadedKey = await uploadToS3(file, key);
-                    item.images.push(`${s3Domain}/${uploadedKey}`);
+                    uploadedUrls.push(`${s3Domain}/${uploadedKey}`);
                 }
+                // Assign explicitly back to the original array reference
+                poData.items[i].images = uploadedUrls;
             }
         }
         poData.totalAmount = calculatedTotal;
