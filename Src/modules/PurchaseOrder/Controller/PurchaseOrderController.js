@@ -39,12 +39,37 @@ const addPurchaseOrder = async (req, res) => {
     try {
         let poData = req.body;
 
-        // Parse items if it's sent as a JSON string (due to multipart/form-data)
-        if (typeof poData.items === "string") {
-            try {
-                poData.items = JSON.parse(poData.items);
-            } catch (err) {
-                return res.status(400).json({ success: false, message: "Invalid JSON format for items array." });
+        // Parse items if they are sent as flat indexed keys (items[0][itemName], items[0][quantity])
+        if (!poData.items || !Array.isArray(poData.items)) {
+            const itemsMap = new Map();
+            Object.keys(poData).forEach((key) => {
+                const match = key.match(/^items\[(\d+)\]\[(.*?)\]$/);
+                if (match) {
+                    const index = match[1];
+                    const field = match[2];
+                    if (!itemsMap.has(index)) {
+                        itemsMap.set(index, {});
+                    }
+                    
+                    let value = poData[key];
+                    if (field === 'quantity' || field === 'unitPrice') {
+                        value = Number(value);
+                    }
+                    
+                    itemsMap.get(index)[field] = value;
+                    delete poData[key]; // Clean up flat keys from body
+                }
+            });
+
+            if (itemsMap.size > 0) {
+                // Convert Map values to array, sort by index to preserve order just in case
+                poData.items = Array.from(itemsMap.values());
+            } else if (typeof poData.items === "string") {
+                 try {
+                     poData.items = JSON.parse(poData.items);
+                 } catch (err) {
+                     return res.status(400).json({ success: false, message: "Invalid JSON format for items array." });
+                 }
             }
         }
 
