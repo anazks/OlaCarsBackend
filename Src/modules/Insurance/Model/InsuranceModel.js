@@ -60,8 +60,19 @@ const insuranceSchema = new mongoose.Schema(
         createdByModel: {
             type: String,
             required: true,
-            enum: [ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER] 
-            // Made this match standard roles, as user mentioned Country/Branch Manager should post. Add role constants here.
+            enum: [
+                ROLES.ADMIN, 
+                ROLES.FINANCEADMIN, 
+                ROLES.OPERATIONADMIN, 
+                ROLES.COUNTRYMANAGER, 
+                ROLES.BRANCHMANAGER,
+                ROLES.FINANCESTAFF
+            ] 
+        },
+        country: {
+            type: String, // Storing raw string as per CountryManager / Branch
+            required: true,
+            trim: true
         }
     },
     {

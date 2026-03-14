@@ -6,6 +6,25 @@ const {
     deleteInsuranceService
 } = require("../Repo/InsuranceRepo");
 const uploadToS3 = require("../../../utils/uploadToS3"); 
+const CountryManager = require("../../CountryManager/Model/CountryManagerModel");
+const Branch = require("../../Branch/Model/BranchModel");
+const { ROLES } = require("../../../shared/constants/roles");
+
+/**
+ * Helper to get the user's country based on their role
+ */
+const getUserCountry = async (user) => {
+    if (user.role === ROLES.COUNTRYMANAGER) {
+        const cm = await CountryManager.findById(user.id);
+        return cm ? cm.country : null;
+    } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF) {
+        // user.branchId should be available from auth token payload
+        if (!user.branchId) return null;
+        const branch = await Branch.findById(user.branchId);
+        return branch ? branch.country : null;
+    }
+    return null;
+};
 
 /**
  * Create a new Insurance
@@ -18,7 +37,28 @@ const createInsurance = async (req, res) => {
         insuranceData.createdBy = req.user.id;
         insuranceData.createdByModel = req.user.role; 
 
+        // Assign country dynamically based on requester
+        const userCountry = await getUserCountry(req.user);
+        if (!userCountry) {
+            return res.status(400).json({ success: false, message: "Could not determine the country for this user." });
+        }
+        insuranceData.country = userCountry;
+
+        // Create the insurance record first to get its ID for the S3 key
         const newInsurance = await createInsuranceService(insuranceData);
+
+        // If a file was uploaded, upload to S3 and update the record
+        if (req.file) {
+            const file = req.file;
+            const key = `insurances/${newInsurance._id}/documents/policy_${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+            const uploadedKey = await uploadToS3(file, key);
+
+            // Update the document URL in the database
+            const { updateInsuranceService } = require("../Repo/InsuranceRepo");
+            const updatedInsurance = await updateInsuranceService(newInsurance._id, { "documents.policyDocumentUrl": uploadedKey });
+            return res.status(201).json({ success: true, data: updatedInsurance });
+        }
+
         return res.status(201).json({ success: true, data: newInsurance });
     } catch (error) {
         return res.status(error.cause || 500).json({ success: false, message: error.message });
@@ -32,7 +72,18 @@ const createInsurance = async (req, res) => {
  */
 const getAllInsurances = async (req, res) => {
     try {
-        const insurances = await getAllInsurancesService();
+        let query = {};
+        const globalRoles = [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN];
+
+        if (!globalRoles.includes(req.user.role)) {
+            const userCountry = await getUserCountry(req.user);
+            if (!userCountry) {
+                return res.status(403).json({ success: false, message: "Country restriction failed. Country not found." });
+            }
+            query.country = userCountry;
+        }
+
+        const insurances = await getAllInsurancesService(query);
         return res.status(200).json({ success: true, data: insurances });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -46,8 +97,18 @@ const getAllInsurances = async (req, res) => {
  */
 const getEligibleInsurances = async (req, res) => {
     try {
-        // Only return ACTIVE insurances. Might also want to filter by Fleet/Individual or coverage later.
-        const insurances = await getAllInsurancesService({ status: "ACTIVE" });
+        let query = { status: "ACTIVE" };
+        const globalRoles = [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN];
+
+        if (!globalRoles.includes(req.user.role)) {
+            const userCountry = await getUserCountry(req.user);
+            if (!userCountry) {
+                return res.status(403).json({ success: false, message: "Country restriction failed. Country not found." });
+            }
+            query.country = userCountry;
+        }
+
+        const insurances = await getAllInsurancesService(query);
         return res.status(200).json({ success: true, data: insurances });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

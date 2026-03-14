@@ -21,14 +21,16 @@ const upload = multer({ storage });
 // Apply authentication middleware to all routes
 
 
-// Only Country Manager & Branch Manager can CREATE
+// Only Country Manager, Branch Manager, & Finance Staff can CREATE
 router.post(
     "/",
     authenticate,
     authorize(
         ROLES.COUNTRYMANAGER,
-        ROLES.BRANCHMANAGER
+        ROLES.BRANCHMANAGER,
+        ROLES.FINANCESTAFF
     ),
+    upload.single("policyDocument"),
     createInsurance
 );
 

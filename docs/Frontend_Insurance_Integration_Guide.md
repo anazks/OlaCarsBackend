@@ -6,23 +6,28 @@ A full CRUD module has been added to the backend for managing Insurance Policies
 ### Endpoints (Base URL: `/api/insurance`)
 
 - **Create Insurance (POST `/api/insurance/`)**
-  - **Permissions:** Restricted to `COUNTRYMANAGER` and `BRANCHMANAGER`.
-  - **Payload Example:**
-    ```json
-    {
-      "provider": "Allianz",
-      "policyNumber": "POL-123456789",
-      "policyType": "FLEET", // Enum: ["FLEET", "INDIVIDUAL"]
-      "coverageType": "COMPREHENSIVE", // Enum: ["THIRD_PARTY", "COMPREHENSIVE"]
-      "startDate": "2026-01-01T00:00:00.000Z",
-      "expiryDate": "2027-01-01T00:00:00.000Z",
-      "insuredValue": 50000,
-      "providerContact": {
-        "name": "John Doe",
-        "phone": "+1234567890",
-        "email": "john@example.com"
-      }
-    }
+  - **Permissions:** Restricted to `COUNTRYMANAGER`, `BRANCHMANAGER`, and `FINANCESTAFF`.
+  - **Payload Format:** `multipart/form-data` (FormData)
+  - You must append all the standard JSON fields as textual keys, and attach the file under the key `policyDocument`.
+  - **Example Usage (Frontend):**
+    ```javascript
+    const formData = new FormData();
+    formData.append("provider", "Allianz");
+    formData.append("policyNumber", "POL-123456789");
+    formData.append("policyType", "FLEET");
+    formData.append("coverageType", "COMPREHENSIVE");
+    formData.append("startDate", "2026-01-01T00:00:00.000Z");
+    formData.append("expiryDate", "2027-01-01T00:00:00.000Z");
+    formData.append("insuredValue", "50000"); // Note: append converts to string
+    formData.append("providerContact[name]", "John Doe"); // For nested objects
+    formData.append("providerContact[phone]", "+1234567890");
+    formData.append("providerContact[email]", "john@example.com");
+    
+    // Attach the actual file:
+    formData.append("policyDocument", fileInput.files[0]);
+
+    // Send via fetch/axios
+    // axios.post('/api/insurance/', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
     ```
 
 - **Get All Insurances (GET `/api/insurance/`)**
@@ -40,7 +45,7 @@ A full CRUD module has been added to the backend for managing Insurance Policies
 - **Upload Policy Document (POST `/api/insurance/:id/upload-document`)**
   - **Type:** `multipart/form-data`
   - **Field Name:** `policyDocument`
-  - Uploads the insurance document to S3 and automatically updates the policy record.
+  - *Note: You can attach the document during the initial creation (`POST /api/insurance/`). This endpoint is primarily kept for **updating** or **retrying** an upload for an existing policy later.*
 
 ---
 
