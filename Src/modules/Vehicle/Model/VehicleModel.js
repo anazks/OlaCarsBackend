@@ -99,21 +99,9 @@ const vehicleSchema = new mongoose.Schema(
         },
 
         // 4. Insurance Policy
-        insurancePolicy: {
-            insuranceType: {
-                type: String,
-                enum: ["Comprehensive", "Third-Party", "Fleet Policy"],
-            },
-            providerName: { type: String },
-            policyNumber: { type: String },
-            startDate: { type: Date },
-            expiryDate: { type: Date },
-            premiumAmount: { type: Number },
-            coverageAmount: { type: Number },
-            policyDocument: { type: String },
-            excessAmount: { type: Number },
-            namedDrivers: [{ type: String }],
-            claimsHistory: { type: String },
+        insurance: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Insurance"
         },
 
         // 5. Importation & Landed Cost
@@ -250,7 +238,7 @@ vehicleSchema.index({ "legalDocs.registrationNumber": 1 });
 vehicleSchema.index({ "basicDetails.vin": 1 });
 
 // Expiry Alert Indexes
-vehicleSchema.index({ "insurancePolicy.expiryDate": 1 });
+// vehicleSchema.index({ "insurancePolicy.expiryDate": 1 }); // Removed as moved to Insurance collection
 vehicleSchema.index({ "legalDocs.registrationExpiry": 1 });
 vehicleSchema.index({ "legalDocs.roadTaxExpiry": 1 });
 

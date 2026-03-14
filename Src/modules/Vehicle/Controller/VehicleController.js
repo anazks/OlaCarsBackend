@@ -18,6 +18,11 @@ const addVehicle = async (req, res) => {
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
 
+        // Handle the new insurance flow
+        if (req.body.insuranceId) {
+            vehicleData.insurance = req.body.insuranceId;
+        }
+
         const branchRoles = [
             "BRANCHMANAGER",
             "OPERATIONSTAFF",
@@ -39,6 +44,14 @@ const addVehicle = async (req, res) => {
         if (newVehicle.purchaseDetails && newVehicle.purchaseDetails.purchaseOrder) {
             const { updatePurchaseOrderService } = require("../../PurchaseOrder/Repo/PurchaseOrderRepo");
             await updatePurchaseOrderService(newVehicle.purchaseDetails.purchaseOrder, { isUsed: true });
+        }
+
+        // If insurance is provided, add this vehicle to the insurance policy
+        if (req.body.insuranceId) {
+            const { updateInsuranceService } = require("../../Insurance/Repo/InsuranceRepo");
+            await updateInsuranceService(req.body.insuranceId, {
+                $push: { vehicles: newVehicle._id }
+            });
         }
 
         return res.status(201).json({ success: true, data: newVehicle });
@@ -130,7 +143,7 @@ const uploadVehicleDocuments = async (req, res) => {
             registrationDocument: "legalDocs.registrationDocument",
             roadTaxDocument: "legalDocs.roadTaxDisc", // Actually roadTaxDisc in schema
             roadworthinessCertificate: "legalDocs.roadworthinessCertificate",
-            insuranceDocument: "insurancePolicy.policyDocument",
+            // insuranceDocument: "insurancePolicy.policyDocument", // Removed as handled in Insurance module
             importDeclaration: "importationDetails.customsDeclarationNumber", // Assuming they meant document
             customsReceipt: "importationDetails.customsReceipt",
             gatePass: "importationDetails.gatePass",
