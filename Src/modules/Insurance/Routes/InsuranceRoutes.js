@@ -8,7 +8,7 @@ const {
     deleteInsurance,
     uploadInsuranceDocument
 } = require("../Controller/InsuranceController");
-const authMiddleware = require("../../../shared/middlewares/authMiddleware");
+const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { ROLES } = require("../../../shared/constants/roles");
 const multer = require("multer");
@@ -19,11 +19,12 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 // Apply authentication middleware to all routes
-router.use(authMiddleware);
+
 
 // Only Country Manager & Branch Manager can CREATE
 router.post(
     "/",
+    authenticate,
     authorize(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
@@ -31,14 +32,15 @@ router.post(
     createInsurance
 );
 
-router.get("/eligible", getEligibleInsurances);
+router.get("/eligible", authenticate, getEligibleInsurances);
 
-router.get("/", getAllInsurances);
-router.get("/:id", getInsuranceById);
+router.get("/", authenticate, getAllInsurances);
+router.get("/:id", authenticate, getInsuranceById);
 
 // Update/Delete (Currently allowing same roles as create for updates, maybe admin as well)
 router.put(
     "/:id",
+    authenticate,
     authorize(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
@@ -48,6 +50,7 @@ router.put(
 
 router.delete(
     "/:id",
+    authenticate,
     authorize(
         ROLES.ADMIN,
         ROLES.COUNTRYMANAGER,
@@ -59,7 +62,8 @@ router.delete(
 // Upload document
 router.post(
     "/:id/upload-document",
-    authorize(
+    authenticate,
+        authorize(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
