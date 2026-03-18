@@ -19,15 +19,16 @@ exports.addPurchaseOrderService = async (data) => {
  * @param {Object} query - Optional query parameters.
  * @param {number} page - Page number.
  * @param {number} limit - Items per page.
+ * @param {Object} sort - Sort parameters.
  * @returns {Promise<Object>} Paginated result
  */
-exports.getPurchaseOrdersService = async (query = {}, page = 1, limit = 10) => {
+exports.getPurchaseOrdersService = async (query = {}, page = 1, limit = 10, sort = { createdAt: -1 }) => {
     try {
         const skip = (page - 1) * limit;
 
         const total = await PurchaseOrder.countDocuments(query);
         const data = await PurchaseOrder.find(query)
-            .sort({ createdAt: -1 }) // Newest first
+            .sort(sort)
             .skip(skip)
             .limit(limit)
             .populate("branch")

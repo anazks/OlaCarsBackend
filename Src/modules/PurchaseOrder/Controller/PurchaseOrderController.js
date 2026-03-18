@@ -159,7 +159,7 @@ const addPurchaseOrder = async (req, res) => {
 const getPurchaseOrders = async (req, res) => {
     try {
         const { role } = req.user;
-        const { purpose, isUsed, page = 1, limit = 10 } = req.query; // Extract purpose and isUsed from query string
+        const { purpose, isUsed, isBilled, status, supplier, branch, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
         let query = {};
 
         // Filter by purpose if provided
@@ -170,13 +170,38 @@ const getPurchaseOrders = async (req, res) => {
             }
         }
 
+        // Filter by status if provided
+        if (status) {
+            query.status = status;
+        }
+
+        // Filter by supplier if provided
+        if (supplier) {
+            query.supplier = supplier;
+        }
+
+        // Filter by branch if provided
+        if (branch) {
+            query.branch = branch;
+        }
+
         // Filter by isUsed if provided
         if (isUsed !== undefined) {
-            if (isUsed === "false") {
-                query.isUsed = { $ne: true };
-            } else {
-                query.isUsed = true;
-            }
+            query.isUsed = isUsed === "true";
+        }
+
+        // Filter by isBilled if provided
+        if (isBilled !== undefined) {
+            query.isBilled = isBilled === "true";
+        }
+
+        // Search functionality (PO Number or Item Name)
+        if (search) {
+            const searchRegex = { $regex: search, $options: "i" };
+            query.$or = [
+                { purchaseOrderNumber: searchRegex },
+                { "items.itemName": searchRegex }
+            ];
         }
 
         if (role === ROLES.BRANCHMANAGER) {
@@ -207,7 +232,10 @@ const getPurchaseOrders = async (req, res) => {
         }
         // Admin, OperationAdmin, FinanceAdmin → no filter (see all)
 
-        const pos = await getPurchaseOrdersService(query, page, limit);
+        // Sorting
+        const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+        const pos = await getPurchaseOrdersService(query, page, limit, sort);
         return res.status(200).json({ 
             success: true, 
             data: pos.data,
@@ -510,11 +538,20 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 const getEligiblePurchaseOrdersForBilling = async (req, res) => {
     try {
         const { role } = req.user;
-        const { page = 1, limit = 10 } = req.query;
+        const { search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
         let query = {
             status: "APPROVED",
             isBilled: { $ne: true }
         };
+
+        // Search functionality
+        if (search) {
+            const searchRegex = { $regex: search, $options: "i" };
+            query.$or = [
+                { purchaseOrderNumber: searchRegex },
+                { "items.itemName": searchRegex }
+            ];
+        }
 
         // Determine the user's country
         let userCountry = req.user.country;
@@ -543,7 +580,10 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
             query.branch = { $in: branchIds };
         }
 
-        const pos = await getPurchaseOrdersService(query, page, limit);
+        // Sorting
+        const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+        const pos = await getPurchaseOrdersService(query, page, limit, sort);
         return res.status(200).json({ 
             success: true, 
             data: pos.data,

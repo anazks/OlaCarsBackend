@@ -242,6 +242,60 @@ router.post(
  *         required: false
  *         description: Optional filter to retrieve POs by a specific purpose
  *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [WAITING, APPROVED, REJECTED]
+ *         required: false
+ *         description: Filter by PO status
+ *       - in: query
+ *         name: supplier
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filter by Supplier ObjectId
+ *       - in: query
+ *         name: branch
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Filter by Branch ObjectId
+ *       - in: query
+ *         name: isUsed
+ *         schema:
+ *           type: string
+ *           enum: [true, false]
+ *         required: false
+ *         description: Filter by used status
+ *       - in: query
+ *         name: isBilled
+ *         schema:
+ *           type: string
+ *           enum: [true, false]
+ *         required: false
+ *         description: Filter by billed status
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Search by Purchase Order Number or Item Name (partial match)
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           default: createdAt
+ *         required: false
+ *         description: Field to sort by (createdAt, totalAmount, purchaseOrderDate)
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         required: false
+ *         description: Sort direction
+ *       - in: query
  *         name: page
  *         schema:
  *           type: integer
@@ -305,6 +359,27 @@ router.get(
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Search by Purchase Order Number or Item Name (partial match)
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           default: createdAt
+ *         required: false
+ *         description: Field to sort by (createdAt, totalAmount, purchaseOrderDate)
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         required: false
+ *         description: Sort direction
  *       - in: query
  *         name: page
  *         schema:
