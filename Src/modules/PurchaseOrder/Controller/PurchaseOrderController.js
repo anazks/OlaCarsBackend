@@ -494,6 +494,52 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
     }
 };
 
+/**
+ * Gets Purchase Orders eligible for billing.
+ * Filters: status = APPROVED, isBilled = false, country = user's country.
+ */
+const getEligiblePurchaseOrdersForBilling = async (req, res) => {
+    try {
+        const { role } = req.user;
+        let query = {
+            status: "APPROVED",
+            isBilled: { $ne: true }
+        };
+
+        // Determine the user's country
+        let userCountry = req.user.country;
+
+        // If country is not in JWT (typical for Branch-level staff), fetch it from their branch
+        if (!userCountry && req.user.branchId) {
+            const branch = await Branch.findById(req.user.branchId).select("country");
+            if (branch) {
+                userCountry = branch.country;
+            }
+        }
+
+        if (!userCountry && role !== ROLES.ADMIN && role !== ROLES.OPERATIONADMIN && role !== ROLES.FINANCEADMIN) {
+            return res.status(400).json({ success: false, message: "Country information not found for your account." });
+        }
+
+        // Filter by country if not a global admin
+        if (userCountry) {
+            // Find all branches in that country
+            const branchesInCountry = await Branch.find({
+                country: { $regex: new RegExp(`^${userCountry}$`, "i") },
+                isDeleted: false
+            }).select("_id");
+
+            const branchIds = branchesInCountry.map(b => b._id);
+            query.branch = { $in: branchIds };
+        }
+
+        const pos = await getPurchaseOrdersService(query);
+        return res.status(200).json({ success: true, data: pos });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
@@ -501,4 +547,5 @@ module.exports = {
     approvePurchaseOrder,
     editPurchaseOrder,
     uploadPurchaseOrderItemImages,
+    getEligiblePurchaseOrdersForBilling,
 };

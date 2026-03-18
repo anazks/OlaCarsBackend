@@ -6,10 +6,26 @@ const {
 } = require("../Repo/PaymentTransactionRepo");
 const { getTaxByIdService } = require("../../Tax/Repo/TaxRepo");
 const { autoGenerateLedgerEntry } = require("../../Ledger/Service/LedgerService");
+const { updatePurchaseOrderService, getPurchaseOrderByIdService } = require("../../PurchaseOrder/Repo/PurchaseOrderRepo");
 
 const addPaymentTransaction = async (req, res) => {
     try {
         let paymentData = req.body;
+
+        // Validation: Unique Bill for Purchase Order
+        if (paymentData.referenceModel === "PurchaseOrder") {
+            const po = await getPurchaseOrderByIdService(paymentData.referenceId);
+            if (!po) {
+                return res.status(404).json({ success: false, message: "Purchase Order not found." });
+            }
+            if (po.isBilled) {
+                return res.status(400).json({ success: false, message: "A bill has already been registered for this Purchase Order." });
+            }
+            if (po.status !== "APPROVED") {
+                return res.status(400).json({ success: false, message: "Bills can only be created for APPROVED Purchase Orders." });
+            }
+        }
+
         paymentData.createdBy = req.user.id;
         paymentData.creatorRole = req.user.role;
 
@@ -42,6 +58,11 @@ const addPaymentTransaction = async (req, res) => {
         }
 
         const newPayment = await addPaymentTransactionService(paymentData);
+
+        // Mark PO as billed if applicable
+        if (paymentData.referenceModel === "PurchaseOrder") {
+            await updatePurchaseOrderService(paymentData.referenceId, { isBilled: true });
+        }
 
         return res.status(201).json({ success: true, data: newPayment });
     } catch (error) {

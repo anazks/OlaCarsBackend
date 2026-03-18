@@ -7,6 +7,7 @@ const {
     approvePurchaseOrder,
     editPurchaseOrder,
     uploadPurchaseOrderItemImages,
+    getEligiblePurchaseOrdersForBilling,
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -262,6 +263,41 @@ router.get(
     "/",
     authenticate,
     getPurchaseOrders
+);
+
+// ─── GET /api/purchase-order/eligible-for-billing — List Unbilled POs ─────
+/**
+ * @swagger
+ * /api/purchase-order/eligible-for-billing:
+ *   get:
+ *     summary: List Purchase Orders eligible for billing (Unbilled & Approved)
+ *     description: |
+ *       Returns POs that:
+ *       1. Are `APPROVED`
+ *       2. Have `isBilled: false`
+ *       3. Belong to branches in the user's country
+ *     tags: [PurchaseOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of eligible Purchase Orders
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PurchaseOrder'
+ */
+router.get(
+    "/eligible-for-billing",
+    authenticate,
+    getEligiblePurchaseOrdersForBilling
 );
 
 // ─── GET /api/purchase-order/:id — Get single PO ─────────────────────

@@ -1,13 +1,13 @@
 # OlaCars Backend — Project Progress Summary
 
-**Last Updated:** March 4, 2026  
+**Last Updated:** March 18, 2026
 **Project:** OlaCarsBackend (Node.js + Express + MongoDB)
 
 ---
 
 ## What We Built
 
-A monolithic RESTful API for **OlaCars** — a car rental & fleet management platform. The backend handles user management, organizational hierarchy, vehicle onboarding, financial operations, and supply chain management.
+A monolithic RESTful API for **OlaCars** — a car rental & fleet management platform. The backend handles user management, organizational hierarchy, vehicle onboarding, driver onboarding, workshop and maintenance, financial operations, and supply chain management.
 
 ### Tech Stack
 | Layer | Technology |
@@ -21,7 +21,7 @@ A monolithic RESTful API for **OlaCars** — a car rental & fleet management pla
 
 ---
 
-## Modules Completed (17 total)
+## Modules Completed (24 total)
 
 All modules follow the **Routes → Controller → Repo → Model** architecture.
 
@@ -37,79 +37,66 @@ All modules follow the **Routes → Controller → Repo → Model** architecture
 | **WorkshopStaff** | Vehicle repairs & maintenance |
 | **Branch** | Branch data & organizational structure |
 | **User** | End-user authentication & profiles |
+| **Driver** | Driver onboarding & lifecycle management |
 | **Vehicle** | Fleet inventory, onboarding, lifecycle management |
+| **WorkOrder** | Workshop maintenance, vehicle repair & inspection resolution |
+| **Inventory** | Spare parts & workshop inventory management |
 | **Supplier** | External supplier management |
-| **PurchaseOrder** | Supply chain procurement |
+| **PurchaseOrder** | Supply chain procurement & purchase bills |
 | **Ledger** | Financial ledger entries |
 | **Payment** | Payment processing & tracking |
+| **ServiceBill** | Billing for services rendered |
 | **AccountingCode** | GL account codes |
 | **Tax** | Tax configuration |
+| **SystemSettings** | Global system configurations |
+| **Insurance** | Insurance policies, linking directly to vehicles |
+| **InsuranceClaim** | Insurance claims management |
 
 ---
 
 ## Major Work Completed (Chronological)
 
-### 1. Folder Structure Standardization
-- Converted all directory names to **PascalCase** for consistency
-- Ensured cross-platform compatibility (Windows ↔ Linux)
+### 1. Folder Structure & Documentation Standard
+- Converted all directory names to **PascalCase** for consistency cross-platform.
+- Overhauled Swagger schemas across all modules to accurately reflect Mongoose model fields and API payloads.
 
-### 2. Swagger Documentation Overhaul
-- Updated Swagger schemas for **all modules** to accurately reflect Mongoose model fields
-- Ensured every endpoint has proper API documentation
-- Covered: PurchaseOrder, AccountingCode, Admin, Branch, BranchManager, FinanceAdmin, FinanceStaff, Ledger, OperationAdmin, OperationStaff, Payment, Supplier, Tax, User, Vehicle
+### 2. Vehicle Onboarding & Fleet Lifecycle (Spec v3.0)
+- Built `VehicleWorkflowService.js` state-machine with 16 statuses, 10 gate validators.
+- Handles transitions: `PENDING ENTRY` → `INSPECTION REQUIRED` → `ACTIVE`/`INSPECTION FAILED`, plus suspensions, transfers, and retirements.
+- S3 Integration attached across onboarding phases, supporting multi-document upload.
 
-### 3. AWS S3 Integration
-- Integrated S3 file uploads across the **Vehicle module** for all document types:
-  - Registration certificate, road tax, roadworthiness certificate
-  - Insurance policy, customs clearance, import permit
-  - Number plate photos, odometer photo, exterior photos (min 6)
-  - Purchase receipt, transfer of ownership
-- Built a reusable S3 upload utility used by vehicle routes
+### 3. Workshop Module & Maintenance Workflow
+- Full CRUD for **WorkOrders** handling `PRE_ENTRY` (for failed vehicle onboarding inspections), `PREVENTIVE`, `CORRECTIVE`, and `ACCIDENT` repairs.
+- State-machine lifecycle: `DRAFT` → `PENDING_APPROVAL` → `APPROVED` → `VEHICLE_CHECKED_IN` → `IN_PROGRESS` → `QUALITY_CHECK` → `READY_FOR_RELEASE` → `VEHICLE_RELEASED`.
+- Granular permissions for `WORKSHOPSTAFF` (tasks, logging labour) and `BRANCHMANAGER` (approvals).
 
-### 4. Vehicle Onboarding & Fleet Lifecycle (Spec v3.0) — ⭐ Largest Feature
-This was a **4-phase implementation** of a full state-machine workflow engine:
+### 4. Insurance Module Detachment & Consolidation
+- Created a standalone `Insurance` module with complete CRUD and `multipart/form-data` support for S3 policy documents.
+- Refactored Vehicle Onboarding: replaced nested insurance object creation with an `insuranceId` reference linking vehicles to pre-existing active policies.
 
-#### Phase 1 — Model Foundation
-- Extended `VehicleModel.js` with **16 vehicle statuses** (up from ~12)
-- Added 4 new statuses: `INSURANCE VERIFICATION`, `SUSPENDED`, `TRANSFER PENDING`, `TRANSFER COMPLETE`
-- Added schema sections: `suspensionDetails`, `transferDetails`, `retirementDetails`, `maintenanceDetails`
-- Added database indexes for expiry date queries
+### 5. Purchase Order & Financial Workflows
+- Integrated complete supply chain handling covering Purchase Orders and Purchase Bills.
+- Produced detailed `PURCHASE_ORDER_FRONTEND_GUIDE.md` for proper UI implementations of procurement data flows.
 
-#### Phase 2 — Workflow Engine
-- Built `VehicleWorkflowService.js` — a full state-machine with:
-  - **16 STATUS_RULES** defining allowed transitions, roles, and hierarchy levels
-  - **10 gate validators** enforcing data completeness before transitions
-  - Auto-fail detection (inspection items rated "Poor" → `INSPECTION FAILED`)
-  - Side effects: branch reassignment on transfer, `previousStatus` capture on suspension
-  - System-protected statuses (`ACTIVE — RENTED`, `INSPECTION FAILED`)
+### 6. Driver Onboarding
+- Developed the `Driver` module with comprehensive onboarding steps for driver profiling and document collections, documented via `DRIVER_ONBOARDING_FRONTEND_GUIDE.md`.
 
-#### Phase 3 — API & Documentation
-- Updated `VehicleController.js` to handle all new `updateData` payloads
-- Updated `VehicleRouter.js` Swagger schemas for all 16 statuses
-- Built unified `PUT /api/vehicle/:id/progress` endpoint handling all transitions
+### 7. Security Refactoring & Defensive Programming
+- Implementing `flattenForSet` pattern in repositories to prevent accidental overwrites of nested Mongoose sub-documents.
+- Fixed Enum mismatch validation errors across User/Manager models.
 
-#### Phase 4 — Verification
-- Static verification **PASSED** — all spec must-haves confirmed
-- Verified: status transitions, gate validators, role access, schema field coverage
+---
 
-### 5. Architecture Mapping
-- Generated `ARCHITECTURE.md` — layered architecture documentation with data flow diagrams
-- Generated `STACK.md` — full dependency and infrastructure inventory
-- Identified technical debt (polymorphic `refPath` patterns, model duplication)
+## Key Documentation Generated
 
-### 6. Security & Architecture Refactoring (Planned)
-- Identified improvements across all 17 modules:
-  - Field whitelisting on inputs
-  - Secure password management (change-password endpoints, strength validation, failed login tracking)
-  - Cleaner Controller → Service → Repo → Model separation
-
-### 7. Branch Manager Login Bug Fix
-- Fixed validation error: `creatorRole: 'Admin' is not a valid enum value`
-- Resolved enum mismatch in the BranchManager model
-
-### 8. Hardening Vehicle Updates
-- Implemented `flattenForSet` pattern in `VehicleRepo.js` to safeguard against accidental overwrites of nested sub-documents during updates.
-- Ensured nested fields are updated safely using MongoDB's dot notation.
+Several comprehensive guides have been created to ease frontend integration and explain architectures:
+- `ARCHITECTURE.md` & `STACK.md` (System Design & Tech Stack)
+- `workshop_backend_system_design.md` & `WORKSHOP_API_REFERENCE.md`
+- `Frontend_Insurance_Integration_Guide.md`
+- `FRONTEND_WORKSHOP_INTEGRATION_GUIDE.md`
+- `VEHICLE_ONBOARDING_FRONTEND_GUIDE.md` & `ONBOARDING_WORKFLOW.md`
+- `DRIVER_ONBOARDING_FRONTEND_GUIDE.md`
+- `PURCHASE_ORDER_FRONTEND_GUIDE.md`
 
 ---
 
@@ -117,12 +104,13 @@ This was a **4-phase implementation** of a full state-machine workflow engine:
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| `POST` | `/api/vehicle/` | Create new vehicle (PENDING ENTRY) |
-| `PUT` | `/api/vehicle/:id/progress` | Unified workflow — all status transitions |
-| `POST` | `/api/vehicle/:id/upload-documents` | Upload files to S3 |
-| `GET` | `/api/vehicle/` | List vehicles (filter by status, branch, category) |
-| `GET` | `/api/vehicle/:id` | Full vehicle detail + history |
-| — | `/api/[module]/` | Standard CRUD for all 17 modules |
+| `POST` | `/api/vehicle/` | Create new vehicle |
+| `PUT` | `/api/vehicle/:id/progress` | Unified workflow transition endpoint (Vehicle) |
+| `POST` | `/api/insurance/` | Create Insurance (supports `multipart/form-data`) |
+| `POST` | `/api/workorder/` | Create a Workshop task/repair |
+| `PUT` | `/api/workorder/:id/progress` | Unified workflow transition endpoint (Workshop) |
+| `POST` | `/api/[module]/:id/upload...` | Centralized S3 document handlers |
+| — | `/api/[module]/` | Standard CRUD for all 24 modules |
 
 ---
 
@@ -130,19 +118,20 @@ This was a **4-phase implementation** of a full state-machine workflow engine:
 
 | Item | Status |
 |------|--------|
-| Vehicle Onboarding Spec v3.0 | ✅ Implemented & Verified |
-| All 17 Modules | ✅ Built & Documented |
-| Swagger Docs | ✅ Updated for All Modules |
-| S3 Integration | ✅ Complete |
-| Architecture Docs | ✅ Generated |
-| Security Refactoring | 📋 Planned (not yet executed) |
-| Automated Test Suite | ⏳ Not yet built |
+| Vehicle Onboarding Workflow | ✅ Implemented & Verified |
+| Workshop Module Workflow | ✅ Built & Documented |
+| Insurance Module Integration | ✅ Built & Refactored |
+| Purchase Order Flow | ✅ Built & Documented |
+| Driver Onboarding | ✅ Built & Documented |
+| All 24 Modules | ✅ Built |
+| Swagger Docs | ✅ Updated |
+| Automated Test Suite | ⏳ Pending |
 
 ---
 
 ## What's Next
 
-1. **Live API testing** — start server with MongoDB and run end-to-end workflow tests
-2. **Security hardening** — implement field whitelisting, password management, rate limiting
-3. **Automated tests** — build test suite for workflow engine and all modules
-4. **Production readiness** — environment configs, error handling review, logging
+1. **Live API Testing** — start server with MongoDB and run end-to-end integration cycles across Workshop & Vehicle flows.
+2. **Security Hardening** — strict field whitelisting on all inputs, robust payload sanitization.
+3. **Automated Tests** — build test harnesses for the critical path workflow engines.
+4. **Environment Configs** — prepare for production readiness.
