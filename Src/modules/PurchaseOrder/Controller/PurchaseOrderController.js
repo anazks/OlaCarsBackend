@@ -44,7 +44,7 @@ const addPurchaseOrder = async (req, res) => {
         console.log("===================================");
 
         let poData = req.body;
-        
+
         // Safety check: if req.files is undefined, the frontend did NOT send multipart/form-data
         if (!req.files && req.headers['content-type']?.includes('application/json')) {
             console.log("WARNING: Received JSON. Images cannot be uploaded via JSON.");
@@ -61,12 +61,12 @@ const addPurchaseOrder = async (req, res) => {
                     if (!itemsMap.has(index)) {
                         itemsMap.set(index, {});
                     }
-                    
+
                     let value = poData[key];
                     if (field === 'quantity' || field === 'unitPrice') {
                         value = Number(value);
                     }
-                    
+
                     itemsMap.get(index)[field] = value;
                     delete poData[key]; // Clean up flat keys from body
                 }
@@ -76,11 +76,11 @@ const addPurchaseOrder = async (req, res) => {
                 // Convert Map values to array, sort by index to preserve order just in case
                 poData.items = Array.from(itemsMap.values());
             } else if (typeof poData.items === "string") {
-                 try {
-                     poData.items = JSON.parse(poData.items);
-                 } catch (err) {
-                     return res.status(400).json({ success: false, message: "Invalid JSON format for items array." });
-                 }
+                try {
+                    poData.items = JSON.parse(poData.items);
+                } catch (err) {
+                    return res.status(400).json({ success: false, message: "Invalid JSON format for items array." });
+                }
             }
         }
 
@@ -106,7 +106,7 @@ const addPurchaseOrder = async (req, res) => {
             const awsRegion = process.env.AWS_REGION || "ap-south-1";
             const awsBucket = process.env.AWS_BUCKET_NAME || "ola-cars-uploads-2026";
             const s3Domain = `https://${awsBucket}.s3.${awsRegion}.amazonaws.com`;
-            
+
             for (let i = 0; i < poData.items.length; i++) {
                 const item = poData.items[i];
                 // Ensure numeric types for calculation if they came as strings from FormData
@@ -118,10 +118,10 @@ const addPurchaseOrder = async (req, res) => {
                 // Since we use upload.any(), req.files is an ARRAY. 
                 // We need to filter it for the specific fieldname: items[i][images]
                 const fieldName = `items[${i}][images]`;
-                const itemFiles = Array.isArray(req.files) 
+                const itemFiles = Array.isArray(req.files)
                     ? req.files.filter(f => f.fieldname === fieldName)
                     : [];
-                
+
                 if (itemFiles.length > 8) {
                     return res.status(400).json({ success: false, message: `Cannot upload more than 8 images for item: ${item.itemName || i}` });
                 }
@@ -159,91 +159,41 @@ const addPurchaseOrder = async (req, res) => {
 const getPurchaseOrders = async (req, res) => {
     try {
         const { role } = req.user;
-        const { purpose, isUsed, isBilled, status, supplier, branch, search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
-        let query = {};
+        let baseQuery = {};
 
-        // Filter by purpose if provided
-        if (purpose) {
-            query.purpose = purpose;
-            if (purpose === "Vehicle") {
-                query.status = "APPROVED"; // Vehicle onboarding only uses approved POs
-            }
-        }
-
-        // Filter by status if provided
-        if (status) {
-            query.status = status;
-        }
-
-        // Filter by supplier if provided
-        if (supplier) {
-            query.supplier = supplier;
-        }
-
-        // Filter by branch if provided
-        if (branch) {
-            query.branch = branch;
-        }
-
-        // Filter by isUsed if provided
-        if (isUsed !== undefined) {
-            query.isUsed = isUsed === "true";
-        }
-
-        // Filter by isBilled if provided
-        if (isBilled !== undefined) {
-            query.isBilled = isBilled === "true";
-        }
-
-        // Search functionality (PO Number or Item Name)
-        if (search) {
-            const searchRegex = { $regex: search, $options: "i" };
-            query.$or = [
-                { purchaseOrderNumber: searchRegex },
-                { "items.itemName": searchRegex }
-            ];
-        }
-
+        // 1. Role-based scoping (Base Query)
         if (role === ROLES.BRANCHMANAGER) {
-            // BM sees all POs from their branch
-            query.branch = req.user.branchId;
+            baseQuery.branch = req.user.branchId;
         } else if ([ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF].includes(role)) {
-            // Staff sees only their own POs
-            query.createdBy = req.user.id;
+            baseQuery.createdBy = req.user.id;
         } else if (role === ROLES.COUNTRYMANAGER) {
-            // CM sees POs from all branches in their country AND POs they created themselves
             if (!req.user.country) {
                 return res.status(400).json({ success: false, message: "Country not assigned to your profile. Contact admin." });
             }
 
-            // Find branches in the same country (case-insensitive)
             const branches = await Branch.find({
                 country: { $regex: new RegExp(`^${req.user.country}$`, "i") },
                 isDeleted: false
             }).select("_id");
 
             const branchIds = branches.map(b => b._id);
-
-            // Override the root query with an $or condition for CMs
-            query.$or = [
+            baseQuery.$or = [
                 { branch: { $in: branchIds } },
                 { createdBy: req.user.id }
             ];
         }
-        // Admin, OperationAdmin, FinanceAdmin → no filter (see all)
 
-        // Sorting
-        const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+        // 2. Execute with queryHelper (Repository takes care of search/filter/sort/pagination)
+        const result = await getPurchaseOrdersService(req.query, { baseQuery });
 
-        const pos = await getPurchaseOrdersService(query, page, limit, sort);
         return res.status(200).json({ 
             success: true, 
-            data: pos.data,
+            data: result.data,
             pagination: {
-                total: pos.total,
-                page: pos.page,
-                limit: pos.limit,
-                totalPages: pos.totalPages
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
             }
         });
     } catch (error) {
@@ -449,7 +399,7 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
     try {
         const { id, itemId } = req.params;
         const files = req.files?.images || req.files; // Depending on multer config
-        
+
         // Ensure array of files
         let imageFiles = [];
         if (Array.isArray(files)) {
@@ -481,9 +431,9 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 
         // Check limit
         if (item.images.length + imageFiles.length > 8) {
-            return res.status(400).json({ 
-                success: false, 
-                message: `Cannot upload more than 8 images. Item currently has ${item.images.length} images.` 
+            return res.status(400).json({
+                success: false,
+                message: `Cannot upload more than 8 images. Item currently has ${item.images.length} images.`
             });
         }
 
@@ -502,12 +452,12 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 
         // Update item images array
         item.images.push(...uploadedUrls);
-        
+
         // PO standard edit rules: mark as edited, reset status to waiting, record history
         po.isEdited = true;
         const previousStatus = po.status;
         po.status = "WAITING";
-        
+
         po.editHistory.push({
             editedAt: new Date(),
             editedBy: req.user.id,
@@ -538,30 +488,16 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 const getEligiblePurchaseOrdersForBilling = async (req, res) => {
     try {
         const { role } = req.user;
-        const { search, sortBy = 'createdAt', sortOrder = 'desc', page = 1, limit = 10 } = req.query;
-        let query = {
+        let baseQuery = {
             status: "APPROVED",
             isBilled: { $ne: true }
         };
 
-        // Search functionality
-        if (search) {
-            const searchRegex = { $regex: search, $options: "i" };
-            query.$or = [
-                { purchaseOrderNumber: searchRegex },
-                { "items.itemName": searchRegex }
-            ];
-        }
-
-        // Determine the user's country
+        // Determine the user's country context
         let userCountry = req.user.country;
-
-        // If country is not in JWT (typical for Branch-level staff), fetch it from their branch
         if (!userCountry && req.user.branchId) {
             const branch = await Branch.findById(req.user.branchId).select("country");
-            if (branch) {
-                userCountry = branch.country;
-            }
+            if (branch) userCountry = branch.country;
         }
 
         if (!userCountry && role !== ROLES.ADMIN && role !== ROLES.OPERATIONADMIN && role !== ROLES.FINANCEADMIN) {
@@ -570,28 +506,25 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
 
         // Filter by country if not a global admin
         if (userCountry) {
-            // Find all branches in that country
             const branchesInCountry = await Branch.find({
                 country: { $regex: new RegExp(`^${userCountry}$`, "i") },
                 isDeleted: false
             }).select("_id");
 
             const branchIds = branchesInCountry.map(b => b._id);
-            query.branch = { $in: branchIds };
+            baseQuery.branch = { $in: branchIds };
         }
 
-        // Sorting
-        const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+        const result = await getPurchaseOrdersService(req.query, { baseQuery });
 
-        const pos = await getPurchaseOrdersService(query, page, limit, sort);
         return res.status(200).json({ 
             success: true, 
-            data: pos.data,
+            data: result.data,
             pagination: {
-                total: pos.total,
-                page: pos.page,
-                limit: pos.limit,
-                totalPages: pos.totalPages
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
             }
         });
     } catch (error) {
