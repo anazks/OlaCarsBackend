@@ -17,13 +17,29 @@ exports.addPurchaseOrderService = async (data) => {
 /**
  * Retrieves all Purchase Orders.
  * @param {Object} query - Optional query parameters.
- * @returns {Promise<Array>}
+ * @param {number} page - Page number.
+ * @param {number} limit - Items per page.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getPurchaseOrdersService = async (query = {}) => {
+exports.getPurchaseOrdersService = async (query = {}, page = 1, limit = 10) => {
     try {
-        return await PurchaseOrder.find(query)
+        const skip = (page - 1) * limit;
+
+        const total = await PurchaseOrder.countDocuments(query);
+        const data = await PurchaseOrder.find(query)
+            .sort({ createdAt: -1 }) // Newest first
+            .skip(skip)
+            .limit(limit)
             .populate("branch")
             .populate("supplier", "name contactPerson email");
+
+        return {
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            totalPages: Math.ceil(total / limit),
+            data
+        };
     } catch (error) {
         throw error;
     }

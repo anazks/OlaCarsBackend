@@ -159,7 +159,7 @@ const addPurchaseOrder = async (req, res) => {
 const getPurchaseOrders = async (req, res) => {
     try {
         const { role } = req.user;
-        const { purpose, isUsed } = req.query; // Extract purpose and isUsed from query string
+        const { purpose, isUsed, page = 1, limit = 10 } = req.query; // Extract purpose and isUsed from query string
         let query = {};
 
         // Filter by purpose if provided
@@ -207,8 +207,17 @@ const getPurchaseOrders = async (req, res) => {
         }
         // Admin, OperationAdmin, FinanceAdmin → no filter (see all)
 
-        const pos = await getPurchaseOrdersService(query);
-        return res.status(200).json({ success: true, data: pos });
+        const pos = await getPurchaseOrdersService(query, page, limit);
+        return res.status(200).json({ 
+            success: true, 
+            data: pos.data,
+            pagination: {
+                total: pos.total,
+                page: pos.page,
+                limit: pos.limit,
+                totalPages: pos.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -501,6 +510,7 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 const getEligiblePurchaseOrdersForBilling = async (req, res) => {
     try {
         const { role } = req.user;
+        const { page = 1, limit = 10 } = req.query;
         let query = {
             status: "APPROVED",
             isBilled: { $ne: true }
@@ -533,8 +543,17 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
             query.branch = { $in: branchIds };
         }
 
-        const pos = await getPurchaseOrdersService(query);
-        return res.status(200).json({ success: true, data: pos });
+        const pos = await getPurchaseOrdersService(query, page, limit);
+        return res.status(200).json({ 
+            success: true, 
+            data: pos.data,
+            pagination: {
+                total: pos.total,
+                page: pos.page,
+                limit: pos.limit,
+                totalPages: pos.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

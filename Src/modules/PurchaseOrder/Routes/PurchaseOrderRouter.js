@@ -241,6 +241,20 @@ router.post(
  *           enum: [Vehicle, "Spare Parts", Others]
  *         required: false
  *         description: Optional filter to retrieve POs by a specific purpose
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         required: false
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         required: false
+ *         description: Number of items per page
  *     responses:
  *       200:
  *         description: List of Purchase Orders
@@ -256,6 +270,17 @@ router.post(
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/PurchaseOrder'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
  *       401:
  *         description: Unauthorized
  */
@@ -279,6 +304,21 @@ router.get(
  *     tags: [PurchaseOrder]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         required: false
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         required: false
+ *         description: Number of items per page
  *     responses:
  *       200:
  *         description: List of eligible Purchase Orders
@@ -293,6 +333,17 @@ router.get(
  *                   type: array
  *                   items:
  *                     $ref: '#/components/schemas/PurchaseOrder'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
  */
 router.get(
     "/eligible-for-billing",
