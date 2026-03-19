@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const sanitizeHtml = require("sanitize-html");
 const AgreementRepo = require("../Repo/AgreementRepo");
-const { AppError } = require("../../../shared/utils/appError");
+const AppError = require("../../../shared/utils/AppError");
 
 class AgreementService {
   /**
