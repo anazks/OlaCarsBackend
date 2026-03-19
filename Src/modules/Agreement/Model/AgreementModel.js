@@ -1,0 +1,54 @@
+const mongoose = require("mongoose");
+
+const agreementSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      unique: true,
+    },
+    type: {
+      type: String,
+      required: true,
+      enum: ["TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER"],
+      default: "OTHER",
+    },
+    content: {
+      type: String,
+      required: true,
+    },
+    version: {
+      type: Number,
+      default: 1,
+    },
+    status: {
+      type: String,
+      enum: ["DRAFT", "PUBLISHED", "ARCHIVED"],
+      default: "PUBLISHED",
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: "creatorRole",
+      required: true,
+    },
+    creatorRole: {
+      type: String,
+      required: true,
+      enum: ["ADMIN", "OPERATIONADMIN", "COUNTRYMANAGER"],
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      refPath: "updaterRole",
+    },
+    updaterRole: {
+      type: String,
+      enum: ["ADMIN", "OPERATIONADMIN", "COUNTRYMANAGER"],
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+module.exports = mongoose.model("Agreement", agreementSchema);
