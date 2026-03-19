@@ -67,6 +67,7 @@ exports.getBranchManagersService = async (queryParams = {}, options = {}) => {
     const queryOptions = {
         searchFields: ["fullName", "email"],
         filterFields: ["status", "branchId"],
+        dateFilterField: "createdAt",
         ...options
     };
 

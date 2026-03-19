@@ -86,6 +86,7 @@ exports.getCountryManagersService = async (queryParams = {}, options = {}) => {
     const queryOptions = {
         searchFields: ["fullName", "email"],
         filterFields: ["status", "country"],
+        dateFilterField: "createdAt",
         ...options
     };
 

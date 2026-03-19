@@ -127,6 +127,7 @@ exports.getOperationalAdminsService = async (queryParams = {}, options = {}) => 
     const queryOptions = {
       searchFields: ["fullName", "email"],
       filterFields: ["status", "role"],
+      dateFilterField: "createdAt",
       ...options
     };
 
