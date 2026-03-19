@@ -128,8 +128,14 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Operational Admin not found', 404);
 };
 
-exports.getAll = async () => {
-    return await OperationalAdmin.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+const { getOperationalAdminsService } = require('../Repo/OperationAdminRepo.js');
+
+exports.getAll = async (queryParams = {}) => {
+    return await getOperationalAdminsService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

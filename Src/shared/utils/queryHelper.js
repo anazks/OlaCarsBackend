@@ -87,6 +87,10 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
         
         let mongooseQuery = model.find(query).sort(sort).skip(skip).limit(numericLimit);
 
+        if (options.select) {
+            mongooseQuery = mongooseQuery.select(options.select);
+        }
+
         if (options.populate) {
             mongooseQuery = mongooseQuery.populate(options.populate);
         }

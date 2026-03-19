@@ -36,8 +36,17 @@ const addOperationalAdmin = async (req, res) => {
 
 const getOperationalAdmins = async (req, res) => {
   try {
-    const admins = await OperationAdminService.getAll();
-    return res.status(200).json({ success: true, data: admins });
+    const result = await OperationAdminService.getAll(req.query);
+    return res.status(200).json({ 
+      success: true, 
+      data: result.data,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

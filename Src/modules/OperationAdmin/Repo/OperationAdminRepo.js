@@ -114,13 +114,23 @@ exports.deleteOperationalAdminService = async (id) => {
   }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Operational Admins.
- * @returns {Promise<Array>}
+ * Retrieves all Operational Admins using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery or overrides.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getOperationalAdminsService = async () => {
+exports.getOperationalAdminsService = async (queryParams = {}, options = {}) => {
   try {
-    return await OperationalAdmin.find({ isDeleted: false });
+    const queryOptions = {
+      searchFields: ["fullName", "email"],
+      filterFields: ["status", "role"],
+      ...options
+    };
+
+    return await applyQueryFeatures(OperationalAdmin, queryParams, queryOptions);
   } catch (error) {
     throw error;
   }

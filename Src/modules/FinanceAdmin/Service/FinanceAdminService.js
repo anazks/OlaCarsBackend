@@ -128,8 +128,14 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Finance Admin not found', 404);
 };
 
-exports.getAll = async () => {
-    return await FinanceAdmin.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+const { getFinanceAdminsService } = require('../Repo/FinanceAdminRepo.js');
+
+exports.getAll = async (queryParams = {}) => {
+    return await getFinanceAdminsService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

@@ -114,13 +114,23 @@ exports.deleteFinanceAdminService = async (id) => {
   }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Finance Admins.
- * @returns {Promise<Array>}
+ * Retrieves all Finance Admins using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery or overrides.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getFinanceAdminsService = async () => {
+exports.getFinanceAdminsService = async (queryParams = {}, options = {}) => {
   try {
-    return await FinanceAdmin.find({ isDeleted: false });
+    const queryOptions = {
+      searchFields: ["fullName", "email"],
+      filterFields: ["status", "role"],
+      ...options
+    };
+
+    return await applyQueryFeatures(FinanceAdmin, queryParams, queryOptions);
   } catch (error) {
     throw error;
   }

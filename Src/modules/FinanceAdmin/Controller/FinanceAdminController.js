@@ -36,8 +36,17 @@ const addFinanceAdmin = async (req, res) => {
 
 const getFinanceAdmins = async (req, res) => {
   try {
-    const admins = await FinanceAdminService.getAll();
-    return res.status(200).json({ success: true, data: admins });
+    const result = await FinanceAdminService.getAll(req.query);
+    return res.status(200).json({ 
+      success: true, 
+      data: result.data,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages
+      }
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
