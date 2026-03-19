@@ -5,7 +5,9 @@ const {
     getVehicles,
     getVehicleById,
     progressVehicleStatus,
-    uploadVehicleDocuments
+    uploadVehicleDocuments,
+    getAvailableCars,
+    assignCarToDriver
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -141,6 +143,25 @@ router.get(
     "/",
     authenticate,
     getVehicles
+);
+
+/**
+ * @swagger
+ * /api/vehicle/available:
+ *   get:
+ *     summary: Get available vehicles for assignment
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of available vehicles
+ */
+router.get(
+    "/available",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    getAvailableCars
 );
 
 /**
@@ -454,6 +475,38 @@ router.post(
         { name: "exteriorPhotos", maxCount: 20 }
     ]),
     uploadVehicleDocuments
+);
+
+/**
+ * @swagger
+ * /api/vehicle/{id}/assign/{driverId}:
+ *   post:
+ *     summary: Assign a vehicle to a driver
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Vehicle ID
+ *       - in: path
+ *         name: driverId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Driver ID
+ *     responses:
+ *       200:
+ *         description: Vehicle assigned successfully
+ */
+router.post(
+    "/:id/assign/:driverId",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    assignCarToDriver
 );
 
 module.exports = router;

@@ -205,6 +205,10 @@ const driverSchema = new mongoose.Schema(
             ref: "Branch",
             required: true,
         },
+        currentVehicle: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Vehicle",
+        },
 
         // ── Audit ────────────────────────────────────────────────────
         statusHistory: [statusHistorySchema],

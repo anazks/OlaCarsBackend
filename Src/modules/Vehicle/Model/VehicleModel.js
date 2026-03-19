@@ -82,6 +82,7 @@ const vehicleSchema = new mongoose.Schema(
             },
             odometer: { type: Number },
             gpsSerialNumber: { type: String },
+            monthlyRent: { type: Number, default: 0 },
         },
 
         // 3. Registration & Legal Documents

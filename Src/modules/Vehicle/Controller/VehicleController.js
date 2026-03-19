@@ -2,7 +2,9 @@ const {
     addVehicleService,
     getVehiclesService,
     getVehicleByIdService,
+    updateVehicleService,
 } = require("../Repo/VehicleRepo");
+const { updateDriverService, getDriverByIdService } = require("../../Driver/Repo/DriverRepo");
 const { processVehicleProgress } = require("../Service/VehicleWorkflowService");
 const uploadToS3 = require("../../../utils/uploadToS3");
 
@@ -213,11 +215,114 @@ const uploadVehicleDocuments = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+/**
+ * Get available vehicles for the staff's branch.
+ * @route GET /api/vehicle/available
+ * @access Private
+ */
+const getAvailableCars = async (req, res) => {
+    try {
+        const queryParams = { ...req.query };
+        const branchRoles = [
+            "BRANCHMANAGER",
+            "OPERATIONSTAFF",
+            "FINANCESTAFF",
+            "WORKSHOPSTAFF"
+        ];
+
+        // Filter by status and branch
+        const baseQuery = { 
+            status: "ACTIVE — AVAILABLE",
+            isDeleted: false 
+        };
+
+        if (branchRoles.includes(req.user.role) && req.user.branchId) {
+            baseQuery["purchaseDetails.branch"] = req.user.branchId;
+        }
+
+        const result = await getVehiclesService(queryParams, {
+            baseQuery,
+            defaultSort: { createdAt: -1 }
+        });
+        
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Assign a vehicle to a driver.
+ * @route POST /api/vehicle/:id/assign/:driverId
+ * @access Private
+ */
+const assignCarToDriver = async (req, res) => {
+    try {
+        const vehicleId = req.params.id;
+        const driverId = req.params.driverId;
+
+        // 1. Verify vehicle exists and is available
+        const vehicle = await getVehicleByIdService(vehicleId);
+        if (!vehicle) return res.status(404).json({ success: false, message: "Vehicle not found" });
+        if (vehicle.status !== "ACTIVE — AVAILABLE") {
+            return res.status(400).json({ success: false, message: `Vehicle is not available for lease. Current status: ${vehicle.status}` });
+        }
+
+        // 2. Verify driver exists
+        const driver = await getDriverByIdService(driverId);
+        if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
+
+        // 3. Perform assignment
+        // Update Vehicle status
+        await updateVehicleService(vehicleId, { 
+            status: "ACTIVE — RENTED",
+            $push: { 
+                statusHistory: {
+                    status: "ACTIVE — RENTED",
+                    changedBy: req.user.id,
+                    changedByRole: req.user.role,
+                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId})`
+                }
+            }
+        });
+
+        // Update Driver's current vehicle
+        await updateDriverService(driverId, { 
+            currentVehicle: vehicleId,
+            $push: {
+                statusHistory: {
+                    status: driver.status, // Keep current status
+                    changedBy: req.user.id,
+                    changedByRole: req.user.role,
+                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin})`
+                }
+            }
+        });
+
+        return res.status(200).json({ 
+            success: true, 
+            message: "Vehicle successfully assigned to driver" 
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 module.exports = {
     addVehicle,
     getVehicles,
     getVehicleById,
     progressVehicleStatus,
-    uploadVehicleDocuments
+    uploadVehicleDocuments,
+    getAvailableCars,
+    assignCarToDriver
 };
