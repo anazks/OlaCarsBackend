@@ -52,13 +52,24 @@ exports.deleteWorkshopStaffService = async (id) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Workshop Staff members.
- * @returns {Promise<Array>}
+ * Retrieves all Workshop Staff members using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getWorkshopStaffService = async () => {
+exports.getWorkshopStaffService = async (queryParams = {}, options = {}) => {
     try {
-        return await WorkshopStaff.find({ isDeleted: false });
+        const queryOptions = {
+            searchFields: ["fullName", "email"],
+            filterFields: ["status", "branchId"],
+            dateFilterField: "createdAt",
+            ...options
+        };
+
+        return await applyQueryFeatures(WorkshopStaff, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }

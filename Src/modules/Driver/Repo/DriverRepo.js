@@ -74,20 +74,33 @@ exports.deleteDriverService = async (id) => {
     await Driver.findByIdAndUpdate(id, { isDeleted: true });
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all non-deleted drivers with optional filters.
- * @param {Object} filter - Optional filter (status, branch, etc.)
- * @param {Object} options - { includeSensitive: false } to strip finance-only fields.
+ * Retrieves all drivers using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - includeSensitive, baseQuery, etc.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getDriversService = async (filter = {}, options = {}) => {
-    const query = { isDeleted: false, ...filter };
-    let q = Driver.find(query).populate("branch", "name code city state country");
+exports.getDriversService = async (queryParams = {}, options = {}) => {
+    try {
+        const queryOptions = {
+            searchFields: ["personalInfo.fullName", "personalInfo.email"],
+            filterFields: ["status", "branch"],
+            dateFilterField: "createdAt",
+            populate: { path: "branch", select: "name code city state country" },
+            ...options
+        };
 
-    if (!options.includeSensitive) {
-        q = q.select(SENSITIVE_FIELDS);
+        // Handle sensitivity if not explicitly provided in select
+        if (!options.select && !options.includeSensitive) {
+            queryOptions.select = SENSITIVE_FIELDS;
+        }
+
+        return await applyQueryFeatures(Driver, queryParams, queryOptions);
+    } catch (error) {
+        throw error;
     }
-
-    return await q;
 };
 
 /**

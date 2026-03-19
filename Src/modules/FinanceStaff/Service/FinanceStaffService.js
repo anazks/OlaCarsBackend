@@ -112,8 +112,15 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Finance Staff not found', 404);
 };
 
-exports.getAll = async (filter = {}) => {
-    return await FinanceStaff.find({ isDeleted: false, ...filter }).select('-passwordHash -refreshToken');
+const { getFinanceStaffService } = require('../Repo/FinanceStaffRepo.js');
+
+exports.getAll = async (queryParams = {}, options = {}) => {
+    return await getFinanceStaffService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 },
+        ...options
+    });
 };
 
 exports.getById = async (id) => {

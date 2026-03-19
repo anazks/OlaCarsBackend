@@ -112,8 +112,15 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Workshop Staff not found', 404);
 };
 
-exports.getAll = async () => {
-    return await WorkshopStaff.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+const { getWorkshopStaffService } = require('../Repo/WorkshopStaffRepo.js');
+
+exports.getAll = async (queryParams = {}, options = {}) => {
+    return await getWorkshopStaffService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 },
+        ...options
+    });
 };
 
 exports.getById = async (id) => {

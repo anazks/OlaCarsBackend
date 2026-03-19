@@ -27,13 +27,13 @@ exports.create = async (data) => {
     return await addDriverService(data);
 };
 
-/**
- * Retrieves all drivers with optional filter.
- * @param {Object} filter - status, branch, etc.
- * @param {Object} options - { includeSensitive: bool }
- */
-exports.getAll = async (filter = {}, options = {}) => {
-    return await getDriversService(filter, options);
+exports.getAll = async (queryParams = {}, options = {}) => {
+    const finalOptions = {
+        baseQuery: { isDeleted: false },
+        defaultSort: { createdAt: -1 },
+        ...options
+    };
+    return await getDriversService(queryParams, finalOptions);
 };
 
 /**

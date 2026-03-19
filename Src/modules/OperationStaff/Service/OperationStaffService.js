@@ -112,8 +112,14 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Operation Staff not found', 404);
 };
 
-exports.getAll = async (filter = {}) => {
-    return await OperationStaff.find({ isDeleted: false, ...filter }).select('-passwordHash -refreshToken');
+const { getOperationStaffService } = require('../Repo/OperationStaffRepo.js');
+
+exports.getAll = async (queryParams = {}) => {
+    return await getOperationStaffService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

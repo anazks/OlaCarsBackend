@@ -52,13 +52,24 @@ exports.deleteOperationStaffService = async (id) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all active Operation Staff members.
- * @returns {Promise<Array>}
+ * Retrieves all Operation Staff members using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getOperationStaffService = async () => {
+exports.getOperationStaffService = async (queryParams = {}, options = {}) => {
     try {
-        return await OperationStaff.find({ isDeleted: false });
+        const queryOptions = {
+            searchFields: ["fullName", "email"],
+            filterFields: ["status", "branchId"],
+            dateFilterField: "createdAt",
+            ...options
+        };
+
+        return await applyQueryFeatures(OperationStaff, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }

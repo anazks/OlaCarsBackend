@@ -52,13 +52,24 @@ exports.deleteFinanceStaffService = async (id) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Finance Staff members.
- * @returns {Promise<Array>}
+ * Retrieves all Finance Staff members using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getFinanceStaffService = async () => {
+exports.getFinanceStaffService = async (queryParams = {}, options = {}) => {
     try {
-        return await FinanceStaff.find({ isDeleted: false });
+        const queryOptions = {
+            searchFields: ["fullName", "email"],
+            filterFields: ["status", "branchId"],
+            dateFilterField: "createdAt",
+            ...options
+        };
+
+        return await applyQueryFeatures(FinanceStaff, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }

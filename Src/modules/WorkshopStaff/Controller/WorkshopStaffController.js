@@ -26,8 +26,28 @@ const addWorkshopStaff = async (req, res) => {
 
 const getWorkshopStaff = async (req, res) => {
     try {
-        const staff = await WorkshopStaffService.getAll();
-        return res.status(200).json({ success: true, data: staff });
+        const queryParams = { ...req.query };
+        const options = {};
+        
+        // If user is COUNTRYMANAGER, restrict staff to branches in their country
+        const BranchService = require('../../Branch/Service/BranchService.js');
+        if (req.user.role === 'COUNTRYMANAGER' && req.user.country) {
+            const countryBranches = await BranchService.getAll({ country: req.user.country });
+            const branchIds = countryBranches.map(b => b._id);
+            options.baseQuery = { branchId: { $in: branchIds } };
+        }
+
+        const result = await WorkshopStaffService.getAll(queryParams, options);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

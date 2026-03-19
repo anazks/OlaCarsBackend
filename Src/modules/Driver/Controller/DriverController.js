@@ -44,14 +44,21 @@ const addDriver = async (req, res) => {
  */
 const getDrivers = async (req, res) => {
     try {
-        const filter = {};
-        if (req.query.status) filter.status = req.query.status;
-        if (req.query.branch) filter.branch = req.query.branch;
-
-        // #9 — Only finance roles see sensitive fields
+        const queryParams = { ...req.query };
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
-        const drivers = await DriverService.getAll(filter, { includeSensitive: isFinanceRole });
-        return res.status(200).json({ success: true, data: drivers });
+        
+        const result = await DriverService.getAll(queryParams, { includeSensitive: isFinanceRole });
+        
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
