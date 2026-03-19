@@ -14,8 +14,14 @@ exports.create = async (data) => {
     return newBranch;
 };
 
-exports.getAll = async (filter = {}) => {
-    return await Branch.find({ isDeleted: false, ...filter });
+const { getBranchesService } = require('../Repo/BranchRepo.js');
+
+exports.getAll = async (queryParams = {}, options = {}) => {
+    return await getBranchesService(queryParams, {
+        baseQuery: { isDeleted: false },
+        defaultSort: { createdAt: -1 },
+        ...options
+    });
 };
 
 exports.getById = async (id) => {

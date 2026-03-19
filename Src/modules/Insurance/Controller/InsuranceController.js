@@ -72,7 +72,8 @@ const createInsurance = async (req, res) => {
  */
 const getAllInsurances = async (req, res) => {
     try {
-        let query = {};
+        const queryParams = { ...req.query };
+        const options = { defaultSort: { createdAt: -1 } };
         const globalRoles = [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN];
 
         if (!globalRoles.includes(req.user.role)) {
@@ -80,11 +81,20 @@ const getAllInsurances = async (req, res) => {
             if (!userCountry) {
                 return res.status(403).json({ success: false, message: "Country restriction failed. Country not found." });
             }
-            query.country = userCountry;
+            options.baseQuery = { country: userCountry };
         }
 
-        const insurances = await getAllInsurancesService(query);
-        return res.status(200).json({ success: true, data: insurances });
+        const result = await getAllInsurancesService(queryParams, options);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -97,7 +107,11 @@ const getAllInsurances = async (req, res) => {
  */
 const getEligibleInsurances = async (req, res) => {
     try {
-        let query = { status: "ACTIVE" };
+        const queryParams = { ...req.query };
+        const options = { 
+            baseQuery: { status: "ACTIVE" },
+            defaultSort: { createdAt: -1 }
+        };
         const globalRoles = [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN];
 
         if (!globalRoles.includes(req.user.role)) {
@@ -105,11 +119,20 @@ const getEligibleInsurances = async (req, res) => {
             if (!userCountry) {
                 return res.status(403).json({ success: false, message: "Country restriction failed. Country not found." });
             }
-            query.country = userCountry;
+            options.baseQuery.country = userCountry;
         }
 
-        const insurances = await getAllInsurancesService(query);
-        return res.status(200).json({ success: true, data: insurances });
+        const result = await getAllInsurancesService(queryParams, options);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

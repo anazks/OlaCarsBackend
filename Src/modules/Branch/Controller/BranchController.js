@@ -15,18 +15,28 @@ const addBranch = async (req, res) => {
 
 const getBranches = async (req, res) => {
     try {
-        const filter = {};
+        const queryParams = { ...req.query };
+        const options = {};
         
         // If user is FINANCESTAFF, restrict branches to their country
         if (req.user.role === 'FINANCESTAFF' && req.user.branchId) {
             const staffBranch = await BranchService.getById(req.user.branchId);
             if (staffBranch && staffBranch.country) {
-                filter.country = staffBranch.country;
+                options.baseQuery = { country: staffBranch.country };
             }
         }
 
-        const branches = await BranchService.getAll(filter);
-        return res.status(200).json({ success: true, data: branches });
+        const result = await BranchService.getAll(queryParams, options);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

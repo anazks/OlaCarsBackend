@@ -12,11 +12,25 @@ exports.addSupplierService = async (data) => {
     }
 };
 
-exports.getSuppliersService = async (query = {}) => {
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
+/**
+ * Retrieves all suppliers using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
+ */
+exports.getSuppliersService = async (queryParams = {}, options = {}) => {
     try {
-        // Default to active, non-deleted suppliers unless overridden
-        const filters = { isDeleted: false, ...query };
-        return await Supplier.find(filters).populate("createdBy", "name email");
+        const queryOptions = {
+            searchFields: ["name", "contactPerson", "email"],
+            filterFields: ["category", "isActive"],
+            dateFilterField: "createdAt",
+            populate: { path: "createdBy", select: "name email" },
+            ...options
+        };
+
+        return await applyQueryFeatures(Supplier, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }

@@ -17,14 +17,38 @@ exports.addVehicleService = async (data) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Vehicles.
- * @param {Object} query - Optional query filters
- * @returns {Promise<Array>}
+ * Retrieves all vehicles using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getVehiclesService = async (query = {}) => {
+exports.getVehiclesService = async (queryParams = {}, options = {}) => {
     try {
-        return await Vehicle.find(query).populate("purchaseDetails.branch").populate("purchaseDetails.purchaseOrder");
+        const queryOptions = {
+            searchFields: [
+                "basicDetails.make", 
+                "basicDetails.model", 
+                "basicDetails.vin", 
+                "legalDocs.registrationNumber"
+            ],
+            filterFields: [
+                "status", 
+                "purchaseDetails.branch", 
+                "basicDetails.category", 
+                "basicDetails.fuelType"
+            ],
+            dateFilterField: "createdAt",
+            populate: [
+                { path: "purchaseDetails.branch" },
+                { path: "purchaseDetails.purchaseOrder" }
+            ],
+            ...options
+        };
+
+        return await applyQueryFeatures(Vehicle, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }

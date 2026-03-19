@@ -14,9 +14,13 @@ exports.create = async (data) => {
     return newSupplier.toObject();
 };
 
-exports.getAll = async (query = {}) => {
-    const filters = { isDeleted: false, ...query };
-    return await Supplier.find(filters).populate('createdBy', 'name email');
+const { getSuppliersService } = require('../Repo/SupplierRepo.js');
+
+exports.getAll = async (queryParams = {}) => {
+    return await getSuppliersService(queryParams, {
+        baseQuery: { isDeleted: false },
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

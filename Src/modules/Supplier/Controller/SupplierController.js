@@ -15,11 +15,18 @@ const addSupplier = async (req, res) => {
 
 const getSuppliers = async (req, res) => {
     try {
-        const query = {};
-        if (req.query.category) query.category = req.query.category;
-        if (req.query.isActive !== undefined) query.isActive = req.query.isActive === 'true';
-        const suppliers = await SupplierService.getAll(query);
-        return res.status(200).json({ success: true, data: suppliers });
+        const queryParams = { ...req.query };
+        const result = await SupplierService.getAll(queryParams);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

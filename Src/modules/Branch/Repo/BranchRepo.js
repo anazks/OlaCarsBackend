@@ -49,40 +49,28 @@ exports.deleteBranchService = async (branchId) => {
     }
 }
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all branches.
- * @param {Object} query - Optional query filters
- * @returns {Promise<Array>} List of branches
+ * Retrieves all branches using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getBranchesService = async () => {
+exports.getBranchesService = async (queryParams = {}, options = {}) => {
     try {
-        const branches = await Branch.find();
-        // const roleMapping = {
-        //     'ADMIN': 'Admin',
-        //     'OPERATIONADMIN': 'OperationalAdmin',
-        //     'FINANCEADMIN': 'FinanceAdmin',
-        //     'COUNTRYMANAGER': 'CountryManager'
-        // };
+        const queryOptions = {
+            searchFields: ["name", "code", "city", "state"],
+            filterFields: ["status", "country"],
+            dateFilterField: "createdAt",
+            ...options
+        };
 
-        // // Populate manually by grouping by model
-        // const populatedBranches = await Promise.all(branches.map(async (branch) => {
-        //     const modelName = roleMapping[branch.creatorRole];
-        //     if (modelName) {
-        //         await branch.populate({
-        //             path: 'createdBy',
-        //             model: modelName,
-        //             select: 'name fullName email role'
-        //         });
-        //     }
-        //     return branch;
-        // }));
-
-        // return populatedBranches;
-        return branches;
+        return await applyQueryFeatures(Branch, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }
-}
+};
 
 /**
  * Retrieves a single branch by ID.

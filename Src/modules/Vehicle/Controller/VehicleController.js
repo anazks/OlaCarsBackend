@@ -67,8 +67,22 @@ const addVehicle = async (req, res) => {
  */
 const getVehicles = async (req, res) => {
     try {
-        const pos = await getVehiclesService();
-        return res.status(200).json({ success: true, data: pos });
+        const queryParams = { ...req.query };
+        const result = await getVehiclesService(queryParams, {
+            baseQuery: { isDeleted: false },
+            defaultSort: { createdAt: -1 }
+        });
+        
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

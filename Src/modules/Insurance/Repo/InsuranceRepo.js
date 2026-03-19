@@ -17,14 +17,25 @@ exports.createInsuranceService = async (data) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all Insurance records.
- * @param {Object} query - Optional query filters
- * @returns {Promise<Array>}
+ * Retrieves all insurance records using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getAllInsurancesService = async (query = {}) => {
+exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
     try {
-        return await Insurance.find(query).populate("vehicles");
+        const queryOptions = {
+            searchFields: ["provider", "policyNumber"],
+            filterFields: ["status", "policyType", "coverageType", "country"],
+            dateFilterField: "createdAt",
+            populate: { path: "vehicles" },
+            ...options
+        };
+
+        return await applyQueryFeatures(Insurance, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }
