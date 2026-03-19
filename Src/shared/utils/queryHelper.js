@@ -19,6 +19,8 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
             sortOrder = 'desc',
             page = 1,
             limit = 10,
+            startDate,
+            endDate,
             ...filters
         } = queryParams;
 
@@ -36,7 +38,25 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
             });
         }
 
-        // 2. Searching (Regex partial match)
+        // 2. Date Range Filtering
+        if (options.dateFilterField && (startDate || endDate)) {
+            const dateQuery = {};
+            if (startDate) {
+                dateQuery.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateQuery.$lte = end;
+            }
+
+            // Merge with existing field query if any (though unlikely for createdAt)
+            query[options.dateFilterField] = query[options.dateFilterField]
+                ? { ...query[options.dateFilterField], ...dateQuery }
+                : dateQuery;
+        }
+
+        // 3. Searching (Regex partial match)
         if (search && options.searchFields && options.searchFields.length > 0) {
             const searchRegex = { $regex: search, $options: 'i' };
             const searchQueries = options.searchFields.map(field => ({
