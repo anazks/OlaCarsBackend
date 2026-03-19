@@ -59,6 +59,11 @@ const addPaymentTransaction = async (req, res) => {
 
         const newPayment = await addPaymentTransactionService(paymentData);
 
+        // TRIGGER LEDGER ENTRY if created as COMPLETED
+        if (newPayment.status === "COMPLETED") {
+            await autoGenerateLedgerEntry(newPayment);
+        }
+
         // Mark PO as billed if applicable
         if (paymentData.referenceModel === "PurchaseOrder") {
             await updatePurchaseOrderService(paymentData.referenceId, { isBilled: true });

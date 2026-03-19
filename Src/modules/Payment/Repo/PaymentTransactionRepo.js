@@ -37,7 +37,7 @@ exports.updatePaymentTransactionStatusService = async (id, status) => {
             id,
             { status },
             { new: true, runValidators: true }
-        );
+        ).populate("accountingCode", "code name category");
     } catch (error) {
         throw error;
     }

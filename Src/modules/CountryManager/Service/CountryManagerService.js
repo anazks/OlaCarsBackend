@@ -130,8 +130,14 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Country Manager not found', 404);
 };
 
-exports.getAll = async () => {
-    return await CountryManager.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+const { getCountryManagersService } = require('../Repo/CountryManagerRepo.js');
+
+exports.getAll = async (queryParams = {}) => {
+    return await getCountryManagersService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

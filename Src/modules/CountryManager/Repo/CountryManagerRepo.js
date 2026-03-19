@@ -73,17 +73,26 @@ exports.deleteCountryManagerService = async (id) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
- * Retrieves all active (non-deleted) Country Managers.
- *
- * @returns {Promise<Array>} A list of Country Manager documents.
+ * Retrieves all Country Managers using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery or overrides.
+ * @returns {Promise<Object>} Paginated result
  */
-exports.getCountryManagersService = async () => {
-    try {
-        return await CountryManager.find({ isDeleted: false });
-    } catch (error) {
-        throw error;
-    }
+exports.getCountryManagersService = async (queryParams = {}, options = {}) => {
+  try {
+    const queryOptions = {
+        searchFields: ["fullName", "email"],
+        filterFields: ["status", "country"],
+        ...options
+    };
+
+    return await applyQueryFeatures(CountryManager, queryParams, queryOptions);
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**

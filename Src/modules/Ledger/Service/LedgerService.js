@@ -24,12 +24,20 @@ exports.getAll = async (query = {}) => {
  */
 exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
     try {
+        // Check if an entry already exists for this transaction to prevent duplicates
+        const existing = await getLedgerEntriesService({ transaction: paymentTransaction._id });
+        if (existing && existing.length > 0) return;
+
         // Construct standard description showing context
-        const description = `Payment [${paymentTransaction.transactionType}] for ${paymentTransaction.referenceModel} (${paymentTransaction.referenceId}). Notes: ${paymentTransaction.notes || "None"}.`;
+        const accSuffix = paymentTransaction.accountingCode && paymentTransaction.accountingCode.name 
+            ? ` [${paymentTransaction.accountingCode.name}]` 
+            : "";
+        
+        const description = `Payment [${paymentTransaction.transactionType}] for ${paymentTransaction.referenceModel}${accSuffix}. Ref ID: ${paymentTransaction.referenceId}. Notes: ${paymentTransaction.notes || "None"}.`;
 
         const ledgerData = {
             transaction: paymentTransaction._id,
-            accountingCode: paymentTransaction.accountingCode,
+            accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
             type: paymentTransaction.transactionType, // Mirrors the DEBIT/CREDIT set by the user
             amount: paymentTransaction.totalAmount, // Maps exact amount
             description: description,
@@ -37,11 +45,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
         };
 
         await addLedgerEntryService(ledgerData);
-        // Note: In full double-entry, a second inverse record (e.g. against Cash/Bank code) is usually made here.
-        // For current scope, we log the primary category selected by the user.
 
     } catch (error) {
         console.error("Failed to generate ledger entry:", error);
-        // Do not throw to crash the main request - in real production, push to a Dead Letter Queue to retry.
     }
 };

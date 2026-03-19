@@ -36,8 +36,17 @@ const addCountryManager = async (req, res) => {
 
 const getCountryManagers = async (req, res) => {
     try {
-        const managers = await CountryManagerService.getAll();
-        return res.status(200).json({ success: true, data: managers });
+        const result = await CountryManagerService.getAll(req.query);
+        return res.status(200).json({ 
+          success: true, 
+          data: result.data,
+          pagination: {
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages
+          }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

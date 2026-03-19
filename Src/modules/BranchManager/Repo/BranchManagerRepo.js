@@ -54,33 +54,26 @@ exports.deleteBranchManagerService = async (id) => {
     }
 };
 
-exports.getBranchManagersService = async () => {
-    try {
-        const managers = await BranchManager.find({ isDeleted: false });
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 
-        const roleMapping = {
-            'ADMIN': 'Admin',
-            'OPERATIONADMIN': 'OperationalAdmin',
-            'FINANCEADMIN': 'FinanceAdmin',
-            'COUNTRYMANAGER': 'CountryManager'
-        };
+/**
+ * Retrieves all Branch Managers using generic query features.
+ * @param {Object} queryParams - Raw query parameters from req.query.
+ * @param {Object} [options={}] - Additional options like baseQuery or overrides.
+ * @returns {Promise<Object>} Paginated result
+ */
+exports.getBranchManagersService = async (queryParams = {}, options = {}) => {
+  try {
+    const queryOptions = {
+        searchFields: ["fullName", "email"],
+        filterFields: ["status", "branchId"],
+        ...options
+    };
 
-        const populatedManagers = await Promise.all(managers.map(async (manager) => {
-            const modelName = roleMapping[manager.creatorRole];
-            if (modelName) {
-                await manager.populate({
-                    path: 'createdBy',
-                    model: modelName,
-                    select: 'name fullName email role'
-                });
-            }
-            return manager;
-        }));
-
-        return populatedManagers;
-    } catch (error) {
-        throw error;
-    }
+    return await applyQueryFeatures(BranchManager, queryParams, queryOptions);
+  } catch (error) {
+    throw error;
+  }
 };
 
 exports.getBranchManagerByIdService = async (id) => {

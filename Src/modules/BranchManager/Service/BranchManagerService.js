@@ -113,31 +113,14 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Branch Manager not found', 404);
 };
 
-exports.getAll = async () => {
-    const managers = await BranchManager.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+const { getBranchManagersService } = require('../Repo/BranchManagerRepo.js');
 
-    // const roleMapping = {
-    //     'ADMIN': 'Admin',
-    //     'OPERATIONADMIN': 'OperationalAdmin',
-    //     'FINANCEADMIN': 'FinanceAdmin',
-    //     'COUNTRYMANAGER': 'CountryManager'
-    // };
-
-    // const populatedManagers = await Promise.all(managers.map(async (manager) => {
-    //     const modelName = roleMapping[manager.creatorRole];
-    //     if (modelName) {
-    //         await manager.populate({
-    //             path: 'createdBy',
-    //             model: modelName,
-    //             select: 'name fullName email role'
-    //         });
-    //     }
-    //     return manager;
-    // }));
-
-
-    // return populatedManagers;
-    return managers;
+exports.getAll = async (queryParams = {}) => {
+    return await getBranchManagersService(queryParams, {
+        baseQuery: { isDeleted: false },
+        select: '-passwordHash -refreshToken',
+        defaultSort: { createdAt: -1 }
+    });
 };
 
 exports.getById = async (id) => {

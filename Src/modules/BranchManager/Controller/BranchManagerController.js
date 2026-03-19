@@ -26,8 +26,17 @@ const addBranchManager = async (req, res) => {
 
 const getBranchManagers = async (req, res) => {
     try {
-        const managers = await BranchManagerService.getAll();
-        return res.status(200).json({ success: true, data: managers });
+        const result = await BranchManagerService.getAll(req.query);
+        return res.status(200).json({ 
+          success: true, 
+          data: result.data,
+          pagination: {
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages
+          }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
