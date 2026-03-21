@@ -4,6 +4,8 @@ const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
+const router = express.Router();
+
 /**
  * @swagger
  * tags:
