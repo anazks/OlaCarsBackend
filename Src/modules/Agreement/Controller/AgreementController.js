@@ -78,6 +78,30 @@ class AgreementController {
       return res.status(statusCode).json({ success: false, message: error.message });
     }
   };
+
+  renderAgreement = async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { id: userId } = req.user;
+      
+      const data = await AgreementService.renderAgreement(id, userId);
+      
+      return res.status(200).json({ success: true, message: "Agreement rendered successfully", data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({ success: false, message: error.message });
+    }
+  };
+
+  getAvailablePlaceholders = async (req, res, next) => {
+    try {
+      const data = AgreementService.getAvailablePlaceholders();
+      return res.status(200).json({ success: true, message: "Placeholders retrieved successfully", data });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({ success: false, message: error.message });
+    }
+  };
 }
 
 module.exports = new AgreementController();

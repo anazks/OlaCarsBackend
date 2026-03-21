@@ -3,8 +3,17 @@ const AgreementController = require("../Controller/AgreementController");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const multer = require("multer");
+
+const {
+    acceptAgreement,
+    getUserAcceptances,
+    verifyLatestAcceptance
+} = require("../Controller/AgreementAcceptanceController");
 
 const router = express.Router();
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
 /**
  * @swagger
@@ -139,6 +148,20 @@ router.put("/:id", AgreementController.updateAgreement);
 
 /**
  * @swagger
+ * /api/agreements/placeholders:
+ *   get:
+ *     summary: Get available placeholders for dynamic templates
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of placeholders
+ */
+router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAvailablePlaceholders);
+
+/**
+ * @swagger
  * /api/agreements/{id}/versions:
  *   get:
  *     summary: Get all versions of an agreement
@@ -156,5 +179,109 @@ router.put("/:id", AgreementController.updateAgreement);
  *         description: List of agreement versions
  */
 router.get("/:id/versions", AgreementController.getAgreementVersions);
+
+/**
+ * @swagger
+ * /api/agreements/{id}/render:
+ *   get:
+ *     summary: Render agreement with dynamic placeholders for the logged-in user
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Rendered agreement content
+ */
+router.get("/:id/render", authenticate, AgreementController.renderAgreement);
+
+// Agreement Acceptance Flow
+/**
+ * @swagger
+ * /api/agreements/accept:
+ *   post:
+ *     summary: Record user acceptance of an agreement version
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - agreementId
+ *               - versionId
+ *               - signatureType
+ *             properties:
+ *               agreementId:
+ *                 type: string
+ *               versionId:
+ *                 type: string
+ *               signatureType:
+ *                 type: string
+ *                 enum: [CLICK_WRAP, TYPED, DRAWN]
+ *               signatureData:
+ *                 type: string
+ *                 description: Typed name (if TYPED) or base64 (if IMAGE, though multipart is preferred)
+ *               signatureImage:
+ *                 type: string
+ *                 format: binary
+ *                 description: File upload if signatureType is DRAWN
+ *     responses:
+ *       201:
+ *         description: Acceptance recorded
+ */
+router.post("/accept", authenticate, upload.single("signatureImage"), acceptAgreement);
+
+/**
+ * @swagger
+ * /api/agreements/acceptances/{userId}:
+ *   get:
+ *     summary: Get all agreements accepted by a user
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of acceptances
+ */
+router.get("/acceptances/:userId", authenticate, getUserAcceptances);
+
+/**
+ * @swagger
+ * /api/agreements/verify/{userId}/{agreementId}:
+ *   get:
+ *     summary: Verify if a user has accepted the latest version of an agreement
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: agreementId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Verification status
+ */
+router.get("/verify/:userId/:agreementId", authenticate, verifyLatestAcceptance);
 
 module.exports = router;

@@ -261,27 +261,54 @@ const getAvailableCars = async (req, res) => {
 };
 
 /**
- * Assign a vehicle to a driver.
+ * Assign a vehicle to a driver and record the lease.
  * @route POST /api/vehicle/:id/assign/:driverId
+ * @body { leaseDuration: number, monthlyRent: number, notes: string }
  * @access Private
  */
 const assignCarToDriver = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
+        const { leaseDuration, monthlyRent, notes } = req.body;
+
+        if (!leaseDuration || !monthlyRent) {
+            throw new Error("leaseDuration and monthlyRent are required during assignment.");
+        }
 
         // 1. Verify vehicle exists and is available
         const vehicle = await getVehicleByIdService(vehicleId);
-        if (!vehicle) return res.status(404).json({ success: false, message: "Vehicle not found" });
+        if (!vehicle) {
+            res.status(404);
+            throw new Error("Vehicle not found");
+        }
         if (vehicle.status !== "ACTIVE — AVAILABLE") {
-            return res.status(400).json({ success: false, message: `Vehicle is not available for lease. Current status: ${vehicle.status}` });
+            res.status(400);
+            throw new Error(`Vehicle is not available for lease. Current status: ${vehicle.status}`);
         }
 
         // 2. Verify driver exists
         const driver = await getDriverByIdService(driverId);
-        if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
+        if (!driver) {
+            res.status(404);
+            throw new Error("Driver not found");
+        }
 
-        // 3. Perform assignment
+        // 3. Create Lease record
+        const { createLeaseService } = require("../../Lease/Service/LeaseService");
+        const leaseData = {
+            driver: driverId,
+            vehicle: vehicleId,
+            durationMonths: leaseDuration,
+            monthlyRent: monthlyRent,
+            notes: notes || `Assigned via automated flow.`,
+        };
+        await createLeaseService(leaseData, req.user.id, req.user.role, session);
+
+        // 4. Perform assignment status updates
         // Update Vehicle status
         await updateVehicleService(vehicleId, { 
             status: "ACTIVE — RENTED",
@@ -290,10 +317,10 @@ const assignCarToDriver = async (req, res) => {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId})`
+                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease Duration: ${leaseDuration} months.`
                 }
             }
-        });
+        }, session);
 
         // Update Driver's current vehicle
         await updateDriverService(driverId, { 
@@ -303,17 +330,23 @@ const assignCarToDriver = async (req, res) => {
                     status: driver.status, // Keep current status
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin})`
+                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease Duration: ${leaseDuration} months.`
                 }
             }
-        });
+        }, session);
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(200).json({ 
             success: true, 
-            message: "Vehicle successfully assigned to driver" 
+            message: "Vehicle successfully assigned to driver and lease record created." 
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        await session.abortTransaction();
+        session.endSession();
+        const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 

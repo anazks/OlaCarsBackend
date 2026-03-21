@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const sanitizeHtml = require("sanitize-html");
 const AgreementRepo = require("../Repo/AgreementRepo");
 const AppError = require("../../../shared/utils/AppError");
+const { Driver } = require("../../Driver/Model/DriverModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+const Branch = require("../../Branch/Model/BranchModel");
+const { replacePlaceholders, AVAILABLE_PLACEHOLDERS } = require("../../../shared/utils/templateEngine");
 
 class AgreementService {
   /**
@@ -150,6 +154,72 @@ class AgreementService {
       throw new AppError("No versions found for this agreement", 404);
     }
     return versions;
+  }
+
+  async renderAgreement(agreementId, userId) {
+    const agreement = await this.getAgreementById(agreementId);
+    
+    // Get the latest published version
+    const versions = await this.getAgreementVersions(agreementId);
+    const latestVersion = versions.find(v => v.status === "PUBLISHED" || v._id.toString() === agreement.latestVersion?.toString());
+    
+    if (!latestVersion) {
+      throw new AppError("No published version found for this agreement", 404);
+    }
+
+    // Fetch context data
+    const driver = await Driver.findOne({ _id: userId }).populate("branch");
+    const data = {
+        CURRENT_DATE: new Date().toLocaleDateString(),
+    };
+
+    if (driver) {
+        data.DRIVER_NAME = driver.personalInfo?.fullName || "";
+        data.DRIVER_EMAIL = driver.personalInfo?.email || "";
+        data.DRIVER_PHONE = driver.personalInfo?.phone || "";
+        data.DRIVER_NATIONALITY = driver.personalInfo?.nationality || "";
+        data.DRIVER_DOB = driver.personalInfo?.dateOfBirth ? new Date(driver.personalInfo.dateOfBirth).toLocaleDateString() : "";
+        data.DRIVER_LICENSE_NUMBER = driver.drivingLicense?.licenseNumber || "";
+        data.DRIVER_LICENSE_EXPIRY = driver.drivingLicense?.expiryDate ? new Date(driver.drivingLicense.expiryDate).toLocaleDateString() : "";
+        data.DRIVER_ID_NUMBER = driver.identityDocs?.idNumber || "";
+        data.BRANCH_NAME = driver.branch?.name || "";
+
+        if (driver.currentVehicle) {
+            const vehicle = await Vehicle.findById(driver.currentVehicle);
+            if (vehicle) {
+                data.VEHICLE_MAKE = vehicle.basicDetails?.make || "";
+                data.VEHICLE_MODEL = vehicle.basicDetails?.model || "";
+                data.VEHICLE_YEAR = vehicle.basicDetails?.year || "";
+                data.VEHICLE_COLOR = vehicle.basicDetails?.colour || "";
+                data.VEHICLE_VIN = vehicle.basicDetails?.vin || "";
+                data.VEHICLE_PLATE = vehicle.legalDocs?.registrationNumber || "";
+            }
+
+            // Fetch Lease details (New)
+            const { getLatestActiveLeaseByDriverService } = require("../../Lease/Repo/LeaseRepo");
+            const lease = await getLatestActiveLeaseByDriverService(userId);
+            if (lease) {
+                data.LEASE_DURATION = lease.durationMonths || "";
+                data.LEASE_MONTHLY_RENT = lease.monthlyRent || "";
+            } else {
+                data.LEASE_DURATION = "";
+                data.LEASE_MONTHLY_RENT = "";
+            }
+        }
+    }
+
+    const renderedContent = replacePlaceholders(latestVersion.content, data);
+
+    return {
+        agreement,
+        version: latestVersion,
+        renderedContent,
+        placeholdersUsed: data
+    };
+  }
+
+  getAvailablePlaceholders() {
+    return AVAILABLE_PLACEHOLDERS;
   }
 }
 
