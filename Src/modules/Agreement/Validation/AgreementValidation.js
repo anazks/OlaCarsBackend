@@ -5,6 +5,10 @@ const createAgreementSchema = Joi.object({
     "string.empty": "Title is required",
     "any.required": "Title is required",
   }),
+  country: Joi.string().required().trim().messages({
+    "string.empty": "Country is required",
+    "any.required": "Country is required",
+  }),
   type: Joi.string()
     .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER")
     .required()
@@ -21,6 +25,7 @@ const createAgreementSchema = Joi.object({
 
 const updateAgreementSchema = Joi.object({
   title: Joi.string().trim().optional(),
+  country: Joi.string().trim().optional(),
   type: Joi.string()
     .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER")
     .optional(),

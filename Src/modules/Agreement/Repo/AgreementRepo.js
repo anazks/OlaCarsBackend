@@ -10,8 +10,8 @@ class AgreementRepo {
     return await AgreementModel.findById(id);
   }
 
-  async getAgreementByTitle(title) {
-    return await AgreementModel.findOne({ title });
+  async getAgreementByTitle(title, country) {
+    return await AgreementModel.findOne({ title, country });
   }
 
   async getAllAgreements(query = {}) {

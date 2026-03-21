@@ -4,19 +4,155 @@ const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
-const router = express.Router();
+/**
+ * @swagger
+ * tags:
+ *   name: Agreement
+ *   description: Agreement Management APIs (Terms, Privacy, etc.)
+ */
 
-// Public routes (if needed to display on customer side without authentication)
+// Public routes
+/**
+ * @swagger
+ * /api/agreements:
+ *   get:
+ *     summary: Get all latest agreements
+ *     tags: [Agreement]
+ *     parameters:
+ *       - in: query
+ *         name: country
+ *         schema:
+ *           type: string
+ *         description: Filter by country (e.g., US, NG)
+ *     responses:
+ *       200:
+ *         description: List of latest agreements
+ */
 router.get("/", AgreementController.getAllAgreements);
+
+/**
+ * @swagger
+ * /api/agreements/{id}:
+ *   get:
+ *     summary: Get agreement by ID
+ *     tags: [Agreement]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Agreement details
+ *       404:
+ *         description: Agreement not found
+ */
 router.get("/:id", AgreementController.getAgreementById);
 
 // Protected routes
 router.use(authenticate);
-// Allowed roles for managing agreements: ADMIN, OPERATIONADMIN, COUNTRYMANAGER
 router.use(authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER));
 
+/**
+ * @swagger
+ * /api/agreements:
+ *   post:
+ *     summary: Create new agreement
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - country
+ *               - type
+ *               - content
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 example: Terms and Conditions
+ *               country:
+ *                 type: string
+ *                 example: US
+ *               type:
+ *                 type: string
+ *                 enum: [TERMS_AND_CONDITIONS, PRIVACY_POLICY, RETURN_POLICY, OTHER]
+ *               content:
+ *                 type: string
+ *                 description: HTML content from editor
+ *               status:
+ *                 type: string
+ *                 enum: [DRAFT, PUBLISHED, ARCHIVED]
+ *     responses:
+ *       201:
+ *         description: Agreement created successfully
+ *       400:
+ *         description: Bad request (e.g., duplicate title for country)
+ */
 router.post("/", AgreementController.createAgreement);
+
+/**
+ * @swagger
+ * /api/agreements/{id}:
+ *   put:
+ *     summary: Update an agreement
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *               content:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Agreement updated successfully (version incremented for meaningful changes)
+ *       404:
+ *         description: Agreement not found
+ */
 router.put("/:id", AgreementController.updateAgreement);
+
+/**
+ * @swagger
+ * /api/agreements/{id}/versions:
+ *   get:
+ *     summary: Get all versions of an agreement
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of agreement versions
+ */
 router.get("/:id/versions", AgreementController.getAgreementVersions);
 
 module.exports = router;

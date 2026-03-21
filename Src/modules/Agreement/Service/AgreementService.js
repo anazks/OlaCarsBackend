@@ -25,9 +25,9 @@ class AgreementService {
   }
 
   async createAgreement(data, userId, userRole) {
-    const existingAgreement = await AgreementRepo.getAgreementByTitle(data.title);
+    const existingAgreement = await AgreementRepo.getAgreementByTitle(data.title, data.country);
     if (existingAgreement) {
-      throw new AppError("An agreement with this title already exists", 400);
+      throw new AppError("An agreement with this title already exists for this country", 400);
     }
 
     if (data.content) {
@@ -44,6 +44,7 @@ class AgreementService {
     await AgreementRepo.createAgreementVersion({
       agreementId: newAgreement._id,
       title: newAgreement.title,
+      country: newAgreement.country,
       type: newAgreement.type,
       content: newAgreement.content,
       version: newAgreement.version,
@@ -64,10 +65,15 @@ class AgreementService {
         throw new AppError("Agreement not found", 404);
       }
 
-      if (data.title && data.title !== existingAgreement.title) {
-        const titleCheck = await AgreementRepo.getAgreementByTitle(data.title);
-        if (titleCheck) {
-          throw new AppError("An agreement with this title already exists", 400);
+      if (
+        (data.title && data.title !== existingAgreement.title) || 
+        (data.country && data.country !== existingAgreement.country)
+      ) {
+        const titleToCheck = data.title || existingAgreement.title;
+        const countryToCheck = data.country || existingAgreement.country;
+        const titleCheck = await AgreementRepo.getAgreementByTitle(titleToCheck, countryToCheck);
+        if (titleCheck && titleCheck._id.toString() !== id) {
+          throw new AppError("An agreement with this title already exists for this country", 400);
         }
       }
 
@@ -82,7 +88,8 @@ class AgreementService {
       if (
         (data.content && data.content !== existingAgreement.content) || 
         (data.type && data.type !== existingAgreement.type) ||
-        (data.title && data.title !== existingAgreement.title)
+        (data.title && data.title !== existingAgreement.title) ||
+        (data.country && data.country !== existingAgreement.country)
       ) {
         newVersionNumber += 1;
         hasContentChanged = true;
@@ -103,6 +110,7 @@ class AgreementService {
           {
             agreementId: updatedAgreement._id,
             title: updatedAgreement.title,
+            country: updatedAgreement.country,
             type: updatedAgreement.type,
             content: updatedAgreement.content,
             version: updatedAgreement.version,

@@ -21,11 +21,13 @@ Used to save a brand new agreement document.
 ```json
 {
   "title": "Terms and Conditions",
+  "country": "US",
   "type": "TERMS_AND_CONDITIONS", 
   "content": "<h1>Terms Use</h1><p>Welcome to our platform...</p>",
   "status": "PUBLISHED"
 }
 ```
+*Note: `title` must be unique per `country`.*
 *Note for `type`: Values can be "TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER".*
 
 ### Success Response (201 Created)
@@ -36,6 +38,7 @@ Used to save a brand new agreement document.
   "data": {
     "_id": "64abcdef123... ",
     "title": "Terms and Conditions",
+    "country": "US",
     "type": "TERMS_AND_CONDITIONS",
     "content": "<h1>Terms Use</h1><p>Welcome to our platform...</p>",
     "version": 1,
@@ -49,7 +52,7 @@ Used to save a brand new agreement document.
 ---
 
 ## 2. Edit an Existing Agreement
-Updates an existing agreement. If `content`, `title`, or `type` is changed, the backend automatically increments the `version` number (e.g., from 1 to 2) and saves the previous state to the `AgreementVersion` history collection.
+Updates an existing agreement. If `content`, `country`, `title`, or `type` is changed, the backend automatically increments the `version` number (e.g., from 1 to 2) and saves the previous state to the `AgreementVersion` history collection.
 
 - **Endpoint**: `PUT /api/agreements/:agreementId`
 - **Auth headers needed**: Yes
@@ -61,7 +64,7 @@ Pass the new HTML content extracted from your TipTap editor:
   "content": "<h1>Updated Terms</h1><p>We changed our policies...</p>"
 }
 ```
-*(You can also pass `title`, `type`, or `status` to modify them).*
+*(You can also pass `title`, `country`, `type`, or `status` to modify them).*
 
 ### Success Response (200 OK)
 ```json
@@ -83,6 +86,7 @@ Pass the new HTML content extracted from your TipTap editor:
 Fetches the latest version of all agreements active in the system.
 
 - **Endpoint**: `GET /api/agreements`
+- **Query Params**: `?country=US` (Filter by country)
 - **Auth headers needed**: No (Public) // *Change if frontend wants this hidden*
 
 ### Success Response (200 OK)
@@ -93,6 +97,7 @@ Fetches the latest version of all agreements active in the system.
     {
       "_id": "64abcdef123...",
       "title": "Terms and Conditions",
+      "country": "US",
       "type": "TERMS_AND_CONDITIONS",
       "version": 2,
       "status": "PUBLISHED"
@@ -126,12 +131,14 @@ Fetches all past versions of a specific agreement document. Useful if the admin 
     {
       "agreementId": "64abcdef123...",
       "version": 2,
+      "country": "US",
       "content": "<h1>Updated Terms</h1>...",
       "updatedBy": "456admin_id..."
     },
     {
       "agreementId": "64abcdef123...",
       "version": 1,
+      "country": "US",
       "content": "<h1>Terms Use</h1>...",
       "updatedBy": "123admin_id..."
     }

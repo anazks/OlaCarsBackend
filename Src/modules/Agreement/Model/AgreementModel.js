@@ -6,7 +6,11 @@ const agreementSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      unique: true,
+    },
+    country: {
+      type: String,
+      required: true,
+      trim: true,
     },
     type: {
       type: String,
@@ -50,5 +54,7 @@ const agreementSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+agreementSchema.index({ title: 1, country: 1 }, { unique: true });
 
 module.exports = mongoose.model("Agreement", agreementSchema);
