@@ -43,6 +43,20 @@ router.get("/", AgreementController.getAllAgreements);
 
 /**
  * @swagger
+ * /api/agreements/placeholders:
+ *   get:
+ *     summary: Get available placeholders for dynamic templates
+ *     tags: [Agreement]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of placeholders
+ */
+router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAvailablePlaceholders);
+
+/**
+ * @swagger
  * /api/agreements/{id}:
  *   get:
  *     summary: Get agreement by ID
@@ -146,19 +160,6 @@ router.post("/", AgreementController.createAgreement);
  */
 router.put("/:id", AgreementController.updateAgreement);
 
-/**
- * @swagger
- * /api/agreements/placeholders:
- *   get:
- *     summary: Get available placeholders for dynamic templates
- *     tags: [Agreement]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of placeholders
- */
-router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAvailablePlaceholders);
 
 /**
  * @swagger

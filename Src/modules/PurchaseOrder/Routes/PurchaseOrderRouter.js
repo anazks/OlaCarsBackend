@@ -11,7 +11,15 @@ const {
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { validate } = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const {
+    addPurchaseOrderSchema,
+    approvePurchaseOrderSchema,
+    editPurchaseOrderSchema,
+    getPurchaseOrderByIdSchema,
+    uploadItemImagesSchema
+} = require("../Validation/PurchaseOrderValidation");
 const upload = require("../../../utils/multerConfig.js");
 
 /**
@@ -211,6 +219,7 @@ router.post(
     authenticate,
     authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     upload.any(),
+    validate(addPurchaseOrderSchema),
     addPurchaseOrder
 );
 
@@ -464,6 +473,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
+    validate(getPurchaseOrderByIdSchema),
     getPurchaseOrderById
 );
 
@@ -560,6 +570,7 @@ router.put(
     "/:id/approve",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
+    validate(approvePurchaseOrderSchema),
     approvePurchaseOrder
 );
 
@@ -634,6 +645,7 @@ router.put(
 router.put(
     "/:id",
     authenticate,
+    validate(editPurchaseOrderSchema),
     editPurchaseOrder
 );
 
@@ -708,6 +720,7 @@ router.put(
 router.post(
     "/:id/item/:itemId/upload-images",
     authenticate,
+    validate(uploadItemImagesSchema),
     upload.array("images", 8),
     uploadPurchaseOrderItemImages
 );

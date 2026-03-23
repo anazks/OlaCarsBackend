@@ -9,7 +9,14 @@ const {
 } = require("../Controller/TaxController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { validate } = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
+const {
+    addTaxSchema,
+    updateTaxSchema,
+    getTaxByIdSchema,
+    deleteTaxSchema
+} = require("../Validation/TaxValidation");
 
 const AUTHORIZED_ROLES = [
     ROLES.ADMIN,
@@ -51,7 +58,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Tax Profile created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), addTax);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addTaxSchema), addTax);
 
 /**
  * @swagger
@@ -85,7 +92,7 @@ router.get("/", authenticate, getTaxes);
  *       200:
  *         description: Tax Profile details
  */
-router.get("/:id", authenticate, getTaxById);
+router.get("/:id", authenticate, validate(getTaxByIdSchema), getTaxById);
 
 /**
  * @swagger
@@ -118,7 +125,7 @@ router.get("/:id", authenticate, getTaxById);
  *       200:
  *         description: Tax Profile updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateTax);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(updateTaxSchema), updateTax);
 
 /**
  * @swagger
@@ -138,6 +145,6 @@ router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateTax);
  *       200:
  *         description: Tax Profile deleted successfully
  */
-router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), deleteTax);
+router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(deleteTaxSchema), deleteTax);
 
 module.exports = router;

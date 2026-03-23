@@ -10,7 +10,15 @@ const {
 } = require("../Controller/InsuranceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { validate } = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
+const {
+    createInsuranceSchema,
+    updateInsuranceSchema,
+    getInsuranceByIdSchema,
+    deleteInsuranceSchema,
+    uploadDocumentSchema
+} = require("../Validation/InsuranceValidation");
 const multer = require("multer");
 
 const router = express.Router();
@@ -78,6 +86,7 @@ router.post(
         ROLES.FINANCESTAFF
     ),
     upload.single("policyDocument"),
+    validate(createInsuranceSchema),
     createInsurance
 );
 
@@ -127,7 +136,7 @@ router.get("/", authenticate, getAllInsurances);
  *       200:
  *         description: Insurance details
  */
-router.get("/:id", authenticate, getInsuranceById);
+router.get("/:id", authenticate, validate(getInsuranceByIdSchema), getInsuranceById);
 
 /**
  * @swagger
@@ -159,6 +168,7 @@ router.put(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
+    validate(updateInsuranceSchema),
     updateInsurance
 );
 
@@ -188,6 +198,7 @@ router.delete(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
+    validate(deleteInsuranceSchema),
     deleteInsurance
 );
 
@@ -226,6 +237,7 @@ router.post(
         ROLES.BRANCHMANAGER
     ),
     upload.single("policyDocument"),
+    validate(uploadDocumentSchema),
     uploadInsuranceDocument
 );
 

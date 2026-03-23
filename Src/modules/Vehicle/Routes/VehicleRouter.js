@@ -12,7 +12,15 @@ const {
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { validate } = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const {
+    addVehicleSchema,
+    progressVehicleSchema,
+    assignCarToDriverSchema,
+    getVehicleByIdSchema,
+    uploadDocumentsSchema
+} = require("../Validation/VehicleValidation");
 
 /**
  * @swagger
@@ -124,6 +132,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
+    validate(addVehicleSchema),
     addVehicle
 );
 
@@ -185,6 +194,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
+    validate(getVehicleByIdSchema),
     getVehicleById
 );
 
@@ -381,6 +391,7 @@ router.put(
         ROLES.COUNTRYMANAGER,
         ROLES.ADMIN
     ),
+    validate(progressVehicleSchema),
     progressVehicleStatus
 );
 
@@ -460,6 +471,7 @@ router.post(
     authorize(
         ROLES.OPERATIONSTAFF
     ),
+    validate(uploadDocumentsSchema),
     upload.fields([
         { name: "purchaseReceipt", maxCount: 1 },
         { name: "registrationCertificate", maxCount: 1 },
@@ -506,6 +518,7 @@ router.post(
     "/:id/assign/:driverId",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    validate(assignCarToDriverSchema),
     assignCarToDriver
 );
 

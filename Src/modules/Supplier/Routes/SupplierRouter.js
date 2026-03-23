@@ -9,7 +9,14 @@ const {
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { validate } = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
+const {
+    addSupplierSchema,
+    updateSupplierSchema,
+    getSupplierByIdSchema,
+    deleteSupplierSchema
+} = require("../Validation/SupplierValidation");
 
 const AUTHORIZED_ROLES = [
     ROLES.ADMIN,
@@ -62,7 +69,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Supplier created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), addSupplier);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addSupplierSchema), addSupplier);
 
 /**
  * @swagger
@@ -96,7 +103,7 @@ router.get("/", authenticate, getSuppliers);
  *       200:
  *         description: Supplier details
  */
-router.get("/:id", authenticate, getSupplierById);
+router.get("/:id", authenticate, validate(getSupplierByIdSchema), getSupplierById);
 
 /**
  * @swagger
@@ -138,7 +145,7 @@ router.get("/:id", authenticate, getSupplierById);
  *       200:
  *         description: Supplier updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateSupplier);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(updateSupplierSchema), updateSupplier);
 
 /**
  * @swagger
@@ -158,6 +165,6 @@ router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateSupplier)
  *       200:
  *         description: Supplier deleted successfully
  */
-router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), deleteSupplier);
+router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(deleteSupplierSchema), deleteSupplier);
 
 module.exports = router;
