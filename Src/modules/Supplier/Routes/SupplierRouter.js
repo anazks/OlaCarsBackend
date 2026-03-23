@@ -9,7 +9,7 @@ const {
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
-const { validate } = require("../../../shared/middlewares/validate");
+const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
 const {
     addSupplierSchema,

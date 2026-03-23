@@ -11,7 +11,7 @@ const {
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
-const { validate } = require("../../../shared/middlewares/validate");
+const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const {
     addPurchaseOrderSchema,
