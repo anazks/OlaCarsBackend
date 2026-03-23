@@ -13,6 +13,16 @@ const {
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    loginSchema,
+    addOperationStaffSchema,
+    editOperationStaffSchema,
+    changePasswordSchema,
+    deleteOperationStaffSchema,
+    getOperationStaffByIdSchema,
+    refreshStaffTokenSchema,
+} = require("../Validation/OperationStaffValidation.js");
 
 /**
  * @swagger
@@ -45,7 +55,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *       200:
  *         description: Login successful
  */
-router.post("/login", login);
+router.post("/login", validate(loginSchema), login);
 
 /**
  * @swagger
@@ -88,6 +98,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    validate(addOperationStaffSchema),
     addOperationStaff
 );
 
@@ -132,28 +143,31 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    validate(getOperationStaffByIdSchema),
     getOperationStaffById
 );
 
 /**
  * @swagger
- * /api/operation-staff/update:
+ * /api/operation-staff/{id}:
  *   put:
  *     summary: Update Operation Staff
  *     tags: [OperationStaff]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
  *               fullName:
  *                 type: string
  *               email:
@@ -175,6 +189,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    validate(editOperationStaffSchema),
     editOperationStaff
 );
 
@@ -214,6 +229,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    validate(changePasswordSchema),
     changePassword
 );
 
@@ -239,6 +255,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    validate(deleteOperationStaffSchema),
     deleteOperationStaff
 );
 
@@ -263,6 +280,6 @@ router.delete(
  *       200:
  *         description: New tokens generated
  */
-router.post("/refresh-token", refreshStaffToken);
+router.post("/refresh-token", validate(refreshStaffTokenSchema), refreshStaffToken);
 
 module.exports = router;

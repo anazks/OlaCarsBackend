@@ -13,6 +13,15 @@ const {
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    loginSchema,
+    addFinanceAdminSchema,
+    editFinanceAdminSchema,
+    changePasswordSchema,
+    deleteFinanceAdminSchema,
+    getFinanceAdminByIdSchema,
+} = require("../Validation/FinanceAdminValidation.js");
 
 /**
  * @swagger
@@ -49,7 +58,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *       401:
  *         description: Invalid credentials
  */
-router.post("/login", login);
+router.post("/login", validate(loginSchema), login);
 
 /**
  * @swagger
@@ -110,6 +119,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(addFinanceAdminSchema),
     addFinanceAdmin
 );
 
@@ -154,28 +164,31 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(getFinanceAdminByIdSchema),
     getFinanceAdminById
 );
 
 /**
  * @swagger
- * /api/finance-admin/update:
+ * /api/finance-admin/{id}:
  *   put:
  *     summary: Update a Finance Admin
  *     tags: [FinanceAdmin]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
  *               fullName:
  *                 type: string
  *               email:
@@ -195,6 +208,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(editFinanceAdminSchema),
     editFinanceAdmin
 );
 
@@ -234,6 +248,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(changePasswordSchema),
     changePassword
 );
 
@@ -259,6 +274,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(deleteFinanceAdminSchema),
     deleteFinanceAdmin
 );
 

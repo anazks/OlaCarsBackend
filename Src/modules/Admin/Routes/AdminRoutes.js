@@ -13,6 +13,15 @@ const {
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    loginSchema,
+    addAdminSchema,
+    editAdminSchema,
+    changePasswordSchema,
+    deleteAdminSchema,
+    getAdminByIdSchema,
+} = require("../Validation/AdminValidation.js");
 
 /**
  * @swagger
@@ -49,7 +58,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *       401:
  *         description: Invalid credentials
  */
-router.post("/login", login);
+router.post("/login", validate(loginSchema), login);
 
 /**
  * @swagger
@@ -108,6 +117,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(addAdminSchema),
     addAdmin
 );
 
@@ -152,6 +162,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(getAdminByIdSchema),
     getAdminById
 );
 
@@ -193,6 +204,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(editAdminSchema),
     editAdmin
 );
 
@@ -234,6 +246,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(changePasswordSchema),
     changePassword
 );
 
@@ -259,6 +272,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    validate(deleteAdminSchema),
     deleteAdmin
 );
 

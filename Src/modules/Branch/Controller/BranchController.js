@@ -54,7 +54,8 @@ const getBranchById = async (req, res) => {
 
 const editBranch = async (req, res) => {
     try {
-        const updatedBranch = await BranchService.update(req.params.id, req.body);
+        const { id, ...data } = req.body;
+        const updatedBranch = await BranchService.update(id, data);
         return res.status(200).json({ success: true, data: updatedBranch });
     } catch (error) {
         const statusCode = error.statusCode || 500;

@@ -5,6 +5,13 @@ const { addBranch, editBranch, deleteBranch, getBranches, getBranchById } = requ
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    addBranchSchema,
+    editBranchSchema,
+    deleteBranchSchema,
+    getBranchByIdSchema,
+} = require("../Validation/BranchValidation.js");
 
 /**
  * @swagger
@@ -34,6 +41,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *               - city
  *               - state
  *               - phone
+ *               - country
  *             properties:
  *               name:
  *                 type: string
@@ -51,11 +59,8 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *                 type: string
  *               email:
  *                 type: string
- *               createdBy:
+ *               country:
  *                 type: string
- *               creatorRole:
- *                 type: string
- *                 enum: [ADMIN, OPERATIONADMIN, FINANCEADMIN, COUNTRYMANAGER]
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, INACTIVE]
@@ -69,6 +74,7 @@ router.post(
   "/",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+  validate(addBranchSchema),
   addBranch
 );
 
@@ -113,6 +119,7 @@ router.get(
   "/:id",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+  validate(getBranchByIdSchema),
   getBranchById
 );
 
@@ -149,11 +156,8 @@ router.get(
  *                 type: string
  *               email:
  *                 type: string
- *               createdBy:
+ *               country:
  *                 type: string
- *               creatorRole:
- *                 type: string
- *                 enum: [ADMIN, OPERATIONADMIN, FINANCEADMIN, COUNTRYMANAGER]
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, INACTIVE]
@@ -165,6 +169,7 @@ router.put(
   "/",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+  validate(editBranchSchema),
   editBranch
 );
 
@@ -190,6 +195,7 @@ router.delete(
   "/:id",
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+  validate(deleteBranchSchema),
   deleteBranch
 );
 

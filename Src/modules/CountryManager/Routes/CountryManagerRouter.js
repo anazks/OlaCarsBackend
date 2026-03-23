@@ -12,6 +12,15 @@ const {
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    loginSchema,
+    addCountryManagerSchema,
+    editCountryManagerSchema,
+    changePasswordSchema,
+    deleteCountryManagerSchema,
+    getCountryManagerByIdSchema,
+} = require("../Validation/CountryManagerValidation.js");
 
 const router = express.Router();
 
@@ -50,7 +59,7 @@ const router = express.Router();
  *       401:
  *         description: Invalid credentials
  */
-router.post("/login", login);
+router.post("/login", validate(loginSchema), login);
 
 /**
  * @swagger
@@ -123,6 +132,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    validate(addCountryManagerSchema),
     addCountryManager
 );
 
@@ -173,29 +183,31 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    validate(getCountryManagerByIdSchema),
     getCountryManagerById
 );
 
 /**
  * @swagger
- * /api/country-manager/update:
+ * /api/country-manager/{id}:
  *   put:
  *     summary: Update country manager
  *     tags: [CountryManager]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
- *                 example: 60d21b4667d0d8992e610c85
  *               fullName:
  *                 type: string
  *               phone:
@@ -221,6 +233,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    validate(editCountryManagerSchema),
     editCountryManager
 );
 
@@ -260,6 +273,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    validate(changePasswordSchema),
     changePassword
 );
 
@@ -287,6 +301,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
+    validate(deleteCountryManagerSchema),
     deleteCountryManager
 );
 

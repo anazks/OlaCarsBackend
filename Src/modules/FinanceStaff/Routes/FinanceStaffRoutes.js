@@ -12,6 +12,15 @@ const {
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const validate = require("../../../shared/middlewares/validate.js");
+const {
+    loginSchema,
+    addFinanceStaffSchema,
+    editFinanceStaffSchema,
+    changePasswordSchema,
+    deleteFinanceStaffSchema,
+    getFinanceStaffByIdSchema,
+} = require("../Validation/FinanceStaffValidation.js");
 
 /**
  * @swagger
@@ -44,7 +53,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *       200:
  *         description: Login successful
  */
-router.post("/login", login);
+router.post("/login", validate(loginSchema), login);
 
 /**
  * @swagger
@@ -87,6 +96,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    validate(addFinanceStaffSchema),
     addFinanceStaff
 );
 
@@ -131,28 +141,31 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    validate(getFinanceStaffByIdSchema),
     getFinanceStaffById
 );
 
 /**
  * @swagger
- * /api/finance-staff/update:
+ * /api/finance-staff/{id}:
  *   put:
  *     summary: Update Finance Staff
  *     tags: [FinanceStaff]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
  *               fullName:
  *                 type: string
  *               email:
@@ -174,6 +187,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    validate(editFinanceStaffSchema),
     editFinanceStaff
 );
 
@@ -213,6 +227,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    validate(changePasswordSchema),
     changePassword
 );
 
@@ -238,6 +253,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    validate(deleteFinanceStaffSchema),
     deleteFinanceStaff
 );
 

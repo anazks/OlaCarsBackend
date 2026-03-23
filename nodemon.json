@@ -1,0 +1,6 @@
+{
+  "watch": ["app.js", "Src"],
+  "ext": "js,json",
+  "ignore": ["node_modules", "tmp"],
+  "legacyWatch": true
+}

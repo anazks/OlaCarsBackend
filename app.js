@@ -38,6 +38,15 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet()); // Security headers
 app.use(cors({ origin: "*" })); // Adjust in production
 app.use(express.json());
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON format. Please check your request body for syntax errors (e.g., trailing commas).",
+    });
+  }
+  next(err);
+});
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -73,10 +82,16 @@ app.get("/health", (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  const statusCode = err.statusCode || 500;
+  const message = err.isOperational ? err.message : "Internal Server Error";
+
+  if (statusCode === 500) {
+    console.error(err.stack);
+  }
+
+  res.status(statusCode).json({
     success: false,
-    message: "Internal Server Error",
+    message: message,
   });
 });
 
