@@ -65,7 +65,7 @@ exports.getPurchaseOrderByIdService = async (id) => {
  */
 exports.updatePurchaseOrderService = async (id, updateData) => {
     try {
-        return await PurchaseOrder.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
+        return await PurchaseOrder.findByIdAndUpdate(id, updateData, { returnDocument: "after", runValidators: true });
     } catch (error) {
         throw error;
     }
@@ -93,7 +93,7 @@ exports.updatePurchaseOrderStatusService = async (
                 approvedBy,
                 approverRole,
             },
-            { new: true }
+            { returnDocument: "after" }
         );
     } catch (error) {
         throw error;

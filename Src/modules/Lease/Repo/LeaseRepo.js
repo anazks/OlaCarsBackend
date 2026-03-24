@@ -14,7 +14,7 @@ exports.createLeaseService = async (data, session = null) => {
  * Updates a lease record.
  */
 exports.updateLeaseService = async (id, updateData, session = null) => {
-    const options = { new: true, runValidators: true };
+    const options = { returnDocument: "after", runValidators: true };
     if (session) options.session = session;
     return await Lease.findByIdAndUpdate(id, updateData, options);
 };

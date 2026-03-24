@@ -104,7 +104,7 @@ exports.updateInsuranceService = async (id, updateData) => {
             finalUpdate.$set = { ...(finalUpdate.$set || {}), ...flatSet };
         }
 
-        return await Insurance.findByIdAndUpdate(id, finalUpdate, { new: true, runValidators: true });
+        return await Insurance.findByIdAndUpdate(id, finalUpdate, { returnDocument: "after", runValidators: true });
     } catch (error) {
         throw error;
     }

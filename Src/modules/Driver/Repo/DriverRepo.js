@@ -61,7 +61,7 @@ exports.updateDriverService = async (id, updateData, session = null) => {
     if ($push) updateOps.$push = $push;
     if ($unset) updateOps.$unset = $unset;
 
-    const options = { new: true, runValidators: true };
+    const options = { returnDocument: "after", runValidators: true };
     if (session) options.session = session;
 
     return await Driver.findByIdAndUpdate(id, updateOps, options);

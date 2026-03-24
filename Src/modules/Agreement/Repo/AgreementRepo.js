@@ -20,7 +20,7 @@ class AgreementRepo {
 
   async updateAgreement(id, data, session = null) {
     return await AgreementModel.findByIdAndUpdate(id, data, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
       session,
     });
