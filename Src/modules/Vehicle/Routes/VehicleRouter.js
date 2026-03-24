@@ -12,7 +12,7 @@ const {
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
-const validate = require("../../../shared/middlewares/validate");
+const validate = require("../../../shared/middlewares/validate.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const {
     addVehicleSchema,
@@ -519,7 +519,7 @@ router.post(
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
     validate(assignCarToDriverSchema),
-    assignCarToDriver
+    (req, res, next) => assignCarToDriver(req, res, next)
 );
 
 module.exports = router;

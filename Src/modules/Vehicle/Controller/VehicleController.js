@@ -14,7 +14,7 @@ const uploadToS3 = require("../../../utils/uploadToS3");
  * @route POST /api/vehicle/
  * @access Private
  */
-const addVehicle = async (req, res) => {
+const addVehicle = async (req, res, next) => {
     try {
         let vehicleData = req.body;
         vehicleData.createdBy = req.user.id;
@@ -68,7 +68,7 @@ const addVehicle = async (req, res) => {
  * @route GET /api/vehicle/
  * @access Private
  */
-const getVehicles = async (req, res) => {
+const getVehicles = async (req, res, next) => {
     try {
         const queryParams = { ...req.query };
         const result = await getVehiclesService(queryParams, {
@@ -96,7 +96,7 @@ const getVehicles = async (req, res) => {
  * @route GET /api/vehicle/:id
  * @access Private
  */
-const getVehicleById = async (req, res) => {
+const getVehicleById = async (req, res, next) => {
     try {
         const vehicle = await getVehicleByIdService(req.params.id);
         if (!vehicle) return res.status(404).json({ success: false, message: "Vehicle not found" });
@@ -111,7 +111,7 @@ const getVehicleById = async (req, res) => {
  * @route PUT /api/vehicle/:id/progress
  * @access Private
  */
-const progressVehicleStatus = async (req, res) => {
+const progressVehicleStatus = async (req, res, next) => {
     try {
         const vehicleId = req.params.id;
         const { targetStatus, updateData, notes } = req.body;
@@ -137,7 +137,7 @@ const progressVehicleStatus = async (req, res) => {
  * @route POST /api/vehicle/:id/upload-documents
  * @access Private
  */
-const uploadVehicleDocuments = async (req, res) => {
+const uploadVehicleDocuments = async (req, res, next) => {
     try {
         const vehicleId = req.params.id;
 
@@ -221,7 +221,7 @@ const uploadVehicleDocuments = async (req, res) => {
  * @route GET /api/vehicle/available
  * @access Private
  */
-const getAvailableCars = async (req, res) => {
+const getAvailableCars = async (req, res, next) => {
     try {
         const queryParams = { ...req.query };
         const branchRoles = [
@@ -267,7 +267,7 @@ const getAvailableCars = async (req, res) => {
  * @body { leaseDuration: number, monthlyRent: number, notes: string }
  * @access Private
  */
-const assignCarToDriver = async (req, res) => {
+const assignCarToDriver = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
 
@@ -346,8 +346,13 @@ const assignCarToDriver = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+        console.error("AssignCarToDriver Error:", error);
         const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(statusCode).json({ 
+            success: false, 
+            message: error.message,
+            stack: process.env.NODE_ENV === "development" ? error.stack : undefined
+        });
     }
 };
 
