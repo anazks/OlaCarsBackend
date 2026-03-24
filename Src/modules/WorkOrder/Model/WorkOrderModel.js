@@ -217,9 +217,8 @@ const workOrderSchema = new mongoose.Schema(
 );
 
 // ─── Pre-save: auto-compute totalCost on parts ──────────────────────
-workOrderPartSchema.pre("validate", function (next) {
+workOrderPartSchema.pre("validate", async function () {
     this.totalCost = (this.quantity || 0) * (this.unitCost || 0);
-    next();
 });
 
 // ─── Indexes ─────────────────────────────────────────────────────────

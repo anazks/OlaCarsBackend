@@ -13,9 +13,8 @@ const lineItemSchema = new mongoose.Schema({
     partId: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryPart" },
 });
 
-lineItemSchema.pre("validate", function (next) {
+lineItemSchema.pre("validate", async function () {
     this.lineTotal = (this.quantity || 0) * (this.unitPrice || 0);
-    next();
 });
 
 const accountingEntrySchema = new mongoose.Schema({

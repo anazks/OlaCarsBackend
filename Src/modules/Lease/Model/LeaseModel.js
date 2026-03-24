@@ -56,13 +56,12 @@ const leaseSchema = new mongoose.Schema(
 );
 
 // Middleware to calculate endDate based on durationMonths
-leaseSchema.pre("save", function (next) {
+leaseSchema.pre("save", async function () {
     if (this.isModified("startDate") || this.isModified("durationMonths")) {
         const end = new Date(this.startDate);
         end.setMonth(end.getMonth() + this.durationMonths);
         this.endDate = end;
     }
-    next();
 });
 
 leaseSchema.index({ driver: 1, status: 1 });

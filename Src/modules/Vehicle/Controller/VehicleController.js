@@ -346,13 +346,8 @@ const assignCarToDriver = async (req, res, next) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        console.error("AssignCarToDriver Error:", error);
         const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
-        return res.status(statusCode).json({ 
-            success: false, 
-            message: error.message,
-            stack: process.env.NODE_ENV === "development" ? error.stack : undefined
-        });
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
