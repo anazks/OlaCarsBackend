@@ -38,7 +38,7 @@ const AVAILABLE_PLACEHOLDERS = {
     // Lease details (New)
     LEASE_DURATION: "Duration of the lease in months",
     LEASE_MONTHLY_RENT: "Monthly rent amount for the vehicle",
-};
+}; 
 
 module.exports = {
     replacePlaceholders,

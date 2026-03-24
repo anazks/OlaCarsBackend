@@ -15,7 +15,7 @@ const agreementSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ["TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER"],
+      enum: ["TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER","DRIVER_AGREEMENT","LEGAL_AGREEMENT"],
       default: "OTHER",
     },
     content: {
