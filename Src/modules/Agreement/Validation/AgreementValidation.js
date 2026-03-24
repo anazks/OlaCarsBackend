@@ -10,7 +10,7 @@ const createAgreementSchema = Joi.object({
     "any.required": "Country is required",
   }),
   type: Joi.string()
-    .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER", "DRIVER_AGREEMENT", "LEGAL_AGREEMENT")
+    .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER", "DRIVER_AGREEMENT", "LEGAL_AGREEMENT", "VEHICLE_ASSIGNMENT_AGREEMENT")
     .required()
     .messages({
       "any.only": "Invalid agreement type",
@@ -27,7 +27,7 @@ const updateAgreementSchema = Joi.object({
   title: Joi.string().trim().optional(),
   country: Joi.string().trim().optional(),
   type: Joi.string()
-    .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER", "DRIVER_AGREEMENT", "LEGAL_AGREEMENT")
+    .valid("TERMS_AND_CONDITIONS", "PRIVACY_POLICY", "RETURN_POLICY", "OTHER", "DRIVER_AGREEMENT", "LEGAL_AGREEMENT", "VEHICLE_ASSIGNMENT_AGREEMENT")
     .optional(),
   content: Joi.string().optional(),
   status: Joi.string().valid("DRAFT", "PUBLISHED", "ARCHIVED").optional(),
