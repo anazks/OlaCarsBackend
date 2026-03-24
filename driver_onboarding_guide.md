@@ -39,6 +39,11 @@ Drivers progress through a strict linear flow. You **cannot skip stages**.
     ```
 *   **UpdateData Whitelisting**: The backend only accepts specific fields during each transition. Sending extra fields will result in them being stripped.
 
+### Agreement Rendering
+*   **GET** `/api/agreements/:templateId/render`
+*   **Auth**: Required. Pass the template ID.
+*   **Result**: Returns the template content with placeholders like `{{DRIVER_NAME}}` already replaced with the driver's current data.
+
 ---
 
 ## 3. Transition Requirements (Gates)
@@ -86,3 +91,29 @@ If you get a `422 Unprocessable Entity`, it means a "Gate" failed. Here are the 
 | `backgroundCheckDocument` | `backgroundCheck.document` |
 | `consentForm` | `creditCheck.consentForm` |
 | `signedContract` | `contract.signedS3Key` |
+| `licenseBack` | `drivingLicense.backImage` |
+| `idBackImage` | `identityDocs.idBackImage` |
+
+---
+
+## 6. Vehicle Assignment
+Once the driver is `ACTIVE`, you can assign a vehicle.
+
+### Step 1: List Available Cars
+*   **GET** `/api/vehicle/available`
+*   **Result**: Returns a list of vehicles with `status: "ACTIVE — AVAILABLE"`.
+
+### Step 2: Perform Assignment
+*   **POST** `/api/vehicle/:id/assign/:driverId`
+*   **Payload**:
+    ```json
+    {
+      "leaseDuration": 12, // Number of months
+      "monthlyRent": 45000,
+      "notes": "Assigned via Frontend UI"
+    }
+    ```
+*   **Outcome**:
+    1.  Vehicle status changes to `ACTIVE — RENTED`.
+    2.  Driver's `currentVehicle` field is populated with the Vehicle ID.
+    3.  A `Lease` record is created in the database.

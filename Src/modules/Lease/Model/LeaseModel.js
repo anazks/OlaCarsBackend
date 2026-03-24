@@ -38,6 +38,12 @@ const leaseSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "AgreementVersion",
         },
+        generatedS3Key: {
+            type: String,
+        },
+        signedS3Key: {
+            type: String,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             refPath: "creatorRole",

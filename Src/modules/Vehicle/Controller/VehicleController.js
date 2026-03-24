@@ -274,7 +274,14 @@ const assignCarToDriver = async (req, res, next) => {
     try {
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
-        const { leaseDuration, monthlyRent, notes } = req.body;
+        const { 
+        leaseDuration, 
+        monthlyRent, 
+        notes, 
+        agreementVersion, 
+        generatedS3Key, 
+        signedS3Key 
+    } = req.body;
 
         if (!leaseDuration || !monthlyRent) {
             throw new Error("leaseDuration and monthlyRent are required during assignment.");
@@ -300,14 +307,18 @@ const assignCarToDriver = async (req, res, next) => {
 
         // 3. Create Lease record
         const { createLeaseService } = require("../../Lease/Service/LeaseService");
-        const leaseData = {
+        const lease = await createLeaseService({
             driver: driverId,
             vehicle: vehicleId,
             durationMonths: leaseDuration,
             monthlyRent: monthlyRent,
-            notes: notes || `Assigned via automated flow.`,
-        };
-        await createLeaseService(leaseData, req.user.id, req.user.role, session);
+            notes: notes,
+            agreementVersion,
+            generatedS3Key,
+            signedS3Key,
+            createdBy: req.user.id,
+            creatorRole: req.user.role
+        }, session);
 
         // 4. Perform assignment status updates
         // Update Vehicle status

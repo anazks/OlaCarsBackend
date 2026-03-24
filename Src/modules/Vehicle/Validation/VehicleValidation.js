@@ -77,6 +77,9 @@ const assignCarToDriverSchema = {
         leaseDuration: Joi.number().min(1).required(),
         monthlyRent: Joi.number().min(0).required(),
         notes: Joi.string().trim().allow("", null),
+        agreementVersion: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+        generatedS3Key: Joi.string().trim(),
+        signedS3Key: Joi.string().trim(),
     }),
 };
 
