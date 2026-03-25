@@ -41,8 +41,8 @@ const STATUS_RULES = {
             if (process.env.NODE_ENV === 'test' || process.env.BYPASS_DOCS === 'true') return null;
 
             const basic = { ...(vehicle.basicDetails || {}), ...(payload.basicDetails || {}) };
-            if (!basic.make || !basic.model || !basic.year || !basic.vin) {
-                return "Basic details (make, model, year, vin) must be completed before reviewing documents.";
+            if (!basic.year) {
+                return "Basic details (year) must be completed before reviewing documents.";
             }
 
             const combinedDocs = { ...vehicle.legalDocs, ...payload.legalDocs };

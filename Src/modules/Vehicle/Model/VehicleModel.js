@@ -73,7 +73,8 @@ const vehicleSchema = new mongoose.Schema(
             vin: {
                 type: String,
                 uppercase: true,
-                trim: true
+                trim: true,
+                index: { unique: true, sparse: true }
             },
             engineNumber: { type: String },
             bodyType: {
@@ -232,11 +233,30 @@ const vehicleSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+// Pre-validate hook to handle empty string VINs
+vehicleSchema.pre("validate", function (next) {
+    if (this.basicDetails && this.basicDetails.vin === "") {
+        this.basicDetails.vin = undefined;
+    }
+    next();
+});
+
+// Pre-update hook to handle empty string VINs for findOneAndUpdate
+vehicleSchema.pre("findOneAndUpdate", function (next) {
+    const update = this.getUpdate();
+    if (update.$set && update.$set["basicDetails.vin"] === "") {
+        update.$set["basicDetails.vin"] = undefined;
+    } else if (update.basicDetails && update.basicDetails.vin === "") {
+        update.basicDetails.vin = undefined;
+    }
+    next();
+});
+
 // Performance Indexes
 vehicleSchema.index({ status: 1 });
 vehicleSchema.index({ "purchaseDetails.branch": 1 });
 vehicleSchema.index({ "legalDocs.registrationNumber": 1 });
-vehicleSchema.index({ "basicDetails.vin": 1 });
+vehicleSchema.index({ "basicDetails.vin": 1 }, { unique: true, sparse: true });
 
 // Expiry Alert Indexes
 // vehicleSchema.index({ "insurancePolicy.expiryDate": 1 }); // Removed as moved to Insurance collection
