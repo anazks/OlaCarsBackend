@@ -76,8 +76,8 @@ router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATION
 router.get("/:id", AgreementController.getAgreementById);
 
 // Protected routes
-router.use(authenticate);
-router.use(authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER));
+// Note: router.use(authenticate) and authorize are removed here and applied individually
+// to allow access to non-admin roles for endpoints like /render and /accept
 
 /**
  * @swagger
@@ -120,7 +120,7 @@ router.use(authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER));
  *       400:
  *         description: Bad request (e.g., duplicate title for country)
  */
-router.post("/", AgreementController.createAgreement);
+router.post("/", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.createAgreement);
 
 /**
  * @swagger
@@ -158,7 +158,7 @@ router.post("/", AgreementController.createAgreement);
  *       404:
  *         description: Agreement not found
  */
-router.put("/:id", AgreementController.updateAgreement);
+router.put("/:id", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.updateAgreement);
 
 
 /**
@@ -179,7 +179,7 @@ router.put("/:id", AgreementController.updateAgreement);
  *       200:
  *         description: List of agreement versions
  */
-router.get("/:id/versions", AgreementController.getAgreementVersions);
+router.get("/:id/versions", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAgreementVersions);
 
 /**
  * @swagger
