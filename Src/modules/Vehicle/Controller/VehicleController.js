@@ -157,13 +157,15 @@ const uploadVehicleDocuments = async (req, res, next) => {
             exteriorPhotos: "inspection.exteriorPhotos",
             interiorPhotos: "inspection.interiorPhotos",
             odometerPhoto: "inspection.odometerPhoto",
-            registrationDocument: "legalDocs.registrationDocument",
-            roadTaxDocument: "legalDocs.roadTaxDisc", // Actually roadTaxDisc in schema
+            registrationCertificate: "legalDocs.registrationCertificate",
+            roadTaxDisc: "legalDocs.roadTaxDisc",
             roadworthinessCertificate: "legalDocs.roadworthinessCertificate",
-            // insuranceDocument: "insurancePolicy.policyDocument", // Removed as handled in Insurance module
-            importDeclaration: "importationDetails.customsDeclarationNumber", // Assuming they meant document
-            customsReceipt: "importationDetails.customsReceipt",
-            gatePass: "importationDetails.gatePass",
+            numberPlateFront: "legalDocs.numberPlateFront",
+            numberPlateRear: "legalDocs.numberPlateRear",
+            transferOfOwnership: "legalDocs.transferOfOwnership",
+            policyDocument: "insurancePolicy.policyDocument", 
+            customsClearanceCertificate: "importationDetails.customsClearanceCertificate", 
+            importPermit: "importationDetails.importPermit",
             purchaseReceipt: "purchaseDetails.purchaseReceipt"
         };
 
@@ -184,6 +186,7 @@ const uploadVehicleDocuments = async (req, res, next) => {
                     uploadedKeys[fieldName].push(uploadedKey);
                 }
                 if (dbPath) {
+                    // Use $push specifically for arrays to append new photos
                     dbUpdatePayload.$push = dbUpdatePayload.$push || {};
                     dbUpdatePayload.$push[dbPath] = { $each: uploadedKeys[fieldName] };
                 }

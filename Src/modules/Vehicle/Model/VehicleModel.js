@@ -133,7 +133,10 @@ const vehicleSchema = new mongoose.Schema(
             checklistItems: [checklistItemSchema],
             exteriorPhotos: {
                 type: [{ type: String }],
-                validate: [v => v == null || v.length === 0 || v.length >= 6, "Minimum 6 exterior photos required for inspection."]
+            },
+            interiorPhotos: {
+                type: [{ type: String }],
+                default: []
             },
             odometerPhoto: { type: String },
         },

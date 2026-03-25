@@ -455,6 +455,11 @@ router.put(
  *                 items:
  *                   type: string
  *                   format: binary
+ *               interiorPhotos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
  *     responses:
  *       200:
  *         description: Documents uploaded successfully
@@ -484,7 +489,8 @@ router.post(
         { name: "customsClearanceCertificate", maxCount: 1 },
         { name: "importPermit", maxCount: 1 },
         { name: "odometerPhoto", maxCount: 1 },
-        { name: "exteriorPhotos", maxCount: 20 }
+        { name: "exteriorPhotos", maxCount: 20 },
+        { name: "interiorPhotos", maxCount: 20 }
     ]),
     uploadVehicleDocuments
 );
