@@ -139,6 +139,8 @@ const progressVehicleStatus = async (req, res, next) => {
  */
 const uploadVehicleDocuments = async (req, res, next) => {
     try {
+        console.log("req.files", req.files);
+        console.log("req.body", req.body);
         const vehicleId = req.params.id;
 
         // Ensure vehicle exists
