@@ -17,7 +17,7 @@ const getUserCountry = async (user) => {
     if (user.role === ROLES.COUNTRYMANAGER) {
         const cm = await CountryManager.findById(user.id);
         return cm ? cm.country : null;
-    } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF) {
+    } else if ([ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF, ROLES.WORKSHOPSTAFF].includes(user.role)) {
         // user.branchId should be available from auth token payload
         if (!user.branchId) return null;
         const branch = await Branch.findById(user.branchId);
