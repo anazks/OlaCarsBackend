@@ -9,8 +9,8 @@ const insuranceSchema = new mongoose.Schema(
         },
         policyNumber: {
             type: String,
-            required: true,
-            unique: true
+            unique: true,
+            sparse: true // Allow multiple nulls/undefined for plans without fixed numbers
         },
         policyType: {
             type: String,
@@ -23,11 +23,9 @@ const insuranceSchema = new mongoose.Schema(
         },
         startDate: {
             type: Date,
-            required: true
         },
         expiryDate: {
             type: Date,
-            required: true,
             index: true
         },
         insuredValue: {

@@ -63,7 +63,17 @@ const progressVehicleSchema = {
     }),
     body: Joi.object({
         targetStatus: Joi.string().trim().valid(...VEHICLE_STATUSES).required(),
-        updateData: Joi.object().default({}),
+        updateData: Joi.object({
+            insuranceDetails: Joi.object({
+                plan: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+                insuranceNumber: Joi.string().trim(),
+                fromDate: Joi.date(),
+                toDate: Joi.date(),
+                certificate: Joi.string().trim(),
+            }),
+            // ... other updateData fields can be added here if needed, 
+            // but Joi.object().unknown() is often used for flexibility in progress updates
+        }).unknown(true).default({}),
         notes: Joi.string().trim().allow("", null),
     }),
 };

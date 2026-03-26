@@ -34,7 +34,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
     },
     "DOCUMENTS REVIEW": {
-        allowedFrom: ["PENDING ENTRY", "INSURANCE VERIFICATION"], // From start or insurance rejection
+        allowedFrom: ["PENDING ENTRY"], // From start
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -66,7 +66,7 @@ const STATUS_RULES = {
         }
     },
     "INSPECTION REQUIRED": {
-        allowedFrom: ["INSURANCE VERIFICATION", "REPAIR IN PROGRESS"],
+        allowedFrom: ["DOCUMENTS REVIEW", "INSURANCE VERIFICATION", "REPAIR IN PROGRESS"],
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -153,7 +153,7 @@ const STATUS_RULES = {
             if (vehicle.legalDocs?.roadTaxExpiry && new Date(vehicle.legalDocs.roadTaxExpiry) < today) {
                 return "Cannot rent: Road Tax has expired.";
             }
-            if (vehicle.insurancePolicy?.expiryDate && new Date(vehicle.insurancePolicy.expiryDate) < today) {
+            if (vehicle.insuranceDetails?.toDate && new Date(vehicle.insuranceDetails.toDate) < today) {
                 return "Cannot rent: Insurance policy has expired.";
             }
 

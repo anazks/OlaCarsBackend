@@ -43,7 +43,7 @@ console.log("\n[3] Transitions");
 const T = (a, b) => ok(STATUS_RULES[b].allowedFrom.includes(a), a + " -> " + b);
 const N = (a, b) => ok(!STATUS_RULES[b].allowedFrom.includes(a), a + " -/-> " + b);
 T("PENDING ENTRY", "DOCUMENTS REVIEW");
-T("DOCUMENTS REVIEW", "INSURANCE VERIFICATION");
+T("DOCUMENTS REVIEW", "INSPECTION REQUIRED");
 T("INSURANCE VERIFICATION", "INSPECTION REQUIRED");
 T("INSPECTION REQUIRED", "ACCOUNTING SETUP");
 T("ACCOUNTING SETUP", "GPS ACTIVATION");
@@ -86,8 +86,9 @@ ok(g("TRANSFER PENDING")({ purchaseDetails: { branch: "a" } }, { transferDetails
 ok(g("TRANSFER PENDING")({ purchaseDetails: { branch: "a" } }, { transferDetails: { toBranch: "b" } }) === null, "Trans: accept diff");
 ok(g("RETIRED")({}, {}) !== null, "Retire: reject");
 ok(g("RETIRED")({}, { retirementDetails: { reason: "Sold" } }) === null, "Retire: accept");
-ok(g("ACTIVE \u2014 RENTED")({ legalDocs: { registrationExpiry: new Date("2020-01-01") } }, {}) !== null, "Rent: reject expired");
-ok(g("ACTIVE \u2014 RENTED")({ legalDocs: { registrationExpiry: new Date("2030-01-01"), roadTaxExpiry: new Date("2030-01-01") }, insurancePolicy: { expiryDate: new Date("2030-01-01") } }, {}) === null, "Rent: accept valid");
+ok(g("ACTIVE \u2014 RENTED")({ legalDocs: { registrationExpiry: new Date("2020-01-01") } }, {}) !== null, "Rent: reject expired registration");
+ok(g("ACTIVE \u2014 RENTED")({ legalDocs: { registrationExpiry: new Date("2030-01-01"), roadTaxExpiry: new Date("2030-01-01") }, insuranceDetails: { toDate: new Date("2030-01-01") } }, {}) === null, "Rent: accept valid");
+ok(g("ACTIVE \u2014 RENTED")({ legalDocs: { registrationExpiry: new Date("2030-01-01"), roadTaxExpiry: new Date("2030-01-01") }, insuranceDetails: { toDate: new Date("2020-01-01") } }, {}) !== null, "Rent: reject expired insurance");
 
 console.log("\n[5] Roles");
 ok(STATUS_RULES["DOCUMENTS REVIEW"].allowedRoles.includes(ROLES.OPERATIONSTAFF), "OpStaff->docs");

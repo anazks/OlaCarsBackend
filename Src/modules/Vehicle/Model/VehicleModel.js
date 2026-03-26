@@ -106,6 +106,14 @@ const vehicleSchema = new mongoose.Schema(
             ref: "Insurance"
         },
 
+        insuranceDetails: {
+            plan: { type: mongoose.Schema.Types.ObjectId, ref: "Insurance" },
+            insuranceNumber: { type: String },
+            fromDate: { type: Date },
+            toDate: { type: Date },
+            certificate: { type: String }, // S3 Key
+        },
+
         // 5. Importation & Landed Cost
         importationDetails: {
             isImported: { type: Boolean, default: false },
