@@ -73,18 +73,8 @@ const STATUS_RULES = {
             if (process.env.NODE_ENV === 'test' || process.env.BYPASS_DOCS === 'true') return null;
             const inspection = { ...vehicle.inspection, ...payload.inspection };
 
-            if (!inspection.checklistItems || inspection.checklistItems.length < 23) {
-                return "All 23 inspection checklist items must be completed.";
-            }
-
-            if (!inspection.exteriorPhotos || inspection.exteriorPhotos.length < 6) {
-                return "Minimum 6 exterior photos are required.";
-            }
-
-            if (!inspection.odometerPhoto) {
-                return "Odometer photo is mandatory.";
-            }
-
+            // Inspection data is no longer required to ENTER this state.
+            // It is required to EXIT this state to ACCOUNTING SETUP.
             return null;
         }
     },
@@ -104,6 +94,17 @@ const STATUS_RULES = {
         minHierarchy: ROLES.FINANCEADMIN,
         gateValidator: (vehicle, payload) => {
             const inspection = { ...vehicle.inspection, ...payload.inspection };
+            
+            if (!inspection.checklistItems || inspection.checklistItems.length < 23) {
+                return "All 23 inspection checklist items must be completed before proceeding to accounting.";
+            }
+            if (!inspection.exteriorPhotos || inspection.exteriorPhotos.length < 6) {
+                return "Minimum 6 exterior photos are required before proceeding to accounting.";
+            }
+            if (!inspection.odometerPhoto) {
+                return "Odometer photo is mandatory before proceeding to accounting.";
+            }
+
             if (inspection.status !== "Passed") {
                 return "Vehicle did not pass inspection. Cannot proceed to accounting.";
             }
@@ -324,24 +325,30 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
 
     // Auto-detect inspection failures after saving inspection data
     if (targetStatus === "INSPECTION REQUIRED") {
-        const hasMandatoryFail = updatedVehicle.inspection?.checklistItems?.some(
-            item => item.condition === "Poor" && item.isMandatoryFail
-        );
-        if (hasMandatoryFail) {
-            updatedVehicle.inspection.status = "Failed";
-            updatedVehicle.status = "INSPECTION FAILED";
-            updatedVehicle.statusHistory.push({
-                status: "INSPECTION FAILED",
-                changedBy: user.id,
-                changedByRole: user.role,
-                notes: "Auto-failed: mandatory inspection item(s) rated Poor.",
-            });
-            await updatedVehicle.save();
-            triggerExternalActions("INSPECTION FAILED", vehicleId);
-            return updatedVehicle;
-        } else {
-            updatedVehicle.inspection.status = "Passed";
-            await updatedVehicle.save();
+        const inspectionPayload = updateData.inspection || {};
+        const currentChecklist = updatedVehicle.inspection?.checklistItems || [];
+        
+        // Only trigger auto-pass/fail if we actually have checklist items to evaluate
+        if (currentChecklist.length >= 23) {
+            const hasMandatoryFail = currentChecklist.some(
+                item => item.condition === "Poor" && item.isMandatoryFail
+            );
+            if (hasMandatoryFail) {
+                updatedVehicle.inspection.status = "Failed";
+                updatedVehicle.status = "INSPECTION FAILED";
+                updatedVehicle.statusHistory.push({
+                    status: "INSPECTION FAILED",
+                    changedBy: user.id,
+                    changedByRole: user.role,
+                    notes: "Auto-failed: mandatory inspection item(s) rated Poor.",
+                });
+                await updatedVehicle.save();
+                triggerExternalActions("INSPECTION FAILED", vehicleId);
+                return updatedVehicle;
+            } else {
+                updatedVehicle.inspection.status = "Passed";
+                await updatedVehicle.save();
+            }
         }
     }
 
