@@ -33,7 +33,7 @@ const getOperationStaff = async (req, res) => {
         // If user is COUNTRYMANAGER, restrict staff to branches in their country
         if (req.user.role === 'COUNTRYMANAGER' && req.user.country) {
             const countryBranches = await BranchService.getAll({ country: req.user.country });
-            const branchIds = countryBranches.map(b => b._id);
+            const branchIds = (countryBranches.data || []).map(b => b._id);
             options.baseQuery = { branchId: { $in: branchIds } };
         }
 
