@@ -72,7 +72,7 @@ ok(g("INSURANCE VERIFICATION")({ insurancePolicy: {} }, {}) !== null, "Ins: reje
 ok(g("INSURANCE VERIFICATION")({ insurancePolicy: {} }, { insurancePolicy: { insuranceType: "X", providerName: "X", policyNumber: "X", startDate: "X", expiryDate: "X" } }) === null, "Ins: accept");
 ok(g("INSPECTION REQUIRED")({ inspection: {} }, {}) === null, "Insp: entry always allowed (relaxed)");
 const it23 = Array.from({ length: 23 }, (_, i) => ({ name: "I" + i, condition: "Good" }));
-ok(g("ACCOUNTING SETUP")({ inspection: {} }, { inspection: { status: "Passed", checklistItems: it23, exteriorPhotos: ["1", "2", "3", "4", "5", "6"], odometerPhoto: "u" } }) === null, "Acct: accept when complete and passed");
+ok(g("ACCOUNTING SETUP")({ inspection: {} }, { inspection: { status: "Passed", checklistItems: it23, exteriorPhotos: ["1"], odometerPhoto: "u" } }) === null, "Acct: accept when complete and passed");
 ok(g("ACCOUNTING SETUP")({ inspection: {} }, { inspection: { status: "Passed", checklistItems: it23.slice(0, 5) } }) !== null, "Acct: reject when checklist incomplete");
 ok(g("ACCOUNTING SETUP")({ inspection: {} }, { inspection: { status: "Pending" } }) !== null, "Acct: reject when status not Passed");
 ok(g("GPS ACTIVATION")({ accountingSetup: { isSetupComplete: false } }, {}) !== null, "GPS: reject");

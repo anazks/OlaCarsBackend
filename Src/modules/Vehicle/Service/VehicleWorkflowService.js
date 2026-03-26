@@ -98,8 +98,8 @@ const STATUS_RULES = {
             if (!inspection.checklistItems || inspection.checklistItems.length < 23) {
                 return "All 23 inspection checklist items must be completed before proceeding to accounting.";
             }
-            if (!inspection.exteriorPhotos || inspection.exteriorPhotos.length < 6) {
-                return "Minimum 6 exterior photos are required before proceeding to accounting.";
+            if (!inspection.exteriorPhotos || inspection.exteriorPhotos.length < 1) {
+                return "Minimum 1 exterior photo is required before proceeding to accounting.";
             }
             if (!inspection.odometerPhoto) {
                 return "Odometer photo is mandatory before proceeding to accounting.";
