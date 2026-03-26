@@ -267,6 +267,16 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
     }
 
     const payload = { ...updateData };
+    
+    // --- Pre-validation Logic: Evaluate Inspection Status if data is provided ---
+    const mergedInspection = { ...(currentVehicle.inspection || {}), ...(payload.inspection || {}) };
+    if (mergedInspection.checklistItems?.length >= 23) {
+        const hasMandatoryFail = mergedInspection.checklistItems.some(
+            item => item.condition === "Poor" && item.isMandatoryFail
+        );
+        if (!payload.inspection) payload.inspection = {};
+        payload.inspection.status = hasMandatoryFail ? "Failed" : "Passed";
+    }
 
     if (rule.gateValidator) {
         const errorMsg = rule.gateValidator(currentVehicle, payload);
@@ -323,33 +333,18 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
 
     // --- Post-transition logic ---
 
-    // Auto-detect inspection failures after saving inspection data
-    if (targetStatus === "INSPECTION REQUIRED") {
-        const inspectionPayload = updateData.inspection || {};
-        const currentChecklist = updatedVehicle.inspection?.checklistItems || [];
-        
-        // Only trigger auto-pass/fail if we actually have checklist items to evaluate
-        if (currentChecklist.length >= 23) {
-            const hasMandatoryFail = currentChecklist.some(
-                item => item.condition === "Poor" && item.isMandatoryFail
-            );
-            if (hasMandatoryFail) {
-                updatedVehicle.inspection.status = "Failed";
-                updatedVehicle.status = "INSPECTION FAILED";
-                updatedVehicle.statusHistory.push({
-                    status: "INSPECTION FAILED",
-                    changedBy: user.id,
-                    changedByRole: user.role,
-                    notes: "Auto-failed: mandatory inspection item(s) rated Poor.",
-                });
-                await updatedVehicle.save();
-                triggerExternalActions("INSPECTION FAILED", vehicleId);
-                return updatedVehicle;
-            } else {
-                updatedVehicle.inspection.status = "Passed";
-                await updatedVehicle.save();
-            }
-        }
+    // Auto-detect inspection failures (only if target was INSPECTION REQUIRED)
+    if (targetStatus === "INSPECTION REQUIRED" && updatedVehicle.inspection?.status === "Failed") {
+        updatedVehicle.status = "INSPECTION FAILED";
+        updatedVehicle.statusHistory.push({
+            status: "INSPECTION FAILED",
+            changedBy: user.id,
+            changedByRole: user.role,
+            notes: "Auto-failed: mandatory inspection item(s) rated Poor.",
+        });
+        await updatedVehicle.save();
+        triggerExternalActions("INSPECTION FAILED", vehicleId);
+        return updatedVehicle;
     }
 
     // Side effects logic separated from pure validation
