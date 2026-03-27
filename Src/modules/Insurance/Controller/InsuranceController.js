@@ -8,6 +8,7 @@ const {
 const uploadToS3 = require("../../../utils/uploadToS3"); 
 const CountryManager = require("../../CountryManager/Model/CountryManagerModel");
 const Branch = require("../../Branch/Model/BranchModel");
+const Supplier = require("../../Supplier/Model/SupplierModel");
 const { ROLES } = require("../../../shared/constants/roles");
 
 /**
@@ -43,6 +44,14 @@ const createInsurance = async (req, res) => {
             return res.status(400).json({ success: false, message: "Could not determine the country for this user." });
         }
         insuranceData.country = userCountry;
+        
+        // If supplier is provided but provider name is missing, auto-fill from supplier
+        if (insuranceData.supplier && !insuranceData.provider) {
+            const supplierDoc = await Supplier.findById(insuranceData.supplier);
+            if (supplierDoc) {
+                insuranceData.provider = supplierDoc.name;
+            }
+        }
 
         // Create the insurance record first to get its ID for the S3 key
         const newInsurance = await createInsuranceService(insuranceData);
@@ -83,6 +92,9 @@ const getAllInsurances = async (req, res) => {
             }
             options.baseQuery = { country: userCountry };
         }
+        
+        // Ensure supplier is populated
+        options.populate = [{ path: "supplier", select: "name email phone" }];
 
         const result = await getAllInsurancesService(queryParams, options);
         return res.status(200).json({ 
@@ -121,6 +133,9 @@ const getEligibleInsurances = async (req, res) => {
             }
             options.baseQuery.country = userCountry;
         }
+        
+        // Ensure supplier is populated
+        options.populate = [{ path: "supplier", select: "name email phone" }];
 
         const result = await getAllInsurancesService(queryParams, options);
         return res.status(200).json({ 
@@ -147,6 +162,8 @@ const getInsuranceById = async (req, res) => {
     try {
         const insurance = await getInsuranceByIdService(req.params.id);
         if (!insurance) return res.status(404).json({ success: false, message: "Insurance not found" });
+        // Populate supplier if exists (using service already would have populated if repo handles it, but let's be explicit if repo doesn't)
+        if (insurance.populate) await insurance.populate("supplier", "name email phone");
         return res.status(200).json({ success: true, data: insurance });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

@@ -51,6 +51,9 @@ const upload = multer({ storage });
  *             properties:
  *               provider:
  *                 type: string
+ *               supplier:
+ *                 type: string
+ *                 description: Reference ID to a Supplier with category 'Insurance'
  *               policyNumber:
  *                 type: string
  *               policyType:

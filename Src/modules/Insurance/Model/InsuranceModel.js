@@ -5,7 +5,11 @@ const insuranceSchema = new mongoose.Schema(
     {
         provider: {
             type: String,
-            required: true
+            required: false // Optional if supplier is provided
+        },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier"
         },
         policyNumber: {
             type: String,
