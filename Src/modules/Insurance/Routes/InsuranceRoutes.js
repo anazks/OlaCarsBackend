@@ -48,9 +48,6 @@ const upload = multer({ storage });
  *             type: object
  *             required:
  *               - provider
- *               - policyNumber
- *               - startDate
- *               - expiryDate
  *             properties:
  *               provider:
  *                 type: string

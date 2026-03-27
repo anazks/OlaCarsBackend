@@ -3,11 +3,11 @@ const Joi = require("joi");
 const createInsuranceSchema = {
     body: Joi.object({
         provider: Joi.string().trim().required(),
-        policyNumber: Joi.string().trim().required(),
+        policyNumber: Joi.string().trim(),
         policyType: Joi.string().trim().valid("FLEET", "INDIVIDUAL").default("FLEET"),
         coverageType: Joi.string().trim().valid("THIRD_PARTY", "COMPREHENSIVE"),
-        startDate: Joi.date().required(),
-        expiryDate: Joi.date().greater(Joi.ref("startDate")).required(),
+        startDate: Joi.date(),
+        expiryDate: Joi.date().greater(Joi.ref("startDate")),
         insuredValue: Joi.number().min(0),
         country: Joi.string().trim().required(),
         "providerContact.name": Joi.string().trim(),
