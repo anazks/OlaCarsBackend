@@ -244,20 +244,24 @@ const vehicleSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Pre-validate hook to handle empty string VINs
+// Pre-validate hook to handle empty/null VINs
 vehicleSchema.pre("validate", async function () {
-    if (this.basicDetails && this.basicDetails.vin === "") {
+    if (this.basicDetails && (this.basicDetails.vin === "" || this.basicDetails.vin === null)) {
         this.basicDetails.vin = undefined;
     }
 });
 
-// Pre-update hook to handle empty string VINs for findOneAndUpdate
+// Pre-update hook to handle empty/null VINs for findOneAndUpdate
 vehicleSchema.pre("findOneAndUpdate", async function () {
     const update = this.getUpdate();
-    if (update.$set && update.$set["basicDetails.vin"] === "") {
-        update.$set["basicDetails.vin"] = undefined;
-    } else if (update.basicDetails && update.basicDetails.vin === "") {
-        update.basicDetails.vin = undefined;
+    if (update.$set) {
+        if (update.$set["basicDetails.vin"] === "" || update.$set["basicDetails.vin"] === null) {
+            update.$set["basicDetails.vin"] = undefined;
+        }
+    } else if (update.basicDetails) {
+        if (update.basicDetails.vin === "" || update.basicDetails.vin === null) {
+            update.basicDetails.vin = undefined;
+        }
     }
 });
 
