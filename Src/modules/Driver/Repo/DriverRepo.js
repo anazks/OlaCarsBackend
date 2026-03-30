@@ -84,6 +84,12 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
  */
 exports.getDriversService = async (queryParams = {}, options = {}) => {
     try {
+        // Enforce latest first sorting by default if not provided
+        if (!queryParams.sortBy) {
+            queryParams.sortBy = 'createdAt';
+            queryParams.sortOrder = 'desc';
+        }
+
         const queryOptions = {
             searchFields: ["personalInfo.fullName", "personalInfo.email"],
             filterFields: ["status", "branch"],

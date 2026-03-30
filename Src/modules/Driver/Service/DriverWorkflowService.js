@@ -181,8 +181,8 @@ const STATUS_RULES = {
 
     "ACTIVE": {
         allowedFrom: ["CONTRACT PENDING", "SUSPENDED"],
-        allowedRoles: [ROLES.BRANCHMANAGER],
-        minHierarchy: ROLES.COUNTRYMANAGER,
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF],
+        minHierarchy: ROLES.OPERATIONSTAFF,
         gateValidator(driver) {
             if (driver.status === "CONTRACT PENDING") {
                 const c = driver.contract || {};

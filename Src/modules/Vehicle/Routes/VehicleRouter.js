@@ -474,7 +474,12 @@ router.post(
     "/:id/upload-documents",
     authenticate,
     authorize(
-        ROLES.OPERATIONSTAFF
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCESTAFF,
+        ROLES.WORKSHOPSTAFF,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.ADMIN
     ),
     validate(uploadDocumentsSchema),
     upload.fields([
@@ -486,6 +491,7 @@ router.post(
         { name: "roadworthinessCertificate", maxCount: 1 },
         { name: "transferOfOwnership", maxCount: 1 },
         { name: "policyDocument", maxCount: 1 },
+        { name: "insuranceCertificate", maxCount: 1 },
         { name: "customsClearanceCertificate", maxCount: 1 },
         { name: "importPermit", maxCount: 1 },
         { name: "odometerPhoto", maxCount: 1 },
