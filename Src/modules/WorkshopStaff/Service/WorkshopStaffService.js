@@ -54,7 +54,7 @@ exports.login = async (email, password) => {
     delete staffObj.passwordHash;
     delete staffObj.refreshToken;
 
-    return { staff: staffObj, accessToken, refreshToken };
+    return { accessToken, refreshToken, staff: staffObj };
 };
 
 exports.create = async (data) => {

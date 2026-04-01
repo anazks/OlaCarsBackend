@@ -25,15 +25,9 @@ const {
     generateBillHandler,
     releaseVehicleHandler,
 } = require("../Controller/WorkOrderController");
-
-// PRIORITY ROUTES (Specific paths first)
-router.post(
-    "/:id/billing/generate",
-    authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
-    generateBillHandler
-);
-
+const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { ROLES } = require("../../../shared/constants/roles.js");
 const upload = require("../../../utils/multerConfig.js");
 
 /**
@@ -206,7 +200,7 @@ router.get(
  *             properties:
  *               targetStatus:
  *                 type: string
- *                 enum: [DRAFT, PENDING_APPROVAL, START, REJECTED, VEHICLE_CHECKED_IN, PARTS_REQUESTED, PARTS_RECEIVED, IN_PROGRESS, PAUSED, ADDITIONAL_WORK_FOUND, QUALITY_CHECK, FAILED_QC, READY_FOR_RELEASE, VEHICLE_RELEASED, INVOICED, CLOSED, CANCELLED]
+ *                 enum: [DRAFT, APPROVED, REJECTED, VEHICLE_CHECKED_IN, PARTS_REQUESTED, PARTS_RECEIVED, IN_PROGRESS, PAUSED, ADDITIONAL_WORK_FOUND, QUALITY_CHECK, FAILED_QC, READY_FOR_RELEASE, VEHICLE_RELEASED, INVOICED, CLOSED, CANCELLED]
  *               notes:
  *                 type: string
  *               updateData:
@@ -666,7 +660,8 @@ router.put(
 router.post(
     "/:id/photos",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    upload.single("photo"),
     addPhotoHandler
 );
 

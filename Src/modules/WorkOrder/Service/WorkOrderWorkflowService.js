@@ -1,6 +1,7 @@
 const { getWorkOrderById, updateWorkOrder } = require("../Repo/WorkOrderRepo");
 const { WORK_ORDER_STATUSES } = require("../Model/WorkOrderModel");
 const { ROLES } = require("../../../shared/constants/roles");
+const { logLabourEntry } = require("./WorkOrderService");
 
 // ─── Role Hierarchy (mirrors VehicleWorkflowService) ─────────────────
 const ROLE_HIERARCHY = {
@@ -34,27 +35,6 @@ const calculateSlaDeadline = (priority) => {
     return new Date(Date.now() + hours * 60 * 60 * 1000);
 };
 
-// ─── Cost Approval Thresholds ────────────────────────────────────────
-const determineCostApprovalLevel = async (estimatedTotalCost) => {
-    const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo");
-    const workshopThreshold = await getSetting("WORK_ORDER_APPROVAL_THRESHOLD") || 200;
-
-    if (estimatedTotalCost <= workshopThreshold) return "AUTO";
-    if (estimatedTotalCost <= 1000) return "BRANCH";
-    if (estimatedTotalCost <= 5000) return "COUNTRY";
-    return "ADMIN";
-};
-
-const canRoleApproveLevel = (userRole, level) => {
-    const approvalMap = {
-        AUTO: [], // no one needed
-        BRANCH: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
-        COUNTRY: [ROLES.COUNTRYMANAGER],
-        ADMIN: [ROLES.ADMIN],
-    };
-    const allowed = approvalMap[level] || [];
-    return checkRoleAuth(userRole, allowed, allowed[0] || ROLES.ADMIN);
-};
 
 // ─── Status Transition Rules ─────────────────────────────────────────
 
@@ -64,12 +44,21 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
     },
-    START: {
-        allowedFrom: ["DRAFT"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
+
+    APPROVED: {
+        allowedFrom: ["DRAFT", "ADDITIONAL_WORK_FOUND"],
+        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
         minHierarchy: ROLES.ADMIN,
-        gateValidator: async (wo, payload, user) => {
-            return null; // All costs are now auto-approved/startable directly
+    },
+    REJECTED: {
+        allowedFrom: ["DRAFT"],
+        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
+        minHierarchy: ROLES.ADMIN,
+        gateValidator: (wo, payload) => {
+            if (!payload.rejectionReason) {
+                return "Rejection reason is required.";
+            }
+            return null;
         },
     },
     VEHICLE_CHECKED_IN: {
@@ -77,7 +66,8 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
-            if (!payload.odometerAtEntry && !wo.odometerAtEntry) {
+            const vehicleOdo = wo.vehicleId?.basicDetails?.odometer;
+            if (!payload.odometerAtEntry && !wo.odometerAtEntry && !vehicleOdo) {
                 return "Odometer reading at entry is required for vehicle check-in.";
             }
             return null;
@@ -89,6 +79,12 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
             const parts = payload.parts || wo.parts || [];
+            const tasks = payload.tasks || wo.tasks || [];
+            
+            if (!tasks.length) {
+                return "At least one task must be defined before requesting parts.";
+            }
+
             if (!parts.length) {
                 return "At least one part must be listed before requesting parts.";
             }
@@ -172,17 +168,9 @@ const STATUS_RULES = {
                     return `${mandatoryFails.length} mandatory QC item(s) failed. Cannot release vehicle.`;
                 }
             }
-
-            // Validate Dynamic Photo Requirements
-            const requiredPhotos = wo.requiredPhotos || [];
-            const uploadedPhotos = wo.photos || [];
-            
-            const missingMandatory = requiredPhotos.filter(rp => 
-                rp.isMandatory && !uploadedPhotos.some(up => up.caption === rp.label)
-            );
-
-            if (missingMandatory.length > 0) {
-                return `The following mandatory photos are missing: ${missingMandatory.map(m => m.label).join(", ")}`;
+            const photos = wo.photos || [];
+            if (photos.length < 4) {
+                return `Minimum 4 QC/repair photos required. Currently ${photos.length} uploaded.`;
             }
 
             return null;
@@ -216,8 +204,8 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     CANCELLED: {
-        allowedFrom: ["DRAFT", "START"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
+        allowedFrom: ["DRAFT", "APPROVED", "REJECTED"],
+        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (wo, payload) => {
             if (!payload.cancellationReason) {
@@ -231,10 +219,6 @@ const STATUS_RULES = {
 // ─── Side Effects ────────────────────────────────────────────────────
 
 const triggerSideEffects = async (targetStatus, workOrder, user) => {
-    if (targetStatus === "START") {
-        // Since we removed PENDING_APPROVAL, we just ensure START is processed.
-        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} started. Processing side effects.`);
-    }
 
     if (targetStatus === "START") {
         console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} approved (START). Ready for vehicle check-in.`);
@@ -320,6 +304,28 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
             console.log(`[WorkOrder] Cost increase >20% detected on WO ${workOrder.workOrderNumber}. Re-approval required.`);
         }
     }
+
+    // ── Automated Labour Tracking ──
+    try {
+        if (targetStatus === "IN_PROGRESS") {
+            console.log(`[WorkOrder] Auto-clocking IN for technician ${user.id} on WO ${workOrder.workOrderNumber}`);
+            await logLabourEntry(workOrder._id, {
+                technicianId: user.id,
+                action: "CLOCK_IN",
+                notes: "Automated clock-in on IN_PROGRESS status transition"
+            });
+        } else if (targetStatus === "QUALITY_CHECK") {
+            console.log(`[WorkOrder] Auto-clocking OUT for technician ${user.id} on WO ${workOrder.workOrderNumber}`);
+            await logLabourEntry(workOrder._id, {
+                technicianId: user.id,
+                action: "CLOCK_OUT",
+                notes: "Automated clock-out on QUALITY_CHECK status transition"
+            });
+        }
+    } catch (labourError) {
+        // Log error but don't fail the status transition (optional fallback)
+        console.error(`[WorkOrder] Failed to automate labour log: ${labourError.message}`);
+    }
 };
 
 // ─── Main Workflow Engine ────────────────────────────────────────────
@@ -385,7 +391,7 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
             approvedBy: user.id,
             approvedByRole: user.role,
             approvedAt: new Date(),
-            thresholdLevel: await determineCostApprovalLevel(currentWO.estimatedTotalCost),
+            thresholdLevel: "NONE",
         };
     }
 
@@ -394,9 +400,13 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
         payload.rejectionReason = payload.rejectionReason;
     }
 
-    // Set pause reason
-    if (targetStatus === "PAUSED") {
-        payload.pauseReason = payload.pauseReason || payload.notes;
+    // Auto-populate odometerAtEntry for VEHICLE_CHECKED_IN if missing
+    if (targetStatus === "VEHICLE_CHECKED_IN" && !payload.odometerAtEntry && !currentWO.odometerAtEntry) {
+        const vehicleOdo = currentWO.vehicleId?.basicDetails?.odometer;
+        if (vehicleOdo) {
+            payload.odometerAtEntry = vehicleOdo;
+            console.log(`[WorkOrder] Auto-populating odometerAtEntry from vehicle: ${vehicleOdo}`);
+        }
     }
 
     // ── Apply status change ──────────────────────────────────────
@@ -422,6 +432,5 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
 module.exports = {
     processWorkOrderProgress,
     STATUS_RULES,
-    determineCostApprovalLevel,
     calculateSlaDeadline,
 };

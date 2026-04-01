@@ -11,6 +11,7 @@ const {
     logLabourEntry,
 } = require("../Service/WorkOrderService");
 const uploadToS3 = require("../../../utils/uploadToS3");
+const crypto = require("crypto");
 
 /**
  * Create a new Work Order (DRAFT).
@@ -30,8 +31,8 @@ const createWorkOrderHandler = async (req, res) => {
             data.slaDeadline = calculateSlaDeadline(data.priority);
         }
 
-        // Auto-calculate estimated total cost
-        if (data.estimatedLabourHours && data.estimatedPartsCost) {
+        // Auto-calculate estimated total cost if not manually provided
+        if (!data.estimatedTotalCost && data.estimatedLabourHours && data.estimatedPartsCost) {
             const labourRate = 50; // default hourly rate — can be made configurable
             data.estimatedTotalCost = (data.estimatedLabourHours * labourRate) + data.estimatedPartsCost;
         }
@@ -261,10 +262,49 @@ const submitQcHandler = async (req, res) => {
  */
 const addPhotoHandler = async (req, res) => {
     try {
+        // Detailed debug logging
+        console.log("─── PHOTO UPLOAD DEBUG START ───");
+        console.log("Headers:", req.headers["content-type"]);
+        console.log("Params ID:", req.params.id);
+        console.log("Body Fields:", Object.keys(req.body || {}));
+        console.log("File Exists:", !!req.file);
+        if (req.file) {
+            console.log("File Info:", {
+                fieldname: req.file.fieldname,
+                originalname: req.file.originalname,
+                mimetype: req.file.mimetype,
+                size: req.file.size
+            });
+        }
+        console.log("─── PHOTO UPLOAD DEBUG END ───");
+
+        const body = req.body || {};
+        let photoUrl = body.url;
+
+        // If file is uploaded via multipart/form-data
+        if (req.file) {
+            const ext = req.file.originalname.split(".").pop();
+            const filename = crypto.randomBytes(16).toString("hex") + "." + ext;
+            const key = `work-orders/${req.params.id}/photos/${filename}`;
+            const uploadedKey = await uploadToS3(req.file, key);
+
+            // Build S3 URL
+            const bucket = process.env.AWS_BUCKET_NAME;
+            const region = process.env.AWS_REGION;
+            photoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${uploadedKey}`;
+        }
+
+        if (!photoUrl) {
+            return res.status(400).json({
+                success: false,
+                message: "Photo file or URL is required. (Check if 'photo' field is sent in FormData)"
+            });
+        }
+
         const photoData = {
-            url: req.body.url,
-            caption: req.body.caption,
-            stage: req.body.stage,
+            url: photoUrl,
+            caption: body.caption || "",
+            stage: body.stage || "IN_PROGRESS",
             uploadedBy: req.user.id,
         };
         const wo = await addWorkOrderPhoto(req.params.id, photoData);

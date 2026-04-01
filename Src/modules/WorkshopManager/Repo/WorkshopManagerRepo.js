@@ -1,15 +1,14 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopManager = require("../Model/WorkshopManagerModel.js");
-const { jwtConfig } = require("../../../config/jwtConfig.js");
-const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+const { jwtConfig  } = require("../../../config/jwtConfig.js");
 
 /**
- * Adds a new Workshop Manager to the database.
- * @param {Object} data - Workshop Manager details.
- * @returns {Promise<Object>} Added Workshop Manager object.
+ * Adds a new Workshop Manager.
+ * @param {Object} data - Manager details.
+ * @returns {Promise<Object>} Added manager document.
  */
-exports.addWorkshopManagerRepo = async (data) => {
+exports.addWorkshopManagerService = async (data) => {
     try {
         const hashedPassword = await bcrypt.hash(data.password, 12);
         const newManager = await WorkshopManager.create({
@@ -17,7 +16,6 @@ exports.addWorkshopManagerRepo = async (data) => {
             passwordHash: hashedPassword,
         });
 
-        // Remove password hash from response
         const managerObj = newManager.toObject();
         delete managerObj.passwordHash;
 
@@ -28,15 +26,14 @@ exports.addWorkshopManagerRepo = async (data) => {
 };
 
 /**
- * Updates an existing Workshop Manager.
- * @param {Object} data - Updated field details including ID.
- * @returns {Promise<Object>} Updated Workshop Manager object.
+ * Updates a Workshop Manager.
+ * @param {Object} data - Update payload containing ID.
+ * @returns {Promise<Object>} Updated manager document.
  */
-exports.editWorkshopManagerRepo = async (data) => {
+exports.editWorkshopManagerService = async (data) => {
     try {
         const { id, ...updateData } = data;
-        const updatedManager = await WorkshopManager.findByIdAndUpdate(id, updateData, { new: true });
-        return updatedManager;
+        return await WorkshopManager.findByIdAndUpdate(id, updateData, { new: true });
     } catch (error) {
         throw error;
     }
@@ -44,10 +41,10 @@ exports.editWorkshopManagerRepo = async (data) => {
 
 /**
  * Soft deletes a Workshop Manager.
- * @param {string} id - The ID to delete.
+ * @param {string} id - ID to delete.
  * @returns {Promise<void>}
  */
-exports.deleteWorkshopManagerRepo = async (id) => {
+exports.deleteWorkshopManagerService = async (id) => {
     try {
         await WorkshopManager.findByIdAndUpdate(id, { isDeleted: true });
     } catch (error) {
@@ -55,56 +52,49 @@ exports.deleteWorkshopManagerRepo = async (id) => {
     }
 };
 
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+
 /**
  * Retrieves all Workshop Managers using generic query features.
  * @param {Object} queryParams - Raw query parameters from req.query.
- * @param {Object} [options={}] - Additional options like baseQuery or overrides.
+ * @param {Object} [options={}] - Additional options like baseQuery.
  * @returns {Promise<Object>} Paginated result
  */
-exports.getWorkshopManagersRepo = async (queryParams = {}, options = {}) => {
-  try {
-    const queryOptions = {
-        searchFields: ["fullName", "email"],
-        filterFields: ["status", "branchId"],
-        dateFilterField: "createdAt",
-        ...options
-    };
-
-    return await applyQueryFeatures(WorkshopManager, queryParams, queryOptions);
-  } catch (error) {
-    throw error;
-  }
-};
-
-exports.getWorkshopManagerByIdRepo = async (id) => {
+exports.getWorkshopManagerService = async (queryParams = {}, options = {}) => {
     try {
-        const manager = await WorkshopManager.findOne({ _id: id, isDeleted: false });
-        if (!manager) return null;
-
-        const roleMapping = {
-            'ADMIN': 'Admin',
-            'OPERATIONADMIN': 'OperationalAdmin',
-            'FINANCEADMIN': 'FinanceAdmin',
-            'COUNTRYMANAGER': 'CountryManager',
-            'BRANCHMANAGER': 'BranchManager'
+        const queryOptions = {
+            searchFields: ["fullName", "email"],
+            filterFields: ["status", "branchId"],
+            dateFilterField: "createdAt",
+            ...options
         };
 
-        const modelName = roleMapping[manager.creatorRole];
-        if (modelName) {
-            await manager.populate({
-                path: 'createdBy',
-                model: modelName,
-                select: 'name fullName email role'
-            });
-        }
-
-        return manager;
+        return await applyQueryFeatures(WorkshopManager, queryParams, queryOptions);
     } catch (error) {
         throw error;
     }
 };
 
-exports.loginWorkshopManagerRepo = async (email, password) => {
+/**
+ * Retrieves a Workshop Manager by ID.
+ * @param {string} id - The ID.
+ * @returns {Promise<Object>}
+ */
+exports.getWorkshopManagerByIdService = async (id) => {
+    try {
+        return await WorkshopManager.findOne({ _id: id, isDeleted: false });
+    } catch (error) {
+        throw error;
+    }
+};
+
+/**
+ * Handles Workshop Manager login.
+ * @param {string} email - Email address.
+ * @param {string} password - Password.
+ * @returns {Promise<Object>} Tokens.
+ */
+exports.loginWorkshopManager = async (email, password) => {
     const manager = await WorkshopManager.findOne({ email, isDeleted: false });
     if (!manager) throw new Error("Invalid credentials");
 
@@ -125,7 +115,8 @@ exports.loginWorkshopManagerRepo = async (email, password) => {
     );
 
     manager.refreshToken = refreshToken;
+    manager.lastLoginAt = new Date();
     await manager.save();
 
-    return { manager, accessToken, refreshToken };
+    return { accessToken, refreshToken };
 };

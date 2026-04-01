@@ -65,7 +65,7 @@ const workshopStaffSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: ['BRANCHMANAGER', 'ADMIN', 'OPERATIONADMIN', 'COUNTRYMANAGER']
+            enum: ['BRANCHMANAGER', 'ADMIN', 'OPERATIONADMIN', 'COUNTRYMANAGER', 'WORKSHOPMANAGER']
         }
     },
     {

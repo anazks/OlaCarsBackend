@@ -4,7 +4,8 @@ const { ROLES } = require("../../../shared/constants/roles");
 // ─── Enums ───────────────────────────────────────────────────────────
 const WORK_ORDER_STATUSES = [
     "DRAFT",
-    "START",
+    "APPROVED",
+    "REJECTED",
     "VEHICLE_CHECKED_IN",
     "PARTS_REQUESTED",
     "PARTS_RECEIVED",
@@ -169,7 +170,7 @@ const workOrderSchema = new mongoose.Schema(
             approvedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "costApproval.approvedByRole" },
             approvedByRole: { type: String },
             approvedAt: { type: Date },
-            thresholdLevel: { type: String, enum: ["AUTO", "BRANCH", "COUNTRY", "ADMIN"] },
+            thresholdLevel: { type: String, enum: ["AUTO", "BRANCH", "COUNTRY", "ADMIN", "NONE"] },
             rejectionReason: { type: String },
         },
 
@@ -242,7 +243,7 @@ workOrderSchema.index({ priority: 1, slaDeadline: 1 });
 workOrderSchema.index({ assignedTechnician: 1 });
 
 module.exports = {
-    WorkOrder: mongoose.model("WorkOrder", workOrderSchema),
+    WorkOrder: mongoose.models.WorkOrder || mongoose.model("WorkOrder", workOrderSchema),
     WORK_ORDER_STATUSES,
     WORK_ORDER_TYPES,
     PRIORITIES,

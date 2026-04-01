@@ -122,8 +122,8 @@ const approveBill = async (billId, user) => {
     const bill = await getBillById(billId);
     if (!bill) throw new Error("Service bill not found.", { cause: 404 });
 
-    if (bill.status !== "PENDING_APPROVAL" && bill.status !== "DRAFT") {
-        throw new Error(`Bill must be in DRAFT or PENDING_APPROVAL state. Current: ${bill.status}`, { cause: 400 });
+    if (bill.status !== "DRAFT") {
+        throw new Error(`Bill must be in DRAFT state. Current: ${bill.status}`, { cause: 400 });
     }
 
     return await updateBill(billId, {

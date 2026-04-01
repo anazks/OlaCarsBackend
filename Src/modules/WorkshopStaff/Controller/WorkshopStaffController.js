@@ -32,7 +32,7 @@ const getWorkshopStaff = async (req, res) => {
     try {
         const queryParams = { ...req.query };
         const options = {};
-        
+
         // If user is COUNTRYMANAGER, restrict staff to branches in their country
         const BranchService = require('../../Branch/Service/BranchService.js');
         if (req.user.role === 'COUNTRYMANAGER' && req.user.country) {
@@ -42,8 +42,8 @@ const getWorkshopStaff = async (req, res) => {
         }
 
         const result = await WorkshopStaffService.getAll(queryParams, options);
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
