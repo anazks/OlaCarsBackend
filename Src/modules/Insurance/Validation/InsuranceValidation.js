@@ -2,8 +2,7 @@ const Joi = require("joi");
 
 const createInsuranceSchema = {
     body: Joi.object({
-        provider: Joi.string().trim(),
-        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
         policyNumber: Joi.string().trim(),
         policyType: Joi.string().trim().valid("FLEET", "INDIVIDUAL").default("FLEET"),
         coverageType: Joi.string().trim().valid("THIRD_PARTY", "COMPREHENSIVE"),
@@ -22,7 +21,7 @@ const updateInsuranceSchema = {
         id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
     }),
     body: Joi.object({
-        provider: Joi.string().trim(),
+        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         policyNumber: Joi.string().trim(),
         policyType: Joi.string().trim().valid("FLEET", "INDIVIDUAL"),
         coverageType: Joi.string().trim().valid("THIRD_PARTY", "COMPREHENSIVE"),

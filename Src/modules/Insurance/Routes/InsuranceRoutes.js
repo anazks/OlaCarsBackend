@@ -44,13 +44,9 @@ const upload = multer({ storage });
  *     requestBody:
  *       content:
  *         multipart/form-data:
- *           schema:
- *             type: object
  *             required:
- *               - provider
+ *               - supplier
  *             properties:
- *               provider:
- *                 type: string
  *               supplier:
  *                 type: string
  *                 description: Reference ID to a Supplier with category 'Insurance'

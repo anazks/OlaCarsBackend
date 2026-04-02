@@ -28,7 +28,7 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
     try {
         const queryOptions = {
-            searchFields: ["provider", "policyNumber"],
+            searchFields: ["policyNumber"],
             filterFields: ["status", "policyType", "coverageType", "country"],
             dateFilterField: "createdAt",
             populate: { path: "vehicles" },

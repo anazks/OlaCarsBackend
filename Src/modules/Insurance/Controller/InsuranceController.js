@@ -45,14 +45,6 @@ const createInsurance = async (req, res) => {
         }
         insuranceData.country = userCountry;
         
-        // If supplier is provided but provider name is missing, auto-fill from supplier
-        if (insuranceData.supplier && !insuranceData.provider) {
-            const supplierDoc = await Supplier.findById(insuranceData.supplier);
-            if (supplierDoc) {
-                insuranceData.provider = supplierDoc.name;
-            }
-        }
-
         // Create the insurance record first to get its ID for the S3 key
         const newInsurance = await createInsuranceService(insuranceData);
 

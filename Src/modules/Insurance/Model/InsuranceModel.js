@@ -3,13 +3,10 @@ const { ROLES } = require("../../../shared/constants/roles"); // Adjust path if 
 
 const insuranceSchema = new mongoose.Schema(
     {
-        provider: {
-            type: String,
-            required: false // Optional if supplier is provided
-        },
         supplier: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "Supplier"
+            ref: "Supplier",
+            required: true
         },
         policyNumber: {
             type: String,
