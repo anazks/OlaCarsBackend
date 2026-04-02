@@ -169,6 +169,7 @@ const driverSchema = new mongoose.Schema(
 
         // ── 11. Activation ───────────────────────────────────────────
         activation: {
+            checklistDocument: { type: String }, // S3 key
             credentialsSent: { type: Boolean, default: false },
             gpsMonitoringActive: { type: Boolean, default: false },
             activatedDate: { type: Date },

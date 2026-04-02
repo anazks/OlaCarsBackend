@@ -17,6 +17,7 @@ const S3_FIELD_MAP = {
     consentForm: "creditCheck.consentForm",
     contractPDF: "contract.generatedS3Key",
     signedContract: "contract.signedS3Key",
+    activationChecklistDocument: "activation.checklistDocument",
 };
 
 /**
