@@ -72,12 +72,28 @@ const removeTask = async (woId, taskId) => {
 /**
  * Add a part to a work order.
  * @param {string} woId
- * @param {Object} partData - { partName, partNumber, quantity, unitCost, source }
+ * @param {Object} partData - { partName, partNumber, quantity, unitCost, source, inventoryPartId }
+ * @param {Object} user - Performing user { id, role }
  * @returns {Promise<Object>}
  */
-const addPart = async (woId, partData) => {
+const addPart = async (woId, partData, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
+
+    // If inventoryPartId is provided and source is IN_STOCK, try to reserve
+    if (partData.inventoryPartId && partData.source === "IN_STOCK") {
+        const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
+        const result = await checkAndReserve(partData.inventoryPartId, partData.quantity, user, woId);
+        
+        if (result.success) {
+            partData.status = "RESERVED";
+            // Sync current cost from inventory if not provided
+            if (!partData.unitCost) partData.unitCost = result.part.unitCost;
+        } else {
+            // If shortfall, we still add it but keep as REQUESTED
+            partData.status = "REQUESTED";
+        }
+    }
 
     // Auto-calculate totalCost
     partData.totalCost = (partData.quantity || 0) * (partData.unitCost || 0);
@@ -93,17 +109,50 @@ const addPart = async (woId, partData) => {
 
 /**
  * Update a specific part within a work order.
+ * Handles inventory synchronization based on status changes.
  * @param {string} woId
  * @param {string} partId - Sub-document _id
  * @param {Object} updates - { status, quantity, unitCost, receivedDate, installedBy }
+ * @param {Object} user - Performing user { id, role }
  * @returns {Promise<Object>}
  */
-const updatePart = async (woId, partId, updates) => {
+const updatePart = async (woId, partId, updates, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
     const part = wo.parts.id(partId);
     if (!part) throw new Error("Part not found.", { cause: 404 });
+
+    const oldStatus = part.status;
+    const newStatus = updates.status;
+
+    // Handle Inventory Transitions
+    if (part.inventoryPartId && newStatus && oldStatus !== newStatus) {
+        const {
+            checkAndReserve,
+            releaseReservation,
+            confirmInstallation,
+            confirmReturn,
+        } = require("../../Inventory/Service/InventoryService");
+
+        // REQUESTED -> RESERVED
+        if (oldStatus === "REQUESTED" && newStatus === "RESERVED") {
+            const result = await checkAndReserve(part.inventoryPartId, part.quantity, user, woId);
+            if (!result.success) throw new Error(result.message, { cause: 400 });
+        }
+        // RESERVED -> INSTALLED
+        else if (oldStatus === "RESERVED" && newStatus === "INSTALLED") {
+            await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
+        }
+        // RESERVED -> REQUESTED (Cancel reservation)
+        else if (oldStatus === "RESERVED" && newStatus === "REQUESTED") {
+            await releaseReservation(part.inventoryPartId, part.quantity, user, woId);
+        }
+        // INSTALLED -> RETURNED (Returning to stock after having been installed)
+        else if (oldStatus === "INSTALLED" && newStatus === "RETURNED") {
+            await confirmReturn(part.inventoryPartId, part.quantity, user, woId);
+        }
+    }
 
     if (updates.status) part.status = updates.status;
     if (updates.quantity !== undefined) part.quantity = updates.quantity;
@@ -123,19 +172,29 @@ const updatePart = async (woId, partId, updates) => {
 };
 
 /**
- * Remove a part from a work order (only if REQUESTED).
+ * Remove a part from a work order.
+ * Releases inventory reservation if necessary.
  * @param {string} woId
  * @param {string} partId
+ * @param {Object} user - Performing user { id, role }
  * @returns {Promise<Object>}
  */
-const removePart = async (woId, partId) => {
+const removePart = async (woId, partId, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
     const part = wo.parts.id(partId);
     if (!part) throw new Error("Part not found.", { cause: 404 });
-    if (part.status !== "REQUESTED") {
-        throw new Error("Only REQUESTED parts can be removed.", { cause: 400 });
+
+    // Release reservation if it was reserved
+    if (part.inventoryPartId && part.status === "RESERVED") {
+        const { releaseReservation } = require("../../Inventory/Service/InventoryService");
+        await releaseReservation(part.inventoryPartId, part.quantity, user, woId);
+    }
+
+    // Only allow removal if not yet INSTALLED (unless specifically handled)
+    if (part.status === "INSTALLED") {
+        throw new Error("Cannot remove a part that has already been installed. Return it first.", { cause: 400 });
     }
 
     wo.parts.pull(partId);

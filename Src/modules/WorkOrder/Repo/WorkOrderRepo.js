@@ -1,4 +1,44 @@
+const mongoose = require("mongoose");
 const { WorkOrder } = require("../Model/WorkOrderModel");
+
+/**
+ * Retrieves all pending part requirements for a branch.
+ * @param {string} branchId
+ * @returns {Promise<Array>}
+ */
+exports.getWorkshopPartRequirements = async (branchId) => {
+    try {
+        const results = await WorkOrder.aggregate([
+            {
+                $match: {
+                    branchId: new mongoose.Types.ObjectId(branchId),
+                    isDeleted: false,
+                    status: { $nin: ["CLOSED", "CANCELLED", "VEHICLE_RELEASED"] },
+                },
+            },
+            { $unwind: "$parts" },
+            { $match: { "parts.status": { $in: ["REQUESTED", "RESERVED"] } } },
+            {
+                $project: {
+                    workOrderId: "$_id",
+                    workOrderNumber: 1,
+                    vehicleId: 1,
+                    partName: "$parts.partName",
+                    partNumber: "$parts.partNumber",
+                    quantity: "$parts.quantity",
+                    status: "$parts.status",
+                    inventoryPartId: "$parts.inventoryPartId",
+                    source: "$parts.source",
+                    requestedAt: "$parts.createdAt", // if available, or just use WO createdAt
+                },
+            },
+            { $sort: { createdAt: 1 } },
+        ]);
+        return results;
+    } catch (error) {
+        throw error;
+    }
+};
 
 /**
  * Helper to recursively flatten an object into dot-notation for MongoDB $set.

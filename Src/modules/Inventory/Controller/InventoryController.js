@@ -4,10 +4,16 @@ const {
     getPartById,
     updatePart,
     deletePart,
-    restockPart,
     getLowStockParts,
 } = require("../Repo/InventoryPartRepo");
-const { checkAndReserve, releaseReservation, confirmInstallation } = require("../Service/InventoryService");
+const { 
+    checkAndReserve, 
+    releaseReservation, 
+    confirmInstallation, 
+    receiveStock 
+} = require("../Service/InventoryService");
+const { getWorkshopPartRequirements } = require("../../WorkOrder/Repo/WorkOrderRepo");
+const { PartTransaction } = require("../Model/PartTransactionModel");
 
 /**
  * Create a new inventory part.
@@ -92,7 +98,7 @@ const restockPartHandler = async (req, res) => {
         if (!quantity || quantity <= 0) {
             return res.status(400).json({ success: false, message: "Quantity must be greater than 0" });
         }
-        const part = await restockPart(req.params.id, quantity);
+        const part = await receiveStock(req.params.id, quantity, req.user);
         if (!part) return res.status(404).json({ success: false, message: "Part not found" });
         return res.status(200).json({ success: true, data: part });
     } catch (error) {
@@ -106,11 +112,11 @@ const restockPartHandler = async (req, res) => {
  */
 const reserveStockHandler = async (req, res) => {
     try {
-        const { quantity } = req.body;
+        const { quantity, workOrderId } = req.body;
         if (!quantity || quantity <= 0) {
             return res.status(400).json({ success: false, message: "Quantity must be greater than 0" });
         }
-        const result = await checkAndReserve(req.params.id, quantity);
+        const result = await checkAndReserve(req.params.id, quantity, req.user, workOrderId);
         if (!result.success) {
             return res.status(400).json({ success: false, message: result.message, shortfall: result.shortfall });
         }
@@ -127,8 +133,8 @@ const reserveStockHandler = async (req, res) => {
  */
 const releaseStockHandler = async (req, res) => {
     try {
-        const { quantity } = req.body;
-        const part = await releaseReservation(req.params.id, quantity);
+        const { quantity, workOrderId } = req.body;
+        const part = await releaseReservation(req.params.id, quantity, req.user, workOrderId);
         return res.status(200).json({ success: true, data: part });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -141,8 +147,8 @@ const releaseStockHandler = async (req, res) => {
  */
 const installPartHandler = async (req, res) => {
     try {
-        const { quantity } = req.body;
-        const part = await confirmInstallation(req.params.id, quantity);
+        const { quantity, workOrderId } = req.body;
+        const part = await confirmInstallation(req.params.id, quantity, req.user, workOrderId);
         return res.status(200).json({ success: true, data: part });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -162,6 +168,38 @@ const getLowStockHandler = async (req, res) => {
     }
 };
 
+/**
+ * Get transaction history for a specific part.
+ * @route GET /api/inventory/:id/transactions
+ */
+const getPartTransactionsHandler = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const transactions = await PartTransaction.find({ partId: id })
+            .populate("performedBy", "name")
+            .populate("workOrderId", "workOrderNumber")
+            .sort({ createdAt: -1 });
+        
+        return res.status(200).json({ success: true, data: transactions });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Get all pending part requirements for a branch.
+ * @route GET /api/inventory/workshop-requirements/:branchId
+ */
+const getWorkshopRequirementsHandler = async (req, res) => {
+    try {
+        const { branchId } = req.params;
+        const requirements = await getWorkshopPartRequirements(branchId);
+        return res.status(200).json({ success: true, data: requirements });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     createPartHandler,
     getPartsHandler,
@@ -173,4 +211,6 @@ module.exports = {
     releaseStockHandler,
     installPartHandler,
     getLowStockHandler,
+    getPartTransactionsHandler,
+    getWorkshopRequirementsHandler,
 };

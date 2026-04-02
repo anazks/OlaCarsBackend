@@ -181,3 +181,16 @@ exports.getLowStockParts = async (branchId) => {
         throw error;
     }
 };
+
+/**
+ * Return parts to stock (physical return after installation or similar).
+ * @param {string} partId
+ * @param {number} qty
+ */
+exports.returnToStock = async (partId, qty) => {
+    return await InventoryPart.findByIdAndUpdate(
+        partId,
+        { $inc: { quantityOnHand: qty } },
+        { new: true }
+    );
+};

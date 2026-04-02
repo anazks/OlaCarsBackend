@@ -156,7 +156,7 @@ const removeTaskHandler = async (req, res) => {
  */
 const addPartHandler = async (req, res) => {
     try {
-        const wo = await addPart(req.params.id, req.body);
+        const wo = await addPart(req.params.id, req.body, req.user);
         return res.status(201).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -170,7 +170,7 @@ const addPartHandler = async (req, res) => {
  */
 const updatePartHandler = async (req, res) => {
     try {
-        const wo = await updatePart(req.params.id, req.params.partId, req.body);
+        const wo = await updatePart(req.params.id, req.params.partId, req.body, req.user);
         return res.status(200).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -184,7 +184,7 @@ const updatePartHandler = async (req, res) => {
  */
 const removePartHandler = async (req, res) => {
     try {
-        const wo = await removePart(req.params.id, req.params.partId);
+        const wo = await removePart(req.params.id, req.params.partId, req.user);
         return res.status(200).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;

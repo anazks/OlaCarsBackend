@@ -371,4 +371,54 @@ router.put(
     installPartHandler
 );
 
+/**
+ * @swagger
+ * /api/inventory/{id}/transactions:
+ *   get:
+ *     summary: Get transaction history for a part
+ *     tags: [Inventory]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of transactions
+ */
+router.get(
+    "/:id/transactions",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    getPartTransactionsHandler
+);
+
+/**
+ * @swagger
+ * /api/inventory/workshop-requirements/{branchId}:
+ *   get:
+ *     summary: Get all pending part requirements for a workshop (branch)
+ *     tags: [Inventory]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: branchId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of pending parts from active work orders
+ */
+router.get(
+    "/workshop-requirements/:branchId",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    getWorkshopRequirementsHandler
+);
+
 module.exports = router;
