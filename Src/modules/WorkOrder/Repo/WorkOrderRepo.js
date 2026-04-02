@@ -16,20 +16,45 @@ exports.getWorkshopPartRequirements = async (branchId) => {
                     status: { $nin: ["CLOSED", "CANCELLED", "VEHICLE_RELEASED"] },
                 },
             },
-            { $unwind: "$parts" },
-            { $match: { "parts.status": { $in: ["REQUESTED", "RESERVED"] } } },
+            {
+                $lookup: {
+                    from: "vehicles",
+                    localField: "vehicleId",
+                    foreignField: "_id",
+                    as: "vehicle",
+                },
+            },
+            { $unwind: { path: "$vehicle", preserveNullAndEmptyArrays: true } },
+            {
+                $addFields: {
+                    vehicleLabel: {
+                        $concat: [
+                            { $ifNull: ["$vehicle.basicDetails.make", "Unknown"] },
+                            " ",
+                            { $ifNull: ["$vehicle.basicDetails.model", "Vehicle"] },
+                            " (",
+                            { $ifNull: ["$vehicle.legalDocs.registrationNumber", "N/A"] },
+                            ")",
+                        ],
+                    },
+                    parts: {
+                        $filter: {
+                            input: "$parts",
+                            as: "part",
+                            cond: { $in: ["$$part.status", ["REQUESTED", "RESERVED"]] },
+                        },
+                    },
+                },
+            },
+            { $match: { "parts.0": { $exists: true } } },
             {
                 $project: {
-                    workOrderId: "$_id",
                     workOrderNumber: 1,
-                    vehicleId: 1,
-                    partName: "$parts.partName",
-                    partNumber: "$parts.partNumber",
-                    quantity: "$parts.quantity",
-                    status: "$parts.status",
-                    inventoryPartId: "$parts.inventoryPartId",
-                    source: "$parts.source",
-                    requestedAt: "$parts.createdAt", // if available, or just use WO createdAt
+                    workOrderType: 1,
+                    status: 1,
+                    vehicleLabel: 1,
+                    parts: 1,
+                    createdAt: 1,
                 },
             },
             { $sort: { createdAt: 1 } },

@@ -88,7 +88,8 @@ router.post(
         ROLES.OPERATIONSTAFF,
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
-        ROLES.ADMIN
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
     ),
     createWorkOrderHandler
 );
@@ -189,7 +190,7 @@ router.get(
  *             properties:
  *               targetStatus:
  *                 type: string
- *                 enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, VEHICLE_CHECKED_IN, PARTS_REQUESTED, PARTS_RECEIVED, IN_PROGRESS, PAUSED, ADDITIONAL_WORK_FOUND, QUALITY_CHECK, FAILED_QC, READY_FOR_RELEASE, VEHICLE_RELEASED, INVOICED, CLOSED, CANCELLED]
+ *                 enum: [DRAFT, PENDING_APPROVAL, START, REJECTED, VEHICLE_CHECKED_IN, PARTS_REQUESTED, PARTS_RECEIVED, IN_PROGRESS, PAUSED, ADDITIONAL_WORK_FOUND, QUALITY_CHECK, FAILED_QC, READY_FOR_RELEASE, VEHICLE_RELEASED, INVOICED, CLOSED, CANCELLED]
  *               notes:
  *                 type: string
  *               updateData:
@@ -214,7 +215,8 @@ router.put(
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
         ROLES.FINANCEADMIN,
-        ROLES.ADMIN
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
     ),
     progressWorkOrderStatusHandler
 );
@@ -264,7 +266,7 @@ router.put(
 router.post(
     "/:id/tasks",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     addTaskHandler
 );
 
@@ -310,7 +312,7 @@ router.post(
 router.put(
     "/:id/tasks/:taskId",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     updateTaskHandler
 );
 
@@ -340,7 +342,7 @@ router.put(
 router.delete(
     "/:id/tasks/:taskId",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     removeTaskHandler
 );
 
@@ -391,7 +393,7 @@ router.delete(
 router.post(
     "/:id/parts",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     addPartHandler
 );
 
@@ -443,7 +445,7 @@ router.post(
 router.put(
     "/:id/parts/:partId",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     updatePartHandler
 );
 
@@ -473,7 +475,7 @@ router.put(
 router.delete(
     "/:id/parts/:partId",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     removePartHandler
 );
 
@@ -527,7 +529,7 @@ router.delete(
 router.post(
     "/:id/labour",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     logLabourHandler
 );
 
@@ -556,7 +558,7 @@ router.post(
 router.post(
     "/:id/qc/generate",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     generateQcHandler
 );
 
@@ -602,7 +604,7 @@ router.post(
 router.put(
     "/:id/qc/submit",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     submitQcHandler
 );
 
@@ -648,7 +650,7 @@ router.put(
 router.post(
     "/:id/photos",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     addPhotoHandler
 );
 
@@ -692,7 +694,7 @@ router.post(
 router.put(
     "/:id/release",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     releaseVehicleHandler
 );
 

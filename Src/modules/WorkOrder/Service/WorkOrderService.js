@@ -71,6 +71,8 @@ const removeTask = async (woId, taskId) => {
 
 /**
  * Add a part to a work order.
+ * If the part is linked to inventory (inventoryPartId provided), stock is
+ * deducted immediately and status is set to INSTALLED.
  * @param {string} woId
  * @param {Object} partData - { partName, partNumber, quantity, unitCost, source, inventoryPartId }
  * @param {Object} user - Performing user { id, role }
@@ -80,17 +82,27 @@ const addPart = async (woId, partData, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
-    // If inventoryPartId is provided and source is IN_STOCK, try to reserve
-    if (partData.inventoryPartId && partData.source === "IN_STOCK") {
-        const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
-        const result = await checkAndReserve(partData.inventoryPartId, partData.quantity, user, woId);
+    // If linked to inventory, check stock and act accordingly
+    if (partData.inventoryPartId) {
+        const { confirmInstallation } = require("../../Inventory/Service/InventoryService");
+        const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
         
-        if (result.success) {
-            partData.status = "RESERVED";
-            // Sync current cost from inventory if not provided
-            if (!partData.unitCost) partData.unitCost = result.part.unitCost;
+        const inventoryPart = await getPartById(partData.inventoryPartId);
+        if (!inventoryPart) throw new Error("Inventory part not found.", { cause: 404 });
+        
+        // Sync part details from inventory
+        partData.partName = inventoryPart.partName;
+        partData.partNumber = inventoryPart.partNumber;
+        if (!partData.unitCost) partData.unitCost = inventoryPart.unitCost;
+        
+        // Check available stock
+        const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
+        if (available >= partData.quantity) {
+            // Sufficient stock → deduct immediately and mark INSTALLED
+            await confirmInstallation(partData.inventoryPartId, partData.quantity, user, woId);
+            partData.status = "INSTALLED";
         } else {
-            // If shortfall, we still add it but keep as REQUESTED
+            // Out of stock → mark as REQUESTED (needs manager approval)
             partData.status = "REQUESTED";
         }
     }
@@ -129,26 +141,30 @@ const updatePart = async (woId, partId, updates, user) => {
     // Handle Inventory Transitions
     if (part.inventoryPartId && newStatus && oldStatus !== newStatus) {
         const {
-            checkAndReserve,
-            releaseReservation,
             confirmInstallation,
             confirmReturn,
         } = require("../../Inventory/Service/InventoryService");
 
-        // REQUESTED -> RESERVED
-        if (oldStatus === "REQUESTED" && newStatus === "RESERVED") {
-            const result = await checkAndReserve(part.inventoryPartId, part.quantity, user, woId);
-            if (!result.success) throw new Error(result.message, { cause: 400 });
+        // REQUESTED -> INSTALLED (direct stock deduction, skip reservation)
+        if (oldStatus === "REQUESTED" && newStatus === "INSTALLED") {
+            const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
+            const inventoryPart = await getPartById(part.inventoryPartId);
+            if (inventoryPart) {
+                const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
+                if (available < part.quantity) {
+                    throw new Error(
+                        `Insufficient stock for ${inventoryPart.partName}. Available: ${available}, Need: ${part.quantity}.`,
+                        { cause: 400 }
+                    );
+                }
+            }
+            await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
         }
-        // RESERVED -> INSTALLED
+        // RESERVED -> INSTALLED (legacy support)
         else if (oldStatus === "RESERVED" && newStatus === "INSTALLED") {
             await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
         }
-        // RESERVED -> REQUESTED (Cancel reservation)
-        else if (oldStatus === "RESERVED" && newStatus === "REQUESTED") {
-            await releaseReservation(part.inventoryPartId, part.quantity, user, woId);
-        }
-        // INSTALLED -> RETURNED (Returning to stock after having been installed)
+        // INSTALLED -> RETURNED (return to stock)
         else if (oldStatus === "INSTALLED" && newStatus === "RETURNED") {
             await confirmReturn(part.inventoryPartId, part.quantity, user, woId);
         }
@@ -173,7 +189,7 @@ const updatePart = async (woId, partId, updates, user) => {
 
 /**
  * Remove a part from a work order.
- * Releases inventory reservation if necessary.
+ * Returns stock to inventory if the part was already installed.
  * @param {string} woId
  * @param {string} partId
  * @param {Object} user - Performing user { id, role }
@@ -186,15 +202,16 @@ const removePart = async (woId, partId, user) => {
     const part = wo.parts.id(partId);
     if (!part) throw new Error("Part not found.", { cause: 404 });
 
-    // Release reservation if it was reserved
+    // Return stock if it was installed from inventory
+    if (part.inventoryPartId && part.status === "INSTALLED") {
+        const { confirmReturn } = require("../../Inventory/Service/InventoryService");
+        await confirmReturn(part.inventoryPartId, part.quantity, user, woId);
+    }
+
+    // Release reservation if it was reserved (legacy support)
     if (part.inventoryPartId && part.status === "RESERVED") {
         const { releaseReservation } = require("../../Inventory/Service/InventoryService");
         await releaseReservation(part.inventoryPartId, part.quantity, user, woId);
-    }
-
-    // Only allow removal if not yet INSTALLED (unless specifically handled)
-    if (part.status === "INSTALLED") {
-        throw new Error("Cannot remove a part that has already been installed. Return it first.", { cause: 400 });
     }
 
     wo.parts.pull(partId);

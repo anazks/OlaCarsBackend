@@ -17,6 +17,7 @@ const UserRouter = require("./Src/modules/User/Routes/UserRoutes");
 const OperationStaffRouter = require("./Src/modules/OperationStaff/Routes/OperationStaffRoutes");
 const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceStaffRoutes");
 const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
+const WorkshopManagerRouter = require("./Src/modules/WorkshopManager/Routes/WorkshopManagerRouter");
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
 const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
@@ -61,6 +62,7 @@ app.use("/api/user", UserRouter);
 app.use("/api/operation-staff", OperationStaffRouter);
 app.use("/api/finance-staff", FinanceStaffRouter);
 app.use("/api/workshop-staff", WorkshopStaffRouter);
+app.use("/api/workshop-manager", WorkshopManagerRouter);
 app.use("/api/purchase-order", PurchaseOrderRouter);
 app.use("/api/vehicle", VehicleRouter);
 app.use("/api/supplier", SupplierRouter);
@@ -106,7 +108,7 @@ const startServer = async () => {
     await seedSystemSettings();
     console.log("System settings verified/seeded");
 
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0",() => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
 

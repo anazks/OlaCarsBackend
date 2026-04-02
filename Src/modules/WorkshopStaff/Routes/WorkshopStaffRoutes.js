@@ -97,7 +97,7 @@ router.post("/login", validate(loginSchema), login);
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(addWorkshopStaffSchema),
     addWorkshopStaff
 );
@@ -117,7 +117,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     getWorkshopStaff
 );
 
@@ -142,7 +142,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(getWorkshopStaffByIdSchema),
     getWorkshopStaffById
 );
@@ -188,7 +188,7 @@ router.get(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(editWorkshopStaffSchema),
     editWorkshopStaff
 );
@@ -228,7 +228,7 @@ router.put(
 router.post(
     "/:id/change-password",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(changePasswordSchema),
     changePassword
 );
@@ -254,7 +254,7 @@ router.post(
 router.delete(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(deleteWorkshopStaffSchema),
     deleteWorkshopStaff
 );

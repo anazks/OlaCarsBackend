@@ -71,7 +71,7 @@ const STATUS_RULES = {
             return null;
         },
     },
-    APPROVED: {
+    START: {
         allowedFrom: ["PENDING_APPROVAL"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
         minHierarchy: ROLES.ADMIN,
@@ -96,7 +96,7 @@ const STATUS_RULES = {
         },
     },
     VEHICLE_CHECKED_IN: {
-        allowedFrom: ["APPROVED"],
+        allowedFrom: ["START"],
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
@@ -231,7 +231,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     CANCELLED: {
-        allowedFrom: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED"],
+        allowedFrom: ["DRAFT", "PENDING_APPROVAL", "START", "REJECTED"],
         allowedRoles: [ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (wo, payload) => {
@@ -246,7 +246,7 @@ const STATUS_RULES = {
 // ─── Side Effects ────────────────────────────────────────────────────
 
 const triggerSideEffects = async (targetStatus, workOrder, user) => {
-    if (targetStatus === "APPROVED" || targetStatus === "PENDING_APPROVAL") {
+    if (targetStatus === "START" || targetStatus === "PENDING_APPROVAL") {
         // Auto-approve if cost ≤ $200
         const level = determineCostApprovalLevel(workOrder.estimatedTotalCost);
         if (level === "AUTO" && targetStatus === "PENDING_APPROVAL") {
@@ -257,9 +257,9 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
                 approvedAt: new Date(),
                 thresholdLevel: "AUTO",
             };
-            workOrder.status = "APPROVED";
+            workOrder.status = "START";
             workOrder.statusHistory.push({
-                status: "APPROVED",
+                status: "START",
                 changedBy: user.id,
                 changedByRole: user.role,
                 notes: "Auto-approved: estimated cost within auto-approval threshold ($200).",
@@ -268,8 +268,8 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
         }
     }
 
-    if (targetStatus === "APPROVED") {
-        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} approved. Ready for vehicle check-in.`);
+    if (targetStatus === "START") {
+        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} approved (START). Ready for vehicle check-in.`);
     }
 
     if (targetStatus === "VEHICLE_RELEASED") {
@@ -349,8 +349,8 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
 
     // ── Pre-transition logic ─────────────────────────────────────
 
-    // Set cost approval on APPROVED
-    if (targetStatus === "APPROVED") {
+    // Set cost approval on START
+    if (targetStatus === "START") {
         payload.costApproval = {
             approvedBy: user.id,
             approvedByRole: user.role,

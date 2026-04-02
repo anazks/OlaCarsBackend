@@ -11,6 +11,8 @@ const {
     releaseStockHandler,
     installPartHandler,
     getLowStockHandler,
+    getPartTransactionsHandler,
+    getWorkshopRequirementsHandler,
 } = require("../Controller/InventoryController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -75,7 +77,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     createPartHandler
 );
 
@@ -194,7 +196,7 @@ router.get("/:id", authenticate, getPartByIdHandler);
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     updatePartHandler
 );
 
@@ -219,7 +221,7 @@ router.put(
 router.delete(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     deletePartHandler
 );
 
@@ -256,7 +258,7 @@ router.delete(
 router.put(
     "/:id/restock",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     restockPartHandler
 );
 
@@ -295,7 +297,7 @@ router.put(
 router.put(
     "/:id/reserve",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     reserveStockHandler
 );
 
@@ -331,7 +333,7 @@ router.put(
 router.put(
     "/:id/release",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     releaseStockHandler
 );
 
@@ -367,7 +369,7 @@ router.put(
 router.put(
     "/:id/install",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     installPartHandler
 );
 
@@ -392,7 +394,7 @@ router.put(
 router.get(
     "/:id/transactions",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     getPartTransactionsHandler
 );
 
@@ -417,7 +419,7 @@ router.get(
 router.get(
     "/workshop-requirements/:branchId",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     getWorkshopRequirementsHandler
 );
 

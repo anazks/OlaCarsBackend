@@ -5,7 +5,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 const WORK_ORDER_STATUSES = [
     "DRAFT",
     "PENDING_APPROVAL",
-    "APPROVED",
+    "START",
     "REJECTED",
     "VEHICLE_CHECKED_IN",
     "PARTS_REQUESTED",
