@@ -86,21 +86,22 @@ const addPart = async (woId, partData, user) => {
     if (partData.inventoryPartId) {
         const { confirmInstallation } = require("../../Inventory/Service/InventoryService");
         const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
-        
+
         const inventoryPart = await getPartById(partData.inventoryPartId);
         if (!inventoryPart) throw new Error("Inventory part not found.", { cause: 404 });
-        
+
         // Sync part details from inventory
         partData.partName = inventoryPart.partName;
         partData.partNumber = inventoryPart.partNumber;
         if (!partData.unitCost) partData.unitCost = inventoryPart.unitCost;
-        
+
         // Check available stock
         const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
         if (available >= partData.quantity) {
-            // Sufficient stock → deduct immediately and mark INSTALLED
-            await confirmInstallation(partData.inventoryPartId, partData.quantity, user, woId);
-            partData.status = "INSTALLED";
+            // Sufficient stock → reserve immediately
+            const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
+            await checkAndReserve(partData.inventoryPartId, partData.quantity, user, woId);
+            partData.status = "RESERVED";
         } else {
             // Out of stock → mark as REQUESTED (needs manager approval)
             partData.status = "REQUESTED";

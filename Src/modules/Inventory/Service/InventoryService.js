@@ -55,7 +55,7 @@ const checkAndReserve = async (partId, quantity, user, workOrderId = null) => {
     }
 
     const updated = await reserveStock(partId, quantity);
-    
+
     await logTransaction({
         partId,
         branchId: part.branchId?._id || part.branchId,
@@ -76,7 +76,7 @@ const checkAndReserve = async (partId, quantity, user, workOrderId = null) => {
 const releaseReservation = async (partId, quantity, user, workOrderId = null) => {
     const part = await getPartById(partId);
     const updated = await releaseStock(partId, quantity);
-    
+
     await logTransaction({
         partId,
         branchId: part.branchId?._id || part.branchId,
@@ -97,7 +97,7 @@ const releaseReservation = async (partId, quantity, user, workOrderId = null) =>
 const confirmInstallation = async (partId, quantity, user, workOrderId = null) => {
     const part = await getPartById(partId);
     const updated = await deductStock(partId, quantity);
-    
+
     await logTransaction({
         partId,
         branchId: part.branchId?._id || part.branchId,
@@ -118,7 +118,7 @@ const confirmInstallation = async (partId, quantity, user, workOrderId = null) =
 const confirmReturn = async (partId, quantity, user, workOrderId = null) => {
     const part = await getPartById(partId);
     const updated = await returnToStock(partId, quantity);
-    
+
     await logTransaction({
         partId,
         branchId: part.branchId?._id || part.branchId,
@@ -139,7 +139,7 @@ const confirmReturn = async (partId, quantity, user, workOrderId = null) => {
 const receiveStock = async (partId, quantity, user) => {
     const part = await getPartById(partId);
     const updated = await restockPart(partId, quantity);
-    
+
     await logTransaction({
         partId,
         branchId: part.branchId?._id || part.branchId,
