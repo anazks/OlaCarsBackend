@@ -131,7 +131,7 @@ const {
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     validate(addVehicleSchema),
     addVehicle
 );
@@ -169,7 +169,7 @@ router.get(
 router.get(
     "/available",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     getAvailableCars
 );
 
@@ -389,7 +389,8 @@ router.put(
         ROLES.WORKSHOPSTAFF,
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
-        ROLES.ADMIN
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
     ),
     validate(progressVehicleSchema),
     progressVehicleStatus
@@ -479,7 +480,8 @@ router.post(
         ROLES.WORKSHOPSTAFF,
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
-        ROLES.ADMIN
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
     ),
     validate(uploadDocumentsSchema),
     upload.fields([
