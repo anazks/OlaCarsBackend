@@ -50,7 +50,11 @@ exports.login = async (email, password) => {
     staff.refreshToken = refreshToken;
     await staff.save();
 
-    return { accessToken, refreshToken };
+    const staffObj = staff.toObject();
+    delete staffObj.passwordHash;
+    delete staffObj.refreshToken;
+
+    return { staff: staffObj, accessToken, refreshToken };
 };
 
 exports.create = async (data) => {

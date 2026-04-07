@@ -1,7 +1,17 @@
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
 const s3 = require("../config/s3");
 
-const uploadToS3 = async (file, key) => {
+/**
+ * Upload a file buffer to S3 and return the public URL.
+ * @param {Object} file - Multer file object
+ * @param {string} folder - Target folder in S3
+ * @returns {Promise<string>} - S3 Public URL
+ */
+const uploadToS3 = async (file, folder = "uploads") => {
+  const timestamp = Date.now();
+  const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+  const key = `${folder}/${timestamp}_${sanitizedFileName}`;
+
   const command = new PutObjectCommand({
     Bucket: process.env.AWS_BUCKET_NAME,
     Key: key,
@@ -11,7 +21,12 @@ const uploadToS3 = async (file, key) => {
 
   await s3.send(command);
 
-  return key;
+  // Construct URL based on region
+  const region = process.env.AWS_REGION;
+  const bucket = process.env.AWS_BUCKET_NAME;
+  
+  // Standard regional URL format: https://bucket.s3.region.amazonaws.com/key
+  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 };
 
 module.exports = uploadToS3;

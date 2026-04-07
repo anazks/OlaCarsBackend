@@ -82,9 +82,11 @@ const addPart = async (woId, partData, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
-    // If linked to inventory, check stock and act accordingly
     if (partData.inventoryPartId) {
-        const { confirmInstallation } = require("../../Inventory/Service/InventoryService");
+        const { 
+            confirmInstallation,
+            confirmDirectInstallation 
+        } = require("../../Inventory/Service/InventoryService");
         const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
         
         const inventoryPart = await getPartById(partData.inventoryPartId);
@@ -99,7 +101,8 @@ const addPart = async (woId, partData, user) => {
         const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
         if (available >= partData.quantity) {
             // Sufficient stock → deduct immediately and mark INSTALLED
-            await confirmInstallation(partData.inventoryPartId, partData.quantity, user, woId);
+            // USE DIRECT DEDUCTION (skips reservation check)
+            await confirmDirectInstallation(partData.inventoryPartId, partData.quantity, user, woId);
             partData.status = "INSTALLED";
         } else {
             // Out of stock → mark as REQUESTED (needs manager approval)
@@ -138,10 +141,10 @@ const updatePart = async (woId, partId, updates, user) => {
     const oldStatus = part.status;
     const newStatus = updates.status;
 
-    // Handle Inventory Transitions
     if (part.inventoryPartId && newStatus && oldStatus !== newStatus) {
         const {
             confirmInstallation,
+            confirmDirectInstallation,
             confirmReturn,
         } = require("../../Inventory/Service/InventoryService");
 
@@ -150,18 +153,28 @@ const updatePart = async (woId, partId, updates, user) => {
             const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
             const inventoryPart = await getPartById(part.inventoryPartId);
             if (inventoryPart) {
-                const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
-                if (available < part.quantity) {
+                // Check if enough on-hand is available (regardless of reservations)
+                if (inventoryPart.quantityOnHand < part.quantity) {
                     throw new Error(
-                        `Insufficient stock for ${inventoryPart.partName}. Available: ${available}, Need: ${part.quantity}.`,
+                        `Insufficient physical stock for ${inventoryPart.partName}. On Hand: ${inventoryPart.quantityOnHand}, Need: ${part.quantity}.`,
                         { cause: 400 }
                     );
                 }
             }
-            await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
+            await confirmDirectInstallation(part.inventoryPartId, part.quantity, user, woId);
         }
-        // RESERVED -> INSTALLED (legacy support)
+        // RESERVED -> INSTALLED (check if enough was reserved)
         else if (oldStatus === "RESERVED" && newStatus === "INSTALLED") {
+            const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
+            const inventoryPart = await getPartById(part.inventoryPartId);
+            if (inventoryPart) {
+                if (inventoryPart.quantityReserved < part.quantity) {
+                    throw new Error(
+                        `Insufficient reservation for ${inventoryPart.partName}. Reserved: ${inventoryPart.quantityReserved}, Need: ${part.quantity}.`,
+                        { cause: 400 }
+                    );
+                }
+            }
             await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
         }
         // INSTALLED -> RETURNED (return to stock)
@@ -258,10 +271,8 @@ const logLabourEntry = async (woId, entry) => {
     entry.timestamp = new Date();
     wo.labourLog.push(entry);
 
-    // Recalculate actual labour hours after CLOCK_OUT
-    if (entry.action === "CLOCK_OUT") {
-        wo.actualLabourHours = calculateLabourHours(wo.labourLog, entry.technicianId.toString());
-    }
+    // Recalculate total actual labour hours for the whole Work Order
+    wo.actualLabourHours = calculateLabourHours(wo.labourLog);
 
     await wo.save();
     return wo;
@@ -288,25 +299,35 @@ const calculateLabourHours = (labourLog, techId = null) => {
         let pauseStart = null;
         let pausedMs = 0;
 
-        for (const log of logs) {
+        // Sort logs by timestamp to ensure correct calculation
+        const sortedLogs = [...logs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        for (const log of sortedLogs) {
             const t = new Date(log.timestamp).getTime();
             switch (log.action) {
                 case "CLOCK_IN":
                     sessionStart = t;
                     pausedMs = 0;
+                    pauseStart = null;
                     break;
                 case "PAUSE":
-                    pauseStart = t;
+                    if (sessionStart && !pauseStart) {
+                        pauseStart = t;
+                    }
                     break;
                 case "RESUME":
-                    if (pauseStart) {
+                    if (sessionStart && pauseStart) {
                         pausedMs += t - pauseStart;
                         pauseStart = null;
                     }
                     break;
                 case "CLOCK_OUT":
                     if (sessionStart) {
-                        totalMs += (t - sessionStart) - pausedMs;
+                        let finalPausedMs = pausedMs;
+                        if (pauseStart) {
+                            finalPausedMs += t - pauseStart;
+                        }
+                        totalMs += (t - sessionStart) - finalPausedMs;
                         sessionStart = null;
                         pauseStart = null;
                         pausedMs = 0;
@@ -317,7 +338,7 @@ const calculateLabourHours = (labourLog, techId = null) => {
     }
 
     // Convert ms to hours (2 decimal places)
-    return Math.round((totalMs / (1000 * 60 * 60)) * 100) / 100;
+    return Math.max(0, Math.round((totalMs / (1000 * 60 * 60)) * 100) / 100);
 };
 
 module.exports = {

@@ -147,6 +147,25 @@ const addWorkOrderPhoto = async (woId, photoData) => {
     return wo;
 };
 
+/**
+ * Remove a photo from a work order.
+ * @param {string} woId
+ * @param {string} photoId
+ */
+const removeWorkOrderPhoto = async (woId, photoId) => {
+    const wo = await WorkOrder.findById(woId);
+    if (!wo) throw new Error("Work order not found.", { cause: 404 });
+
+    const photoIndex = wo.photos.findIndex((p) => p._id.toString() === photoId);
+    if (photoIndex === -1) {
+        throw new Error("Photo not found in work order.", { cause: 404 });
+    }
+
+    wo.photos.splice(photoIndex, 1);
+    await wo.save();
+    return wo;
+};
+
 // ─── Vehicle Release ─────────────────────────────────────────────────
 
 /**
@@ -172,6 +191,17 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
         if (failed.length > 0) {
             throw new Error(`Cannot release: ${failed.length} QC item(s) failed.`, { cause: 400 });
         }
+    }
+
+    // Double check Mandatory Photos
+    const requiredPhotos = wo.requiredPhotos || [];
+    const uploadedPhotos = wo.photos || [];
+    const missingMandatory = requiredPhotos.filter(rp => 
+        rp.isMandatory && !uploadedPhotos.some(up => up.caption === rp.label)
+    );
+
+    if (missingMandatory.length > 0) {
+        throw new Error(`Cannot release: Mandatory photos missing (${missingMandatory.map(m => m.label).join(", ")}).`, { cause: 400 });
     }
 
     // Update work order
@@ -214,5 +244,6 @@ module.exports = {
     generateQcChecklist,
     submitQcResults,
     addWorkOrderPhoto,
+    removeWorkOrderPhoto,
     executeVehicleRelease,
 };

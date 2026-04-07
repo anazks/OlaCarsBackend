@@ -105,6 +105,20 @@ const photoSchema = new mongoose.Schema({
     uploadedAt: { type: Date, default: Date.now },
 });
 
+const requiredPhotoSchema = new mongoose.Schema({
+    label: { type: String, required: true },
+    description: { type: String },
+    stage: { type: String, enum: ["CHECK_IN", "IN_PROGRESS", "QC", "RELEASE"], default: "QC" },
+    isMandatory: { type: Boolean, default: true },
+});
+
+const requiredPartSchema = new mongoose.Schema({
+    inventoryPartId: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryPart" },
+    partName: { type: String, required: true },
+    quantity: { type: Number, required: true, default: 1 },
+    unitCost: { type: Number, required: true, default: 0 },
+});
+
 // ─── Main Schema ─────────────────────────────────────────────────────
 
 const workOrderSchema = new mongoose.Schema(
@@ -168,6 +182,8 @@ const workOrderSchema = new mongoose.Schema(
         labourLog: [labourEntrySchema],
         qcChecklist: [qcItemSchema],
         photos: [photoSchema],
+        requiredPhotos: [requiredPhotoSchema],
+        requiredParts: [requiredPartSchema],
 
         // Release
         releasedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "releasedByRole" },

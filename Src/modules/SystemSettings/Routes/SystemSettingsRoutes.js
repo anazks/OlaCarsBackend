@@ -81,6 +81,6 @@ router.get("/:key", authenticate, getSystemSetting);
  *       200:
  *         description: Setting updated successfully
  */
-router.put("/:key", authenticate, authorize(ROLES.ADMIN), updateSystemSetting);
+router.put("/:key", authenticate, authorize([ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER]), updateSystemSetting);
 
 module.exports = router;

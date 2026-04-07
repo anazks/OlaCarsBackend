@@ -1,6 +1,8 @@
 {
-  "watch": ["app.js", "Src"],
+  "watch": ["app.js", "Src", "adapters", "scripts"],
   "ext": "js,json",
-  "ignore": ["node_modules", "tmp"],
-  "legacyWatch": true
+  "ignore": ["node_modules", "tmp", "docs", "tests"],
+  "legacyWatch": false,
+  "delay": "500",
+  "verbose": true
 }

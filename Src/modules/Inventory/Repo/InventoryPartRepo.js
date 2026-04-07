@@ -111,19 +111,27 @@ exports.deletePart = async (id) => {
  * @param {number} qty
  */
 exports.reserveStock = async (partId, qty) => {
-    const part = await InventoryPart.findById(partId);
-    if (!part) throw new Error("Inventory part not found.", { cause: 404 });
+    // Atomic check: (onHand - reserved) >= qty
+    const updated = await InventoryPart.findOneAndUpdate(
+        { 
+            _id: partId,
+            $expr: { 
+                $gte: [{ $subtract: ["$quantityOnHand", "$quantityReserved"] }, qty] 
+            }
+        },
+        { $inc: { quantityReserved: qty } },
+        { new: true, runValidators: true }
+    );
 
-    const available = part.quantityOnHand - part.quantityReserved;
-    if (available < qty) {
-        throw new Error(`Insufficient stock. Available: ${available}, Requested: ${qty}.`, { cause: 400 });
+    if (!updated) {
+        // If not found, either ID is wrong or insufficient stock
+        const part = await InventoryPart.findById(partId);
+        if (!part) throw new Error("Inventory part not found.", { cause: 404 });
+        const available = part.quantityOnHand - part.quantityReserved;
+        throw new Error(`Insufficient available stock. Available: ${available}, Requested: ${qty}.`, { cause: 400 });
     }
 
-    return await InventoryPart.findByIdAndUpdate(
-        partId,
-        { $inc: { quantityReserved: qty } },
-        { new: true }
-    );
+    return updated;
 };
 
 /**
@@ -132,11 +140,17 @@ exports.reserveStock = async (partId, qty) => {
  * @param {number} qty
  */
 exports.releaseStock = async (partId, qty) => {
-    return await InventoryPart.findByIdAndUpdate(
-        partId,
+    const updated = await InventoryPart.findOneAndUpdate(
+        { _id: partId, quantityReserved: { $gte: qty } },
         { $inc: { quantityReserved: -qty } },
-        { new: true }
+        { new: true, runValidators: true }
     );
+
+    if (!updated) {
+        throw new Error("Cannot release more stock than is currently reserved.", { cause: 400 });
+    }
+
+    return updated;
 };
 
 /**
@@ -145,11 +159,44 @@ exports.releaseStock = async (partId, qty) => {
  * @param {number} qty
  */
 exports.deductStock = async (partId, qty) => {
-    return await InventoryPart.findByIdAndUpdate(
-        partId,
+    const updated = await InventoryPart.findOneAndUpdate(
+        { 
+            _id: partId, 
+            quantityOnHand: { $gte: qty },
+            quantityReserved: { $gte: qty }
+        },
         { $inc: { quantityOnHand: -qty, quantityReserved: -qty } },
-        { new: true }
+        { new: true, runValidators: true }
     );
+
+    if (!updated) {
+        throw new Error("Insufficient stock on hand or insufficient reservation to complete installation.", { cause: 400 });
+    }
+
+    return updated;
+};
+
+/**
+ * Deduct stock directly from on-hand (no reservation check).
+ * Used for parts taken from stock and installed immediately (REQUESTED -> INSTALLED).
+ * @param {string} partId
+ * @param {number} qty
+ */
+exports.deductStockDirectly = async (partId, qty) => {
+    const updated = await InventoryPart.findOneAndUpdate(
+        { 
+            _id: partId, 
+            quantityOnHand: { $gte: qty }
+        },
+        { $inc: { quantityOnHand: -qty } },
+        { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+        throw new Error("Insufficient stock on hand to complete installation.", { cause: 400 });
+    }
+
+    return updated;
 };
 
 /**

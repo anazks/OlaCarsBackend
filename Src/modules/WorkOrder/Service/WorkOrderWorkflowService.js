@@ -7,6 +7,7 @@ const ROLE_HIERARCHY = {
     [ROLES.OPERATIONSTAFF]: 1,
     [ROLES.FINANCESTAFF]: 1,
     [ROLES.WORKSHOPSTAFF]: 2,
+    [ROLES.WORKSHOPMANAGER]: 3,
     [ROLES.BRANCHMANAGER]: 3,
     [ROLES.COUNTRYMANAGER]: 4,
     [ROLES.OPERATIONADMIN]: 5,
@@ -34,8 +35,11 @@ const calculateSlaDeadline = (priority) => {
 };
 
 // ─── Cost Approval Thresholds ────────────────────────────────────────
-const determineCostApprovalLevel = (estimatedTotalCost) => {
-    if (estimatedTotalCost <= 200) return "AUTO";
+const determineCostApprovalLevel = async (estimatedTotalCost) => {
+    const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo");
+    const workshopThreshold = await getSetting("WORK_ORDER_APPROVAL_THRESHOLD") || 200;
+
+    if (estimatedTotalCost <= workshopThreshold) return "AUTO";
     if (estimatedTotalCost <= 1000) return "BRANCH";
     if (estimatedTotalCost <= 5000) return "COUNTRY";
     return "ADMIN";
@@ -44,7 +48,7 @@ const determineCostApprovalLevel = (estimatedTotalCost) => {
 const canRoleApproveLevel = (userRole, level) => {
     const approvalMap = {
         AUTO: [], // no one needed
-        BRANCH: [ROLES.BRANCHMANAGER],
+        BRANCH: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         COUNTRY: [ROLES.COUNTRYMANAGER],
         ADMIN: [ROLES.ADMIN],
     };
@@ -62,7 +66,7 @@ const STATUS_RULES = {
     },
     PENDING_APPROVAL: {
         allowedFrom: ["DRAFT", "ADDITIONAL_WORK_FOUND"],
-        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
             if (!wo.estimatedTotalCost || wo.estimatedTotalCost <= 0) {
@@ -72,12 +76,18 @@ const STATUS_RULES = {
         },
     },
     START: {
-        allowedFrom: ["PENDING_APPROVAL"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
+        allowedFrom: ["PENDING_APPROVAL", "DRAFT", "ADDITIONAL_WORK_FOUND"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.ADMIN,
-        gateValidator: (wo, payload, user) => {
-            const requiredLevel = determineCostApprovalLevel(wo.estimatedTotalCost);
-            if (requiredLevel === "AUTO") return null; // auto-approved handled in side effects
+        gateValidator: async (wo, payload, user) => {
+            const requiredLevel = await determineCostApprovalLevel(wo.estimatedTotalCost);
+            
+            // Allow START from DRAFT or ADDITIONAL_WORK_FOUND only if AUTO-APPROVED
+            if (["DRAFT", "ADDITIONAL_WORK_FOUND"].includes(wo.status) && requiredLevel !== "AUTO") {
+                return `Cost of $${wo.estimatedTotalCost} requires PENDING_APPROVAL and ${requiredLevel}-level authority.`;
+            }
+
+            if (requiredLevel === "AUTO") return null; // auto-approved
             if (!canRoleApproveLevel(user.role, requiredLevel)) {
                 return `Cost of $${wo.estimatedTotalCost} requires ${requiredLevel}-level approval. Your role cannot approve this.`;
             }
@@ -86,7 +96,7 @@ const STATUS_RULES = {
     },
     REJECTED: {
         allowedFrom: ["PENDING_APPROVAL"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (wo, payload) => {
             if (!payload.rejectionReason) {
@@ -124,12 +134,17 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
     },
     IN_PROGRESS: {
-        allowedFrom: ["VEHICLE_CHECKED_IN", "PARTS_RECEIVED", "PAUSED", "FAILED_QC"],
+        allowedFrom: ["VEHICLE_CHECKED_IN", "PARTS_RECEIVED", "PAUSED", "FAILED_QC", "START"],
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
             if (!wo.assignedTechnician && !payload.assignedTechnician) {
                 return "A technician must be assigned before work can begin.";
+            }
+            // If coming from START, ensure it was ALREADY checked in.
+            // If logic path is DRAFT -> START (no checkin yet), then this will force them to go through CHECK-IN first.
+            if (wo.status === "START" && !wo.odometerAtEntry && !payload.odometerAtEntry) {
+                return "Vehicle must be checked-in (odometer recorded) before work can begin.";
             }
             return null;
         },
@@ -139,8 +154,9 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
-            if (!payload.pauseReason) {
-                return "Pause reason is required.";
+            const reason = payload.pauseReason || payload.notes || wo.pauseReason;
+            if (!reason || (typeof reason === 'string' && reason.trim() === "")) {
+                return `Pause reason is required. (Payload Keys: ${Object.keys(payload).join(", ")})`;
             }
             return null;
         },
@@ -187,6 +203,7 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
+            // Validate QC Checklist
             const qcItems = wo.qcChecklist || [];
             if (qcItems.length > 0) {
                 const mandatoryFails = qcItems.filter(
@@ -196,10 +213,19 @@ const STATUS_RULES = {
                     return `${mandatoryFails.length} mandatory QC item(s) failed. Cannot release vehicle.`;
                 }
             }
-            const photos = wo.qcPhotos || [];
-            if (photos.length < 4) {
-                return `Minimum 4 QC/repair photos required. Currently ${photos.length} uploaded.`;
+
+            // Validate Dynamic Photo Requirements
+            const requiredPhotos = wo.requiredPhotos || [];
+            const uploadedPhotos = wo.photos || [];
+            
+            const missingMandatory = requiredPhotos.filter(rp => 
+                rp.isMandatory && !uploadedPhotos.some(up => up.caption === rp.label)
+            );
+
+            if (missingMandatory.length > 0) {
+                return `The following mandatory photos are missing: ${missingMandatory.map(m => m.label).join(", ")}`;
             }
+
             return null;
         },
     },
@@ -227,12 +253,12 @@ const STATUS_RULES = {
     },
     CLOSED: {
         allowedFrom: ["INVOICED"],
-        allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         minHierarchy: ROLES.ADMIN,
     },
     CANCELLED: {
         allowedFrom: ["DRAFT", "PENDING_APPROVAL", "START", "REJECTED"],
-        allowedRoles: [ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (wo, payload) => {
             if (!payload.cancellationReason) {
@@ -247,10 +273,11 @@ const STATUS_RULES = {
 
 const triggerSideEffects = async (targetStatus, workOrder, user) => {
     if (targetStatus === "START" || targetStatus === "PENDING_APPROVAL") {
-        // Auto-approve if cost ≤ $200
-        const level = determineCostApprovalLevel(workOrder.estimatedTotalCost);
+        // Auto-approve if cost ≤ Threshold
+        const level = await determineCostApprovalLevel(workOrder.estimatedTotalCost);
         if (level === "AUTO" && targetStatus === "PENDING_APPROVAL") {
-            console.log(`[WorkOrder] Auto-approving WO ${workOrder.workOrderNumber} (cost ≤ $200)`);
+            const workshopThreshold = (await require("../../SystemSettings/Repo/SystemSettingsRepo").getSetting("WORK_ORDER_APPROVAL_THRESHOLD")) || 200;
+            console.log(`[WorkOrder] Auto-approving WO ${workOrder.workOrderNumber} (cost ≤ $${workshopThreshold})`);
             workOrder.costApproval = {
                 approvedBy: user.id,
                 approvedByRole: user.role,
@@ -262,7 +289,7 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
                 status: "START",
                 changedBy: user.id,
                 changedByRole: user.role,
-                notes: "Auto-approved: estimated cost within auto-approval threshold ($200).",
+                notes: `Auto-approved: estimated cost within auto-approval threshold ($${workshopThreshold}).`,
             });
             await workOrder.save();
         }
@@ -280,6 +307,68 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
     if (targetStatus === "CANCELLED") {
         console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} cancelled. Releasing any reserved inventory.`);
         // Future: release reserved parts back to inventory
+    }
+
+    if (targetStatus === "PAUSED") {
+        const { logLabourEntry } = require("./WorkOrderService");
+        const technicianId = workOrder.assignedTechnician;
+        if (technicianId) {
+            console.log(`[WorkOrder] Auto-pausing labour for technician ${technicianId} on WO ${workOrder.workOrderNumber}`);
+            try {
+                await logLabourEntry(workOrder._id, {
+                    technicianId: technicianId,
+                    action: "PAUSE",
+                    notes: workOrder.pauseReason || "Work order paused",
+                });
+            } catch (err) {
+                console.warn(`[WorkOrder] Auto-pause failed: ${err.message}. (Possibly already paused)`);
+            }
+        }
+    }
+
+    if (targetStatus === "QUALITY_CHECK") {
+        const { logLabourEntry } = require("./WorkOrderService");
+        // For each technician in labourLog, check if their last action was CLOCK_IN or RESUME
+        // If so, trigger a CLOCK_OUT at current time.
+        const techLastActions = {};
+        for (const log of workOrder.labourLog || []) {
+            techLastActions[log.technicianId.toString()] = log.action;
+        }
+
+        for (const [techId, lastAction] of Object.entries(techLastActions)) {
+            if (["CLOCK_IN", "RESUME"].includes(lastAction)) {
+                console.log(`[WorkOrder] Auto-clocking out technician ${techId} as WO ${workOrder.workOrderNumber} moves to QUALITY_CHECK`);
+                try {
+                    await logLabourEntry(workOrder._id, {
+                        technicianId: techId,
+                        action: "CLOCK_OUT",
+                        notes: "Auto-clocked out at Quality Check",
+                    });
+                } catch (err) {
+                    console.warn(`[WorkOrder] Auto-clock-out failed for ${techId}: ${err.message}`);
+                }
+            }
+        }
+    }
+
+    if (targetStatus === "IN_PROGRESS" && workOrder.statusHistory.length > 0) {
+        const lastStatus = workOrder.statusHistory[workOrder.statusHistory.length - 2]?.status;
+        if (lastStatus === "PAUSED") {
+            const { logLabourEntry } = require("./WorkOrderService");
+            const technicianId = workOrder.assignedTechnician;
+            if (technicianId) {
+                console.log(`[WorkOrder] Auto-resuming labour for technician ${technicianId} on WO ${workOrder.workOrderNumber}`);
+                try {
+                    await logLabourEntry(workOrder._id, {
+                        technicianId: technicianId,
+                        action: "RESUME",
+                        notes: "Work order resumed",
+                    });
+                } catch (err) {
+                    console.warn(`[WorkOrder] Auto-resume failed: ${err.message}. (Possibly not paused)`);
+                }
+            }
+        }
     }
 
     if (targetStatus === "ADDITIONAL_WORK_FOUND") {
@@ -341,7 +430,7 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
     // Run gate validator
     const payload = { ...updateData };
     if (rule.gateValidator) {
-        const errorMsg = rule.gateValidator(currentWO, payload, user);
+        const errorMsg = await rule.gateValidator(currentWO, payload, user);
         if (errorMsg) {
             throw new Error(errorMsg, { cause: 400 });
         }
@@ -355,13 +444,18 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
             approvedBy: user.id,
             approvedByRole: user.role,
             approvedAt: new Date(),
-            thresholdLevel: determineCostApprovalLevel(currentWO.estimatedTotalCost),
+            thresholdLevel: await determineCostApprovalLevel(currentWO.estimatedTotalCost),
         };
     }
 
     // Set rejection reason
     if (targetStatus === "REJECTED" && payload.rejectionReason) {
         payload.rejectionReason = payload.rejectionReason;
+    }
+
+    // Set pause reason
+    if (targetStatus === "PAUSED") {
+        payload.pauseReason = payload.pauseReason || payload.notes;
     }
 
     // ── Apply status change ──────────────────────────────────────
