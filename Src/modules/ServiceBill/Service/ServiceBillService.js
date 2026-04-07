@@ -11,13 +11,17 @@ const { getWorkOrderById } = require("../../WorkOrder/Repo/WorkOrderRepo");
  */
 const generateFromWorkOrder = async (woId, options = {}, user) => {
     const wo = await getWorkOrderById(woId);
-    if (!wo) throw new Error("Work order not found.", { cause: 404 });
+    if (!wo) {
+        const err = new Error(`Work order not found for ID: ${woId}`);
+        err.statusCode = 404;
+        throw err;
+    }
 
     // Check WO is in a billable state
-    const billableStatuses = ["VEHICLE_RELEASED", "INVOICED", "CLOSED"];
+    const billableStatuses = ["QUALITY_CHECK", "READY_FOR_RELEASE", "VEHICLE_RELEASED", "INVOICED", "CLOSED"];
     if (!billableStatuses.includes(wo.status)) {
         throw new Error(
-            `Work order must be in VEHICLE_RELEASED, INVOICED, or CLOSED state to generate a bill. Current: ${wo.status}`,
+            `Work order must be in a billable state (QC onwards) to generate a bill. Current status: ${wo.status}`,
             { cause: 400 }
         );
     }

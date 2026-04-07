@@ -3,8 +3,12 @@ const WorkshopStaffService = require('../Service/WorkshopStaffService.js');
 const login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const tokens = await WorkshopStaffService.login(email, password);
-        return res.status(200).json({ success: true, ...tokens });
+        const result = await WorkshopStaffService.login(email, password);
+        return res.status(200).json({ 
+            success: true, 
+            ...result,
+            data: result.staff // For alternative frontend checks
+        });
     } catch (error) {
         const statusCode = error.statusCode || 401;
         return res.status(statusCode).json({ success: false, message: error.message });

@@ -18,6 +18,7 @@ const VEHICLE_STATUSES = [
     "TRANSFER PENDING",
     "TRANSFER COMPLETE",
     "RETIRED",
+    "PRE-BOOKED",
 ];
 
 const checklistItemSchema = new mongoose.Schema({

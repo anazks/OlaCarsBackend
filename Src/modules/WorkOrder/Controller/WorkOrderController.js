@@ -1,8 +1,5 @@
-const {
-    createWorkOrder,
-    getWorkOrders,
-    getWorkOrderById,
-} = require("../Repo/WorkOrderRepo");
+console.log("[DEBUG] Loading WorkOrderController.js...");
+const WorkOrderRepo = require("../Repo/WorkOrderRepo");
 const { processWorkOrderProgress, calculateSlaDeadline } = require("../Service/WorkOrderWorkflowService");
 const {
     addTask,
@@ -13,6 +10,7 @@ const {
     removePart,
     logLabourEntry,
 } = require("../Service/WorkOrderService");
+const uploadToS3 = require("../../../utils/uploadToS3");
 
 /**
  * Create a new Work Order (DRAFT).
@@ -38,7 +36,7 @@ const createWorkOrderHandler = async (req, res) => {
             data.estimatedTotalCost = (data.estimatedLabourHours * labourRate) + data.estimatedPartsCost;
         }
 
-        const wo = await createWorkOrder(data);
+        const wo = await WorkOrderRepo.createWorkOrder(data);
 
         return res.status(201).json({ success: true, data: wo });
     } catch (error) {
@@ -59,7 +57,7 @@ const getWorkOrdersHandler = async (req, res) => {
         if (req.query.priority) filters.priority = req.query.priority;
         if (req.query.workOrderType) filters.workOrderType = req.query.workOrderType;
 
-        const workOrders = await getWorkOrders(filters);
+        const workOrders = await WorkOrderRepo.getWorkOrders(filters);
         return res.status(200).json({ success: true, data: workOrders });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -72,7 +70,7 @@ const getWorkOrdersHandler = async (req, res) => {
  */
 const getWorkOrderByIdHandler = async (req, res) => {
     try {
-        const wo = await getWorkOrderById(req.params.id);
+        const wo = await WorkOrderRepo.getWorkOrderById(req.params.id);
         if (!wo) {
             return res.status(404).json({ success: false, message: "Work order not found" });
         }
@@ -216,8 +214,10 @@ const {
     generateQcChecklist,
     submitQcResults,
     addWorkOrderPhoto,
+    removeWorkOrderPhoto,
     executeVehicleRelease,
 } = require("../Service/QcReleaseService");
+const { generateFromWorkOrder } = require("../../ServiceBill/Service/ServiceBillService");
 
 // ─── QC Handlers ─────────────────────────────────────────────────────
 
@@ -275,6 +275,54 @@ const addPhotoHandler = async (req, res) => {
     }
 };
 
+/**
+ * Upload a photo file to S3 and add to work order.
+ * @route POST /api/work-orders/:id/photos/upload
+ * @param {file} photo - Multer file object
+ */
+const uploadWorkOrderPhotoHandler = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No photo file uploaded" });
+        }
+
+        const woId = req.params.id;
+        const file = req.file;
+        const caption = req.body.caption || "";
+        const stage = req.body.stage || "IN_PROGRESS";
+
+        // Upload to S3 (Folder: work-orders/{woId})
+        const s3Url = await uploadToS3(file, `work-orders/${woId}`);
+
+        const photoData = {
+            url: s3Url,
+            caption,
+            stage,
+            uploadedBy: req.user.id,
+        };
+
+        const wo = await addWorkOrderPhoto(woId, photoData);
+        return res.status(201).json({ success: true, data: wo.photos });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Remove a photo from a work order.
+ * @route DELETE /api/work-orders/:id/photos/:photoId
+ */
+const removePhotoHandler = async (req, res) => {
+    try {
+        const { id, photoId } = req.params;
+        const wo = await removeWorkOrderPhoto(id, photoId);
+        return res.status(200).json({ success: true, data: wo.photos });
+    } catch (error) {
+        const statusCode = error.cause || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 // ─── Vehicle Release Handler ─────────────────────────────────────────
 
 /**
@@ -287,6 +335,25 @@ const releaseVehicleHandler = async (req, res) => {
         return res.status(200).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Generate a service bill for a work order.
+ * @route POST /api/work-orders/:id/billing/generate
+ */
+const generateBillHandler = async (req, res) => {
+    try {
+        const bill = await generateFromWorkOrder(req.params.id, req.body, req.user);
+        
+        // Link bill to WO
+        await WorkOrderRepo.updateWorkOrder(req.params.id, { serviceBillId: bill._id });
+        
+        return res.status(201).json({ success: true, data: bill });
+    } catch (error) {
+        console.error(`[BILLING ERROR] ${error.message}`);
+        const statusCode = error.statusCode || error.cause || 500;
         return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
@@ -306,6 +373,9 @@ module.exports = {
     generateQcHandler,
     submitQcHandler,
     addPhotoHandler,
+    uploadWorkOrderPhotoHandler,
+    removePhotoHandler,
+    generateBillHandler,
     releaseVehicleHandler,
 };
 

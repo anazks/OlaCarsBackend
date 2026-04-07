@@ -1,5 +1,10 @@
 const express = require("express");
 const router = express.Router();
+
+const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { ROLES } = require("../../../shared/constants/roles.js");
+
 const {
     createWorkOrderHandler,
     getWorkOrdersHandler,
@@ -15,11 +20,21 @@ const {
     generateQcHandler,
     submitQcHandler,
     addPhotoHandler,
+    uploadWorkOrderPhotoHandler,
+    removePhotoHandler,
+    generateBillHandler,
     releaseVehicleHandler,
 } = require("../Controller/WorkOrderController");
-const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
-const { ROLES } = require("../../../shared/constants/roles.js");
+
+// PRIORITY ROUTES (Specific paths first)
+router.post(
+    "/:id/billing/generate",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    generateBillHandler
+);
+
+const upload = require("../../../utils/multerConfig.js");
 
 /**
  * @swagger
@@ -154,11 +169,12 @@ router.get(
  *         schema:
  *           type: string
  *     responses:
- *       200:
- *         description: Work order details
- *       404:
- *         description: Work order not found
- */
+      200:
+        description: Work order details
+      404:
+        description: Work order not found
+*/
+
 router.get(
     "/:id",
     authenticate,
@@ -652,6 +668,77 @@ router.post(
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     addPhotoHandler
+);
+
+/**
+ * @swagger
+ * /api/work-orders/{id}/photos/upload:
+ *   post:
+ *     summary: Upload a photo file to a work order (multipart/form-data)
+ *     tags: [WorkOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               photo:
+ *                 type: string
+ *                 format: binary
+ *               caption:
+ *                 type: string
+ *               stage:
+ *                 type: string
+ *                 enum: [CHECK_IN, IN_PROGRESS, QC, RELEASE]
+ *     responses:
+ *       201:
+ *         description: Photo uploaded and added
+ */
+router.post(
+    "/:id/photos/upload",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    upload.single("photo"),
+    uploadWorkOrderPhotoHandler
+);
+
+/**
+ * @swagger
+ * /api/work-orders/{id}/photos/{photoId}:
+ *   delete:
+ *     summary: Remove a photo from a work order
+ *     tags: [WorkOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: photoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Photo removed
+ */
+router.delete(
+    "/:id/photos/:photoId",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    removePhotoHandler
 );
 
 // ═══════════════════════════════════════════════════════════════════════

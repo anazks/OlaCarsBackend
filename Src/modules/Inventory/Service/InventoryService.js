@@ -2,6 +2,7 @@ const {
     reserveStock,
     releaseStock,
     deductStock,
+    deductStockDirectly,
     restockPart,
     getPartById,
     returnToStock,
@@ -113,6 +114,27 @@ const confirmInstallation = async (partId, quantity, user, workOrderId = null) =
 };
 
 /**
+ * Deduct stock directly (without reservation).
+ */
+const confirmDirectInstallation = async (partId, quantity, user, workOrderId = null) => {
+    const part = await getPartById(partId);
+    const updated = await deductStockDirectly(partId, quantity);
+    
+    await logTransaction({
+        partId,
+        branchId: part.branchId?._id || part.branchId,
+        workOrderId,
+        transactionType: "INSTALL",
+        quantity: -quantity,
+        performedBy: user.id,
+        role: user.role,
+        notes: `Direct installation in work order: ${workOrderId || "N/A"}`,
+    });
+
+    return updated;
+};
+
+/**
  * Return parts to stock (post-installation).
  */
 const confirmReturn = async (partId, quantity, user, workOrderId = null) => {
@@ -157,6 +179,7 @@ module.exports = {
     checkAndReserve,
     releaseReservation,
     confirmInstallation,
+    confirmDirectInstallation,
     confirmReturn,
     receiveStock,
 };
