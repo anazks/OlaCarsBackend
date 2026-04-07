@@ -1,6 +1,6 @@
 # OlaCars Backend — Project Progress Summary
 
-**Last Updated:** March 18, 2026
+**Last Updated:** April 7, 2026
 **Project:** OlaCarsBackend (Node.js + Express + MongoDB)
 
 ---
@@ -51,6 +51,7 @@ All modules follow the **Routes → Controller → Repo → Model** architecture
 | **SystemSettings** | Global system configurations |
 | **Insurance** | Insurance policies, linking directly to vehicles |
 | **InsuranceClaim** | Insurance claims management |
+| **AI** | Automated vehicle discovery & pre-booking |
 
 ---
 
@@ -84,6 +85,12 @@ All modules follow the **Routes → Controller → Repo → Model** architecture
 ### 7. Security Refactoring & Defensive Programming
 - Implementing `flattenForSet` pattern in repositories to prevent accidental overwrites of nested Mongoose sub-documents.
 - Fixed Enum mismatch validation errors across User/Manager models.
+
+### 8. AI Service & Workshop Inventory Lifecycle
+- **Unauthenticated AI Discovery**: Built `AiController.js` and `AiRoutes.js` to allow external systems to check vehicle availability and create reservations.
+- **Inventory Reservation System**: Implemented atomic `reserveStock`, `releaseStock`, and `deductStock` logic in `InventoryPartRepo.js` to synchronize stock levels with live Work Orders.
+- **Automated Billing Generation**: Developed `ServiceBillService.js` to auto-generate invoices from completed Work Orders, aggregating labour hours, parts used, and applied taxes.
+- **Media Verification**: Integrated S3 photo uploads for workshop stages (In-Progress, QC) and vehicle release documentation.
 
 ---
 
@@ -123,7 +130,10 @@ Several comprehensive guides have been created to ease frontend integration and 
 | Insurance Module Integration | ✅ Built & Refactored |
 | Purchase Order Flow | ✅ Built & Documented |
 | Driver Onboarding | ✅ Built & Documented |
-| All 24 Modules | ✅ Built |
+| AI Pre-booking & Discovery | ✅ Implemented |
+| Workshop-Inventory Sync | ✅ Implemented |
+| Automated Service Billing | ✅ Implemented |
+| All 25 Modules | ✅ Built |
 | Swagger Docs | ✅ Updated |
 | Automated Test Suite | ⏳ Pending |
 
