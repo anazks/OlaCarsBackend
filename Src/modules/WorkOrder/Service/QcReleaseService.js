@@ -204,6 +204,19 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
         throw new Error(`Cannot release: Mandatory photos missing (${missingMandatory.map(m => m.label).join(", ")}).`, { cause: 400 });
     }
 
+    // Verify Payment Completed
+    if (!wo.serviceBillId) {
+        throw new Error("Cannot release vehicle: Service bill has not been generated.", { cause: 400 });
+    }
+    const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+    const bill = await ServiceBill.findById(wo.serviceBillId);
+    if (!bill) {
+        throw new Error("Cannot release vehicle: Associated service bill not found.", { cause: 404 });
+    }
+    if (bill.paymentStatus !== "PAID") {
+        throw new Error("Cannot release vehicle: Payment is not completed.", { cause: 400 });
+    }
+
     // Update work order
     wo.odometerAtRelease = releaseData.odometerAtRelease || wo.odometerAtRelease;
     wo.releaseNotes = releaseData.releaseNotes || "";

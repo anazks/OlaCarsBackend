@@ -57,7 +57,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
     generateBillHandler
 );
 
@@ -136,7 +136,7 @@ router.get("/:id", authenticate, getBillByIdHandler);
 router.put(
     "/:id/approve",
     authenticate,
-    authorize(ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
     approveBillHandler
 );
 
@@ -173,7 +173,7 @@ router.put(
 router.put(
     "/:id/pay",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
     markPaidHandler
 );
 

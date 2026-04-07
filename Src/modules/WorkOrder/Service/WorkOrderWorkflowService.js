@@ -64,45 +64,12 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
     },
-    PENDING_APPROVAL: {
-        allowedFrom: ["DRAFT", "ADDITIONAL_WORK_FOUND"],
-        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER],
-        minHierarchy: ROLES.BRANCHMANAGER,
-        gateValidator: (wo, payload) => {
-            if (!wo.estimatedTotalCost || wo.estimatedTotalCost <= 0) {
-                return "Estimated total cost must be greater than 0 before requesting approval.";
-            }
-            return null;
-        },
-    },
     START: {
-        allowedFrom: ["PENDING_APPROVAL", "DRAFT", "ADDITIONAL_WORK_FOUND"],
+        allowedFrom: ["DRAFT"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.ADMIN,
         gateValidator: async (wo, payload, user) => {
-            const requiredLevel = await determineCostApprovalLevel(wo.estimatedTotalCost);
-            
-            // Allow START from DRAFT or ADDITIONAL_WORK_FOUND only if AUTO-APPROVED
-            if (["DRAFT", "ADDITIONAL_WORK_FOUND"].includes(wo.status) && requiredLevel !== "AUTO") {
-                return `Cost of $${wo.estimatedTotalCost} requires PENDING_APPROVAL and ${requiredLevel}-level authority.`;
-            }
-
-            if (requiredLevel === "AUTO") return null; // auto-approved
-            if (!canRoleApproveLevel(user.role, requiredLevel)) {
-                return `Cost of $${wo.estimatedTotalCost} requires ${requiredLevel}-level approval. Your role cannot approve this.`;
-            }
-            return null;
-        },
-    },
-    REJECTED: {
-        allowedFrom: ["PENDING_APPROVAL"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER],
-        minHierarchy: ROLES.ADMIN,
-        gateValidator: (wo, payload) => {
-            if (!payload.rejectionReason) {
-                return "Rejection reason is required.";
-            }
-            return null;
+            return null; // All costs are now auto-approved/startable directly
         },
     },
     VEHICLE_CHECKED_IN: {
@@ -117,7 +84,7 @@ const STATUS_RULES = {
         },
     },
     PARTS_REQUESTED: {
-        allowedFrom: ["VEHICLE_CHECKED_IN", "IN_PROGRESS"],
+        allowedFrom: ["IN_PROGRESS"],
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
@@ -138,6 +105,9 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
+            if (wo.status === "VEHICLE_CHECKED_IN" && (!wo.tasks || wo.tasks.length === 0)) {
+                return "At least one task must be added before starting work.";
+            }
             if (!wo.assignedTechnician && !payload.assignedTechnician) {
                 return "A technician must be assigned before work can begin.";
             }
@@ -157,17 +127,6 @@ const STATUS_RULES = {
             const reason = payload.pauseReason || payload.notes || wo.pauseReason;
             if (!reason || (typeof reason === 'string' && reason.trim() === "")) {
                 return `Pause reason is required. (Payload Keys: ${Object.keys(payload).join(", ")})`;
-            }
-            return null;
-        },
-    },
-    ADDITIONAL_WORK_FOUND: {
-        allowedFrom: ["IN_PROGRESS"],
-        allowedRoles: [ROLES.WORKSHOPSTAFF],
-        minHierarchy: ROLES.BRANCHMANAGER,
-        gateValidator: (wo, payload) => {
-            if (!payload.additionalWorkScope) {
-                return "Description of additional work scope is required.";
             }
             return null;
         },
@@ -257,7 +216,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     CANCELLED: {
-        allowedFrom: ["DRAFT", "PENDING_APPROVAL", "START", "REJECTED"],
+        allowedFrom: ["DRAFT", "START"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (wo, payload) => {
@@ -272,27 +231,9 @@ const STATUS_RULES = {
 // ─── Side Effects ────────────────────────────────────────────────────
 
 const triggerSideEffects = async (targetStatus, workOrder, user) => {
-    if (targetStatus === "START" || targetStatus === "PENDING_APPROVAL") {
-        // Auto-approve if cost ≤ Threshold
-        const level = await determineCostApprovalLevel(workOrder.estimatedTotalCost);
-        if (level === "AUTO" && targetStatus === "PENDING_APPROVAL") {
-            const workshopThreshold = (await require("../../SystemSettings/Repo/SystemSettingsRepo").getSetting("WORK_ORDER_APPROVAL_THRESHOLD")) || 200;
-            console.log(`[WorkOrder] Auto-approving WO ${workOrder.workOrderNumber} (cost ≤ $${workshopThreshold})`);
-            workOrder.costApproval = {
-                approvedBy: user.id,
-                approvedByRole: user.role,
-                approvedAt: new Date(),
-                thresholdLevel: "AUTO",
-            };
-            workOrder.status = "START";
-            workOrder.statusHistory.push({
-                status: "START",
-                changedBy: user.id,
-                changedByRole: user.role,
-                notes: `Auto-approved: estimated cost within auto-approval threshold ($${workshopThreshold}).`,
-            });
-            await workOrder.save();
-        }
+    if (targetStatus === "START") {
+        // Since we removed PENDING_APPROVAL, we just ensure START is processed.
+        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} started. Processing side effects.`);
     }
 
     if (targetStatus === "START") {
