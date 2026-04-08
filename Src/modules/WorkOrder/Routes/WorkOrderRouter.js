@@ -163,11 +163,11 @@ router.get(
  *         schema:
  *           type: string
  *     responses:
-      200:
-        description: Work order details
-      404:
-        description: Work order not found
-*/
+ *       200:
+ *         description: Work order details
+ *       404:
+ *         description: Work order not found
+ */
 
 router.get(
     "/:id",
@@ -660,7 +660,7 @@ router.put(
 router.post(
     "/:id/photos",
     authenticate,
-    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     upload.single("photo"),
     addPhotoHandler
 );

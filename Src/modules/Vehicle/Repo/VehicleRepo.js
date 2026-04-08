@@ -125,10 +125,14 @@ exports.updateVehicleService = async (id, updateData, session = null) => {
             finalUpdate.$set = { ...(finalUpdate.$set || {}), ...flatSet };
         }
 
+        console.log(`[DEBUG] updateVehicleService - ID: ${id}, Final Update:`, JSON.stringify(finalUpdate, null, 2));
+
         const options = { returnDocument: "after", runValidators: true };
         if (session) options.session = session;
 
-        return await Vehicle.findByIdAndUpdate(id, finalUpdate, options);
+        const result = await Vehicle.findByIdAndUpdate(id, finalUpdate, options);
+        console.log(`[DEBUG] updateVehicleService - Result Success:`, !!result);
+        return result;
     } catch (error) {
         throw error;
     }

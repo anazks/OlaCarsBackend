@@ -35,7 +35,6 @@ const calculateSlaDeadline = (priority) => {
     return new Date(Date.now() + hours * 60 * 60 * 1000);
 };
 
-
 // ─── Status Transition Rules ─────────────────────────────────────────
 
 const STATUS_RULES = {
@@ -44,10 +43,9 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
     },
-
     APPROVED: {
-        allowedFrom: ["DRAFT", "ADDITIONAL_WORK_FOUND"],
-        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
+        allowedFrom: ["DRAFT"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.ADMIN,
     },
     REJECTED: {
@@ -61,8 +59,16 @@ const STATUS_RULES = {
             return null;
         },
     },
+    START: {
+        allowedFrom: ["DRAFT"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
+        minHierarchy: ROLES.ADMIN,
+        gateValidator: async (wo, payload, user) => {
+            return null;
+        },
+    },
     VEHICLE_CHECKED_IN: {
-        allowedFrom: ["START"],
+        allowedFrom: ["START", "APPROVED"],
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
@@ -97,7 +103,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
     },
     IN_PROGRESS: {
-        allowedFrom: ["VEHICLE_CHECKED_IN", "PARTS_RECEIVED", "PAUSED", "FAILED_QC", "START"],
+        allowedFrom: ["VEHICLE_CHECKED_IN", "PARTS_RECEIVED", "PAUSED", "FAILED_QC", "START", "APPROVED"],
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
@@ -107,9 +113,7 @@ const STATUS_RULES = {
             if (!wo.assignedTechnician && !payload.assignedTechnician) {
                 return "A technician must be assigned before work can begin.";
             }
-            // If coming from START, ensure it was ALREADY checked in.
-            // If logic path is DRAFT -> START (no checkin yet), then this will force them to go through CHECK-IN first.
-            if (wo.status === "START" && !wo.odometerAtEntry && !payload.odometerAtEntry) {
+            if (["START", "APPROVED"].includes(wo.status) && !wo.odometerAtEntry && !payload.odometerAtEntry) {
                 return "Vehicle must be checked-in (odometer recorded) before work can begin.";
             }
             return null;
@@ -122,7 +126,7 @@ const STATUS_RULES = {
         gateValidator: (wo, payload) => {
             const reason = payload.pauseReason || payload.notes || wo.pauseReason;
             if (!reason || (typeof reason === 'string' && reason.trim() === "")) {
-                return `Pause reason is required. (Payload Keys: ${Object.keys(payload).join(", ")})`;
+                return `Pause reason is required.`;
             }
             return null;
         },
@@ -168,9 +172,20 @@ const STATUS_RULES = {
                     return `${mandatoryFails.length} mandatory QC item(s) failed. Cannot release vehicle.`;
                 }
             }
-            const photos = wo.photos || [];
-            if (photos.length < 4) {
-                return `Minimum 4 QC/repair photos required. Currently ${photos.length} uploaded.`;
+
+            // Validate Photo Requirements
+            const requiredPhotos = wo.requiredPhotos || [];
+            const uploadedPhotos = wo.photos || [];
+            
+            if (requiredPhotos.length > 0) {
+                const missingMandatory = requiredPhotos.filter(rp => 
+                    rp.isMandatory && !uploadedPhotos.some(up => up.caption === rp.label)
+                );
+                if (missingMandatory.length > 0) {
+                    return `Mandatory photos missing: ${missingMandatory.map(m => m.label).join(", ")}`;
+                }
+            } else if (uploadedPhotos.length < 4) {
+                return `Minimum 4 QC/repair photos required. Currently ${uploadedPhotos.length} uploaded.`;
             }
 
             return null;
@@ -204,8 +219,8 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     CANCELLED: {
-        allowedFrom: ["DRAFT", "APPROVED", "REJECTED"],
-        allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER],
+        allowedFrom: ["DRAFT", "START", "APPROVED", "REJECTED"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (wo, payload) => {
             if (!payload.cancellationReason) {
@@ -219,26 +234,22 @@ const STATUS_RULES = {
 // ─── Side Effects ────────────────────────────────────────────────────
 
 const triggerSideEffects = async (targetStatus, workOrder, user) => {
-
-    if (targetStatus === "START") {
-        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} approved (START). Ready for vehicle check-in.`);
+    if (["START", "APPROVED"].includes(targetStatus)) {
+        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} started/approved. Ready for vehicle check-in.`);
     }
 
     if (targetStatus === "VEHICLE_RELEASED") {
-        console.log(`[WorkOrder] Vehicle released from WO ${workOrder.workOrderNumber}. Triggering vehicle status sync → ACTIVE — AVAILABLE.`);
-        // Future: call Vehicle workflow to set status to ACTIVE — AVAILABLE
+        console.log(`[WorkOrder] Vehicle released from WO ${workOrder.workOrderNumber}. Triggering vehicle status sync.`);
     }
 
     if (targetStatus === "CANCELLED") {
-        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} cancelled. Releasing any reserved inventory.`);
-        // Future: release reserved parts back to inventory
+        console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} cancelled. Releasing reserved inventory.`);
     }
 
     if (targetStatus === "PAUSED") {
         const { logLabourEntry } = require("./WorkOrderService");
         const technicianId = workOrder.assignedTechnician;
         if (technicianId) {
-            console.log(`[WorkOrder] Auto-pausing labour for technician ${technicianId} on WO ${workOrder.workOrderNumber}`);
             try {
                 await logLabourEntry(workOrder._id, {
                     technicianId: technicianId,
@@ -246,15 +257,13 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
                     notes: workOrder.pauseReason || "Work order paused",
                 });
             } catch (err) {
-                console.warn(`[WorkOrder] Auto-pause failed: ${err.message}. (Possibly already paused)`);
+                console.warn(`[WorkOrder] Auto-pause failed: ${err.message}`);
             }
         }
     }
 
     if (targetStatus === "QUALITY_CHECK") {
         const { logLabourEntry } = require("./WorkOrderService");
-        // For each technician in labourLog, check if their last action was CLOCK_IN or RESUME
-        // If so, trigger a CLOCK_OUT at current time.
         const techLastActions = {};
         for (const log of workOrder.labourLog || []) {
             techLastActions[log.technicianId.toString()] = log.action;
@@ -262,7 +271,6 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
 
         for (const [techId, lastAction] of Object.entries(techLastActions)) {
             if (["CLOCK_IN", "RESUME"].includes(lastAction)) {
-                console.log(`[WorkOrder] Auto-clocking out technician ${techId} as WO ${workOrder.workOrderNumber} moves to QUALITY_CHECK`);
                 try {
                     await logLabourEntry(workOrder._id, {
                         technicianId: techId,
@@ -282,7 +290,6 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
             const { logLabourEntry } = require("./WorkOrderService");
             const technicianId = workOrder.assignedTechnician;
             if (technicianId) {
-                console.log(`[WorkOrder] Auto-resuming labour for technician ${technicianId} on WO ${workOrder.workOrderNumber}`);
                 try {
                     await logLabourEntry(workOrder._id, {
                         technicianId: technicianId,
@@ -290,103 +297,58 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
                         notes: "Work order resumed",
                     });
                 } catch (err) {
-                    console.warn(`[WorkOrder] Auto-resume failed: ${err.message}. (Possibly not paused)`);
+                    console.warn(`[WorkOrder] Auto-resume failed: ${err.message}`);
                 }
             }
         }
     }
 
-    if (targetStatus === "ADDITIONAL_WORK_FOUND") {
-        // Check if cost increase > 20% → re-approval
-        const originalCost = workOrder.estimatedTotalCost || 0;
-        const newEstimate = workOrder.additionalWorkScope ? originalCost * 1.2 : originalCost;
-        if (newEstimate > originalCost * 1.2) {
-            console.log(`[WorkOrder] Cost increase >20% detected on WO ${workOrder.workOrderNumber}. Re-approval required.`);
-        }
-    }
-
-    // ── Automated Labour Tracking ──
+    // Automated Labour Tracking
     try {
         if (targetStatus === "IN_PROGRESS") {
-            console.log(`[WorkOrder] Auto-clocking IN for technician ${user.id} on WO ${workOrder.workOrderNumber}`);
             await logLabourEntry(workOrder._id, {
                 technicianId: user.id,
                 action: "CLOCK_IN",
-                notes: "Automated clock-in on IN_PROGRESS status transition"
-            });
-        } else if (targetStatus === "QUALITY_CHECK") {
-            console.log(`[WorkOrder] Auto-clocking OUT for technician ${user.id} on WO ${workOrder.workOrderNumber}`);
-            await logLabourEntry(workOrder._id, {
-                technicianId: user.id,
-                action: "CLOCK_OUT",
-                notes: "Automated clock-out on QUALITY_CHECK status transition"
+                notes: "Automated clock-in on IN_PROGRESS transition"
             });
         }
     } catch (labourError) {
-        // Log error but don't fail the status transition (optional fallback)
         console.error(`[WorkOrder] Failed to automate labour log: ${labourError.message}`);
     }
 };
 
 // ─── Main Workflow Engine ────────────────────────────────────────────
 
-/**
- * Unified work order status transition engine.
- * @param {string} woId - Work Order ID
- * @param {string} targetStatus - Target status
- * @param {Object} updateData - Data payload for the transition
- * @param {Object} user - { id, role } from JWT
- * @returns {Promise<Object>} Updated work order
- */
 const processWorkOrderProgress = async (woId, targetStatus, updateData, user) => {
     const currentWO = await getWorkOrderById(woId);
-    if (!currentWO) {
-        throw new Error("Work order not found.", { cause: 404 });
-    }
+    if (!currentWO) throw new Error("Work order not found.", { cause: 404 });
 
-    if (!WORK_ORDER_STATUSES.includes(targetStatus)) {
+    if (!WORK_ORDER_STATUSES.includes(targetStatus) && targetStatus !== "APPROVED") {
         throw new Error("Invalid target status provided.", { cause: 400 });
     }
 
-    // Same-status update (just applying data without transition)
     if (currentWO.status === targetStatus) {
         return await updateWorkOrder(woId, updateData);
     }
 
     const rule = STATUS_RULES[targetStatus];
-    if (!rule) {
-        throw new Error("Invalid target status configuration.", { cause: 500 });
-    }
+    if (!rule) throw new Error("Invalid target status configuration.", { cause: 500 });
 
-    // Validate transition path
     if (!rule.allowedFrom.includes(currentWO.status)) {
-        throw new Error(
-            `Invalid transition. Cannot progress from '${currentWO.status}' to '${targetStatus}'.`,
-            { cause: 400 }
-        );
+        throw new Error(`Invalid transition from '${currentWO.status}' to '${targetStatus}'.`, { cause: 400 });
     }
 
-    // Validate role authorization
     if (!checkRoleAuth(user.role, rule.allowedRoles, rule.minHierarchy)) {
-        throw new Error(
-            `Role '${user.role}' is not authorized for the '${targetStatus}' transition.`,
-            { cause: 403 }
-        );
+        throw new Error(`Role '${user.role}' is not authorized for '${targetStatus}'.`, { cause: 403 });
     }
 
-    // Run gate validator
     const payload = { ...updateData };
     if (rule.gateValidator) {
         const errorMsg = await rule.gateValidator(currentWO, payload, user);
-        if (errorMsg) {
-            throw new Error(errorMsg, { cause: 400 });
-        }
+        if (errorMsg) throw new Error(errorMsg, { cause: 400 });
     }
 
-    // ── Pre-transition logic ─────────────────────────────────────
-
-    // Set cost approval on START
-    if (targetStatus === "START") {
+    if (["START", "APPROVED"].includes(targetStatus)) {
         payload.costApproval = {
             approvedBy: user.id,
             approvedByRole: user.role,
@@ -395,35 +357,26 @@ const processWorkOrderProgress = async (woId, targetStatus, updateData, user) =>
         };
     }
 
-    // Set rejection reason
-    if (targetStatus === "REJECTED" && payload.rejectionReason) {
-        payload.rejectionReason = payload.rejectionReason;
-    }
-
-    // Auto-populate odometerAtEntry for VEHICLE_CHECKED_IN if missing
     if (targetStatus === "VEHICLE_CHECKED_IN" && !payload.odometerAtEntry && !currentWO.odometerAtEntry) {
         const vehicleOdo = currentWO.vehicleId?.basicDetails?.odometer;
-        if (vehicleOdo) {
-            payload.odometerAtEntry = vehicleOdo;
-            console.log(`[WorkOrder] Auto-populating odometerAtEntry from vehicle: ${vehicleOdo}`);
-        }
+        if (vehicleOdo) payload.odometerAtEntry = vehicleOdo;
     }
 
-    // ── Apply status change ──────────────────────────────────────
+    if (targetStatus === "PAUSED") {
+        payload.pauseReason = payload.pauseReason || payload.notes;
+    }
+
     payload.status = targetStatus;
     const updatedWO = await updateWorkOrder(woId, payload);
 
-    // Record in audit trail
     updatedWO.statusHistory.push({
         status: targetStatus,
         changedBy: user.id,
         changedByRole: user.role,
-        notes: updateData?.notes || `Status changed from ${currentWO.status} to ${targetStatus}`,
+        notes: updateData?.notes || `Status changed to ${targetStatus}`,
     });
 
     await updatedWO.save();
-
-    // ── Post-transition side effects ─────────────────────────────
     await triggerSideEffects(targetStatus, updatedWO, user);
 
     return updatedWO;

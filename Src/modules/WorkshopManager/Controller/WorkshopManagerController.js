@@ -53,70 +53,23 @@ const getWorkshopManager = async (req, res) => {
     }
 };
 
-const getWorkshopManagerById = async (req, res) => {
+exports.getWorkshopManagerById = async (req, res) => {
     try {
-        const manager = await WorkshopManagerService.getById(req.params.id);
-        if (!manager) return res.status(404).json({ success: false, message: 'Workshop Manager not found' });
-        return res.status(200).json({ success: true, data: manager });
+        const result = await WorkshopManagerService.getWorkshopManagerByIdService(req.params.id);
+        if (!result) return res.status(404).json({ success: false, message: "Workshop Manager not found" });
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-const editWorkshopManager = async (req, res) => {
+exports.login = async (req, res) => {
     try {
-        const updatedManager = await WorkshopManagerService.update(req.params.id, req.body);
-        return res.status(200).json({ success: true, data: updatedManager });
+        const { email, password } = req.body;
+        const { manager, accessToken, refreshToken } = await WorkshopManagerService.loginWorkshopManagerService(email, password);
+        return res.status(200).json({ success: true, manager, token: accessToken, refreshToken });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(401).json({ success: false, message: error.message });
     }
 };
 
-const changePassword = async (req, res) => {
-    try {
-        const { currentPassword, newPassword } = req.body;
-        const result = await WorkshopManagerService.changePassword(req.params.id, currentPassword, newPassword);
-        return res.status(200).json({ success: true, ...result });
-    } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
-    }
-};
-
-const deleteWorkshopManager = async (req, res) => {
-    try {
-        await WorkshopManagerService.remove(req.params.id);
-        return res.status(200).json({ success: true, message: 'Workshop Manager deleted successfully' });
-    } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
-    }
-};
-
-const refreshManagerToken = async (req, res) => {
-    try {
-        const { token } = req.body;
-        if (!token) {
-            const AppError = require('../../../shared/utils/AppError.js');
-            throw new AppError('Refresh token is required', 400);
-        }
-
-        const tokens = await WorkshopManagerService.refreshSession(token);
-        return res.status(200).json({ success: true, ...tokens });
-    } catch (error) {
-        const statusCode = error.statusCode || 401;
-        return res.status(statusCode).json({ success: false, message: error.message });
-    }
-};
-
-module.exports = {
-    login,
-    addWorkshopManager,
-    getWorkshopManager,
-    getWorkshopManagerById,
-    editWorkshopManager,
-    changePassword,
-    deleteWorkshopManager,
-    refreshManagerToken
-};

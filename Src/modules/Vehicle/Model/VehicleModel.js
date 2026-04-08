@@ -113,6 +113,15 @@ const vehicleSchema = new mongoose.Schema(
             fromDate: { type: Date },
             toDate: { type: Date },
             certificate: { type: String }, // S3 Key
+            provider: { type: String },
+            policyType: { type: String },
+            coverageType: { type: String },
+            supplier: {
+                _id: { type: String },
+                name: { type: String },
+                email: { type: String },
+                phone: { type: String }
+            }
         },
 
         // 5. Importation & Landed Cost

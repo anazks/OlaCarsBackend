@@ -70,6 +70,15 @@ const progressVehicleSchema = {
                 fromDate: Joi.date(),
                 toDate: Joi.date(),
                 certificate: Joi.string().trim(),
+                provider: Joi.string().trim(),
+                policyType: Joi.string().trim(),
+                coverageType: Joi.string().trim(),
+                supplier: Joi.object({
+                    _id: Joi.string().trim(),
+                    name: Joi.string().trim(),
+                    email: Joi.string().email().allow("", null),
+                    phone: Joi.string().trim().allow("", null)
+                }).unknown(true).allow(null)
             }),
             // ... other updateData fields can be added here if needed, 
             // but Joi.object().unknown() is often used for flexibility in progress updates

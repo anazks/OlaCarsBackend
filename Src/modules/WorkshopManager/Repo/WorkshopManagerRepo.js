@@ -1,14 +1,15 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopManager = require("../Model/WorkshopManagerModel.js");
-const { jwtConfig  } = require("../../../config/jwtConfig.js");
+const { jwtConfig } = require("../../../config/jwtConfig.js");
+const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 
 /**
- * Adds a new Workshop Manager.
- * @param {Object} data - Manager details.
- * @returns {Promise<Object>} Added manager document.
+ * Adds a new Workshop Manager to the database.
+ * @param {Object} data - Workshop Manager details.
+ * @returns {Promise<Object>} Added Workshop Manager object.
  */
-exports.addWorkshopManagerService = async (data) => {
+exports.addWorkshopManagerRepo = async (data) => {
     try {
         const hashedPassword = await bcrypt.hash(data.password, 12);
         const newManager = await WorkshopManager.create({
@@ -16,6 +17,7 @@ exports.addWorkshopManagerService = async (data) => {
             passwordHash: hashedPassword,
         });
 
+        // Remove password hash from response
         const managerObj = newManager.toObject();
         delete managerObj.passwordHash;
 
@@ -26,14 +28,15 @@ exports.addWorkshopManagerService = async (data) => {
 };
 
 /**
- * Updates a Workshop Manager.
- * @param {Object} data - Update payload containing ID.
- * @returns {Promise<Object>} Updated manager document.
+ * Updates an existing Workshop Manager.
+ * @param {Object} data - Updated field details including ID.
+ * @returns {Promise<Object>} Updated Workshop Manager object.
  */
-exports.editWorkshopManagerService = async (data) => {
+exports.editWorkshopManagerRepo = async (data) => {
     try {
         const { id, ...updateData } = data;
-        return await WorkshopManager.findByIdAndUpdate(id, updateData, { new: true });
+        const updatedManager = await WorkshopManager.findByIdAndUpdate(id, updateData, { new: true });
+        return updatedManager;
     } catch (error) {
         throw error;
     }
@@ -41,10 +44,10 @@ exports.editWorkshopManagerService = async (data) => {
 
 /**
  * Soft deletes a Workshop Manager.
- * @param {string} id - ID to delete.
+ * @param {string} id - The ID to delete.
  * @returns {Promise<void>}
  */
-exports.deleteWorkshopManagerService = async (id) => {
+exports.deleteWorkshopManagerRepo = async (id) => {
     try {
         await WorkshopManager.findByIdAndUpdate(id, { isDeleted: true });
     } catch (error) {
@@ -60,7 +63,27 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
  * @param {Object} [options={}] - Additional options like baseQuery.
  * @returns {Promise<Object>} Paginated result
  */
-exports.getWorkshopManagerService = async (queryParams = {}, options = {}) => {
+exports.getWorkshopManagersRepo = async (queryParams = {}, options = {}) => {
+  try {
+    const queryOptions = {
+        searchFields: ["fullName", "email"],
+        filterFields: ["status", "branchId"],
+        dateFilterField: "createdAt",
+        ...options
+    };
+
+    return await applyQueryFeatures(WorkshopManager, queryParams, queryOptions);
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Retrieves a Workshop Manager by ID.
+ * @param {string} id - The ID.
+ * @returns {Promise<Object>}
+ */
+exports.getWorkshopManagerByIdRepo = async (id) => {
     try {
         const queryOptions = {
             searchFields: ["fullName", "email"],
@@ -76,25 +99,12 @@ exports.getWorkshopManagerService = async (queryParams = {}, options = {}) => {
 };
 
 /**
- * Retrieves a Workshop Manager by ID.
- * @param {string} id - The ID.
- * @returns {Promise<Object>}
- */
-exports.getWorkshopManagerByIdService = async (id) => {
-    try {
-        return await WorkshopManager.findOne({ _id: id, isDeleted: false });
-    } catch (error) {
-        throw error;
-    }
-};
-
-/**
  * Handles Workshop Manager login.
  * @param {string} email - Email address.
  * @param {string} password - Password.
- * @returns {Promise<Object>} Tokens.
+ * @returns {Promise<Object>} Tokens and manager object.
  */
-exports.loginWorkshopManager = async (email, password) => {
+exports.loginWorkshopManagerRepo = async (email, password) => {
     const manager = await WorkshopManager.findOne({ email, isDeleted: false });
     if (!manager) throw new Error("Invalid credentials");
 
@@ -118,5 +128,5 @@ exports.loginWorkshopManager = async (email, password) => {
     manager.lastLoginAt = new Date();
     await manager.save();
 
-    return { accessToken, refreshToken };
+    return { manager, accessToken, refreshToken };
 };

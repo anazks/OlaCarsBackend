@@ -57,6 +57,10 @@ const workshopManagerSchema = new mongoose.Schema(
         lockUntil: {
             type: Date,
         },
+        isDeleted: {
+            type: Boolean,
+            default: false,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: true,
@@ -65,7 +69,7 @@ const workshopManagerSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: ['BRANCHMANAGER', 'ADMIN', 'OPERATIONADMIN', 'COUNTRYMANAGER']
+            enum: ['ADMIN', 'OPERATIONADMIN', 'FINANCEADMIN', 'COUNTRYMANAGER', 'BRANCHMANAGER']
         }
     },
     {

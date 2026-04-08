@@ -4,8 +4,8 @@ const { ROLES } = require("../../../shared/constants/roles");
 // ─── Enums ───────────────────────────────────────────────────────────
 const WORK_ORDER_STATUSES = [
     "DRAFT",
+    "START",
     "APPROVED",
-    "REJECTED",
     "VEHICLE_CHECKED_IN",
     "PARTS_REQUESTED",
     "PARTS_RECEIVED",
