@@ -55,8 +55,6 @@ exports.deleteWorkshopManagerRepo = async (id) => {
     }
 };
 
-const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
-
 /**
  * Retrieves all Workshop Managers using generic query features.
  * @param {Object} queryParams - Raw query parameters from req.query.
@@ -85,14 +83,7 @@ exports.getWorkshopManagersRepo = async (queryParams = {}, options = {}) => {
  */
 exports.getWorkshopManagerByIdRepo = async (id) => {
     try {
-        const queryOptions = {
-            searchFields: ["fullName", "email"],
-            filterFields: ["status", "branchId"],
-            dateFilterField: "createdAt",
-            ...options
-        };
-
-        return await applyQueryFeatures(WorkshopManager, queryParams, queryOptions);
+        return await WorkshopManager.findById(id).select("-passwordHash");
     } catch (error) {
         throw error;
     }

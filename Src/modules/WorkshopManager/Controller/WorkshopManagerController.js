@@ -1,22 +1,22 @@
 const WorkshopManagerService = require('../Service/WorkshopManagerService.js');
 
-const login = async (req, res) => {
+exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const tokens = await WorkshopManagerService.login(email, password);
-        return res.status(200).json({ success: true, ...tokens });
+        const result = await WorkshopManagerService.loginService(email, password);
+        return res.status(200).json({ success: true, ...result });
     } catch (error) {
         const statusCode = error.statusCode || 401;
         return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
-const addWorkshopManager = async (req, res) => {
+exports.addWorkshopManager = async (req, res) => {
     try {
         const data = { ...req.body };
         data.createdBy = req.user.id;
         data.creatorRole = req.user.role;
-        const newManager = await WorkshopManagerService.create(data);
+        const newManager = await WorkshopManagerService.createWorkshopManagerService(data);
         return res.status(201).json({ success: true, data: newManager });
     } catch (error) {
         const statusCode = error.statusCode || 500;
@@ -24,7 +24,7 @@ const addWorkshopManager = async (req, res) => {
     }
 };
 
-const getWorkshopManager = async (req, res) => {
+exports.getWorkshopManager = async (req, res) => {
     try {
         const queryParams = { ...req.query };
         const options = {};
@@ -37,7 +37,7 @@ const getWorkshopManager = async (req, res) => {
             options.baseQuery = { branchId: { $in: branchIds } };
         }
 
-        const result = await WorkshopManagerService.getAll(queryParams, options);
+        const result = await WorkshopManagerService.getAllWorkshopManagersService(queryParams, options);
         return res.status(200).json({
             success: true,
             data: result.data,
@@ -56,20 +56,52 @@ const getWorkshopManager = async (req, res) => {
 exports.getWorkshopManagerById = async (req, res) => {
     try {
         const result = await WorkshopManagerService.getWorkshopManagerByIdService(req.params.id);
-        if (!result) return res.status(404).json({ success: false, message: "Workshop Manager not found" });
         return res.status(200).json({ success: true, data: result });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 
-exports.login = async (req, res) => {
+exports.editWorkshopManager = async (req, res) => {
     try {
-        const { email, password } = req.body;
-        const { manager, accessToken, refreshToken } = await WorkshopManagerService.loginWorkshopManagerService(email, password);
-        return res.status(200).json({ success: true, manager, token: accessToken, refreshToken });
+        const result = await WorkshopManagerService.updateWorkshopManagerService(req.params.id, req.body);
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
-        return res.status(401).json({ success: false, message: error.message });
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteWorkshopManager = async (req, res) => {
+    try {
+        await WorkshopManagerService.deleteWorkshopManagerService(req.params.id);
+        return res.status(200).json({ success: true, message: "Workshop Manager deleted successfully" });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+exports.changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const result = await WorkshopManagerService.changePasswordService(req.params.id, currentPassword, newPassword);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+exports.refreshManagerToken = async (req, res) => {
+    try {
+        const { token } = req.body;
+        const result = await WorkshopManagerService.refreshSessionService(token);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
     }
 };
 

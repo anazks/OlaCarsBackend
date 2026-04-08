@@ -116,10 +116,108 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Workshop Manager not found', 404);
 };
 
-const { getWorkshopManagerService } = require('../Repo/WorkshopManagerRepo.js');
+const { 
+    getWorkshopManagersRepo, 
+    addWorkshopManagerRepo, 
+    editWorkshopManagerRepo, 
+    deleteWorkshopManagerRepo,
+    getWorkshopManagerByIdRepo,
+    loginWorkshopManagerRepo
+} = require('../Repo/WorkshopManagerRepo.js');
 
-exports.getAll = async (queryParams = {}, options = {}) => {
-    return await getWorkshopManagerService(queryParams, {
+exports.loginService = async (email, password) => {
+    // We can use the logic already in the repo or keep the complex service logic if needed.
+    // The current service logic has lock-out features which are good.
+    // Let's keep the service logic but ensure it uses the model consistently.
+    const manager = await WorkshopManager.findOne({ email, isDeleted: false });
+    if (!manager) throw new AppError('Invalid credentials', 401);
+
+    if (manager.lockUntil && manager.lockUntil > Date.now()) {
+        throw new AppError('Account is locked. Try again later.', 423);
+    }
+
+    if (manager.status !== 'ACTIVE') throw new AppError('Account not active', 403);
+
+    const isMatch = await bcrypt.compare(password, manager.passwordHash);
+    if (!isMatch) {
+        manager.failedLoginAttempts = (manager.failedLoginAttempts || 0) + 1;
+        if (manager.failedLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
+            manager.lockUntil = new Date(Date.now() + LOCK_TIME_MS);
+            manager.status = 'LOCKED';
+        }
+        await manager.save();
+        throw new AppError('Invalid credentials', 401);
+    }
+
+    manager.failedLoginAttempts = 0;
+    manager.lockUntil = undefined;
+    manager.lastLoginAt = new Date();
+
+    const accessToken = jwt.sign(
+        { id: manager._id, role: manager.role, branchId: manager.branchId },
+        process.env.JWT_SECRET,
+        { expiresIn: jwtConfig.accessTokenExpiry }
+    );
+
+    const refreshToken = jwt.sign(
+        { id: manager._id },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: jwtConfig.refreshTokenExpiry }
+    );
+
+    manager.refreshToken = refreshToken;
+    await manager.save();
+
+    const managerObj = manager.toObject();
+    delete managerObj.passwordHash;
+    delete managerObj.refreshToken;
+
+    return { accessToken, refreshToken, manager: managerObj };
+};
+
+exports.createWorkshopManagerService = async (data) => {
+    validatePassword(data.password);
+    return await addWorkshopManagerRepo(data);
+};
+
+exports.updateWorkshopManagerService = async (id, body) => {
+    const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
+    if (Object.keys(filtered).length === 0) {
+        throw new AppError('No valid fields to update', 400);
+    }
+    
+    const result = await editWorkshopManagerRepo({ id, ...filtered });
+    if (!result) throw new AppError('Workshop Manager not found', 404);
+    
+    const managerObj = result.toObject();
+    delete managerObj.passwordHash;
+    return managerObj;
+};
+
+exports.changePasswordService = async (id, currentPassword, newPassword) => {
+    const manager = await WorkshopManager.findById(id);
+    if (!manager) throw new AppError('Workshop Manager not found', 404);
+
+    const isMatch = await bcrypt.compare(currentPassword, manager.passwordHash);
+    if (!isMatch) throw new AppError('Current password is incorrect', 401);
+
+    validatePassword(newPassword);
+
+    manager.passwordHash = await bcrypt.hash(newPassword, 12);
+    manager.passwordChangedAt = new Date();
+    manager.failedLoginAttempts = 0;
+    manager.lockUntil = undefined;
+    await manager.save();
+
+    return { message: 'Password changed successfully' };
+};
+
+exports.deleteWorkshopManagerService = async (id) => {
+    await deleteWorkshopManagerRepo(id);
+};
+
+exports.getAllWorkshopManagersService = async (queryParams = {}, options = {}) => {
+    return await getWorkshopManagersRepo(queryParams, {
         baseQuery: { isDeleted: false },
         select: '-passwordHash -refreshToken',
         defaultSort: { createdAt: -1 },
@@ -127,10 +225,13 @@ exports.getAll = async (queryParams = {}, options = {}) => {
     });
 };
 
-exports.getById = async (id) => {
-    return await WorkshopManager.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
+exports.getWorkshopManagerByIdService = async (id) => {
+    const manager = await getWorkshopManagerByIdRepo(id);
+    if (!manager || manager.isDeleted) throw new AppError('Workshop Manager not found', 404);
+    return manager;
 };
-exports.refreshSession = async (token) => {
+
+exports.refreshSessionService = async (token) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
         const manager = await WorkshopManager.findById(decoded.id);

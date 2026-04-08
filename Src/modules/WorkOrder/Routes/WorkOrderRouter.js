@@ -25,9 +25,6 @@ const {
     generateBillHandler,
     releaseVehicleHandler,
 } = require("../Controller/WorkOrderController");
-const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
-const { ROLES } = require("../../../shared/constants/roles.js");
 const upload = require("../../../utils/multerConfig.js");
 
 /**
