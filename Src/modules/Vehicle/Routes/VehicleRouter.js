@@ -7,7 +7,8 @@ const {
     progressVehicleStatus,
     uploadVehicleDocuments,
     getAvailableCars,
-    assignCarToDriver
+    assignCarToDriver,
+    updateVehicleLeaseSettings
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -19,7 +20,8 @@ const {
     progressVehicleSchema,
     assignCarToDriverSchema,
     getVehicleByIdSchema,
-    uploadDocumentsSchema
+    uploadDocumentsSchema,
+    updateLeaseSettingsSchema
 } = require("../Validation/VehicleValidation");
 
 /**
@@ -534,6 +536,50 @@ router.post(
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
     validate(assignCarToDriverSchema),
     (req, res, next) => assignCarToDriver(req, res, next)
+);
+
+/**
+ * @swagger
+ * /api/vehicle/{id}/lease-settings:
+ *   put:
+ *     summary: Update vehicle lease settings (lease duration and weekly rent)
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - durationWeeks
+ *               - weeklyRent
+ *             properties:
+ *               durationWeeks:
+ *                 type: number
+ *               weeklyRent:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Lease settings updated successfully
+ *       403:
+ *         description: Unauthorized role
+ *       404:
+ *         description: Vehicle not found
+ */
+router.put(
+    "/:id/lease-settings",
+    authenticate,
+    authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
+    validate(updateLeaseSettingsSchema),
+    updateVehicleLeaseSettings
 );
 
 module.exports = router;

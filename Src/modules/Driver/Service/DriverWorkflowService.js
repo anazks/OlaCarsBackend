@@ -167,23 +167,26 @@ const STATUS_RULES = {
     },
 
     "CONTRACT PENDING": {
-        allowedFrom: ["APPROVED"],
+        allowedFrom: ["APPROVED", "ACTIVE"],
         allowedRoles: [ROLES.FINANCESTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const c = driver.contract || {};
-            if (!c.generatedS3Key) {
-                return "Contract PDF must be generated/uploaded before issuing.";
+            // In manual flow, we might have a signed copy but not a generated one yet
+            if (!c.generatedS3Key && !c.signedS3Key) {
+                return "Contract document must be generated or a signed copy uploaded before issuing.";
             }
             return null;
         },
     },
 
     "ACTIVE": {
-        allowedFrom: ["CONTRACT PENDING", "SUSPENDED"],
+        allowedFrom: ["CONTRACT PENDING", "SUSPENDED", "APPROVED"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.OPERATIONSTAFF,
         gateValidator(driver) {
+            // If we are coming from CONTRACT PENDING, we MUST have a signed contract.
+            // If we are coming from APPROVED, we allow activation first (contract comes during vehicle assignment).
             if (driver.status === "CONTRACT PENDING") {
                 const c = driver.contract || {};
                 if (!c.signedS3Key) {

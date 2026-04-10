@@ -81,7 +81,6 @@ const serviceBillSchema = new mongoose.Schema(
 );
 
 // Indexes
-serviceBillSchema.index({ billNumber: 1 });
 serviceBillSchema.index({ workOrderId: 1 });
 serviceBillSchema.index({ branchId: 1 });
 serviceBillSchema.index({ status: 1 });

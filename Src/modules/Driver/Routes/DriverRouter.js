@@ -8,6 +8,8 @@ const {
     progressDriverStatus,
     uploadDriverDocuments,
     deleteDriver,
+    markRentAsPaid,
+    updatePerformance,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -210,7 +212,7 @@ router.get(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
     editDriver
 );
 
@@ -340,7 +342,7 @@ router.put(
 router.post(
     "/:id/upload-documents",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
     upload.fields([
         { name: "photograph", maxCount: 1 },
         { name: "idFrontImage", maxCount: 1 },
@@ -381,6 +383,22 @@ router.delete(
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN),
     deleteDriver
+);
+
+// ─── PUT /api/driver/:id/rent/pay — Mark Rent as Paid ────────────────
+router.put(
+    "/:id/rent/pay",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    markRentAsPaid
+);
+
+// ─── PUT /api/driver/:id/performance — Update Metrics ────────────────
+router.put(
+    "/:id/performance",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    updatePerformance
 );
 
 module.exports = router;

@@ -6,7 +6,7 @@ const AppError = require("../../../shared/utils/AppError");
  */
 exports.createLeaseService = async (data, userId, userRole, session = null) => {
     // 1. Mandatory checks
-    if (!data.driver || !data.vehicle || !data.durationMonths || !data.monthlyRent) {
+    if (!data.driver || !data.vehicle || !data.durationWeeks || !data.weeklyRent) {
         throw new AppError("Missing required lease details (driver, vehicle, duration, rent)", 400);
     }
 

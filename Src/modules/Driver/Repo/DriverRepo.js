@@ -52,14 +52,24 @@ exports.addDriverService = async (data) => {
  * @param {Object} [session] - Optional Mongoose session for transactions.
  */
 exports.updateDriverService = async (id, updateData, session = null) => {
-    // Separate $push and other operators from flat fields
-    const { $push, $unset, ...rest } = updateData;
-    const flatFields = flattenForSet(rest);
+    // Separate operators from flat fields
+    const operators = {};
+    const data = {};
 
-    const updateOps = {};
-    if (Object.keys(flatFields).length > 0) updateOps.$set = flatFields;
-    if ($push) updateOps.$push = $push;
-    if ($unset) updateOps.$unset = $unset;
+    for (const [key, value] of Object.entries(updateData)) {
+        if (key.startsWith("$")) {
+            operators[key] = value;
+        } else {
+            data[key] = value;
+        }
+    }
+
+    const flatFields = flattenForSet(data);
+    const updateOps = { ...operators };
+
+    if (Object.keys(flatFields).length > 0) {
+        updateOps.$set = { ...(updateOps.$set || {}), ...flatFields };
+    }
 
     const options = { returnDocument: "after", runValidators: true };
     if (session) options.session = session;

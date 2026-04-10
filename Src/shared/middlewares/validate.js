@@ -11,6 +11,9 @@ const validate = (schema) => (req, res, next) => {
 
     validations.forEach((key) => {
         if (schema[key]) {
+            if (key === 'body') {
+                console.log(`[DEBUG] Validation - Path: ${req.originalUrl}, Body:`, JSON.stringify(req.body, null, 2));
+            }
             const { error, value } = schema[key].validate(req[key], {
                 abortEarly: false,
                 stripUnknown: true,

@@ -156,15 +156,15 @@ class AgreementService {
     return versions;
   }
 
-  async renderAgreement(agreementId, userId) {
+  async renderAgreement(agreementId, userId, overrides = {}) {
     const agreement = await this.getAgreementById(agreementId);
     
-    // Get the latest published version
+    // Get the latest published version, or fallback to the most recent version
     const versions = await this.getAgreementVersions(agreementId);
-    const latestVersion = versions.find(v => v.status === "PUBLISHED" || v._id.toString() === agreement.latestVersion?.toString());
+    const latestVersion = versions.find(v => v.status === "PUBLISHED" || v._id.toString() === agreement.latestVersion?.toString()) || versions[0];
     
     if (!latestVersion) {
-      throw new AppError("No published version found for this agreement", 404);
+      throw new AppError("No version found for this agreement", 404);
     }
 
     // Fetch context data
@@ -184,8 +184,9 @@ class AgreementService {
         data.DRIVER_ID_NUMBER = driver.identityDocs?.idNumber || "";
         data.BRANCH_NAME = driver.branch?.name || "";
 
-        if (driver.currentVehicle) {
-            const vehicle = await Vehicle.findById(driver.currentVehicle);
+        const targetVehicleId = overrides.vehicleId || driver.currentVehicle;
+        if (targetVehicleId) {
+            const vehicle = await Vehicle.findById(targetVehicleId);
             if (vehicle) {
                 data.VEHICLE_MAKE = vehicle.basicDetails?.make || "";
                 data.VEHICLE_MODEL = vehicle.basicDetails?.model || "";
@@ -196,14 +197,19 @@ class AgreementService {
             }
 
             // Fetch Lease details (New)
-            const { getLatestActiveLeaseByDriverService } = require("../../Lease/Repo/LeaseRepo");
-            const lease = await getLatestActiveLeaseByDriverService(userId);
-            if (lease) {
-                data.LEASE_DURATION = lease.durationMonths || "";
-                data.LEASE_MONTHLY_RENT = lease.monthlyRent || "";
+            if (overrides.leaseDuration !== undefined && overrides.monthlyRent !== undefined) {
+                data.LEASE_DURATION = overrides.leaseDuration;
+                data.LEASE_MONTHLY_RENT = overrides.monthlyRent;
             } else {
-                data.LEASE_DURATION = "";
-                data.LEASE_MONTHLY_RENT = "";
+                const { getLatestActiveLeaseByDriverService } = require("../../Lease/Repo/LeaseRepo");
+                const lease = await getLatestActiveLeaseByDriverService(userId);
+                if (lease) {
+                    data.LEASE_DURATION = lease.durationMonths || "";
+                    data.LEASE_MONTHLY_RENT = lease.monthlyRent || "";
+                } else {
+                    data.LEASE_DURATION = "";
+                    data.LEASE_MONTHLY_RENT = "";
+                }
             }
         }
     }

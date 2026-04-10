@@ -274,23 +274,26 @@ const getAvailableCars = async (req, res, next) => {
  * @access Private
  */
 const assignCarToDriver = async (req, res, next) => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    let session = null;
 
     try {
+        session = await mongoose.startSession();
+        session.startTransaction();
+        console.log('[DEBUG] Starting Vehicle Assignment Transaction...');
+        
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
         const { 
-        leaseDuration, 
-        monthlyRent, 
-        notes, 
-        agreementVersion, 
-        generatedS3Key, 
-        signedS3Key 
-    } = req.body;
+            durationWeeks, 
+            weeklyRent, 
+            notes, 
+            agreementVersion, 
+            generatedS3Key, 
+            signedS3Key 
+        } = req.body;
 
-        if (!leaseDuration || !monthlyRent) {
-            throw new Error("leaseDuration and monthlyRent are required during assignment.");
+        if (durationWeeks === undefined || weeklyRent === undefined) {
+            throw new Error("durationWeeks and weeklyRent are required during assignment.");
         }
 
         // 1. Verify vehicle exists and is available
@@ -316,15 +319,13 @@ const assignCarToDriver = async (req, res, next) => {
         const lease = await createLeaseService({
             driver: driverId,
             vehicle: vehicleId,
-            durationMonths: leaseDuration,
-            monthlyRent: monthlyRent,
-            notes: notes,
+            durationWeeks,
+            weeklyRent,
+            notes,
             agreementVersion,
             generatedS3Key,
-            signedS3Key,
-            createdBy: req.user.id,
-            creatorRole: req.user.role
-        }, session);
+            signedS3Key
+        }, req.user.id, req.user.role, session);
 
         // 4. Perform assignment status updates
         // Update Vehicle status
@@ -335,12 +336,11 @@ const assignCarToDriver = async (req, res, next) => {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease Duration: ${leaseDuration} months.`
+                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease Duration: ${durationWeeks} weeks.`
                 }
             }
         }, session);
 
-        // Update Driver's current vehicle
         await updateDriverService(driverId, { 
             currentVehicle: vehicleId,
             $push: {
@@ -348,9 +348,17 @@ const assignCarToDriver = async (req, res, next) => {
                     status: driver.status, // Keep current status
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease Duration: ${leaseDuration} months.`
+                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease Duration: ${durationWeeks} weeks.`
                 }
             }
+        }, session);
+
+        // 5. Generate the multi-week rent plan automatically
+        const DriverService = require("../../Driver/Service/DriverService");
+        await DriverService.generateRentPlan(driverId, {
+            weeklyRent: weeklyRent,
+            durationWeeks: durationWeeks,
+            startFromNextWeek: true 
         }, session);
 
         await session.commitTransaction();
@@ -361,10 +369,49 @@ const assignCarToDriver = async (req, res, next) => {
             message: "Vehicle successfully assigned to driver and lease record created." 
         });
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        const statusCode = res.statusCode !== 200 ? res.statusCode : 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        console.error('[ERROR] assignCarToDriver Exception:', error);
+        if (session) {
+            await session.abortTransaction();
+            session.endSession();
+        }
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ 
+            success: false, 
+            message: error.message,
+            stack: error.stack 
+        });
+    }
+};
+
+/**
+ * Update Vehicle Lease Settings (Financial Admin only)
+ * @route PUT /api/vehicle/:id/lease-settings
+ * @body { durationWeeks: number, weeklyRent: number }
+ * @access Private
+ */
+const updateVehicleLeaseSettings = async (req, res, next) => {
+    try {
+        console.log('[DEBUG] updateVehicleLeaseSettings - Body:', JSON.stringify(req.body, null, 2));
+        const vehicleId = req.params.id;
+        const { durationWeeks, weeklyRent } = req.body;
+        
+        if (typeof durationWeeks !== 'number' || typeof weeklyRent !== 'number') {
+            return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks/weeklyRent fields." });
+        }
+
+        const { updateVehicleService } = require("../Repo/VehicleRepo");
+        const updatedVehicle = await updateVehicleService(vehicleId, {
+            "basicDetails.leaseDurationWeeks": durationWeeks,
+            "basicDetails.weeklyRent": weeklyRent
+        });
+
+        if (!updatedVehicle) {
+            return res.status(404).json({ success: false, message: "Vehicle not found" });
+        }
+
+        return res.status(200).json({ success: true, data: updatedVehicle });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
@@ -375,5 +422,6 @@ module.exports = {
     progressVehicleStatus,
     uploadVehicleDocuments,
     getAvailableCars,
-    assignCarToDriver
+    assignCarToDriver,
+    updateVehicleLeaseSettings
 };

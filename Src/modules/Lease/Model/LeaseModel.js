@@ -12,12 +12,12 @@ const leaseSchema = new mongoose.Schema(
             ref: "Vehicle",
             required: true,
         },
-        durationMonths: {
+        durationWeeks: {
             type: Number,
             required: true,
             min: 1,
         },
-        monthlyRent: {
+        weeklyRent: {
             type: Number,
             required: true,
             min: 0,
@@ -61,11 +61,11 @@ const leaseSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Middleware to calculate endDate based on durationMonths
+// Middleware to calculate endDate based on durationWeeks
 leaseSchema.pre("save", async function () {
-    if (this.isModified("startDate") || this.isModified("durationMonths")) {
+    if (this.isModified("startDate") || this.isModified("durationWeeks")) {
         const end = new Date(this.startDate);
-        end.setMonth(end.getMonth() + this.durationMonths);
+        end.setDate(end.getDate() + (this.durationWeeks * 7));
         this.endDate = end;
     }
 });

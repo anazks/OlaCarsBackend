@@ -93,8 +93,8 @@ const assignCarToDriverSchema = {
         driverId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
     }),
     body: Joi.object({
-        leaseDuration: Joi.number().min(1).required(),
-        monthlyRent: Joi.number().min(0).required(),
+        durationWeeks: Joi.number().min(1).required(),
+        weeklyRent: Joi.number().min(0).required(),
         notes: Joi.string().trim().allow("", null),
         agreementVersion: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         generatedS3Key: Joi.string().trim(),
@@ -114,10 +114,21 @@ const uploadDocumentsSchema = {
     }),
 };
 
+const updateLeaseSettingsSchema = {
+    params: Joi.object({
+        id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+    }),
+    body: Joi.object({
+        durationWeeks: Joi.number().min(1).required(),
+        weeklyRent: Joi.number().min(0).required(),
+    }),
+};
+
 module.exports = {
     addVehicleSchema,
     progressVehicleSchema,
     assignCarToDriverSchema,
     getVehicleByIdSchema,
     uploadDocumentsSchema,
+    updateLeaseSettingsSchema,
 };

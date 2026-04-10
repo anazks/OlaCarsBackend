@@ -72,6 +72,10 @@ const getDrivers = async (req, res) => {
 const getDriverById = async (req, res) => {
     try {
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
+        
+        // Ensure overdue rent is rolled over before fetching
+        await DriverService.rolloverOverdueRent(req.params.id);
+        
         const driver = await DriverService.getById(req.params.id, { includeSensitive: isFinanceRole });
         if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
         return res.status(200).json({ success: true, data: driver });
@@ -187,6 +191,44 @@ const deleteDriver = async (req, res) => {
     }
 };
 
+/**
+ * Record a partial or full rent payment for a driver's week.
+ * @route PUT /api/driver/:id/rent/pay
+ */
+const markRentAsPaid = async (req, res) => {
+    try {
+        const { weekNumber, amount, paymentMethod, transactionId, note } = req.body;
+        const driverId = req.params.id;
+
+        if (!weekNumber || !amount) {
+            return res.status(400).json({ success: false, message: "weekNumber and amount are required." });
+        }
+
+        const updatedDriver = await DriverService.payRent(driverId, { weekNumber, amount, paymentMethod, transactionId, note });
+        return res.status(200).json({ success: true, data: updatedDriver });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Update performance metrics for a driver.
+ * @route PUT /api/driver/:id/performance
+ */
+const updatePerformance = async (req, res) => {
+    try {
+        const driverId = req.params.id;
+        const metrics = req.body;
+
+        const updatedDriver = await DriverService.updateMetrics(driverId, metrics);
+        return res.status(200).json({ success: true, data: updatedDriver });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -195,4 +237,6 @@ module.exports = {
     progressDriverStatus,
     uploadDriverDocuments,
     deleteDriver,
+    markRentAsPaid,
+    updatePerformance,
 };

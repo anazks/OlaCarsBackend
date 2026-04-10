@@ -82,9 +82,10 @@ class AgreementController {
   renderAgreement = async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { id: userId } = req.user;
+      const { driverId, vehicleId, leaseDuration, monthlyRent } = req.query;
+      const targetUserId = driverId || req.user.id;
       
-      const data = await AgreementService.renderAgreement(id, userId);
+      const data = await AgreementService.renderAgreement(id, targetUserId, { vehicleId, leaseDuration, monthlyRent });
       
       return res.status(200).json({ success: true, message: "Agreement rendered successfully", data });
     } catch (error) {

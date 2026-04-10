@@ -84,7 +84,8 @@ const vehicleSchema = new mongoose.Schema(
             },
             odometer: { type: Number },
             gpsSerialNumber: { type: String },
-            monthlyRent: { type: Number, default: 0 },
+            weeklyRent: { type: Number, default: 0 },
+            leaseDurationWeeks: { type: Number, default: 260 },
         },
 
         // 3. Registration & Legal Documents
@@ -279,8 +280,6 @@ vehicleSchema.pre("findOneAndUpdate", async function () {
 vehicleSchema.index({ status: 1 });
 vehicleSchema.index({ "purchaseDetails.branch": 1 });
 vehicleSchema.index({ "legalDocs.registrationNumber": 1 });
-vehicleSchema.index({ "basicDetails.vin": 1 }, { unique: true, sparse: true });
-
 // Expiry Alert Indexes
 // vehicleSchema.index({ "insurancePolicy.expiryDate": 1 }); // Removed as moved to Insurance collection
 vehicleSchema.index({ "legalDocs.registrationExpiry": 1 });

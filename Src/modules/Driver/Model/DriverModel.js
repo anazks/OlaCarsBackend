@@ -211,6 +211,41 @@ const driverSchema = new mongoose.Schema(
             ref: "Vehicle",
         },
 
+        // ── 14. Performance Metrics ──────────────────────────────────
+        performance: {
+            avgSpeed: { type: Number, default: 0 },
+            totalDistance: { type: Number, default: 0 }, // in KM
+            drivingScore: { type: Number, default: 100 },
+            fuelEfficiency: { type: Number, default: 0 },
+            safetyEvents: {
+                braking: { type: Number, default: 0 },
+                speeding: { type: Number, default: 0 },
+                acceleration: { type: Number, default: 0 },
+            },
+            lastUpdated: { type: Date, default: Date.now },
+        },
+
+        // ── 15. Rent Tracking ────────────────────────────────────────
+        rentTracking: [{
+            weekNumber: { type: Number }, // 1, 2, 3...
+            weekLabel: { type: String }, // e.g., "Week 1", "Week 2 - May 2026"
+            dueDate: { type: Date }, 
+            amount: { type: Number, required: true }, // Original weekly rent amount
+            carryOver: { type: Number, default: 0 }, // Unpaid balance rolled from previous week
+            totalDue: { type: Number, default: 0 }, // amount + carryOver = total owed this week
+            amountPaid: { type: Number, default: 0 }, // Sum of all partial payments
+            balance: { type: Number, default: 0 }, // totalDue - amountPaid = remaining
+            status: { type: String, enum: ["PAID", "PARTIAL", "PENDING"], default: "PENDING" },
+            paidAt: { type: Date }, // Set when fully paid
+            payments: [{ // Individual partial payments log
+                amount: { type: Number, required: true },
+                paidAt: { type: Date, default: Date.now },
+                paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Other"], default: "Cash" },
+                transactionId: { type: String },
+                note: { type: String },
+            }],
+        }],
+
         // ── Audit ────────────────────────────────────────────────────
         statusHistory: [statusHistorySchema],
 
