@@ -34,6 +34,11 @@ exports.login = async (email, password) => {
     manager.failedLoginAttempts = 0;
     manager.lockUntil = undefined;
     manager.lastLoginAt = new Date();
+    
+    manager.loginHistory = manager.loginHistory || [];
+    manager.loginHistory.push({
+        loginTime: new Date()
+    });
 
     const accessToken = jwt.sign(
         { id: manager._id, role: manager.role, branchId: manager.branchId },
@@ -113,6 +118,22 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Branch Manager not found', 404);
 };
 
+exports.logout = async (id) => {
+    const manager = await BranchManager.findById(id);
+    if (!manager) throw new AppError('Branch Manager not found', 404);
+
+    if (manager.loginHistory && manager.loginHistory.length > 0) {
+        // Find the last login that doesn't have a logoutTime yet
+        for (let i = manager.loginHistory.length - 1; i >= 0; i--) {
+            if (!manager.loginHistory[i].logoutTime) {
+                manager.loginHistory[i].logoutTime = new Date();
+                break;
+            }
+        }
+        await manager.save();
+    }
+};
+
 const { getBranchManagersService } = require('../Repo/BranchManagerRepo.js');
 
 exports.getAll = async (queryParams = {}) => {
@@ -145,3 +166,37 @@ exports.getById = async (id) => {
 
     return manager;
 };
+
+exports.refreshAccessToken = async (token) => {
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+        const manager = await BranchManager.findById(decoded.id);
+
+        if (!manager || manager.refreshToken !== token) {
+            throw new AppError('Invalid refresh token', 401);
+        }
+
+        const accessToken = jwt.sign(
+            { id: manager._id, role: manager.role, branchId: manager.branchId },
+            process.env.JWT_SECRET,
+            { expiresIn: jwtConfig.accessTokenExpiry }
+        );
+
+        const newRefreshToken = jwt.sign(
+            { id: manager._id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: jwtConfig.refreshTokenExpiry }
+        );
+
+        manager.refreshToken = newRefreshToken;
+        await manager.save();
+
+        return { accessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+            throw new AppError('Invalid or expired refresh token', 401);
+        }
+        throw error;
+    }
+};
+

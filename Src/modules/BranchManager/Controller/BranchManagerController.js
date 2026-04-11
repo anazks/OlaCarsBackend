@@ -11,6 +11,16 @@ const login = async (req, res) => {
     }
 };
 
+const logout = async (req, res) => {
+    try {
+        await BranchManagerService.logout(req.user.id);
+        return res.status(200).json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 const addBranchManager = async (req, res) => {
     try {
         const data = { ...req.body };
@@ -83,10 +93,24 @@ const deleteBranchManager = async (req, res) => {
     }
 };
 
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        const result = await BranchManagerService.refreshAccessToken(refreshToken);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
+    logout,
+    refreshToken,
     addBranchManager,
     getBranchManagers,
+
     getBranchManagerById,
     editBranchManager,
     changePassword,

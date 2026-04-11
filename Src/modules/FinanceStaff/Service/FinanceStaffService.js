@@ -34,6 +34,12 @@ exports.login = async (email, password) => {
     staff.failedLoginAttempts = 0;
     staff.lockUntil = undefined;
     staff.lastLoginAt = new Date();
+    
+    // Add to login history
+    staff.loginHistory = staff.loginHistory || [];
+    staff.loginHistory.push({
+        loginTime: new Date()
+    });
 
     const accessToken = jwt.sign(
         { id: staff._id, role: staff.role, branchId: staff.branchId },
@@ -112,6 +118,22 @@ exports.remove = async (id) => {
     if (!result) throw new AppError('Finance Staff not found', 404);
 };
 
+exports.logout = async (id) => {
+    const staff = await FinanceStaff.findById(id);
+    if (!staff) throw new AppError('Finance Staff not found', 404);
+
+    if (staff.loginHistory && staff.loginHistory.length > 0) {
+        // Find the last login that doesn't have a logoutTime yet
+        for (let i = staff.loginHistory.length - 1; i >= 0; i--) {
+            if (!staff.loginHistory[i].logoutTime) {
+                staff.loginHistory[i].logoutTime = new Date();
+                break;
+            }
+        }
+        await staff.save();
+    }
+};
+
 const { getFinanceStaffService } = require('../Repo/FinanceStaffRepo.js');
 
 exports.getAll = async (queryParams = {}, options = {}) => {
@@ -126,3 +148,37 @@ exports.getAll = async (queryParams = {}, options = {}) => {
 exports.getById = async (id) => {
     return await FinanceStaff.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
 };
+
+exports.refreshAccessToken = async (token) => {
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+        const staff = await FinanceStaff.findById(decoded.id);
+
+        if (!staff || staff.refreshToken !== token) {
+            throw new AppError('Invalid refresh token', 401);
+        }
+
+        const accessToken = jwt.sign(
+            { id: staff._id, role: staff.role, branchId: staff.branchId },
+            process.env.JWT_SECRET,
+            { expiresIn: jwtConfig.accessTokenExpiry }
+        );
+
+        const newRefreshToken = jwt.sign(
+            { id: staff._id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: jwtConfig.refreshTokenExpiry }
+        );
+
+        staff.refreshToken = newRefreshToken;
+        await staff.save();
+
+        return { accessToken, refreshToken: newRefreshToken };
+    } catch (error) {
+        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
+            throw new AppError('Invalid or expired refresh token', 401);
+        }
+        throw error;
+    }
+};
+

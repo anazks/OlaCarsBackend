@@ -34,6 +34,11 @@ exports.login = async (email, password) => {
     manager.failedLoginAttempts = 0;
     manager.lockUntil = undefined;
     manager.lastLoginAt = new Date();
+    
+    manager.loginHistory = manager.loginHistory || [];
+    manager.loginHistory.push({
+        loginTime: new Date()
+    });
 
     const accessToken = jwt.sign(
         { id: manager._id, role: manager.role, country: manager.country },
@@ -128,6 +133,22 @@ exports.changePassword = async (id, currentPassword, newPassword) => {
 exports.remove = async (id) => {
     const result = await CountryManager.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
     if (!result) throw new AppError('Country Manager not found', 404);
+};
+
+exports.logout = async (id) => {
+    const manager = await CountryManager.findById(id);
+    if (!manager) throw new AppError('Country Manager not found', 404);
+
+    if (manager.loginHistory && manager.loginHistory.length > 0) {
+        // Find the last login that doesn't have a logoutTime yet
+        for (let i = manager.loginHistory.length - 1; i >= 0; i--) {
+            if (!manager.loginHistory[i].logoutTime) {
+                manager.loginHistory[i].logoutTime = new Date();
+                break;
+            }
+        }
+        await manager.save();
+    }
 };
 
 const { getCountryManagersService } = require('../Repo/CountryManagerRepo.js');

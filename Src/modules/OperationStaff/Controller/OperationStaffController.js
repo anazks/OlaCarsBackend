@@ -12,6 +12,16 @@ const login = async (req, res) => {
     }
 };
 
+const logout = async (req, res) => {
+    try {
+        await OperationStaffService.logout(req.user.id);
+        return res.status(200).json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 const addOperationStaff = async (req, res) => {
     try {
         const data = { ...req.body };
@@ -109,6 +119,7 @@ const refreshStaffToken = async (req, res) => {
 
 module.exports = {
     login,
+    logout,
     addOperationStaff,
     getOperationStaff,
     getOperationStaffById,

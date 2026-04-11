@@ -7,7 +7,9 @@ const {
     deleteFinanceStaff,
     getFinanceStaff,
     getFinanceStaffById,
-    login
+    login,
+    logout,
+    refreshToken
 } = require("../Controller/FinanceStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -20,7 +22,9 @@ const {
     changePasswordSchema,
     deleteFinanceStaffSchema,
     getFinanceStaffByIdSchema,
+    refreshTokenSchema,
 } = require("../Validation/FinanceStaffValidation.js");
+
 
 /**
  * @swagger
@@ -54,6 +58,44 @@ const {
  *         description: Login successful
  */
 router.post("/login", validate(loginSchema), login);
+
+/**
+ * @swagger
+ * /api/finance-staff/refresh:
+ *   post:
+ *     summary: Refresh Finance Staff access token
+ *     tags: [FinanceStaff]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Token refreshed successful
+ */
+router.post("/refresh", validate(refreshTokenSchema), refreshToken);
+
+
+/**
+ * @swagger
+ * /api/finance-staff/logout:
+ *   post:
+ *     summary: Finance Staff logout
+ *     tags: [FinanceStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ */
+router.post("/logout", authenticate, logout);
 
 /**
  * @swagger

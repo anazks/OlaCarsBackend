@@ -7,7 +7,9 @@ const {
     deleteBranchManager,
     getBranchManagers,
     getBranchManagerById,
-    login
+    login,
+    logout,
+    refreshToken
 } = require("../Controller/BranchManagerController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -20,7 +22,9 @@ const {
     changePasswordSchema,
     deleteBranchManagerSchema,
     getBranchManagerByIdSchema,
+    refreshTokenSchema,
 } = require("../Validation/BranchManagerValidation.js");
+
 
 /**
  * @swagger
@@ -54,6 +58,44 @@ const {
  *         description: Login successful
  */
 router.post("/login", validate(loginSchema), login);
+
+/**
+ * @swagger
+ * /api/branch-manager/refresh:
+ *   post:
+ *     summary: Refresh Branch Manager access token
+ *     tags: [BranchManager]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Token refreshed successful
+ */
+router.post("/refresh", validate(refreshTokenSchema), refreshToken);
+
+
+/**
+ * @swagger
+ * /api/branch-manager/logout:
+ *   post:
+ *     summary: Branch Manager logout
+ *     tags: [BranchManager]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ */
+router.post("/logout", authenticate, logout);
 
 /**
  * @swagger

@@ -54,6 +54,12 @@ const getFinanceStaffByIdSchema = {
     }),
 };
 
+const refreshTokenSchema = {
+    body: Joi.object({
+        refreshToken: Joi.string().required(),
+    }),
+};
+
 module.exports = {
     loginSchema,
     addFinanceStaffSchema,
@@ -61,4 +67,6 @@ module.exports = {
     changePasswordSchema,
     deleteFinanceStaffSchema,
     getFinanceStaffByIdSchema,
+    refreshTokenSchema,
 };
+

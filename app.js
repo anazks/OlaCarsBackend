@@ -34,6 +34,7 @@ const InsuranceRouter = require("./Src/modules/Insurance/Routes/InsuranceRoutes"
 const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/SystemSettingsRoutes");
 const AgreementRouter = require("./Src/modules/Agreement/Routes/AgreementRouter");
 const AIRouter = require("./Src/modules/AI/Routes/AiRoutes");
+const StaffPerformanceRouter = require("./Src/modules/StaffPerformance/Routes/staffPerformanceRoutes");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -80,6 +81,7 @@ app.use("/api/insurance", InsuranceRouter);
 app.use("/api/system-settings", SystemSettingsRouter);
 app.use("/api/agreements", AgreementRouter);
 app.use("/api/ai-service", AIRouter);
+app.use("/api/staff-performance", StaffPerformanceRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });

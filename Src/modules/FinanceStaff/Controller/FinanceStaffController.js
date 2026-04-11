@@ -12,6 +12,16 @@ const login = async (req, res) => {
     }
 };
 
+const logout = async (req, res) => {
+    try {
+        await FinanceStaffService.logout(req.user.id);
+        return res.status(200).json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 const addFinanceStaff = async (req, res) => {
     try {
         const data = { ...req.body };
@@ -94,8 +104,21 @@ const deleteFinanceStaff = async (req, res) => {
     }
 };
 
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken } = req.body;
+        const result = await FinanceStaffService.refreshAccessToken(refreshToken);
+        return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        const statusCode = error.statusCode || 401;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
+    logout,
+    refreshToken,
     addFinanceStaff,
     getFinanceStaff,
     getFinanceStaffById,
@@ -103,3 +126,4 @@ module.exports = {
     changePassword,
     deleteFinanceStaff
 };
+

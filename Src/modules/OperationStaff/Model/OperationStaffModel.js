@@ -44,6 +44,13 @@ const operationStaffSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        loginHistory: [
+            {
+                loginTime: { type: Date, required: true },
+                logoutTime: { type: Date },
+                ipAddress: { type: String }
+            }
+        ],
         lastLoginAt: {
             type: Date,
         },

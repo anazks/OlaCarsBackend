@@ -8,6 +8,7 @@ const {
     getOperationStaff,
     getOperationStaffById,
     login,
+    logout,
     refreshStaffToken
 } = require("../Controller/OperationStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -56,6 +57,20 @@ const {
  *         description: Login successful
  */
 router.post("/login", validate(loginSchema), login);
+
+/**
+ * @swagger
+ * /api/operation-staff/logout:
+ *   post:
+ *     summary: Operation Staff logout
+ *     tags: [OperationStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ */
+router.post("/logout", authenticate, logout);
 
 /**
  * @swagger

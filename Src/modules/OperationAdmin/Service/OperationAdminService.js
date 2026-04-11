@@ -35,6 +35,11 @@ exports.login = async (email, password) => {
     admin.lockUntil = undefined;
     admin.lastLoginAt = new Date();
 
+    admin.loginHistory = admin.loginHistory || [];
+    admin.loginHistory.push({
+        loginTime: new Date()
+    });
+
     const accessToken = jwt.sign(
         { id: admin._id, role: admin.role },
         process.env.JWT_SECRET,
@@ -126,6 +131,21 @@ exports.changePassword = async (id, currentPassword, newPassword) => {
 exports.remove = async (id) => {
     const result = await OperationalAdmin.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
     if (!result) throw new AppError('Operational Admin not found', 404);
+};
+
+exports.logout = async (id) => {
+    const admin = await OperationalAdmin.findById(id);
+    if (!admin) throw new AppError('Operational Admin not found', 404);
+
+    if (admin.loginHistory && admin.loginHistory.length > 0) {
+        for (let i = admin.loginHistory.length - 1; i >= 0; i--) {
+            if (!admin.loginHistory[i].logoutTime) {
+                admin.loginHistory[i].logoutTime = new Date();
+                break;
+            }
+        }
+        await admin.save();
+    }
 };
 
 const { getOperationalAdminsService } = require('../Repo/OperationAdminRepo.js');

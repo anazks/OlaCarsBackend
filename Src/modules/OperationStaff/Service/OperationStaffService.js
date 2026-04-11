@@ -34,6 +34,12 @@ exports.login = async (email, password) => {
     staff.failedLoginAttempts = 0;
     staff.lockUntil = undefined;
     staff.lastLoginAt = new Date();
+    
+    // Add to login history
+    staff.loginHistory = staff.loginHistory || [];
+    staff.loginHistory.push({
+        loginTime: new Date()
+    });
 
     const accessToken = jwt.sign(
         { id: staff._id, role: staff.role, branchId: staff.branchId },
@@ -110,6 +116,22 @@ exports.changePassword = async (id, currentPassword, newPassword) => {
 exports.remove = async (id) => {
     const result = await OperationStaff.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
     if (!result) throw new AppError('Operation Staff not found', 404);
+};
+
+exports.logout = async (id) => {
+    const staff = await OperationStaff.findById(id);
+    if (!staff) throw new AppError('Operation Staff not found', 404);
+
+    if (staff.loginHistory && staff.loginHistory.length > 0) {
+        // Find the last login that doesn't have a logoutTime yet
+        for (let i = staff.loginHistory.length - 1; i >= 0; i--) {
+            if (!staff.loginHistory[i].logoutTime) {
+                staff.loginHistory[i].logoutTime = new Date();
+                break;
+            }
+        }
+        await staff.save();
+    }
 };
 
 const { getOperationStaffService } = require('../Repo/OperationStaffRepo.js');

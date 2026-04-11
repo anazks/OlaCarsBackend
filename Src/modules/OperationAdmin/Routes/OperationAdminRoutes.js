@@ -8,7 +8,8 @@ const {
     getOperationalAdminById,
     editOperationalAdmin,
     changePassword,
-    deleteOperationalAdmin
+    deleteOperationalAdmin,
+    logout
 } = require("../Controller/OperationAdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -59,6 +60,20 @@ const {
  *         description: Invalid credentials
  */
 router.post("/login", validate(loginSchema), login);
+
+/**
+ * @swagger
+ * /api/operation-admin/logout:
+ *   post:
+ *     summary: Operational Admin logout
+ *     tags: [OperationalAdmin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ */
+router.post("/logout", authenticate, logout);
 
 /**
  * @swagger

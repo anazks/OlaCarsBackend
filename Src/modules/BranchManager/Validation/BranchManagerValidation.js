@@ -56,6 +56,12 @@ const getBranchManagerByIdSchema = {
     }),
 };
 
+const refreshTokenSchema = {
+    body: Joi.object({
+        refreshToken: Joi.string().required(),
+    }),
+};
+
 module.exports = {
     loginSchema,
     addBranchManagerSchema,
@@ -63,4 +69,6 @@ module.exports = {
     changePasswordSchema,
     deleteBranchManagerSchema,
     getBranchManagerByIdSchema,
+    refreshTokenSchema,
 };
+

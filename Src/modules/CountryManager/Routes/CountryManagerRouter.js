@@ -7,7 +7,8 @@ const {
     changePassword,
     deleteCountryManager,
     getCountryManagers,
-    getCountryManagerById
+    getCountryManagerById,
+    logout
 } = require("../Controller/CountryManagerController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -60,6 +61,20 @@ const router = express.Router();
  *         description: Invalid credentials
  */
 router.post("/login", validate(loginSchema), login);
+
+/**
+ * @swagger
+ * /api/country-manager/logout:
+ *   post:
+ *     summary: Country Manager logout
+ *     tags: [CountryManager]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout successful
+ */
+router.post("/logout", authenticate, logout);
 
 /**
  * @swagger

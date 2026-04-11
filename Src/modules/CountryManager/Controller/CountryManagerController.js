@@ -11,6 +11,16 @@ const login = async (req, res) => {
     }
 };
 
+const logout = async (req, res) => {
+    try {
+        await CountryManagerService.logout(req.user.id);
+        return res.status(200).json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 const refreshToken = async (req, res) => {
     try {
         const { refreshToken } = req.body;
@@ -95,6 +105,7 @@ const deleteCountryManager = async (req, res) => {
 
 module.exports = {
     login,
+    logout,
     refreshToken,
     addCountryManager,
     getCountryManagers,
