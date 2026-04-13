@@ -94,6 +94,5 @@ const operationalAdminSchema = new mongoose.Schema(
   }
 );
 
-const OperationalAdmin = mongoose.model("OperationalAdmin", operationalAdminSchema);
-mongoose.model("OPERATIONADMIN", operationalAdminSchema, "operationaladmins");
+const OperationalAdmin = mongoose.models.OperationalAdmin || mongoose.model("OperationalAdmin", operationalAdminSchema);
 module.exports = OperationalAdmin;

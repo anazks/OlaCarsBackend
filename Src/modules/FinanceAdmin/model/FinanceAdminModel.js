@@ -94,6 +94,5 @@ const financeAdminSchema = new mongoose.Schema(
   }
 );
 
-const FinanceAdmin = mongoose.model("FinanceAdmin", financeAdminSchema);
-mongoose.model("FINANCEADMIN", financeAdminSchema, "financeadmins");
+const FinanceAdmin = mongoose.models.FinanceAdmin || mongoose.model("FinanceAdmin", financeAdminSchema);
 module.exports = FinanceAdmin;

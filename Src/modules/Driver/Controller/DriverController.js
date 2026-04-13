@@ -204,7 +204,12 @@ const markRentAsPaid = async (req, res) => {
             return res.status(400).json({ success: false, message: "weekNumber and amount are required." });
         }
 
-        const updatedDriver = await DriverService.payRent(driverId, { weekNumber, amount, paymentMethod, transactionId, note });
+        const paymentPayload = {
+            weekNumber, amount, paymentMethod, transactionId, note,
+            createdBy: req.user.id,
+            creatorRole: req.user.role
+        };
+        const updatedDriver = await DriverService.payRent(driverId, paymentPayload);
         return res.status(200).json({ success: true, data: updatedDriver });
     } catch (error) {
         const statusCode = error.statusCode || 500;

@@ -33,7 +33,17 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
             ? ` [${paymentTransaction.accountingCode.name}]` 
             : "";
         
-        const description = `Payment [${paymentTransaction.transactionType}] for ${paymentTransaction.referenceModel}${accSuffix}. Ref ID: ${paymentTransaction.referenceId}. Notes: ${paymentTransaction.notes || "None"}.`;
+        let description = `Payment [${paymentTransaction.transactionType}] for ${paymentTransaction.referenceModel}${accSuffix}. Ref ID: ${paymentTransaction.referenceId}. Notes: ${paymentTransaction.notes || "None"}.`;
+
+        // Enrich description if this is a Purchase Order payment
+        if (paymentTransaction.referenceModel === "PurchaseOrder") {
+            const PurchaseOrder = require('../../PurchaseOrder/Model/PurchaseOrderModel');
+            const po = await PurchaseOrder.findById(paymentTransaction.referenceId).populate('supplier');
+            if (po) {
+                const supplierName = po.supplier ? po.supplier.name : "Unknown Supplier";
+                description = `Purchase Order Payment to ${supplierName} for ${po.purpose} (PO: ${po.purchaseOrderNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
+            }
+        }
 
         const ledgerData = {
             transaction: paymentTransaction._id,

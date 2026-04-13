@@ -15,7 +15,7 @@ const paymentTransactionSchema = new mongoose.Schema(
         referenceModel: {
             type: String,
             required: true,
-            enum: ["PurchaseOrder"], // Extensible for "Booking", "Repair", etc.
+            enum: ["PurchaseOrder", "Driver"], // Extensible for "Booking", "Repair", etc.
         },
         transactionCategory: {
             type: String,

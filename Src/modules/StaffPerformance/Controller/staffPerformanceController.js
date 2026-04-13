@@ -9,6 +9,10 @@ exports.getPerformance = async (req, res) => {
             filters.branchId = req.query.branch;
         }
 
+        // Date filters
+        if (req.query.startDate) filters.startDate = req.query.startDate;
+        if (req.query.endDate) filters.endDate = req.query.endDate;
+
         // If branch manager, restrict to their own branch
         if (req.user.role === "BRANCHMANAGER" && req.user.branchId) {
             filters.branchId = req.user.branchId;

@@ -71,6 +71,13 @@ const addVehicle = async (req, res, next) => {
 const getVehicles = async (req, res, next) => {
     try {
         const queryParams = { ...req.query };
+        
+        // Map universal 'branch' filter to the specific field in Vehicle schema
+        if (queryParams.branch) {
+            queryParams['purchaseDetails.branch'] = queryParams.branch;
+            delete queryParams.branch;
+        }
+
         const result = await getVehiclesService(queryParams, {
             baseQuery: { isDeleted: false },
             defaultSort: { createdAt: -1 }

@@ -5,19 +5,30 @@ const OperationStaff = require("../../OperationStaff/Model/OperationStaffModel")
 const BranchManager = require("../../BranchManager/Model/BranchManagerModel");
 const CountryManager = require("../../CountryManager/Model/CountryManagerModel");
 const Branch = require("../../Branch/Model/BranchModel");
-const FinanceAdmin = require("../../FinanceAdmin/Model/FinanceAdminModel");
-const OperationAdmin = require("../../OperationAdmin/Model/OperationAdminModel");
+const FinanceAdmin = require("../../FinanceAdmin/model/FinanceAdminModel");
+const OperationAdmin = require("../../OperationAdmin/model/OperationAdminModel");
 
 /**
  * Aggregates performance metrics for finance and operation staff
  * by cross-referencing Driver/Vehicle statusHistory records.
  */
 exports.getStaffPerformance = async (filters = {}) => {
-    const { branchId, type = "all" } = filters;
+    const { branchId, type = "all", startDate, endDate } = filters;
 
     const now = new Date();
     const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
     const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+    // Timeline match logic for performance calculations
+    const timelineMatch = {};
+    if (startDate || endDate) {
+        if (startDate) timelineMatch.$gte = new Date(startDate);
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            timelineMatch.$lte = end;
+        }
+    }
 
     const result = { financeStaff: [], operationStaff: [], branchManagers: [], countryManagers: [], globalAdmins: [] };
 
@@ -39,6 +50,7 @@ exports.getStaffPerformance = async (filters = {}) => {
                 $match: {
                     "statusHistory.changedByRole": "FINANCESTAFF",
                     "statusHistory.changedBy": { $in: finStaff.map(s => s._id) },
+                    ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
                 },
             },
             {
@@ -149,6 +161,7 @@ exports.getStaffPerformance = async (filters = {}) => {
                 $match: {
                     "statusHistory.changedByRole": "OPERATIONSTAFF",
                     "statusHistory.changedBy": { $in: opStaff.map(s => s._id) },
+                    ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
                 },
             },
             {

@@ -5,6 +5,10 @@ const {
     updateDriverService,
     deleteDriverService,
 } = require("../Repo/DriverRepo");
+const LedgerService = require("../../Ledger/Service/LedgerService");
+const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
+const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 
 // ─── Fields that CANNOT be set via the edit endpoint ──────────────────
 const BLOCKED_FIELDS = [
@@ -72,7 +76,7 @@ exports.remove = async (id) => {
  * to ensure past debts are cleared first and overpayments flow into future weeks.
  */
 exports.payRent = async (id, paymentData) => {
-    const { amount, paymentMethod, transactionId, note } = paymentData;
+    const { amount, paymentMethod, transactionId, note, createdBy, creatorRole } = paymentData;
     
     if (!amount || amount <= 0) throw new Error("Payment amount must be greater than 0");
 
@@ -96,6 +100,7 @@ exports.payRent = async (id, paymentData) => {
     }
 
     const firstEffectiveWeekNum = tracking[startIndex].weekNumber;
+    const paidWeeks = [];
 
     for (let i = startIndex; i < tracking.length; i++) {
         if (remainingAmount <= 0) break;
@@ -114,6 +119,7 @@ exports.payRent = async (id, paymentData) => {
         const paymentForThisWeek = Math.min(currentBalance, remainingAmount);
 
         if (paymentForThisWeek <= 0) continue;
+        paidWeeks.push(`Wk${week.weekNumber}`);
 
         const newPaid = currentPaid + paymentForThisWeek;
         const newBalance = Math.max(0, totalDue - newPaid);
@@ -153,6 +159,48 @@ exports.payRent = async (id, paymentData) => {
     }
 
     await updateDriverService(id, updates);
+
+    // Create Ledger & Payment Transaction
+    if (createdBy && creatorRole && amount > 0) {
+        try {
+            const accCode = await AccountingCode.findOne({ code: "4100" });
+            if (accCode) {
+                const driverName = driver.personalInfo?.fullName || "Unknown Driver";
+                let vehicleDesc = "Unassigned Vehicle";
+                if (driver.currentVehicle) {
+                    const vehicle = await Vehicle.findById(driver.currentVehicle);
+                    if (vehicle) {
+                        vehicleDesc = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''} (${vehicle.legalDocs?.registrationNumber || vehicle.basicDetails?.vin || 'No Reg'})`.trim();
+                    }
+                }
+                
+                const weekNote = paidWeeks.length > 0 ? ` for ${paidWeeks.join(', ')}` : '';
+                const enhancedNote = `Rent Payment${weekNote} by ${driverName} [${vehicleDesc}]${note ? ' - ' + note : ''}`;
+
+                const transactionData = {
+                    accountingCode: accCode._id,
+                    referenceId: id,
+                    referenceModel: "Driver",
+                    transactionCategory: "INCOME",
+                    transactionType: "CREDIT",
+                    isTaxInclusive: false,
+                    baseAmount: amount,
+                    totalAmount: amount,
+                    paymentMethod: paymentMethod ? paymentMethod.toUpperCase() : "CASH",
+                    status: "COMPLETED",
+                    paymentDate: timestamp,
+                    notes: enhancedNote,
+                    createdBy,
+                    creatorRole
+                };
+                const newTransaction = await PaymentTransaction.create(transactionData);
+                const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
+                await LedgerService.autoGenerateLedgerEntry(populatedTx);
+            }
+        } catch (err) {
+            console.error("Failed to generate ledger for rent payment:", err);
+        }
+    }
 
     // After payment distribution, recalculate carryovers for the remaining timeline
     return await exports.rolloverOverdueRent(id);
