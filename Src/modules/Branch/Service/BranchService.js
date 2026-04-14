@@ -2,8 +2,8 @@ const Branch = require('../Model/BranchModel.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const AppError = require('../../../shared/utils/AppError.js');
 
-const ALLOWED_CREATE_FIELDS = ['name', 'code', 'address', 'city', 'state', 'phone', 'email', 'status'];
-const ALLOWED_UPDATE_FIELDS = ['name', 'address', 'city', 'state', 'phone', 'email', 'status'];
+const ALLOWED_CREATE_FIELDS = ['name', 'code', 'address', 'city', 'state', 'phone', 'email', 'status', 'country'];
+const ALLOWED_UPDATE_FIELDS = ['name', 'address', 'city', 'state', 'phone', 'email', 'status', 'country'];
 
 exports.create = async (data) => {
     const filtered = filterBody(data, ...ALLOWED_CREATE_FIELDS);

@@ -7,7 +7,7 @@ const addSupplierSchema = {
         email: Joi.string().trim().email().allow("", null),
         phone: Joi.string().trim().allow("", null),
         address: Joi.string().trim().allow("", null),
-        category: Joi.string().trim().valid("Vehicles", "Parts", "Services", "Insurance", "General").default("General"),
+        category: Joi.string().trim().valid("Vehicles", "Parts", "Spare Parts", "Services", "Insurance", "Office Supplies", "IT Equipment", "Marketing", "Other", "General").default("General"),
         isActive: Joi.boolean().default(true),
     }),
 };
@@ -22,7 +22,7 @@ const updateSupplierSchema = {
         email: Joi.string().trim().email().allow("", null),
         phone: Joi.string().trim().allow("", null),
         address: Joi.string().trim().allow("", null),
-        category: Joi.string().trim().valid("Vehicles", "Parts", "Services", "Insurance", "General"),
+        category: Joi.string().trim().valid("Vehicles", "Parts", "Spare Parts", "Services", "Insurance", "Office Supplies", "IT Equipment", "Marketing", "Other", "General"),
         isActive: Joi.boolean(),
     }).min(1),
 };

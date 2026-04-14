@@ -10,9 +10,6 @@ exports.createInsuranceService = async (data) => {
         const newInsurance = await Insurance.create(data);
         return newInsurance.toObject();
     } catch (error) {
-        if (error.code === 11000 && error.keyPattern && error.keyPattern['policyNumber']) {
-            throw new Error("An insurance policy with this policy number already exists.", { cause: 409 });
-        }
         throw error;
     }
 };
@@ -31,7 +28,10 @@ exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
             searchFields: ["policyNumber"],
             filterFields: ["status", "policyType", "coverageType", "country"],
             dateFilterField: "createdAt",
-            populate: { path: "vehicles" },
+            populate: [
+                { path: "vehicles" },
+                { path: "supplier", select: "name email phone" }
+            ],
             ...options
         };
 

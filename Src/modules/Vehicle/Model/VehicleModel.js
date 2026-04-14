@@ -139,8 +139,6 @@ const vehicleSchema = new mongoose.Schema(
             localTransport: { type: Number },
             otherCharges: { type: Number },
             landedCost: { type: Number }, // Computed
-            customsClearanceCertificate: { type: String },
-            importPermit: { type: String },
         },
 
         // 6. Inspection Checklist

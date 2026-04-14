@@ -10,9 +10,6 @@ const createInsuranceSchema = {
         expiryDate: Joi.date().greater(Joi.ref("startDate")),
         insuredValue: Joi.number().min(0),
         country: Joi.string().trim().required(),
-        "providerContact.name": Joi.string().trim(),
-        "providerContact.phone": Joi.string().trim(),
-        "providerContact.email": Joi.string().trim().email(),
     }),
 };
 

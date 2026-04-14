@@ -174,8 +174,6 @@ const uploadVehicleDocuments = async (req, res, next) => {
             transferOfOwnership: "legalDocs.transferOfOwnership",
             policyDocument: "insuranceDetails.certificate",
             insuranceCertificate: "insuranceDetails.certificate",
-            customsClearanceCertificate: "importationDetails.customsClearanceCertificate", 
-            importPermit: "importationDetails.importPermit",
             purchaseReceipt: "purchaseDetails.purchaseReceipt"
         };
 

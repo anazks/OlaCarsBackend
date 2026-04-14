@@ -35,6 +35,7 @@ const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/System
 const AgreementRouter = require("./Src/modules/Agreement/Routes/AgreementRouter");
 const AIRouter = require("./Src/modules/AI/Routes/AiRoutes");
 const StaffPerformanceRouter = require("./Src/modules/StaffPerformance/Routes/staffPerformanceRoutes");
+const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -105,6 +106,17 @@ const startServer = async () => {
   try {
     await connectDB();
     console.log("Database connected successfully");
+
+    // Drop deprecated policyNumber index if it exists
+    try {
+      const collections = await mongoose.connection.db.listCollections({ name: 'insurances' }).toArray();
+      if (collections.length > 0) {
+        await mongoose.connection.db.collection('insurances').dropIndex('policyNumber_1').catch(() => {});
+        console.log("Verified/Dropped deprecated policyNumber index");
+      }
+    } catch (e) {
+      // Ignore if index doesn't exist
+    }
 
     await createDefaultAdmin();
     console.log("Default admin verified");

@@ -43,7 +43,11 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
             dateFilterField: "createdAt",
             populate: [
                 { path: "purchaseDetails.branch" },
-                { path: "purchaseDetails.purchaseOrder" }
+                { path: "purchaseDetails.purchaseOrder" },
+                { 
+                    path: "insuranceDetails.plan", 
+                    populate: { path: "supplier", select: "name email phone" } 
+                }
             ],
             ...options
         };
@@ -61,7 +65,13 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
  */
 exports.getVehicleByIdService = async (id) => {
     try {
-        return await Vehicle.findById(id).populate("purchaseDetails.branch").populate("purchaseDetails.purchaseOrder");
+        return await Vehicle.findById(id)
+            .populate("purchaseDetails.branch")
+            .populate("purchaseDetails.purchaseOrder")
+            .populate({
+                path: "insuranceDetails.plan",
+                populate: { path: "supplier", select: "name email phone" }
+            });
     } catch (error) {
         throw error;
     }

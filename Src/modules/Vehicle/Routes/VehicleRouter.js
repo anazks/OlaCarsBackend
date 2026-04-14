@@ -444,12 +444,6 @@ router.put(
  *               policyDocument:
  *                 type: string
  *                 format: binary
- *               customsClearanceCertificate:
- *                 type: string
- *                 format: binary
- *               importPermit:
- *                 type: string
- *                 format: binary
  *               odometerPhoto:
  *                 type: string
  *                 format: binary
@@ -496,8 +490,6 @@ router.post(
         { name: "transferOfOwnership", maxCount: 1 },
         { name: "policyDocument", maxCount: 1 },
         { name: "insuranceCertificate", maxCount: 1 },
-        { name: "customsClearanceCertificate", maxCount: 1 },
-        { name: "importPermit", maxCount: 1 },
         { name: "odometerPhoto", maxCount: 1 },
         { name: "exteriorPhotos", maxCount: 20 },
         { name: "interiorPhotos", maxCount: 20 }

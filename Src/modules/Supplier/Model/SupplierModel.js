@@ -27,7 +27,7 @@ const supplierSchema = new mongoose.Schema(
         },
         category: {
             type: String,
-            enum: ["Vehicles", "Parts", "Services", "Insurance", "General"],
+            enum: ["Vehicles", "Parts", "Spare Parts", "Services", "Insurance", "Office Supplies", "IT Equipment", "Marketing", "Other", "General"],
             default: "General",
         },
         isActive: {
