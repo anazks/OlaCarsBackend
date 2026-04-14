@@ -34,7 +34,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.BRANCHMANAGER,
     },
     "DOCUMENTS REVIEW": {
-        allowedFrom: ["PENDING ENTRY"], // From start
+        allowedFrom: ["PENDING ENTRY", "INSPECTION REQUIRED", "ACCOUNTING SETUP", "GPS ACTIVATION", "BRANCH MANAGER APPROVAL", "ACTIVE — AVAILABLE"],
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -66,7 +66,7 @@ const STATUS_RULES = {
         }
     },
     "INSPECTION REQUIRED": {
-        allowedFrom: ["DOCUMENTS REVIEW", "INSURANCE VERIFICATION", "REPAIR IN PROGRESS"],
+        allowedFrom: ["DOCUMENTS REVIEW", "INSURANCE VERIFICATION", "REPAIR IN PROGRESS", "ACCOUNTING SETUP", "GPS ACTIVATION", "BRANCH MANAGER APPROVAL", "ACTIVE — AVAILABLE"],
         allowedRoles: [ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -89,7 +89,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.ADMIN,
     },
     "ACCOUNTING SETUP": {
-        allowedFrom: ["INSPECTION REQUIRED"],
+        allowedFrom: ["INSPECTION REQUIRED", "GPS ACTIVATION", "BRANCH MANAGER APPROVAL", "ACTIVE — AVAILABLE"],
         allowedRoles: [ROLES.FINANCESTAFF, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.FINANCEADMIN,
         gateValidator: (vehicle, payload) => {
@@ -112,7 +112,7 @@ const STATUS_RULES = {
         }
     },
     "GPS ACTIVATION": {
-        allowedFrom: ["ACCOUNTING SETUP"],
+        allowedFrom: ["ACCOUNTING SETUP", "BRANCH MANAGER APPROVAL"],
         allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -124,7 +124,7 @@ const STATUS_RULES = {
         }
     },
     "BRANCH MANAGER APPROVAL": {
-        allowedFrom: ["GPS ACTIVATION"],
+        allowedFrom: ["GPS ACTIVATION", "ACTIVE — AVAILABLE"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
