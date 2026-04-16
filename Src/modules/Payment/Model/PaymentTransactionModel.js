@@ -66,6 +66,11 @@ const paymentTransactionSchema = new mongoose.Schema(
             type: String,
             trim: true, // E.g., EMI 1 of 12
         },
+        codTrx: {
+            type: String,
+            unique: true,
+            sparse: true,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: true,

@@ -35,6 +35,7 @@ const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/System
 const AgreementRouter = require("./Src/modules/Agreement/Routes/AgreementRouter");
 const AIRouter = require("./Src/modules/AI/Routes/AiRoutes");
 const StaffPerformanceRouter = require("./Src/modules/StaffPerformance/Routes/staffPerformanceRoutes");
+const PagoFacilRouter = require("./Src/modules/Payment/Routes/PagoFacilRouter");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -83,6 +84,7 @@ app.use("/api/system-settings", SystemSettingsRouter);
 app.use("/api/agreements", AgreementRouter);
 app.use("/api/ai-service", AIRouter);
 app.use("/api/staff-performance", StaffPerformanceRouter);
+app.use("/pagofacil/api", PagoFacilRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
