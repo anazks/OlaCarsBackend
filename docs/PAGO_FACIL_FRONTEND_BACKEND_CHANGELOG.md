@@ -50,6 +50,12 @@ Because Pago Fácil runs asynchronously and pings our backend directly, the driv
    * Ensure the Rent Dashboard has a "Pull Down to Refresh" ability.
    * *(Optional but recommended)* Implement a Socket.io event from the backend that tells the Driver Application `RENT_UPDATED` so the screen balance automatically turns to `₹0` if they look at their phone standing at the Pago Fácil counter.
 
+### 4. Development Testing Simulator (NEW)
+To allow frontend developers to test the full "Payment Success" flow without external tools or real cash, a sandbox endpoint has been added.
+* **Endpoint**: `POST /pagofacil/api/test-auto-pay/:driverId`
+* **Behavior**: Automatically calculates the driver's total outstanding debt and simulates a successful Pago Fácil notification (`directa`) to clear it instantly in the DB.
+* **Security**: This endpoint is "Development Only" and returns `403 Forbidden` in production environments for safety.
+
 ### B. Admin / Branch Dashboard (Web Panel)
 
 #### 1. Payment Reversals Visualized (NEW)

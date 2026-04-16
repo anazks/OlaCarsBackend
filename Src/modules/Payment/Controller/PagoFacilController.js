@@ -455,3 +455,52 @@ exports.reversePayment = async (req, res) => {
         });
     }
 };
+
+// 4. DEVELOPMENT TESTING API (Simulate a Cash-In)
+exports.testAutoPay = async (req, res) => {
+    // Only allow in development environments, or you can remove this check if you need it on a staging server
+    if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ success: false, message: "Testing endpoints disabled in production." });
+    }
+
+    try {
+        const driverId = req.params.driverId;
+        const driver = await Driver.findById(driverId);
+        if (!driver) {
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
+
+        // Calculate total debt to automatically pay it all, or default to a dummy amount
+        let totalDebt = 0;
+        driver.rentTracking.forEach(week => {
+            if (week.status !== "PAID" && week.balance > 0) {
+                totalDebt += week.balance;
+            }
+        });
+
+        if (totalDebt <= 0) {
+            return res.status(400).json({ success: false, message: "Driver has zero debt. Nothing to test." });
+        }
+
+        // Fake the direct notification body
+        req.body = {
+            user: PAGO_FACIL_USER,
+            password: PAGO_FACIL_PASS,
+            tipo_operacion: "CashIn",
+            cod_cliente: driverId.substring(0, 8),
+            id_item: driverId,
+            importe: Math.round(totalDebt * 100).toString(),
+            cod_trx: "TEST_TRX_" + Date.now(),
+            terminal: "DEV_FRONTEND",
+            secuencia: Math.floor(Math.random() * 9000) + 1000
+        };
+
+        // Call the exact same Directa API logic securely to process it identically
+        console.log("🛠️ TEST AUTO-PAY TRIGGERED for Driver:", driverId);
+        return exports.notifyPayment(req, res);
+
+    } catch (error) {
+        console.error("[PagoFacil] [TEST-PAY] Error:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};

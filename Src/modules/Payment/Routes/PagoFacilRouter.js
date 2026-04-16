@@ -5,7 +5,8 @@ const {
     generateToken,
     consultaDebt,
     notifyPayment,
-    reversePayment
+    reversePayment,
+    testAutoPay
 } = require("../Controller/PagoFacilController");
 
 /**
@@ -17,6 +18,9 @@ const {
 
 // Token Generation
 router.post("/auth/token", generateToken);
+
+// Development Testing Endpoint (Do not use in production)
+router.post("/test-auto-pay/:driverId", testAutoPay);
 
 // Operations with Authentication Middleware
 router.post("/consulta", authenticatePagoFacil, consultaDebt);
