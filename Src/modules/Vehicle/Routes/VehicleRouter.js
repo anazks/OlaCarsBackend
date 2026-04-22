@@ -8,7 +8,8 @@ const {
     uploadVehicleDocuments,
     getAvailableCars,
     assignCarToDriver,
-    updateVehicleLeaseSettings
+    updateVehicleLeaseSettings,
+    updateMaintenanceSettings
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -22,7 +23,8 @@ const {
     assignCarToDriverSchema,
     getVehicleByIdSchema,
     uploadDocumentsSchema,
-    updateLeaseSettingsSchema
+    updateLeaseSettingsSchema,
+    updateMaintenanceSettingsSchema
 } = require("../Validation/VehicleValidation");
 
 /**
@@ -134,7 +136,7 @@ const {
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     hasPermission("VEHICLE_CREATE"),
     validate(addVehicleSchema),
     addVehicle
@@ -581,6 +583,44 @@ router.put(
     hasPermission("VEHICLE_EDIT"),
     validate(updateLeaseSettingsSchema),
     updateVehicleLeaseSettings
+);
+
+/**
+ * @swagger
+ * /api/vehicle/{id}/maintenance-settings:
+ *   put:
+ *     summary: Update vehicle maintenance settings (threshold)
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maintenanceThresholdKm
+ *             properties:
+ *               maintenanceThresholdKm:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Maintenance settings updated
+ */
+router.put(
+    "/:id/maintenance-settings",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN),
+    hasPermission("VEHICLE_EDIT"),
+    validate(updateMaintenanceSettingsSchema),
+    updateMaintenanceSettings
 );
 
 module.exports = router;

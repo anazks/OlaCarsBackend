@@ -142,6 +142,13 @@ const addPurchaseOrder = async (req, res) => {
         poData.createdBy = req.user.id;
         poData.creatorRole = req.user.role;
 
+        // Auto-approve if created by ADMIN
+        if (req.user.role === ROLES.ADMIN) {
+            poData.status = "APPROVED";
+            poData.approvedBy = req.user.id;
+            poData.approverRole = req.user.role;
+        }
+
         const newPO = await addPurchaseOrderService(poData);
         return res.status(201).json({ success: true, data: newPO });
     } catch (error) {

@@ -420,6 +420,36 @@ const updateVehicleLeaseSettings = async (req, res, next) => {
     }
 };
 
+/**
+ * Update Vehicle Maintenance Settings (Admin/Manager only)
+ * @route PUT /api/vehicle/:id/maintenance-settings
+ * @body { maintenanceThresholdKm: number }
+ * @access Private
+ */
+const updateMaintenanceSettings = async (req, res, next) => {
+    try {
+        const vehicleId = req.params.id;
+        const { maintenanceThresholdKm } = req.body;
+        
+        if (typeof maintenanceThresholdKm !== 'number') {
+            return res.status(400).json({ success: false, message: "Invalid or missing maintenanceThresholdKm field." });
+        }
+
+        const { updateVehicleService } = require("../Repo/VehicleRepo");
+        const updatedVehicle = await updateVehicleService(vehicleId, {
+            "maintenanceDetails.maintenanceThresholdKm": maintenanceThresholdKm
+        });
+
+        if (!updatedVehicle) {
+            return res.status(404).json({ success: false, message: "Vehicle not found" });
+        }
+
+        return res.status(200).json({ success: true, data: updatedVehicle });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -428,5 +458,6 @@ module.exports = {
     uploadVehicleDocuments,
     getAvailableCars,
     assignCarToDriver,
-    updateVehicleLeaseSettings
+    updateVehicleLeaseSettings,
+    updateMaintenanceSettings
 };

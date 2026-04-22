@@ -367,6 +367,12 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
     // Side effects logic separated from pure validation
     triggerExternalActions(targetStatus, vehicleId);
 
+    // Trigger maintenance alert check if odometer was updated
+    if (updateData?.basicDetails?.odometer) {
+        const { checkAndCreateMaintenanceAlert } = require("../../Alert/Service/AlertService");
+        await checkAndCreateMaintenanceAlert(updatedVehicle);
+    }
+
     return updatedVehicle;
 };
 

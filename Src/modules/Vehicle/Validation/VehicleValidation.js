@@ -124,6 +124,15 @@ const updateLeaseSettingsSchema = {
     }),
 };
 
+const updateMaintenanceSettingsSchema = {
+    params: Joi.object({
+        id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+    }),
+    body: Joi.object({
+        maintenanceThresholdKm: Joi.number().min(100).required(),
+    }),
+};
+
 module.exports = {
     addVehicleSchema,
     progressVehicleSchema,
@@ -131,4 +140,5 @@ module.exports = {
     getVehicleByIdSchema,
     uploadDocumentsSchema,
     updateLeaseSettingsSchema,
+    updateMaintenanceSettingsSchema,
 };

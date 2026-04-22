@@ -218,7 +218,7 @@ const upload = require("../../../utils/multerConfig.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     hasPermission("PURCHASE_ORDER_CREATE"),
     upload.any(),
     validate(addPurchaseOrderSchema),

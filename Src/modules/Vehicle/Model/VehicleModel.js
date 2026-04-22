@@ -219,6 +219,8 @@ const vehicleSchema = new mongoose.Schema(
             estimatedCompletionDate: { type: Date },
             assignedTo: { type: mongoose.Schema.Types.ObjectId, refPath: "maintenanceDetails.assignedToRole" },
             assignedToRole: { type: String },
+            maintenanceThresholdKm: { type: Number, default: 1000 },
+            lastMaintenanceOdometer: { type: Number, default: 0 },
         },
 
         createdBy: {

@@ -235,17 +235,39 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
 
     await wo.save();
 
-    // Sync vehicle status back to ACTIVE (if Vehicle model is accessible)
+    // Sync vehicle status back to ACTIVE and handle maintenance tracking
     try {
-        const Vehicle = require("../../Vehicle/Model/VehicleModel");
+        const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+        const { checkAndCreateMaintenanceAlert, resolveMaintenanceAlerts } = require("../../Alert/Service/AlertService");
+        
         if (Vehicle && wo.vehicleId) {
-            await Vehicle.findByIdAndUpdate(wo.vehicleId, {
-                $set: { "statusTracking.currentStatus": "ACTIVE" },
-            });
+            const updatePayload = { 
+                "status": "ACTIVE — AVAILABLE" 
+            };
+
+            // If it was preventive maintenance, reset the maintenance tracking
+            if (wo.workOrderType === "PREVENTIVE") {
+                updatePayload["maintenanceDetails.lastMaintenanceOdometer"] = wo.odometerAtRelease;
+                await resolveMaintenanceAlerts(wo.vehicleId, user.id);
+            }
+
+            // If it's a general release, still update the odometer and check for alerts
+            updatePayload["basicDetails.odometer"] = wo.odometerAtRelease;
+
+            const updatedVehicle = await Vehicle.findByIdAndUpdate(
+                wo.vehicleId, 
+                { $set: updatePayload },
+                { new: true }
+            );
+
+            // Trigger alert check for next maintenance
+            if (updatedVehicle) {
+                await checkAndCreateMaintenanceAlert(updatedVehicle);
+            }
         }
     } catch (err) {
         // Non-critical — log but don't fail the release
-        console.warn("Vehicle status sync warning:", err.message);
+        console.warn("Vehicle status and maintenance sync warning:", err.message);
     }
 
     return wo;
