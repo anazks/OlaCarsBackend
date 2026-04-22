@@ -9,6 +9,7 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
 const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+const InvoiceService = require("../../Invoice/Service/InvoiceService");
 
 // ─── Fields that CANNOT be set via the edit endpoint ──────────────────
 const BLOCKED_FIELDS = [
@@ -358,7 +359,26 @@ exports.generateRentPlan = async (driverId, { weeklyRent, durationWeeks, startFr
 
     // Replace the entire rentTracking to avoid duplicates on re-assignment
     // Explicitly use $set to ensure array replacement regardless of Mongoose settings
-    return await updateDriverService(driverId, {
+    const updatedDriver = await updateDriverService(driverId, {
         $set: { rentTracking: installments }
     }, session);
+
+    // Call InvoiceService to generate real Invoice documents parallel to rentTracking
+    // We assume the first vehicle assignment is the one here, or we pass null if none
+    const vehicleId = updatedDriver.currentVehicle || null;
+    
+    // We don't have createdBy/creatorRole in this scope immediately unless they are passed.
+    // For automatic rent plan generation, we'll try to find an admin or leave it null.
+    await InvoiceService.generateRentInvoices(
+        driverId, 
+        vehicleId, 
+        weeklyRent, 
+        durationWeeks, 
+        startFromNextWeek, 
+        updatedDriver.createdBy, 
+        updatedDriver.creatorRole, 
+        session
+    );
+
+    return updatedDriver;
 };

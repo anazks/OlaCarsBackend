@@ -734,6 +734,61 @@ router.delete(
 );
 
 // ═══════════════════════════════════════════════════════════════════════
+//  BILLING
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * @swagger
+ * /api/work-orders/{id}/billing/generate:
+ *   post:
+ *     summary: Generate a service bill from a work order
+ *     description: |
+ *       Creates a ServiceBill document from the work order's tasks, parts,
+ *       and labour entries, then links the bill back to the work order.
+ *     tags: [WorkOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               discountPercent:
+ *                 type: number
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Service bill generated
+ *       400:
+ *         description: Work order not in billable state
+ *       404:
+ *         description: Work order not found
+ */
+router.post(
+    "/:id/billing/generate",
+    authenticate,
+    authorize(
+        ROLES.WORKSHOPSTAFF,
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCESTAFF,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.FINANCEADMIN,
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
+    ),
+    generateBillHandler
+);
+
+// ═══════════════════════════════════════════════════════════════════════
 //  VEHICLE RELEASE
 // ═══════════════════════════════════════════════════════════════════════
 
