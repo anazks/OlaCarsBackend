@@ -25,10 +25,15 @@ const financeStaffSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["FINANCESTAFF"],
             default: "FINANCESTAFF",
+            enum: ["FINANCESTAFF"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

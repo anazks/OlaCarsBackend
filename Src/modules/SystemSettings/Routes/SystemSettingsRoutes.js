@@ -3,6 +3,7 @@ const router = express.Router();
 const { getSystemSetting, updateSystemSetting, listSystemSettings } = require("../Controller/SystemSettingsController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
 /**
@@ -45,9 +46,9 @@ const { ROLES } = require("../../../shared/constants/roles");
  *       200:
  *         description: List of settings retrieved
  */
-router.get("/", authenticate, listSystemSettings);
+router.get("/", authenticate, hasPermission("SYSTEM_SETTINGS_VIEW"), listSystemSettings);
 
-router.get("/:key", authenticate, getSystemSetting);
+router.get("/:key", authenticate, hasPermission("SYSTEM_SETTINGS_VIEW"), getSystemSetting);
 
 /**
  * @swagger
@@ -81,6 +82,6 @@ router.get("/:key", authenticate, getSystemSetting);
  *       200:
  *         description: Setting updated successfully
  */
-router.put("/:key", authenticate, authorize([ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER]), updateSystemSetting);
+router.put("/:key", authenticate, authorize([ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER]), hasPermission("SYSTEM_SETTINGS_EDIT"), updateSystemSetting);
 
 module.exports = router;

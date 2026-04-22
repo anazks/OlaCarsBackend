@@ -1,0 +1,150 @@
+/**
+ * Master list of all system permissions.
+ * These are the granular actions that can be assigned to users.
+ * Format: MODULE_ACTION
+ */
+
+const PERMISSIONS = {
+  // ─── Vehicle Management ────────────────────────────────────
+  VEHICLE_VIEW: "VEHICLE_VIEW",
+  VEHICLE_CREATE: "VEHICLE_CREATE",
+  VEHICLE_EDIT: "VEHICLE_EDIT",
+  VEHICLE_DELETE: "VEHICLE_DELETE",
+  VEHICLE_TRANSFER: "VEHICLE_TRANSFER",
+  VEHICLE_STATUS_CHANGE: "VEHICLE_STATUS_CHANGE",
+  VEHICLE_APPROVE: "VEHICLE_APPROVE",
+
+  // ─── Driver Management ─────────────────────────────────────
+  DRIVER_VIEW: "DRIVER_VIEW",
+  DRIVER_CREATE: "DRIVER_CREATE",
+  DRIVER_EDIT: "DRIVER_EDIT",
+  DRIVER_DELETE: "DRIVER_DELETE",
+  DRIVER_ONBOARD: "DRIVER_ONBOARD",
+  DRIVER_ASSIGN_VEHICLE: "DRIVER_ASSIGN_VEHICLE",
+
+  // ─── Branch Management ─────────────────────────────────────
+  BRANCH_VIEW: "BRANCH_VIEW",
+  BRANCH_CREATE: "BRANCH_CREATE",
+  BRANCH_EDIT: "BRANCH_EDIT",
+  BRANCH_DELETE: "BRANCH_DELETE",
+
+  // ─── Staff / User Management ───────────────────────────────
+  STAFF_VIEW: "STAFF_VIEW",
+  STAFF_CREATE: "STAFF_CREATE",
+  STAFF_EDIT: "STAFF_EDIT",
+  STAFF_DELETE: "STAFF_DELETE",
+  STAFF_MANAGE_PERMISSIONS: "STAFF_MANAGE_PERMISSIONS",
+
+  // ─── User (Customer) Management ────────────────────────────
+  USER_VIEW: "USER_VIEW",
+  USER_CREATE: "USER_CREATE",
+  USER_EDIT: "USER_EDIT",
+  USER_DELETE: "USER_DELETE",
+
+  // ─── Purchase Order Management ─────────────────────────────
+  PURCHASE_ORDER_VIEW: "PURCHASE_ORDER_VIEW",
+  PURCHASE_ORDER_CREATE: "PURCHASE_ORDER_CREATE",
+  PURCHASE_ORDER_EDIT: "PURCHASE_ORDER_EDIT",
+  PURCHASE_ORDER_DELETE: "PURCHASE_ORDER_DELETE",
+  PURCHASE_ORDER_APPROVE: "PURCHASE_ORDER_APPROVE",
+
+  // ─── Supplier Management ──────────────────────────────────
+  SUPPLIER_VIEW: "SUPPLIER_VIEW",
+  SUPPLIER_CREATE: "SUPPLIER_CREATE",
+  SUPPLIER_EDIT: "SUPPLIER_EDIT",
+  SUPPLIER_DELETE: "SUPPLIER_DELETE",
+
+  // ─── Payment & Finance ─────────────────────────────────────
+  PAYMENT_VIEW: "PAYMENT_VIEW",
+  PAYMENT_CREATE: "PAYMENT_CREATE",
+  PAYMENT_EDIT: "PAYMENT_EDIT",
+  PAYMENT_DELETE: "PAYMENT_DELETE",
+  PAYMENT_APPROVE: "PAYMENT_APPROVE",
+
+  // ─── Ledger ────────────────────────────────────────────────
+  LEDGER_VIEW: "LEDGER_VIEW",
+  LEDGER_CREATE: "LEDGER_CREATE",
+  LEDGER_EDIT: "LEDGER_EDIT",
+  LEDGER_DELETE: "LEDGER_DELETE",
+
+  // ─── Insurance ─────────────────────────────────────────────
+  INSURANCE_VIEW: "INSURANCE_VIEW",
+  INSURANCE_CREATE: "INSURANCE_CREATE",
+  INSURANCE_EDIT: "INSURANCE_EDIT",
+  INSURANCE_DELETE: "INSURANCE_DELETE",
+
+  // ─── Insurance Claims ──────────────────────────────────────
+  INSURANCE_CLAIM_VIEW: "INSURANCE_CLAIM_VIEW",
+  INSURANCE_CLAIM_CREATE: "INSURANCE_CLAIM_CREATE",
+  INSURANCE_CLAIM_EDIT: "INSURANCE_CLAIM_EDIT",
+  INSURANCE_CLAIM_DELETE: "INSURANCE_CLAIM_DELETE",
+
+  // ─── Work Order Management ─────────────────────────────────
+  WORK_ORDER_VIEW: "WORK_ORDER_VIEW",
+  WORK_ORDER_CREATE: "WORK_ORDER_CREATE",
+  WORK_ORDER_EDIT: "WORK_ORDER_EDIT",
+  WORK_ORDER_DELETE: "WORK_ORDER_DELETE",
+  WORK_ORDER_APPROVE: "WORK_ORDER_APPROVE",
+
+  // ─── Service Bill Management ───────────────────────────────
+  SERVICE_BILL_VIEW: "SERVICE_BILL_VIEW",
+  SERVICE_BILL_CREATE: "SERVICE_BILL_CREATE",
+  SERVICE_BILL_EDIT: "SERVICE_BILL_EDIT",
+  SERVICE_BILL_DELETE: "SERVICE_BILL_DELETE",
+
+  // ─── Inventory Management ─────────────────────────────────
+  INVENTORY_VIEW: "INVENTORY_VIEW",
+  INVENTORY_CREATE: "INVENTORY_CREATE",
+  INVENTORY_EDIT: "INVENTORY_EDIT",
+  INVENTORY_DELETE: "INVENTORY_DELETE",
+
+  // ─── Tax Management ────────────────────────────────────────
+  TAX_VIEW: "TAX_VIEW",
+  TAX_CREATE: "TAX_CREATE",
+  TAX_EDIT: "TAX_EDIT",
+  TAX_DELETE: "TAX_DELETE",
+
+  // ─── Accounting Code Management ────────────────────────────
+  ACCOUNTING_CODE_VIEW: "ACCOUNTING_CODE_VIEW",
+  ACCOUNTING_CODE_CREATE: "ACCOUNTING_CODE_CREATE",
+  ACCOUNTING_CODE_EDIT: "ACCOUNTING_CODE_EDIT",
+  ACCOUNTING_CODE_DELETE: "ACCOUNTING_CODE_DELETE",
+
+  // ─── Agreement / Lease Management ──────────────────────────
+  AGREEMENT_VIEW: "AGREEMENT_VIEW",
+  AGREEMENT_CREATE: "AGREEMENT_CREATE",
+  AGREEMENT_EDIT: "AGREEMENT_EDIT",
+  AGREEMENT_DELETE: "AGREEMENT_DELETE",
+
+  LEASE_VIEW: "LEASE_VIEW",
+  LEASE_CREATE: "LEASE_CREATE",
+  LEASE_EDIT: "LEASE_EDIT",
+  LEASE_DELETE: "LEASE_DELETE",
+
+  // ─── System Settings ──────────────────────────────────────
+  SYSTEM_SETTINGS_VIEW: "SYSTEM_SETTINGS_VIEW",
+  SYSTEM_SETTINGS_EDIT: "SYSTEM_SETTINGS_EDIT",
+
+  // ─── Staff Performance ────────────────────────────────────
+  STAFF_PERFORMANCE_VIEW: "STAFF_PERFORMANCE_VIEW",
+  STAFF_PERFORMANCE_EDIT: "STAFF_PERFORMANCE_EDIT",
+
+  // ─── AI Service ────────────────────────────────────────────
+  AI_SERVICE_ACCESS: "AI_SERVICE_ACCESS",
+
+  // ─── Reports / Dashboard ───────────────────────────────────
+  REPORTS_VIEW: "REPORTS_VIEW",
+  DASHBOARD_VIEW: "DASHBOARD_VIEW",
+
+  // ─── Access Control (Admin-only) ───────────────────────────
+  ACCESS_CONTROL_MANAGE: "ACCESS_CONTROL_MANAGE",
+  ROLE_TEMPLATE_VIEW: "ROLE_TEMPLATE_VIEW",
+  ROLE_TEMPLATE_EDIT: "ROLE_TEMPLATE_EDIT",
+};
+
+/**
+ * Get all permission keys as an array of strings.
+ */
+const ALL_PERMISSIONS = Object.values(PERMISSIONS);
+
+module.exports = { PERMISSIONS, ALL_PERMISSIONS };

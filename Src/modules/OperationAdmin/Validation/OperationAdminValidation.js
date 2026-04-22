@@ -12,6 +12,8 @@ const addOperationalAdminSchema = {
         fullName: Joi.string().trim().min(3).max(50).required(),
         email: Joi.string().trim().email().required(),
         password: Joi.string().trim().min(6).required(),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED").default("ACTIVE"),
         twoFactorEnabled: Joi.boolean().default(false),
     }),
@@ -25,6 +27,8 @@ const editOperationalAdminSchema = {
         fullName: Joi.string().trim().min(3).max(50),
         email: Joi.string().trim().email(),
         password: Joi.string().trim().min(6),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED"),
         twoFactorEnabled: Joi.boolean(),
     }).min(1),

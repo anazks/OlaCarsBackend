@@ -12,6 +12,7 @@ const {
 } = require("../Controller/WorkshopStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const validate = require("../../../shared/middlewares/validate.js");
 const {
@@ -98,6 +99,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_CREATE"),
     validate(addWorkshopStaffSchema),
     addWorkshopStaff
 );
@@ -118,6 +120,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_VIEW"),
     getWorkshopStaff
 );
 
@@ -143,6 +146,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_VIEW"),
     validate(getWorkshopStaffByIdSchema),
     getWorkshopStaffById
 );
@@ -189,6 +193,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_EDIT"),
     validate(editWorkshopStaffSchema),
     editWorkshopStaff
 );
@@ -229,6 +234,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword
 );
@@ -255,6 +261,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("STAFF_DELETE"),
     validate(deleteWorkshopStaffSchema),
     deleteWorkshopStaff
 );

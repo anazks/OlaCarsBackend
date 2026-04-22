@@ -14,6 +14,8 @@ const addBranchManagerSchema = {
         password: Joi.string().trim().min(6).required(),
         phone: Joi.string().trim().allow("", null),
         branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED").default("ACTIVE"),
         twoFactorEnabled: Joi.boolean().default(false),
     }),
@@ -29,6 +31,8 @@ const editBranchManagerSchema = {
         password: Joi.string().trim().min(6),
         phone: Joi.string().trim().allow("", null),
         branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED"),
         twoFactorEnabled: Joi.boolean(),
     }).min(1),

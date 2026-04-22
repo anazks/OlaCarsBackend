@@ -5,8 +5,9 @@ const { jwtConfig } = require('../../../config/jwtConfig.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
+const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
@@ -36,7 +37,7 @@ exports.login = async (email, password) => {
     staff.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: staff._id, role: staff.role, branchId: staff.branchId },
+        { id: staff._id, role: 'WORKSHOPSTAFF', branchId: staff.branchId },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -54,12 +55,21 @@ exports.login = async (email, password) => {
     delete staffObj.passwordHash;
     delete staffObj.refreshToken;
 
-    return { accessToken, refreshToken, staff: staffObj };
+    return { accessToken, refreshToken, user: staffObj };
 };
 
 exports.create = async (data) => {
     validatePassword(data.password);
     const hashedPassword = await bcrypt.hash(data.password, 12);
+
+    let finalPermissions = data.permissions || [];
+    if (finalPermissions.length === 0) {
+       const RoleTemplate = require('../../AccessControl/Model/RoleTemplate');
+       const template = await RoleTemplate.findOne({ roleName: 'WORKSHOPSTAFF' });
+       if (template) finalPermissions = template.permissions;
+    }
+    
+    await validateDelegatedPermissions(data.createdBy, data.creatorRole, finalPermissions);
 
     const newStaff = await WorkshopStaff.create({
         fullName: data.fullName,
@@ -68,6 +78,7 @@ exports.create = async (data) => {
         passwordHash: hashedPassword,
         branchId: data.branchId,
         status: data.status,
+        permissions: finalPermissions,
         createdBy: data.createdBy,
         creatorRole: data.creatorRole,
     });
@@ -82,6 +93,10 @@ exports.update = async (id, body) => {
     const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
     if (Object.keys(filtered).length === 0) {
         throw new AppError('No valid fields to update', 400);
+    }
+
+    if (filtered.permissions) {
+        await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
 
     const updated = await WorkshopStaff.findByIdAndUpdate(id, filtered, {
@@ -140,7 +155,7 @@ exports.refreshSession = async (token) => {
         }
 
         const accessToken = jwt.sign(
-            { id: staff._id, role: staff.role, branchId: staff.branchId },
+            { id: staff._id, role: 'WORKSHOPSTAFF', branchId: staff.branchId },
             process.env.JWT_SECRET,
             { expiresIn: jwtConfig.accessTokenExpiry }
         );

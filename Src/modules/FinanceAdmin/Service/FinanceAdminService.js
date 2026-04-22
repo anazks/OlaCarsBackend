@@ -5,8 +5,9 @@ const { jwtConfig } = require('../../../config/jwtConfig.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
+const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'status', 'twoFactorEnabled'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'status', 'twoFactorEnabled', 'permissions'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
@@ -41,7 +42,7 @@ exports.login = async (email, password) => {
     });
 
     const accessToken = jwt.sign(
-        { id: admin._id, role: admin.role },
+        { id: admin._id, role: 'FINANCEADMIN' },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -55,7 +56,11 @@ exports.login = async (email, password) => {
     admin.refreshToken = refreshToken;
     await admin.save();
 
-    return { accessToken, refreshToken };
+    const adminObj = admin.toObject();
+    delete adminObj.passwordHash;
+    delete adminObj.refreshToken;
+
+    return { accessToken, refreshToken, user: adminObj };
 };
 
 exports.refreshAccessToken = async (token) => {
@@ -67,7 +72,7 @@ exports.refreshAccessToken = async (token) => {
     }
 
     const newAccessToken = jwt.sign(
-        { id: admin._id, role: admin.role },
+        { id: admin._id, role: 'FINANCEADMIN' },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -79,11 +84,21 @@ exports.create = async (data) => {
     validatePassword(data.password);
     const hashedPassword = await bcrypt.hash(data.password, 12);
 
+    let finalPermissions = data.permissions || [];
+    if (finalPermissions.length === 0) {
+       const RoleTemplate = require('../../AccessControl/Model/RoleTemplate');
+       const template = await RoleTemplate.findOne({ roleName: 'FINANCEADMIN' });
+       if (template) finalPermissions = template.permissions;
+    }
+    
+    await validateDelegatedPermissions(data.createdBy, data.creatorRole, finalPermissions);
+
     const newAdmin = await FinanceAdmin.create({
         fullName: data.fullName,
         email: data.email,
         passwordHash: hashedPassword,
         status: data.status,
+        permissions: finalPermissions,
         twoFactorEnabled: data.twoFactorEnabled,
         createdBy: data.createdBy,
         creatorRole: data.creatorRole,
@@ -99,6 +114,10 @@ exports.update = async (id, body) => {
     const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
     if (Object.keys(filtered).length === 0) {
         throw new AppError('No valid fields to update', 400);
+    }
+
+    if (filtered.permissions) {
+        await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
 
     const updated = await FinanceAdmin.findByIdAndUpdate(id, filtered, {

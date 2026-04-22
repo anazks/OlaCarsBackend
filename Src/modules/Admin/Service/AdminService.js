@@ -42,7 +42,7 @@ exports.login = async (email, password) => {
     admin.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: admin._id, role: admin.role },
+        { id: admin._id, role: 'ADMIN' },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -56,7 +56,11 @@ exports.login = async (email, password) => {
     admin.refreshToken = refreshToken;
     await admin.save();
 
-    return { accessToken, refreshToken };
+    const adminObj = admin.toObject();
+    delete adminObj.passwordHash;
+    delete adminObj.refreshToken;
+
+    return { accessToken, refreshToken, user: adminObj };
 };
 
 /**

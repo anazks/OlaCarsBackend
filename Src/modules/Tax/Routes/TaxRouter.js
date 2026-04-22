@@ -9,6 +9,7 @@ const {
 } = require("../Controller/TaxController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
 const {
@@ -58,7 +59,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Tax Profile created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addTaxSchema), addTax);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("TAX_CREATE"), validate(addTaxSchema), addTax);
 
 /**
  * @swagger
@@ -72,7 +73,7 @@ router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addTaxSc
  *       200:
  *         description: List of Tax Profiles
  */
-router.get("/", authenticate, getTaxes);
+router.get("/", authenticate, hasPermission("TAX_VIEW"), getTaxes);
 
 /**
  * @swagger
@@ -92,7 +93,7 @@ router.get("/", authenticate, getTaxes);
  *       200:
  *         description: Tax Profile details
  */
-router.get("/:id", authenticate, validate(getTaxByIdSchema), getTaxById);
+router.get("/:id", authenticate, hasPermission("TAX_VIEW"), validate(getTaxByIdSchema), getTaxById);
 
 /**
  * @swagger
@@ -125,7 +126,7 @@ router.get("/:id", authenticate, validate(getTaxByIdSchema), getTaxById);
  *       200:
  *         description: Tax Profile updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(updateTaxSchema), updateTax);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("TAX_EDIT"), validate(updateTaxSchema), updateTax);
 
 /**
  * @swagger
@@ -145,6 +146,6 @@ router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(update
  *       200:
  *         description: Tax Profile deleted successfully
  */
-router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(deleteTaxSchema), deleteTax);
+router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("TAX_DELETE"), validate(deleteTaxSchema), deleteTax);
 
 module.exports = router;

@@ -20,11 +20,16 @@ const financeAdminSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    role: {
-      type: String,
-      enum: ["FINANCEADMIN"],
-      default: "FINANCEADMIN",
-    },
+    
+        role: {
+            type: String,
+            default: "FINANCEADMIN",
+            enum: ["FINANCEADMIN"]
+        },
+        permissions: {
+            type: [String],
+            default: []
+        },
     status: {
       type: String,
       enum: ["ACTIVE", "SUSPENDED", "LOCKED"],

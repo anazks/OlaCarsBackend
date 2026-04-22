@@ -64,7 +64,8 @@ const getBranchManagerById = async (req, res) => {
 
 const editBranchManager = async (req, res) => {
     try {
-        const updatedManager = await BranchManagerService.update(req.params.id, req.body);
+        const payload = { ...req.body, modifierId: req.user.id, modifierRole: req.user.role };
+        const updatedManager = await BranchManagerService.update(req.params.id, payload);
         return res.status(200).json({ success: true, data: updatedManager });
     } catch (error) {
         const statusCode = error.statusCode || 500;

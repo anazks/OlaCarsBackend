@@ -10,6 +10,7 @@ const {
 } = require("../Controller/ServiceBillController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
@@ -58,6 +59,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
+    hasPermission("SERVICE_BILL_CREATE"),
     generateBillHandler
 );
 
@@ -91,7 +93,7 @@ router.post(
  *       200:
  *         description: List of bills
  */
-router.get("/", authenticate, getBillsHandler);
+router.get("/", authenticate, hasPermission("SERVICE_BILL_VIEW"), getBillsHandler);
 
 /**
  * @swagger
@@ -113,7 +115,7 @@ router.get("/", authenticate, getBillsHandler);
  *       404:
  *         description: Not found
  */
-router.get("/:id", authenticate, getBillByIdHandler);
+router.get("/:id", authenticate, hasPermission("SERVICE_BILL_VIEW"), getBillByIdHandler);
 
 /**
  * @swagger
@@ -137,6 +139,7 @@ router.put(
     "/:id/approve",
     authenticate,
     authorize(ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
+    hasPermission("PAYMENT_APPROVE"),
     approveBillHandler
 );
 
@@ -174,6 +177,7 @@ router.put(
     "/:id/pay",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
+    hasPermission("PAYMENT_CREATE"),
     markPaidHandler
 );
 
@@ -210,6 +214,7 @@ router.put(
     "/:id/void",
     authenticate,
     authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("SERVICE_BILL_DELETE"),
     voidBillHandler
 );
 

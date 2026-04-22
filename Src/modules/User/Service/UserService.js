@@ -36,7 +36,7 @@ exports.login = async (email, password) => {
     user.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: user._id, role: user.role },
+        { id: user._id, role: 'USER' },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -50,7 +50,11 @@ exports.login = async (email, password) => {
     user.refreshToken = refreshToken;
     await user.save();
 
-    return { accessToken, refreshToken };
+    const userObj = user.toObject();
+    delete userObj.passwordHash;
+    delete userObj.refreshToken;
+
+    return { accessToken, refreshToken, user: userObj };
 };
 
 exports.create = async (data) => {

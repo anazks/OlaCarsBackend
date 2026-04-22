@@ -3,6 +3,7 @@ const router = express.Router();
 
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
 const {
@@ -97,6 +98,7 @@ router.post(
         ROLES.ADMIN,
         ROLES.WORKSHOPMANAGER
     ),
+    hasPermission("WORK_ORDER_CREATE"),
     createWorkOrderHandler
 );
 
@@ -142,6 +144,7 @@ router.post(
 router.get(
     "/",
     authenticate,
+    hasPermission("WORK_ORDER_VIEW"),
     getWorkOrdersHandler
 );
 
@@ -169,6 +172,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
+    hasPermission("WORK_ORDER_VIEW"),
     getWorkOrderByIdHandler
 );
 
@@ -225,6 +229,7 @@ router.put(
         ROLES.ADMIN,
         ROLES.WORKSHOPMANAGER
     ),
+    hasPermission("WORK_ORDER_EDIT"),
     progressWorkOrderStatusHandler
 );
 
@@ -274,6 +279,7 @@ router.post(
     "/:id/tasks",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     addTaskHandler
 );
 
@@ -320,6 +326,7 @@ router.put(
     "/:id/tasks/:taskId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     updateTaskHandler
 );
 
@@ -350,6 +357,7 @@ router.delete(
     "/:id/tasks/:taskId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     removeTaskHandler
 );
 
@@ -401,6 +409,7 @@ router.post(
     "/:id/parts",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     addPartHandler
 );
 
@@ -453,6 +462,7 @@ router.put(
     "/:id/parts/:partId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     updatePartHandler
 );
 
@@ -483,6 +493,7 @@ router.delete(
     "/:id/parts/:partId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     removePartHandler
 );
 
@@ -537,6 +548,7 @@ router.post(
     "/:id/labour",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     logLabourHandler
 );
 
@@ -566,6 +578,7 @@ router.post(
     "/:id/qc/generate",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     generateQcHandler
 );
 
@@ -612,6 +625,7 @@ router.put(
     "/:id/qc/submit",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     submitQcHandler
 );
 
@@ -658,6 +672,7 @@ router.post(
     "/:id/photos",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     upload.single("photo"),
     addPhotoHandler
 );
@@ -699,6 +714,7 @@ router.post(
     "/:id/photos/upload",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     upload.single("photo"),
     uploadWorkOrderPhotoHandler
 );
@@ -730,6 +746,7 @@ router.delete(
     "/:id/photos/:photoId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
     removePhotoHandler
 );
 
@@ -829,6 +846,7 @@ router.put(
     "/:id/release",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("VEHICLE_STATUS_CHANGE"),
     releaseVehicleHandler
 );
 

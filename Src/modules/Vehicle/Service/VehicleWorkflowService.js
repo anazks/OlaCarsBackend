@@ -266,6 +266,23 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
         throw new Error(`User role '${user.role}' is not authorized to finalize the ${targetStatus} stage.`, { cause: 403 });
     }
 
+    // --- Decision Step Permissions (Onboarding Approval/Decline) ---
+    const onboardingDecisions = [
+        { from: "DOCUMENTS REVIEW", to: "INSPECTION REQUIRED" }, // Doc Approve
+        { from: "DOCUMENTS REVIEW", to: "PENDING ENTRY" },       // Doc Decline
+        { from: "BRANCH MANAGER APPROVAL", to: "ACTIVE — AVAILABLE" }, // Final Approve
+        { from: "BRANCH MANAGER APPROVAL", to: "DOCUMENTS REVIEW" },   // Final Decline
+    ];
+
+    const isDecision = onboardingDecisions.some(d => d.from === currentVehicle.status && d.to === targetStatus);
+    
+    if (isDecision && user.role !== ROLES.ADMIN) {
+        if (!user.permissions || !user.permissions.includes("VEHICLE_APPROVE")) {
+            const action = targetStatus.includes('AVAILABLE') || targetStatus.includes('INSPECTION') ? 'approve' : 'decline';
+            throw new Error(`Access denied. You do not have the 'VEHICLE_APPROVE' permission required to ${action} this vehicle.`, { cause: 403 });
+        }
+    }
+
     const payload = { ...updateData };
     
     // --- Pre-validation Logic: Evaluate Inspection Status if data is provided ---

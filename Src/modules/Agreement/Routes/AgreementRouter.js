@@ -2,6 +2,7 @@ const express = require("express");
 const AgreementController = require("../Controller/AgreementController");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const multer = require("multer");
 
@@ -53,7 +54,7 @@ router.get("/", AgreementController.getAllAgreements);
  *       200:
  *         description: List of placeholders
  */
-router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAvailablePlaceholders);
+router.get("/placeholders", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), hasPermission("AGREEMENT_EDIT"), AgreementController.getAvailablePlaceholders);
 
 /**
  * @swagger
@@ -120,7 +121,7 @@ router.get("/:id", AgreementController.getAgreementById);
  *       400:
  *         description: Bad request (e.g., duplicate title for country)
  */
-router.post("/", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.createAgreement);
+router.post("/", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), hasPermission("AGREEMENT_EDIT"), AgreementController.createAgreement);
 
 /**
  * @swagger
@@ -158,7 +159,7 @@ router.post("/", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLE
  *       404:
  *         description: Agreement not found
  */
-router.put("/:id", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.updateAgreement);
+router.put("/:id", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), hasPermission("AGREEMENT_EDIT"), AgreementController.updateAgreement);
 
 
 /**
@@ -179,7 +180,7 @@ router.put("/:id", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, RO
  *       200:
  *         description: List of agreement versions
  */
-router.get("/:id/versions", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), AgreementController.getAgreementVersions);
+router.get("/:id/versions", authenticate, authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER), hasPermission("AGREEMENT_VIEW"), AgreementController.getAgreementVersions);
 
 /**
  * @swagger
@@ -258,7 +259,7 @@ router.post("/accept", authenticate, upload.single("signatureImage"), acceptAgre
  *       200:
  *         description: List of acceptances
  */
-router.get("/acceptances/:userId", authenticate, getUserAcceptances);
+router.get("/acceptances/:userId", authenticate, hasPermission("AGREEMENT_VIEW"), getUserAcceptances);
 
 /**
  * @swagger

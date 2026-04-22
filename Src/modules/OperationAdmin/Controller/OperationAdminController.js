@@ -74,7 +74,8 @@ const getOperationalAdminById = async (req, res) => {
 
 const editOperationalAdmin = async (req, res) => {
   try {
-    const updatedAdmin = await OperationAdminService.update(req.params.id, req.body);
+    const payload = { ...req.body, modifierId: req.user.id, modifierRole: req.user.role };
+    const updatedAdmin = await OperationAdminService.update(req.params.id, payload);
     return res.status(200).json({ success: true, data: updatedAdmin });
   } catch (error) {
     const statusCode = error.statusCode || 500;
