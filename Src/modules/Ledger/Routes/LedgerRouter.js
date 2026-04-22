@@ -3,6 +3,7 @@ const router = express.Router();
 const { getLedgerEntries } = require("../Controller/LedgerController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
 const VIEW_ACCESS_ROLES = [
@@ -30,6 +31,6 @@ const VIEW_ACCESS_ROLES = [
  *       200:
  *         description: List of Ledger Entries
  */
-router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), getLedgerEntries);
+router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntries);
 
 module.exports = router;

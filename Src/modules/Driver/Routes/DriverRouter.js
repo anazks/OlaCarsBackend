@@ -13,6 +13,7 @@ const {
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 const upload = require("../../../utils/multerConfig");
 
@@ -109,6 +110,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER),
+    hasPermission("DRIVER_CREATE"),
     addDriver
 );
 
@@ -140,6 +142,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_VIEW"),
     getDrivers
 );
 
@@ -168,6 +171,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_VIEW"),
     getDriverById
 );
 
@@ -213,6 +217,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
+    hasPermission("DRIVER_EDIT"),
     editDriver
 );
 
@@ -268,6 +273,7 @@ router.put(
     "/:id/progress",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_ONBOARD"),
     progressDriverStatus
 );
 
@@ -343,6 +349,7 @@ router.post(
     "/:id/upload-documents",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
+    hasPermission("DRIVER_EDIT"),
     upload.fields([
         { name: "photograph", maxCount: 1 },
         { name: "idFrontImage", maxCount: 1 },
@@ -382,6 +389,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_DELETE"),
     deleteDriver
 );
 
@@ -390,6 +398,7 @@ router.put(
     "/:id/rent/pay",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("PAYMENT_CREATE"),
     markRentAsPaid
 );
 
@@ -398,6 +407,7 @@ router.put(
     "/:id/performance",
     authenticate,
     authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    hasPermission("STAFF_PERFORMANCE_EDIT"),
     updatePerformance
 );
 

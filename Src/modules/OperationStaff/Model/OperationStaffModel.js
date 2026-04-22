@@ -25,10 +25,15 @@ const operationStaffSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["OPERATIONSTAFF"],
             default: "OPERATIONSTAFF",
+            enum: ["OPERATIONSTAFF"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

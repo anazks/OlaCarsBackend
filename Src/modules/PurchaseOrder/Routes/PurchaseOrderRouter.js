@@ -11,6 +11,7 @@ const {
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const {
@@ -218,6 +219,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    hasPermission("PURCHASE_ORDER_CREATE"),
     upload.any(),
     validate(addPurchaseOrderSchema),
     addPurchaseOrder
@@ -350,6 +352,7 @@ router.post(
 router.get(
     "/",
     authenticate,
+    hasPermission("PURCHASE_ORDER_VIEW"),
     getPurchaseOrders
 );
 
@@ -432,6 +435,7 @@ router.get(
 router.get(
     "/eligible-for-billing",
     authenticate,
+    hasPermission("PURCHASE_ORDER_VIEW"),
     getEligiblePurchaseOrdersForBilling
 );
 
@@ -473,6 +477,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
+    hasPermission("PURCHASE_ORDER_VIEW"),
     validate(getPurchaseOrderByIdSchema),
     getPurchaseOrderById
 );
@@ -570,6 +575,7 @@ router.put(
     "/:id/approve",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
+    hasPermission("PURCHASE_ORDER_APPROVE"),
     validate(approvePurchaseOrderSchema),
     approvePurchaseOrder
 );
@@ -645,6 +651,7 @@ router.put(
 router.put(
     "/:id",
     authenticate,
+    hasPermission("PURCHASE_ORDER_EDIT"),
     validate(editPurchaseOrderSchema),
     editPurchaseOrder
 );
@@ -720,6 +727,7 @@ router.put(
 router.post(
     "/:id/item/:itemId/upload-images",
     authenticate,
+    hasPermission("PURCHASE_ORDER_EDIT"),
     validate(uploadItemImagesSchema),
     upload.array("images", 8),
     uploadPurchaseOrderItemImages

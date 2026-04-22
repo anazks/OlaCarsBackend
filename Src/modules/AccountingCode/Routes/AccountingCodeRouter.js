@@ -9,6 +9,7 @@ const {
 } = require("../Controller/AccountingCodeController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
 const AUTHORIZED_ROLES = [
@@ -57,7 +58,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Accounting Code created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), addAccountingCode);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("ACCOUNTING_CODE_CREATE"), addAccountingCode);
 
 /**
  * @swagger
@@ -71,7 +72,7 @@ router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), addAccountingCode
  *       200:
  *         description: List of Accounting Codes
  */
-router.get("/", authenticate, getAccountingCodes);
+router.get("/", authenticate, hasPermission("ACCOUNTING_CODE_VIEW"), getAccountingCodes);
 
 /**
  * @swagger
@@ -91,7 +92,7 @@ router.get("/", authenticate, getAccountingCodes);
  *       200:
  *         description: Accounting Code details
  */
-router.get("/:id", authenticate, getAccountingCodeById);
+router.get("/:id", authenticate, hasPermission("ACCOUNTING_CODE_VIEW"), getAccountingCodeById);
 
 /**
  * @swagger
@@ -129,7 +130,7 @@ router.get("/:id", authenticate, getAccountingCodeById);
  *       200:
  *         description: Accounting Code updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateAccountingCode);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("ACCOUNTING_CODE_EDIT"), updateAccountingCode);
 
 /**
  * @swagger
@@ -149,6 +150,6 @@ router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), updateAccountin
  *       200:
  *         description: Accounting Code deleted successfully
  */
-router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), deleteAccountingCode);
+router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("ACCOUNTING_CODE_DELETE"), deleteAccountingCode);
 
 module.exports = router;

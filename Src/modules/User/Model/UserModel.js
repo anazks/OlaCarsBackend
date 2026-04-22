@@ -25,10 +25,15 @@ const userSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["USER"],
             default: "USER",
+            enum: ["USER"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

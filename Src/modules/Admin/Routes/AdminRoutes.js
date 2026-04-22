@@ -12,6 +12,7 @@ const {
 } = require("../Controller/AdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const validate = require("../../../shared/middlewares/validate.js");
 const {
@@ -117,6 +118,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_CREATE"),
     validate(addAdminSchema),
     addAdmin
 );
@@ -137,6 +139,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_VIEW"),
     getAdmins
 );
 
@@ -162,6 +165,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_VIEW"),
     validate(getAdminByIdSchema),
     getAdminById
 );
@@ -204,6 +208,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(editAdminSchema),
     editAdmin
 );
@@ -246,6 +251,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword
 );
@@ -272,6 +278,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_DELETE"),
     validate(deleteAdminSchema),
     deleteAdmin
 );

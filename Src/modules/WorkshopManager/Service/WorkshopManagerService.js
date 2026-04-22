@@ -5,8 +5,9 @@ const { jwtConfig } = require('../../../config/jwtConfig.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
+const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
@@ -36,7 +37,7 @@ exports.login = async (email, password) => {
     manager.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: manager._id, role: manager.role, branchId: manager.branchId },
+        { id: manager._id, role: 'WORKSHOPMANAGER', branchId: manager.branchId },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -54,7 +55,7 @@ exports.login = async (email, password) => {
     delete managerObj.passwordHash;
     delete managerObj.refreshToken;
 
-    return { accessToken, refreshToken, manager: managerObj };
+    return { accessToken, refreshToken, user: managerObj };
 };
 
 exports.create = async (data) => {
@@ -154,7 +155,7 @@ exports.loginService = async (email, password) => {
     manager.lastLoginAt = new Date();
 
     const accessToken = jwt.sign(
-        { id: manager._id, role: manager.role, branchId: manager.branchId },
+        { id: manager._id, role: 'WORKSHOPMANAGER', branchId: manager.branchId },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
@@ -172,18 +173,33 @@ exports.loginService = async (email, password) => {
     delete managerObj.passwordHash;
     delete managerObj.refreshToken;
 
-    return { accessToken, refreshToken, manager: managerObj };
+    return { accessToken, refreshToken, user: managerObj };
 };
 
 exports.createWorkshopManagerService = async (data) => {
     validatePassword(data.password);
-    return await addWorkshopManagerRepo(data);
+    
+    let finalPermissions = data.permissions || [];
+    if (finalPermissions.length === 0) {
+       const RoleTemplate = require('../../AccessControl/Model/RoleTemplate');
+       const template = await RoleTemplate.findOne({ roleName: 'WORKSHOPMANAGER' });
+       if (template) finalPermissions = template.permissions;
+    }
+    
+    await validateDelegatedPermissions(data.createdBy, data.creatorRole, finalPermissions);
+    
+    const payload = { ...data, permissions: finalPermissions };
+    return await addWorkshopManagerRepo(payload);
 };
 
 exports.updateWorkshopManagerService = async (id, body) => {
     const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
     if (Object.keys(filtered).length === 0) {
         throw new AppError('No valid fields to update', 400);
+    }
+    
+    if (filtered.permissions) {
+        await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
     
     const result = await editWorkshopManagerRepo({ id, ...filtered });
@@ -241,7 +257,7 @@ exports.refreshSessionService = async (token) => {
         }
 
         const accessToken = jwt.sign(
-            { id: manager._id, role: manager.role, branchId: manager.branchId },
+            { id: manager._id, role: 'WORKSHOPMANAGER', branchId: manager.branchId },
             process.env.JWT_SECRET,
             { expiresIn: jwtConfig.accessTokenExpiry }
         );

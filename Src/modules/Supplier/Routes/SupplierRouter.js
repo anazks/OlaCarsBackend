@@ -9,6 +9,7 @@ const {
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
 const {
@@ -69,7 +70,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Supplier created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addSupplierSchema), addSupplier);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), validate(addSupplierSchema), addSupplier);
 
 /**
  * @swagger
@@ -83,7 +84,7 @@ router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), validate(addSuppl
  *       200:
  *         description: List of active suppliers
  */
-router.get("/", authenticate, getSuppliers);
+router.get("/", authenticate, hasPermission("SUPPLIER_VIEW"), getSuppliers);
 
 /**
  * @swagger
@@ -103,7 +104,7 @@ router.get("/", authenticate, getSuppliers);
  *       200:
  *         description: Supplier details
  */
-router.get("/:id", authenticate, validate(getSupplierByIdSchema), getSupplierById);
+router.get("/:id", authenticate, hasPermission("SUPPLIER_VIEW"), validate(getSupplierByIdSchema), getSupplierById);
 
 /**
  * @swagger
@@ -145,7 +146,7 @@ router.get("/:id", authenticate, validate(getSupplierByIdSchema), getSupplierByI
  *       200:
  *         description: Supplier updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(updateSupplierSchema), updateSupplier);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_EDIT"), validate(updateSupplierSchema), updateSupplier);
 
 /**
  * @swagger
@@ -165,6 +166,6 @@ router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(update
  *       200:
  *         description: Supplier deleted successfully
  */
-router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), validate(deleteSupplierSchema), deleteSupplier);
+router.delete("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_DELETE"), validate(deleteSupplierSchema), deleteSupplier);
 
 module.exports = router;

@@ -25,10 +25,15 @@ const branchManagerSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["BRANCHMANAGER"],
             default: "BRANCHMANAGER",
+            enum: ["BRANCHMANAGER"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

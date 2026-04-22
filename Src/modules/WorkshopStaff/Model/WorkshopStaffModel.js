@@ -25,10 +25,15 @@ const workshopStaffSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["WORKSHOPSTAFF"],
             default: "WORKSHOPSTAFF",
+            enum: ["WORKSHOPSTAFF"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

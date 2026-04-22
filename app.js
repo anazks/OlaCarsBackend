@@ -137,8 +137,6 @@ const startServer = async () => {
 };
 
 startServer();
-// Triggering restart for workflow changes
-
 
 process.on("SIGINT", () => {
   console.log("Server shutting down...");

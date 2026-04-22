@@ -10,6 +10,7 @@ const {
 } = require("../Controller/InsuranceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const validate = require("../../../shared/middlewares/validate");
 const { ROLES } = require("../../../shared/constants/roles");
 const {
@@ -81,6 +82,7 @@ router.post(
         ROLES.BRANCHMANAGER,
         ROLES.FINANCESTAFF
     ),
+    hasPermission("INSURANCE_CREATE"),
     upload.single("policyDocument"),
     validate(createInsuranceSchema),
     createInsurance
@@ -98,7 +100,7 @@ router.post(
  *       200:
  *         description: List of active insurance policies
  */
-router.get("/eligible", authenticate, getEligibleInsurances);
+router.get("/eligible", authenticate, hasPermission("INSURANCE_VIEW"), getEligibleInsurances);
 
 /**
  * @swagger
@@ -112,7 +114,7 @@ router.get("/eligible", authenticate, getEligibleInsurances);
  *       200:
  *         description: List of insurance policies
  */
-router.get("/", authenticate, getAllInsurances);
+router.get("/", authenticate, hasPermission("INSURANCE_VIEW"), getAllInsurances);
 
 /**
  * @swagger
@@ -132,7 +134,7 @@ router.get("/", authenticate, getAllInsurances);
  *       200:
  *         description: Insurance details
  */
-router.get("/:id", authenticate, validate(getInsuranceByIdSchema), getInsuranceById);
+router.get("/:id", authenticate, hasPermission("INSURANCE_VIEW"), validate(getInsuranceByIdSchema), getInsuranceById);
 
 /**
  * @swagger
@@ -164,6 +166,7 @@ router.put(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
+    hasPermission("INSURANCE_EDIT"),
     validate(updateInsuranceSchema),
     updateInsurance
 );
@@ -194,6 +197,7 @@ router.delete(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
+    hasPermission("INSURANCE_DELETE"),
     validate(deleteInsuranceSchema),
     deleteInsurance
 );
@@ -232,6 +236,7 @@ router.post(
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
+    hasPermission("INSURANCE_EDIT"),
     upload.single("policyDocument"),
     validate(uploadDocumentSchema),
     uploadInsuranceDocument

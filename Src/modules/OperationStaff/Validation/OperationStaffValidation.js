@@ -14,6 +14,8 @@ const addOperationStaffSchema = {
         password: Joi.string().trim().min(6).required(),
         phone: Joi.string().trim().allow("", null),
         branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED").default("ACTIVE"),
     }),
 };
@@ -28,6 +30,8 @@ const editOperationStaffSchema = {
         password: Joi.string().trim().min(6),
         phone: Joi.string().trim().allow("", null),
         branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED"),
     }).min(1),
 };

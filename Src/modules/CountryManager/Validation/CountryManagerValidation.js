@@ -14,6 +14,8 @@ const addCountryManagerSchema = {
         password: Joi.string().trim().min(6).required(),
         phone: Joi.string().trim().allow("", null),
         country: Joi.string().trim().required(),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED").default("ACTIVE"),
         twoFactorEnabled: Joi.boolean().default(false),
     }),
@@ -29,6 +31,8 @@ const editCountryManagerSchema = {
         password: Joi.string().trim().min(6),
         phone: Joi.string().trim().allow("", null),
         country: Joi.string().trim(),
+        
+        permissions: Joi.array().items(Joi.string().trim()).default([]),
         status: Joi.string().trim().valid("ACTIVE", "SUSPENDED", "LOCKED"),
         twoFactorEnabled: Joi.boolean(),
     }).min(1),

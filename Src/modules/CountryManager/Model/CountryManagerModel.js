@@ -25,10 +25,15 @@ const countryManagerSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["COUNTRYMANAGER"],
             default: "COUNTRYMANAGER",
+            enum: ["COUNTRYMANAGER"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

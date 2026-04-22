@@ -13,6 +13,7 @@ const {
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const validate = require("../../../shared/middlewares/validate.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const {
@@ -134,6 +135,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("VEHICLE_CREATE"),
     validate(addVehicleSchema),
     addVehicle
 );
@@ -153,6 +155,7 @@ router.post(
 router.get(
     "/",
     authenticate,
+    hasPermission("VEHICLE_VIEW"),
     getVehicles
 );
 
@@ -172,6 +175,7 @@ router.get(
     "/available",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("VEHICLE_VIEW"),
     getAvailableCars
 );
 
@@ -196,6 +200,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
+    hasPermission("VEHICLE_VIEW"),
     validate(getVehicleByIdSchema),
     getVehicleById
 );
@@ -394,6 +399,7 @@ router.put(
         ROLES.ADMIN,
         ROLES.WORKSHOPMANAGER
     ),
+    hasPermission("VEHICLE_STATUS_CHANGE"),
     validate(progressVehicleSchema),
     progressVehicleStatus
 );
@@ -479,6 +485,7 @@ router.post(
         ROLES.ADMIN,
         ROLES.WORKSHOPMANAGER
     ),
+    hasPermission("VEHICLE_EDIT"),
     validate(uploadDocumentsSchema),
     upload.fields([
         { name: "purchaseReceipt", maxCount: 1 },
@@ -526,6 +533,7 @@ router.post(
     "/:id/assign/:driverId",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_ASSIGN_VEHICLE"),
     validate(assignCarToDriverSchema),
     (req, res, next) => assignCarToDriver(req, res, next)
 );
@@ -570,6 +578,7 @@ router.put(
     "/:id/lease-settings",
     authenticate,
     authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("VEHICLE_EDIT"),
     validate(updateLeaseSettingsSchema),
     updateVehicleLeaseSettings
 );

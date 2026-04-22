@@ -74,7 +74,8 @@ const getCountryManagerById = async (req, res) => {
 
 const editCountryManager = async (req, res) => {
     try {
-        const updatedManager = await CountryManagerService.update(req.params.id, req.body);
+        const payload = { ...req.body, modifierId: req.user.id, modifierRole: req.user.role };
+        const updatedManager = await CountryManagerService.update(req.params.id, payload);
         return res.status(200).json({ success: true, data: updatedManager });
     } catch (error) {
         const statusCode = error.statusCode || 500;

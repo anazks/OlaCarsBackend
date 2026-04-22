@@ -7,10 +7,12 @@ const {
     deleteUser,
     getUsers,
     getUserById,
+    getProfile,
     login
 } = require("../Controller/UserController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
@@ -45,6 +47,20 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *         description: Login successful
  */
 router.post("/login", login);
+
+/**
+ * @swagger
+ * /api/user/profile:
+ *   get:
+ *     summary: Get current user profile
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Profile details
+ */
+router.get("/profile", authenticate, getProfile);
 
 /**
  * @swagger
@@ -84,6 +100,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    hasPermission("USER_CREATE"),
     addUser
 );
 
@@ -99,7 +116,7 @@ router.post(
  *       200:
  *         description: List of users
  */
-router.get("/", authenticate, getUsers);
+router.get("/", authenticate, hasPermission("USER_VIEW"), getUsers);
 
 /**
  * @swagger
@@ -119,7 +136,7 @@ router.get("/", authenticate, getUsers);
  *       200:
  *         description: User details
  */
-router.get("/:id", authenticate, getUserById);
+router.get("/:id", authenticate, hasPermission("USER_VIEW"), getUserById);
 
 /**
  * @swagger
@@ -155,7 +172,7 @@ router.get("/:id", authenticate, getUserById);
  *       200:
  *         description: User updated successfully
  */
-router.put("/:id", authenticate, editUser);
+router.put("/:id", authenticate, hasPermission("USER_EDIT"), editUser);
 
 /**
  * @swagger
@@ -209,6 +226,6 @@ router.post("/:id/change-password", authenticate, changePassword);
  *       200:
  *         description: User deleted successfully
  */
-router.delete("/:id", authenticate, deleteUser);
+router.delete("/:id", authenticate, hasPermission("USER_DELETE"), deleteUser);
 
 module.exports = router;

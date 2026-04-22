@@ -1,6 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const aiController = require("../Controller/AiController");
+const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 
 /**
  * Public routes for AI Call Service.
@@ -8,9 +10,9 @@ const aiController = require("../Controller/AiController");
  */
 
 // Get available vehicles for booking
-router.get("/vehicles/available", aiController.getAvailableVehicles);
+router.get("/vehicles/available", authenticate, hasPermission("AI_SERVICE_ACCESS"), aiController.getAvailableVehicles);
 
 // Pre-book a vehicle for a driver
-router.post("/vehicles/book", aiController.bookVehicle);
+router.post("/vehicles/book", authenticate, hasPermission("AI_SERVICE_ACCESS"), aiController.bookVehicle);
 
 module.exports = router;

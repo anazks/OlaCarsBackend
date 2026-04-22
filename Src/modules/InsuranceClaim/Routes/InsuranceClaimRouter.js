@@ -8,6 +8,7 @@ const {
 } = require("../Controller/InsuranceClaimController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
@@ -65,6 +66,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("INSURANCE_CLAIM_CREATE"),
     createClaimHandler
 );
 
@@ -97,7 +99,7 @@ router.post(
  *       200:
  *         description: List of claims
  */
-router.get("/", authenticate, getClaimsHandler);
+router.get("/", authenticate, hasPermission("INSURANCE_CLAIM_VIEW"), getClaimsHandler);
 
 /**
  * @swagger
@@ -119,7 +121,7 @@ router.get("/", authenticate, getClaimsHandler);
  *       404:
  *         description: Not found
  */
-router.get("/:id", authenticate, getClaimByIdHandler);
+router.get("/:id", authenticate, hasPermission("INSURANCE_CLAIM_VIEW"), getClaimByIdHandler);
 
 /**
  * @swagger
@@ -171,6 +173,7 @@ router.put(
     "/:id/progress",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("INSURANCE_CLAIM_EDIT"),
     progressClaimHandler
 );
 

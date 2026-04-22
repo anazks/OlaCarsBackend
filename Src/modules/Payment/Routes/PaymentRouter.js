@@ -7,6 +7,7 @@ const {
     updatePaymentStatus,
 } = require("../Controller/PaymentTransactionController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 
 // Depending on the organization's rules, adding a payment might be restricted.
 // Assuming authenticate is enough for now, role middleware can be added if needed based on the matrix.
@@ -77,7 +78,7 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware");
  *       201:
  *         description: Payment Transaction created successfully
  */
-router.post("/", authenticate, addPaymentTransaction);
+router.post("/", authenticate, hasPermission("PAYMENT_CREATE"), addPaymentTransaction);
 
 /**
  * @swagger
@@ -91,7 +92,7 @@ router.post("/", authenticate, addPaymentTransaction);
  *       200:
  *         description: List of Payment Transactions
  */
-router.get("/", authenticate, getPaymentTransactions);
+router.get("/", authenticate, hasPermission("PAYMENT_VIEW"), getPaymentTransactions);
 
 /**
  * @swagger
@@ -111,7 +112,7 @@ router.get("/", authenticate, getPaymentTransactions);
  *       200:
  *         description: Payment Transaction details
  */
-router.get("/:id", authenticate, getPaymentTransactionById);
+router.get("/:id", authenticate, hasPermission("PAYMENT_VIEW"), getPaymentTransactionById);
 
 /**
  * @swagger
@@ -143,6 +144,6 @@ router.get("/:id", authenticate, getPaymentTransactionById);
  *       200:
  *         description: Payment Transaction status updated successfully
  */
-router.put("/:id/status", authenticate, updatePaymentStatus);
+router.put("/:id/status", authenticate, hasPermission("PAYMENT_APPROVE"), updatePaymentStatus);
 
 module.exports = router;

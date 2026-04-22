@@ -20,11 +20,16 @@ const adminSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    role: {
-      type: String,
-      enum: ["ADMIN"],
-      default: "ADMIN",
-    },
+    
+        role: {
+            type: String,
+            default: "ADMIN",
+            enum: ["ADMIN"]
+        },
+        permissions: {
+            type: [String],
+            default: []
+        },
     status: {
       type: String,
       enum: ["ACTIVE", "SUSPENDED", "LOCKED"],

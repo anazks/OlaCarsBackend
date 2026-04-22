@@ -16,6 +16,7 @@ const {
 } = require("../Controller/InventoryController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
 /**
@@ -78,6 +79,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_CREATE"),
     createPartHandler
 );
 
@@ -116,7 +118,7 @@ router.post(
  *       200:
  *         description: List of parts
  */
-router.get("/", authenticate, getPartsHandler);
+router.get("/", authenticate, hasPermission("INVENTORY_VIEW"), getPartsHandler);
 
 /**
  * @swagger
@@ -136,7 +138,7 @@ router.get("/", authenticate, getPartsHandler);
  *       200:
  *         description: List of low-stock parts
  */
-router.get("/low-stock/:branchId", authenticate, getLowStockHandler);
+router.get("/low-stock/:branchId", authenticate, hasPermission("INVENTORY_VIEW"), getLowStockHandler);
 
 /**
  * @swagger
@@ -158,7 +160,7 @@ router.get("/low-stock/:branchId", authenticate, getLowStockHandler);
  *       404:
  *         description: Part not found
  */
-router.get("/:id", authenticate, getPartByIdHandler);
+router.get("/:id", authenticate, hasPermission("INVENTORY_VIEW"), getPartByIdHandler);
 
 /**
  * @swagger
@@ -197,6 +199,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
     updatePartHandler
 );
 
@@ -222,6 +225,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_DELETE"),
     deletePartHandler
 );
 
@@ -259,6 +263,7 @@ router.put(
     "/:id/restock",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
     restockPartHandler
 );
 
@@ -298,6 +303,7 @@ router.put(
     "/:id/reserve",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
     reserveStockHandler
 );
 
@@ -334,6 +340,7 @@ router.put(
     "/:id/release",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
     releaseStockHandler
 );
 
@@ -370,6 +377,7 @@ router.put(
     "/:id/install",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
     installPartHandler
 );
 
@@ -395,6 +403,7 @@ router.get(
     "/:id/transactions",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_VIEW"),
     getPartTransactionsHandler
 );
 
@@ -420,6 +429,7 @@ router.get(
     "/workshop-requirements/:branchId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_VIEW"),
     getWorkshopRequirementsHandler
 );
 

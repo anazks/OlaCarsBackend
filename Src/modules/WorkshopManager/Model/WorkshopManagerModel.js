@@ -25,10 +25,15 @@ const workshopManagerSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        
         role: {
             type: String,
-            enum: ["WORKSHOPMANAGER"],
             default: "WORKSHOPMANAGER",
+            enum: ["WORKSHOPMANAGER"]
+        },
+        permissions: {
+            type: [String],
+            default: []
         },
         status: {
             type: String,

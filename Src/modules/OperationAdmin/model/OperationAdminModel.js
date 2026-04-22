@@ -20,11 +20,16 @@ const operationalAdminSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    role: {
-      type: String,
-      enum: ["OPERATIONADMIN"],
-      default: "OPERATIONADMIN",
-    },
+    
+        role: {
+            type: String,
+            default: "OPERATIONADMIN",
+            enum: ["OPERATIONADMIN"]
+        },
+        permissions: {
+            type: [String],
+            default: []
+        },
     status: {
       type: String,
       enum: ["ACTIVE", "SUSPENDED", "LOCKED"],

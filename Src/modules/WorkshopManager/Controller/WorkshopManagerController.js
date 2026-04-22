@@ -65,7 +65,8 @@ exports.getWorkshopManagerById = async (req, res) => {
 
 exports.editWorkshopManager = async (req, res) => {
     try {
-        const result = await WorkshopManagerService.updateWorkshopManagerService(req.params.id, req.body);
+        const payload = { ...req.body, modifierId: req.user.id, modifierRole: req.user.role };
+        const result = await WorkshopManagerService.updateWorkshopManagerService(req.params.id, payload);
         return res.status(200).json({ success: true, data: result });
     } catch (error) {
         const statusCode = error.statusCode || 500;

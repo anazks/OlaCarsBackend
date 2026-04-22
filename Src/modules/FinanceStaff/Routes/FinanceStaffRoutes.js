@@ -13,6 +13,7 @@ const {
 } = require("../Controller/FinanceStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const validate = require("../../../shared/middlewares/validate.js");
 const {
@@ -138,6 +139,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_CREATE"),
     validate(addFinanceStaffSchema),
     addFinanceStaff
 );
@@ -158,6 +160,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_VIEW"),
     getFinanceStaff
 );
 
@@ -183,6 +186,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_VIEW"),
     validate(getFinanceStaffByIdSchema),
     getFinanceStaffById
 );
@@ -229,6 +233,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(editFinanceStaffSchema),
     editFinanceStaff
 );
@@ -269,6 +274,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword
 );
@@ -295,6 +301,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    hasPermission("STAFF_DELETE"),
     validate(deleteFinanceStaffSchema),
     deleteFinanceStaff
 );

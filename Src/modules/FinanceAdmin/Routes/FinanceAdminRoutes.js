@@ -12,6 +12,7 @@ const {
 } = require("../Controller/FinanceAdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const validate = require("../../../shared/middlewares/validate.js");
 const {
@@ -119,6 +120,7 @@ router.post(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_CREATE"),
     validate(addFinanceAdminSchema),
     addFinanceAdmin
 );
@@ -139,6 +141,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_VIEW"),
     getFinanceAdmins
 );
 
@@ -164,6 +167,7 @@ router.get(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_VIEW"),
     validate(getFinanceAdminByIdSchema),
     getFinanceAdminById
 );
@@ -208,6 +212,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(editFinanceAdminSchema),
     editFinanceAdmin
 );
@@ -248,6 +253,7 @@ router.post(
     "/:id/change-password",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword
 );
@@ -274,6 +280,7 @@ router.delete(
     "/:id",
     authenticate,
     authorize(ROLES.ADMIN),
+    hasPermission("STAFF_DELETE"),
     validate(deleteFinanceAdminSchema),
     deleteFinanceAdmin
 );

@@ -3,6 +3,7 @@ const router = express.Router();
 const { getPerformance } = require("../Controller/staffPerformanceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
 /**
@@ -40,6 +41,7 @@ router.get(
     "/",
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    hasPermission("STAFF_PERFORMANCE_VIEW"),
     getPerformance
 );
 
