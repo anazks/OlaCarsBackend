@@ -92,6 +92,15 @@ const runPeriodicVehicleChecks = async () => {
     };
 };
 
+/**
+ * Resolves maintenance alerts for a vehicle (usually when a preventive service is done).
+ * @param {string} vehicleId 
+ * @param {string} userId 
+ */
+const resolveMaintenanceAlerts = async (vehicleId, userId) => {
+    return await resolveAlertByVehicleAndTypeRepo(vehicleId, "MAINTENANCE", userId);
+};
+
 module.exports = {
     checkAndCreateMaintenanceAlert,
     checkAndCreateInsuranceAlert,
