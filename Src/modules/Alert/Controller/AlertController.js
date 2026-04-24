@@ -80,29 +80,55 @@ const resolveAlert = async (req, res) => {
 };
 
 /**
- * Manually triggers the insurance expiry check.
- * @route POST /api/alerts/check-insurance
+ * Manually triggers all vehicle checks (Insurance & Maintenance).
+ * @route POST /api/alerts/check-all
  * @access Private (Admin)
  */
-const runManualInsuranceCheck = async (req, res) => {
+const runManualVehicleChecks = async (req, res) => {
     try {
-        const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
-        const { checkAndCreateInsuranceAlert } = require("../Service/AlertService");
-
-        const vehicles = await Vehicle.find({
-            isDeleted: false,
-            status: { $nin: ["RETIRED", "TRANSFER COMPLETE"] }
-        });
-
-        for (const vehicle of vehicles) {
-            await checkAndCreateInsuranceAlert(vehicle);
-        }
+        const { runPeriodicVehicleChecks } = require("../Service/AlertService");
+        const result = await runPeriodicVehicleChecks();
 
         return res.status(200).json({
             success: true,
-            message: "Manual insurance check completed successfully",
+            message: "Manual vehicle checks completed successfully",
+            data: result
         });
     } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+/**
+ * Endpoint for external cron service to trigger periodic checks.
+ * @route POST /api/alerts/cron-trigger
+ * @access Public (Protected by secret header)
+ */
+const triggerCronChecks = async (req, res) => {
+    try {
+        const cronSecret = process.env.CRON_SECRET;
+        const incomingSecret = req.headers["x-cron-secret"];
+
+        if (cronSecret && incomingSecret !== cronSecret) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized: Invalid cron secret",
+            });
+        }
+
+        const { runPeriodicVehicleChecks } = require("../Service/AlertService");
+        const result = await runPeriodicVehicleChecks();
+
+        return res.status(200).json({
+            success: true,
+            message: "Cron vehicle checks triggered successfully",
+            data: result
+        });
+    } catch (error) {
+        console.error("[CRON-CONTROLLER] Error triggering checks:", error.message);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -114,5 +140,6 @@ module.exports = {
     getActiveAlerts,
     getAllAlerts,
     resolveAlert,
-    runManualInsuranceCheck,
+    runManualVehicleChecks,
+    triggerCronChecks,
 };

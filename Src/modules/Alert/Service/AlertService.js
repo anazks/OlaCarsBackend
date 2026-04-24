@@ -67,6 +67,32 @@ const checkAndCreateInsuranceAlert = async (vehicle) => {
 };
 
 /**
+ * Runs periodic checks for all active vehicles (Insurance & Maintenance).
+ */
+const runPeriodicVehicleChecks = async () => {
+    const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+    
+    console.log("[CRON-SERVICE] Starting periodic vehicle checks...");
+    const vehicles = await Vehicle.find({
+        isDeleted: false,
+        status: { $nin: ["RETIRED", "TRANSFER COMPLETE"] }
+    });
+
+    let insuranceCount = 0;
+    let maintenanceCount = 0;
+
+    for (const vehicle of vehicles) {
+        await checkAndCreateInsuranceAlert(vehicle);
+        await checkAndCreateMaintenanceAlert(vehicle);
+    }
+    
+    console.log(`[CRON-SERVICE] Periodic vehicle checks completed for ${vehicles.length} vehicles.`);
+    return {
+        vehicleCount: vehicles.length
+    };
+};
+
+/**
  * Resolves maintenance alerts for a vehicle (usually when a preventive service is done).
  * @param {string} vehicleId 
  * @param {string} userId 
@@ -79,4 +105,5 @@ module.exports = {
     checkAndCreateMaintenanceAlert,
     checkAndCreateInsuranceAlert,
     resolveMaintenanceAlerts,
+    runPeriodicVehicleChecks,
 };
