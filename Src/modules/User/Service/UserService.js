@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../Model/UserModel.js');
+const { Driver } = require('../../Driver/Model/DriverModel');
 const { jwtConfig } = require('../../../config/jwtConfig.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
@@ -11,21 +11,25 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
 exports.login = async (email, password) => {
-    const user = await User.findOne({ email, isDeleted: false });
+    const user = await Driver.findOne({ "personalInfo.email": email.toLowerCase(), isDeleted: false });
     if (!user) throw new AppError('Invalid credentials', 401);
 
     if (user.lockUntil && user.lockUntil > Date.now()) {
         throw new AppError('Account is locked. Try again later.', 423);
     }
 
-    if (user.status !== 'ACTIVE') throw new AppError('Account not active', 403);
+    // Drivers might be in DRAFT, PENDING REVIEW, etc. 
+    // We check if they are SUSPENDED or REJECTED
+    if (["SUSPENDED", "REJECTED"].includes(user.status)) {
+        throw new AppError(`Account is ${user.status.toLowerCase()}`, 403);
+    }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
         user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
         if (user.failedLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
             user.lockUntil = new Date(Date.now() + LOCK_TIME_MS);
-            user.status = 'LOCKED';
+            user.status = 'SUSPENDED'; // Mapping LOCKED to SUSPENDED for Driver model
         }
         await user.save();
         throw new AppError('Invalid credentials', 401);
@@ -50,51 +54,53 @@ exports.login = async (email, password) => {
     user.refreshToken = refreshToken;
     await user.save();
 
-    const userObj = user.toObject();
-    delete userObj.passwordHash;
-    delete userObj.refreshToken;
-
-    return { accessToken, refreshToken, user: userObj };
+    return { accessToken, refreshToken, user };
 };
 
 exports.create = async (data) => {
     validatePassword(data.password);
     const hashedPassword = await bcrypt.hash(data.password, 12);
 
-    const newUser = await User.create({
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
+    const newDriver = await Driver.create({
+        personalInfo: {
+            fullName: data.fullName,
+            email: data.email.toLowerCase(),
+            phone: data.phone,
+        },
         passwordHash: hashedPassword,
-        status: data.status,
+        status: data.status || "DRAFT",
+        role: "USER",
         createdBy: data.createdBy,
         creatorRole: data.creatorRole,
+        branch: data.branch || "000000000000000000000000", // Default placeholder
     });
 
-    const userObj = newUser.toObject();
-    delete userObj.passwordHash;
-    delete userObj.refreshToken;
-    return userObj;
+    return newDriver;
 };
 
 exports.update = async (id, body) => {
-    const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
-    if (Object.keys(filtered).length === 0) {
+    const updateData = {};
+    if (body.fullName) updateData["personalInfo.fullName"] = body.fullName;
+    if (body.email) updateData["personalInfo.email"] = body.email.toLowerCase();
+    if (body.phone) updateData["personalInfo.phone"] = body.phone;
+    if (body.status) updateData["status"] = body.status;
+
+    if (Object.keys(updateData).length === 0) {
         throw new AppError('No valid fields to update', 400);
     }
 
-    const updated = await User.findByIdAndUpdate(id, filtered, {
+    const updated = await Driver.findByIdAndUpdate(id, { $set: updateData }, {
         new: true,
         runValidators: true,
-    }).select('-passwordHash -refreshToken');
+    });
 
-    if (!updated) throw new AppError('User not found', 404);
+    if (!updated) throw new AppError('Driver not found', 404);
     return updated;
 };
 
 exports.changePassword = async (id, currentPassword, newPassword) => {
-    const user = await User.findById(id);
-    if (!user) throw new AppError('User not found', 404);
+    const user = await Driver.findById(id);
+    if (!user) throw new AppError('Driver not found', 404);
 
     const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isMatch) throw new AppError('Current password is incorrect', 401);
@@ -111,14 +117,16 @@ exports.changePassword = async (id, currentPassword, newPassword) => {
 };
 
 exports.remove = async (id) => {
-    const result = await User.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
-    if (!result) throw new AppError('User not found', 404);
+    const result = await Driver.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
+    if (!result) throw new AppError('Driver not found', 404);
 };
 
 exports.getAll = async () => {
-    return await User.find({ isDeleted: false }).select('-passwordHash -refreshToken');
+    return await Driver.find({ isDeleted: false });
 };
 
 exports.getById = async (id) => {
-    return await User.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
+    const driver = await Driver.findOne({ _id: id, isDeleted: false });
+    if (!driver) throw new AppError('Driver not found', 404);
+    return driver;
 };

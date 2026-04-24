@@ -133,6 +133,13 @@ const updateMaintenanceSettingsSchema = {
     }),
 };
 
+const updateVehicleSchema = {
+    params: Joi.object({
+        id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+    }),
+    body: Joi.object().unknown(true),
+};
+
 module.exports = {
     addVehicleSchema,
     progressVehicleSchema,
@@ -141,4 +148,5 @@ module.exports = {
     uploadDocumentsSchema,
     updateLeaseSettingsSchema,
     updateMaintenanceSettingsSchema,
+    updateVehicleSchema
 };

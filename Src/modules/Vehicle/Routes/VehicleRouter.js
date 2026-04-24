@@ -9,7 +9,8 @@ const {
     getAvailableCars,
     assignCarToDriver,
     updateVehicleLeaseSettings,
-    updateMaintenanceSettings
+    updateMaintenanceSettings,
+    updateVehicle
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -24,7 +25,8 @@ const {
     getVehicleByIdSchema,
     uploadDocumentsSchema,
     updateLeaseSettingsSchema,
-    updateMaintenanceSettingsSchema
+    updateMaintenanceSettingsSchema,
+    updateVehicleSchema
 } = require("../Validation/VehicleValidation");
 
 /**
@@ -205,6 +207,41 @@ router.get(
     hasPermission("VEHICLE_VIEW"),
     validate(getVehicleByIdSchema),
     getVehicleById
+);
+
+/**
+ * @swagger
+ * /api/vehicle/{id}:
+ *   put:
+ *     summary: Update vehicle generic fields
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Vehicle details updated
+ *       404:
+ *         description: Vehicle not found
+ */
+router.put(
+    "/:id",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    hasPermission("VEHICLE_EDIT"),
+    validate(updateVehicleSchema),
+    updateVehicle
 );
 
 /**

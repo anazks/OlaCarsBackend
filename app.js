@@ -38,6 +38,7 @@ const StaffPerformanceRouter = require("./Src/modules/StaffPerformance/Routes/st
 const PagoFacilRouter = require("./Src/modules/Payment/Routes/PagoFacilRouter");
 const InvoiceRouter = require("./Src/modules/Invoice/Routes/InvoiceRoutes");
 const AlertRouter = require("./Src/modules/Alert/Routes/AlertRoutes");
+const DriverAuthRouter = require("./Src/modules/DriverAuth/Routes/DriverAuthRouter");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const mongoose = require("mongoose");
 const app = express();
@@ -90,6 +91,7 @@ app.use("/api/staff-performance", StaffPerformanceRouter);
 app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
+app.use("/api/driver-auth", DriverAuthRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });

@@ -63,6 +63,18 @@ const driverSchema = new mongoose.Schema(
             default: "DRAFT",
         },
 
+        // ── Auth Fields ──────────────────────────────────────────────
+        refreshToken: { type: String },
+        passwordHash: { type: String, required: false },
+        otp: { type: String },
+        otpExpires: { type: Date },
+        role: { type: String, default: "USER", enum: ["USER"] },
+        permissions: { type: [String], default: [] },
+        failedLoginAttempts: { type: Number, default: 0 },
+        lockUntil: { type: Date },
+        lastLoginAt: { type: Date },
+        passwordChangedAt: { type: Date },
+
         // ── 1. Personal Information ──────────────────────────────────
         personalInfo: {
             fullName: { type: String, required: true, trim: true },
@@ -262,7 +274,33 @@ const driverSchema = new mongoose.Schema(
 
         isDeleted: { type: Boolean, default: false },
     },
-    { timestamps: true, toJSON: { getters: true }, toObject: { getters: true } }
+    { 
+        timestamps: true, 
+        toJSON: { 
+            getters: true,
+            transform(doc, ret) {
+                delete ret.passwordHash;
+                delete ret.refreshToken;
+                delete ret.failedLoginAttempts;
+                delete ret.lockUntil;
+                delete ret.otp;
+                delete ret.otpExpires;
+                return ret;
+            }
+        }, 
+        toObject: { 
+            getters: true,
+            transform(doc, ret) {
+                delete ret.passwordHash;
+                delete ret.refreshToken;
+                delete ret.failedLoginAttempts;
+                delete ret.lockUntil;
+                delete ret.otp;
+                delete ret.otpExpires;
+                return ret;
+            }
+        } 
+    }
 );
 
 // ─── Performance Indexes ──────────────────────────────────────────────

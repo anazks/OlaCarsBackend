@@ -450,6 +450,29 @@ const updateMaintenanceSettings = async (req, res, next) => {
     }
 };
 
+/**
+ * Update any generic fields on a Vehicle record.
+ * @route PUT /api/vehicle/:id
+ * @access Private
+ */
+const updateVehicle = async (req, res, next) => {
+    try {
+        const vehicleId = req.params.id;
+        const updateData = req.body;
+
+        const { updateVehicleService } = require("../Repo/VehicleRepo");
+        const updatedVehicle = await updateVehicleService(vehicleId, updateData);
+
+        if (!updatedVehicle) {
+            return res.status(404).json({ success: false, message: "Vehicle not found" });
+        }
+
+        return res.status(200).json({ success: true, data: updatedVehicle });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -459,5 +482,6 @@ module.exports = {
     getAvailableCars,
     assignCarToDriver,
     updateVehicleLeaseSettings,
-    updateMaintenanceSettings
+    updateMaintenanceSettings,
+    updateVehicle
 };

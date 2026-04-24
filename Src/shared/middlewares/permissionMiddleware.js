@@ -56,7 +56,7 @@ const hasPermission = (requiredPermissions) => {
           Model = require("../../modules/WorkshopStaff/Model/WorkshopStaffModel");
           break;
         case "USER":
-          Model = require("../../modules/User/Model/UserModel");
+          Model = require("../../modules/Driver/Model/DriverModel").Driver;
           break;
         default:
           throw new AppError("Invalid user role.", 403);
