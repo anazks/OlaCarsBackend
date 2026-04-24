@@ -7,8 +7,8 @@ const { checkAndCreateInsuranceAlert, checkAndCreateMaintenanceAlert } = require
  * Runs insurance checks daily at midnight.
  */
 const initAlertScheduler = () => {
-    // Schedule task to run every minute for testing
-    cron.schedule("* * * * *", async () => {
+    // Schedule task to run every hour
+    cron.schedule("0 * * * *", async () => {
         console.log("[CRON] Running periodic vehicle checks (Insurance & Maintenance)...");
         try {
             const vehicles = await Vehicle.find({

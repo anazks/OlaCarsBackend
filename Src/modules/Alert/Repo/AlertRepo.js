@@ -37,6 +37,18 @@ const getActiveAlertsRepo = async (filters = {}) => {
 };
 
 /**
+ * Fetches all alerts (active, resolved, dismissed) with populated vehicle details.
+ * @param {Object} filters 
+ * @returns {Promise<Array>}
+ */
+const getAllAlertsRepo = async (filters = {}) => {
+    const query = { isDeleted: false, ...filters };
+    return await Alert.find(query)
+        .populate("vehicleId", "basicDetails purchaseDetails status")
+        .sort({ createdAt: -1 });
+};
+
+/**
  * Resolves an alert.
  * @param {string} alertId 
  * @param {string} userId 
@@ -76,6 +88,7 @@ module.exports = {
     createAlertRepo,
     findActiveAlertRepo,
     getActiveAlertsRepo,
+    getAllAlertsRepo,
     resolveAlertRepo,
     resolveAlertByVehicleAndTypeRepo,
 };

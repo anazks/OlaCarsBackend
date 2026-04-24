@@ -85,6 +85,24 @@ const getDriverById = async (req, res) => {
 };
 
 /**
+ * Get current logged-in driver's profile
+ * @route GET /api/driver/me
+ */
+const getDriverMe = async (req, res) => {
+    try {
+        const email = req.user.email;
+        if (!email) return res.status(400).json({ success: false, message: "User email not found in token" });
+
+        const driver = await DriverService.getByEmail(email, { includeSensitive: false });
+        if (!driver) return res.status(404).json({ success: false, message: "Driver profile not found" });
+
+        return res.status(200).json({ success: true, data: driver });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
  * Update non-workflow driver fields (personal info, docs, etc.)
  * @route PUT /api/driver/:id
  */
@@ -238,6 +256,7 @@ module.exports = {
     addDriver,
     getDrivers,
     getDriverById,
+    getDriverMe,
     editDriver,
     progressDriverStatus,
     uploadDriverDocuments,

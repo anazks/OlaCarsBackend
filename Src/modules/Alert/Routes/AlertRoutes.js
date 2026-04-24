@@ -6,9 +6,25 @@ const { hasPermission } = require("../../../shared/middlewares/permissionMiddlew
 const { ROLES } = require("../../../shared/constants/roles");
 const { 
     getActiveAlerts, 
+    getAllAlerts,
     resolveAlert,
     runManualInsuranceCheck
 } = require("../Controller/AlertController");
+
+// Get all alerts (including resolved)
+router.get(
+    "/all",
+    authenticate,
+    authorize(
+        ROLES.ADMIN, 
+        ROLES.COUNTRYMANAGER, 
+        ROLES.BRANCHMANAGER, 
+        ROLES.WORKSHOPMANAGER,
+        ROLES.OPERATIONADMIN, 
+        ROLES.OPERATIONSTAFF
+    ),
+    getAllAlerts
+);
 
 // Get all active alerts
 router.get(

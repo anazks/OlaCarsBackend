@@ -133,3 +133,21 @@ exports.getDriverByIdService = async (id, options = {}) => {
 
     return await q;
 };
+
+/**
+ * Retrieves a single driver by Email.
+ * @param {string} email - Driver email.
+ * @param {Object} options - { includeSensitive: false }
+ */
+exports.getDriverByEmailService = async (email, options = {}) => {
+    let q = Driver.findOne({ "personalInfo.email": email, isDeleted: false })
+        .populate("branch", "name code city state country")
+        .populate("currentVehicle");
+
+    if (!options.includeSensitive) {
+        q = q.select(SENSITIVE_FIELDS);
+    }
+
+    return await q;
+};
+

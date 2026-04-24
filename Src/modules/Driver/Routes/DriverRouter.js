@@ -10,6 +10,7 @@ const {
     deleteDriver,
     markRentAsPaid,
     updatePerformance,
+    getDriverMe,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -144,6 +145,27 @@ router.get(
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_VIEW"),
     getDrivers
+);
+
+// ─── GET /api/driver/me — Get Current Driver ─────────────────────────
+/**
+ * @swagger
+ * /api/driver/me:
+ *   get:
+ *     summary: Get logged-in driver's details
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Driver details
+ *       404:
+ *         description: Driver not found
+ */
+router.get(
+    "/me",
+    authenticate,
+    getDriverMe
 );
 
 // ─── GET /api/driver/:id — Get Single Driver ─────────────────────────

@@ -2,6 +2,7 @@ const {
     addDriverService,
     getDriversService,
     getDriverByIdService,
+    getDriverByEmailService,
     updateDriverService,
     deleteDriverService,
 } = require("../Repo/DriverRepo");
@@ -50,6 +51,21 @@ exports.getById = async (id, options = {}) => {
     // Before returning, ensure any overdue rent is rolled over correctly
     await exports.rolloverOverdueRent(id);
     return await getDriverByIdService(id, options);
+};
+
+/**
+ * Retrieves a driver by Email.
+ * @param {string} email
+ * @param {Object} options - { includeSensitive: bool }
+ */
+exports.getByEmail = async (email, options = {}) => {
+    const driver = await getDriverByEmailService(email, options);
+    if (driver) {
+        await exports.rolloverOverdueRent(driver._id);
+        // fetch again to get updated roll over rent
+        return await getDriverByEmailService(email, options);
+    }
+    return null;
 };
 
 /**
