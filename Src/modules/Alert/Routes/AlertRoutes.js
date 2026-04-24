@@ -8,7 +8,8 @@ const {
     getActiveAlerts, 
     getAllAlerts,
     resolveAlert,
-    runManualInsuranceCheck
+    runManualVehicleChecks,
+    triggerCronChecks
 } = require("../Controller/AlertController");
 
 // Get all alerts (including resolved)
@@ -55,12 +56,18 @@ router.put(
     resolveAlert
 );
 
-// Manual trigger for insurance check
+// Manual trigger for all vehicle checks
 router.post(
-    "/check-insurance",
+    "/check-all",
     authenticate,
     authorize(ROLES.ADMIN, ROLES.COUNTRYMANAGER),
-    runManualInsuranceCheck
+    runManualVehicleChecks
+);
+
+// External cron trigger (protected by secret key, not JWT)
+router.post(
+    "/cron-trigger",
+    triggerCronChecks
 );
 
 module.exports = router;

@@ -131,7 +131,11 @@ const startServer = async () => {
     await seedSystemSettings();
     console.log("System settings verified/seeded");
 
-    initAlertScheduler();
+    if (process.env.ENABLE_INTERNAL_CRON !== "false") {
+      initAlertScheduler();
+    } else {
+      console.log("Internal cron scheduler disabled (using external service)");
+    }
 
     app.listen(PORT, "0.0.0.0",() => {
       console.log(`🚀 Server running on port ${PORT}`);
