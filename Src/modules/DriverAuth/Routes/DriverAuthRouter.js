@@ -33,8 +33,13 @@ const {
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
+ *               branch:
+ *                 type: string
+ *                 description: Optional Branch ObjectId
  *     responses:
  *       201:
  *         description: Account created, driver in DRAFT status
@@ -60,6 +65,7 @@ router.post("/register", register);
  *             properties:
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *     responses:
  *       200:
  *         description: OTP sent to email
@@ -86,6 +92,7 @@ router.post("/request-otp", requestOTP);
  *             properties:
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               otp:
  *                 type: string
  *     responses:

@@ -57,8 +57,10 @@ const AUTHORIZED_ROLES = [
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               address:
  *                 type: string
  *               category:
@@ -133,8 +135,10 @@ router.get("/:id", authenticate, hasPermission("SUPPLIER_VIEW"), validate(getSup
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               address:
  *                 type: string
  *               category:

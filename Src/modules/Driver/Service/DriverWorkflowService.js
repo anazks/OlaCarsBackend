@@ -62,7 +62,7 @@ function workflowError(message, statusCode) {
 const STATUS_RULES = {
     "PENDING REVIEW": {
         allowedFrom: ["DRAFT"],
-        allowedRoles: [ROLES.FINANCESTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver, payload) {
             const p = driver.personalInfo || {};
@@ -92,7 +92,7 @@ const STATUS_RULES = {
 
     "VERIFICATION": {
         allowedFrom: ["PENDING REVIEW"],
-        allowedRoles: [ROLES.FINANCESTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const dl = driver.drivingLicense || {};
@@ -110,7 +110,7 @@ const STATUS_RULES = {
 
     "CREDIT CHECK": {
         allowedFrom: ["VERIFICATION"],
-        allowedRoles: [ROLES.FINANCESTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
@@ -123,7 +123,7 @@ const STATUS_RULES = {
 
     "MANAGER REVIEW": {
         allowedFrom: ["CREDIT CHECK"],
-        allowedRoles: [], // System-triggered only
+        allowedRoles: [ROLES.USER], // Added USER so driver can push past credit check if needed
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
@@ -139,7 +139,7 @@ const STATUS_RULES = {
 
     "APPROVED": {
         allowedFrom: ["CREDIT CHECK", "MANAGER REVIEW"],
-        allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const cc = driver.creditCheck || {};
@@ -168,7 +168,7 @@ const STATUS_RULES = {
 
     "CONTRACT PENDING": {
         allowedFrom: ["APPROVED", "ACTIVE"],
-        allowedRoles: [ROLES.FINANCESTAFF],
+        allowedRoles: [ROLES.FINANCESTAFF, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
             const c = driver.contract || {};
@@ -182,7 +182,7 @@ const STATUS_RULES = {
 
     "ACTIVE": {
         allowedFrom: ["CONTRACT PENDING", "SUSPENDED", "APPROVED"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF, ROLES.OPERATIONSTAFF, ROLES.USER],
         minHierarchy: ROLES.OPERATIONSTAFF,
         gateValidator(driver) {
             // If we are coming from CONTRACT PENDING, we MUST have a signed contract.

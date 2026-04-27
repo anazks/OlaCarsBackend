@@ -52,8 +52,10 @@ const {
  *             properties:
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *     responses:
  *       200:
  *         description: Login successful
@@ -77,6 +79,7 @@ router.post("/login", validate(loginSchema), login);
  *             properties:
  *               refreshToken:
  *                 type: string
+ *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *     responses:
  *       200:
  *         description: Token refreshed successful
@@ -122,10 +125,13 @@ router.post("/logout", authenticate, logout);
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               branchId:
  *                 type: string
  *               status:
@@ -218,10 +224,13 @@ router.get(
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               branchId:
  *                 type: string
  *               status:
@@ -268,8 +277,10 @@ router.put(
  *             properties:
  *               currentPassword:
  *                 type: string
+ *                 example: "OldPassword@123"
  *               newPassword:
  *                 type: string
+ *                 example: "NewStrongPassword@123"
  *     responses:
  *       200:
  *         description: Password changed successfully

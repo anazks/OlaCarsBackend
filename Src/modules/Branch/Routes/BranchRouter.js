@@ -58,8 +58,10 @@ const {
  *                 type: string
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               country:
  *                 type: string
  *               status:
@@ -158,8 +160,10 @@ router.get(
  *                 type: string
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               country:
  *                 type: string
  *               status:

@@ -67,6 +67,7 @@ const upload = require("../../../utils/multerConfig.js");
  *           maxItems: 8
  *           items:
  *             type: string
+
  *             example: "https://example.com/image.jpg"
  *     PurchaseOrderStatus:
  *       type: string
@@ -90,6 +91,7 @@ const upload = require("../../../utils/multerConfig.js");
  *           type: string
  *         changesSummary:
  *           type: string
+
  *           example: "Added items: Oil Filter | Updated quantities or prices in items list."
  *     PurchaseOrder:
  *       type: object
@@ -709,11 +711,13 @@ router.put(
  *                   example: true
  *                 message:
  *                   type: string
+
  *                   example: "Images uploaded successfully."
  *                 data:
  *                   type: array
  *                   items:
  *                     type: string
+
  *                     example: "https://bucket.s3.region.amazonaws.com/purchase-orders/..."
  *       400:
  *         description: Bad request (no images, exceeding limits)
