@@ -43,8 +43,10 @@ const {
  *             properties:
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *     responses:
  *       200:
  *         description: Login successful
@@ -75,10 +77,13 @@ router.post("/login", validate(loginSchema), login);
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               branchId:
  *                 type: string
  *     responses:
@@ -162,8 +167,10 @@ router.get(
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]

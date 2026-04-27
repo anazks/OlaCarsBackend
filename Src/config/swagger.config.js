@@ -1,4 +1,5 @@
 const swaggerJsdoc = require("swagger-jsdoc");
+const path = require("path");
 
 const options = {
   definition: {
@@ -30,7 +31,7 @@ const options = {
   },
 
   // 🔥 Scan ALL route files inside modules
-  apis: ["./Src/modules/*/Routes/*.js"],
+  apis: [path.join(__dirname, "../modules/*/Routes/*.js")],
 
 };
 

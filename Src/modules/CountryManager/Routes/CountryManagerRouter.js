@@ -92,6 +92,7 @@ router.post("/logout", authenticate, logout);
  *             properties:
  *               refreshToken:
  *                 type: string
+ *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *     responses:
  *       200:
  *         description: New access token generated
@@ -231,10 +232,13 @@ router.get(
  *                 type: string
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               country:
  *                 type: string
  *               status:
@@ -283,8 +287,10 @@ router.put(
  *             properties:
  *               currentPassword:
  *                 type: string
+ *                 example: "OldPassword@123"
  *               newPassword:
  *                 type: string
+ *                 example: "NewStrongPassword@123"
  *     responses:
  *       200:
  *         description: Password changed successfully

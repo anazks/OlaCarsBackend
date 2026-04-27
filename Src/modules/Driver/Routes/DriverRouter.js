@@ -17,14 +17,34 @@ const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 const upload = require("../../../utils/multerConfig");
-
+const { Driver } = require("../Model/DriverModel");
+// Helper to allow the driver to access their own record OR staff with permission
+const hasSelfOrStaffPermission = (permission) => {
+    return (req, res, next) => {
+        const userId = String(req.user.id || req.user._id || "");
+        const targetId = String(req.params.id || "");
+        // 1. If it's a driver, they MUST be accessing their own record
+        if (req.user.role === "USER") {
+            if (userId === targetId) {
+                return next();
+            } else {
+                console.log(`[hasSelfOrStaffPermission] Driver ${userId} attempted to access ${targetId}`);
+                return res.status(403).json({ 
+                    success: false, 
+                    message: `Access denied. You are logged in as driver ${userId} but trying to access driver ${targetId}.`
+                });
+            }
+        }
+        // 2. If it's staff, fallback to permission check
+        return hasPermission(permission)(req, res, next);
+    };
+};
 /**
  * @swagger
  * tags:
  *   name: Driver
  *   description: Driver Onboarding & Lifecycle Management
  */
-
 /**
  * @swagger
  * components:
@@ -41,8 +61,10 @@ const upload = require("../../../utils/multerConfig");
  *           type: string
  *         email:
  *           type: string
+ *           example: "user@olacars.com"
  *         phone:
  *           type: string
+ *           example: "+1234567890"
  *         whatsappNumber:
  *           type: string
  *     DriverStatus:
@@ -59,7 +81,6 @@ const upload = require("../../../utils/multerConfig");
  *         - SUSPENDED
  *         - REJECTED
  */
-
 // ─── POST /api/driver — Create New Driver Application ─────────────────
 /**
  * @swagger
@@ -101,6 +122,7 @@ const upload = require("../../../utils/multerConfig");
  *                     type: string
  *                   phone:
  *                     type: string
+ *                     example: "+1234567890"
  *     responses:
  *       201:
  *         description: Driver application created with DRAFT status
@@ -114,7 +136,6 @@ router.post(
     hasPermission("DRIVER_CREATE"),
     addDriver
 );
-
 // ─── GET /api/driver — List Drivers ───────────────────────────────────
 /**
  * @swagger
@@ -146,7 +167,6 @@ router.get(
     hasPermission("DRIVER_VIEW"),
     getDrivers
 );
-
 // ─── GET /api/driver/me — Get Current Driver ─────────────────────────
 /**
  * @swagger
@@ -167,7 +187,6 @@ router.get(
     authenticate,
     getDriverMe
 );
-
 // ─── GET /api/driver/:id — Get Single Driver ─────────────────────────
 /**
  * @swagger
@@ -192,11 +211,10 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
-    hasPermission("DRIVER_VIEW"),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.USER),
+    hasSelfOrStaffPermission("DRIVER_VIEW"),
     getDriverById
 );
-
 // ─── PUT /api/driver/:id — Edit Driver Fields ────────────────────────
 /**
  * @swagger
@@ -238,11 +256,10 @@ router.get(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
-    hasPermission("DRIVER_EDIT"),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.USER),
+    hasSelfOrStaffPermission("DRIVER_EDIT"),
     editDriver
 );
-
 // ─── PUT /api/driver/:id/progress — Workflow Status Transition ───────
 /**
  * @swagger
@@ -294,11 +311,10 @@ router.put(
 router.put(
     "/:id/progress",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
-    hasPermission("DRIVER_ONBOARD"),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.USER),
+    hasSelfOrStaffPermission("DRIVER_ONBOARD"),
     progressDriverStatus
 );
-
 // ─── POST /api/driver/:id/upload-documents — S3 Upload ───────────────
 /**
  * @swagger
@@ -370,8 +386,8 @@ router.put(
 router.post(
     "/:id/upload-documents",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER),
-    hasPermission("DRIVER_EDIT"),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.USER),
+    hasSelfOrStaffPermission("DRIVER_EDIT"),
     upload.fields([
         { name: "photograph", maxCount: 1 },
         { name: "idFrontImage", maxCount: 1 },
@@ -387,7 +403,6 @@ router.post(
     ]),
     uploadDriverDocuments
 );
-
 // ─── DELETE /api/driver/:id — Soft Delete ────────────────────────────
 /**
  * @swagger
@@ -414,7 +429,6 @@ router.delete(
     hasPermission("DRIVER_DELETE"),
     deleteDriver
 );
-
 // ─── PUT /api/driver/:id/rent/pay — Mark Rent as Paid ────────────────
 router.put(
     "/:id/rent/pay",
@@ -423,7 +437,6 @@ router.put(
     hasPermission("PAYMENT_CREATE"),
     markRentAsPaid
 );
-
 // ─── PUT /api/driver/:id/performance — Update Metrics ────────────────
 router.put(
     "/:id/performance",
@@ -432,5 +445,5 @@ router.put(
     hasPermission("STAFF_PERFORMANCE_EDIT"),
     updatePerformance
 );
-
 module.exports = router;
+

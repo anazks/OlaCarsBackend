@@ -40,8 +40,10 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *             properties:
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *     responses:
  *       200:
  *         description: Login successful
@@ -85,10 +87,13 @@ router.get("/profile", authenticate, getProfile);
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]
@@ -140,31 +145,36 @@ router.get("/:id", authenticate, hasPermission("USER_VIEW"), getUserById);
 
 /**
  * @swagger
- * /api/user/update:
+ * /api/user/{id}:
  *   put:
  *     summary: Update User
  *     tags: [User]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: string
  *               fullName:
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               phone:
  *                 type: string
+ *                 example: "+1234567890"
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]
@@ -200,8 +210,10 @@ router.put("/:id", authenticate, hasPermission("USER_EDIT"), editUser);
  *             properties:
  *               currentPassword:
  *                 type: string
+ *                 example: "OldPassword@123"
  *               newPassword:
  *                 type: string
+ *                 example: "NewStrongPassword@123"
  *     responses:
  *       200:
  *         description: Password changed successfully

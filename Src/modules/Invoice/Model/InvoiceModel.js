@@ -91,7 +91,6 @@ const invoiceSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true });
-invoiceSchema.index({ invoiceNumber: 1 });
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 

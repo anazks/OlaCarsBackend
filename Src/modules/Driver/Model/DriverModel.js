@@ -216,7 +216,7 @@ const driverSchema = new mongoose.Schema(
         branch: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Branch",
-            required: true,
+            required: function() { return this.status !== "DRAFT"; },
         },
         currentVehicle: {
             type: mongoose.Schema.Types.ObjectId,
@@ -269,7 +269,7 @@ const driverSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN,ROLES.FINANCESTAFF],
+            enum: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCESTAFF, ROLES.USER],
         },
 
         isDeleted: { type: Boolean, default: false },

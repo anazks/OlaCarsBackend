@@ -29,7 +29,7 @@ const register = async (req, res) => {
 
         // Create Driver record in DRAFT status
         // Since we combined models, Driver IS the User.
-        const newDriver = await Driver.create({
+        const driverPayload = {
             status: "DRAFT",
             personalInfo: {
                 fullName,
@@ -37,10 +37,15 @@ const register = async (req, res) => {
                 phone,
             },
             role: "USER",
-            branch: req.body.branch || "000000000000000000000000", // Placeholder
             createdBy: new mongoose.Types.ObjectId(), // Self-created (will be updated to its own ID if needed, but usually creatorRole 'USER' handles it)
-            creatorRole: "OPERATIONSTAFF", // System-default for self-reg
-        });
+            creatorRole: "USER", // Self-registration
+        };
+
+        if (req.body.branch) {
+            driverPayload.branch = req.body.branch;
+        }
+
+        const newDriver = await Driver.create(driverPayload);
 
         // Update createdBy to its own ID for self-registration
         newDriver.createdBy = newDriver._id;
@@ -146,7 +151,7 @@ const login = async (req, res) => {
 
         // Generate tokens
         const accessToken = jwt.sign(
-            { id: driver._id, email: driver.personalInfo.email, role: "USER" },
+            { id: String(driver._id), email: driver.personalInfo.email, role: "USER" },
             process.env.JWT_SECRET,
             { expiresIn: jwtConfig.accessTokenExpiry }
         );

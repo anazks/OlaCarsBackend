@@ -91,6 +91,7 @@ router.post("/logout", authenticate, logout);
  *             properties:
  *               refreshToken:
  *                 type: string
+ *                 example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *     responses:
  *       200:
  *         description: New access token generated
@@ -120,8 +121,10 @@ router.post("/refresh", refreshToken);
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]
@@ -212,8 +215,10 @@ router.get(
  *                 type: string
  *               email:
  *                 type: string
+ *                 example: "user@olacars.com"
  *               password:
  *                 type: string
+ *                 example: "StrongPassword@123"
  *               status:
  *                 type: string
  *                 enum: [ACTIVE, SUSPENDED, LOCKED]
@@ -258,8 +263,10 @@ router.put(
  *             properties:
  *               currentPassword:
  *                 type: string
+ *                 example: "OldPassword@123"
  *               newPassword:
  *                 type: string
+ *                 example: "NewStrongPassword@123"
  *     responses:
  *       200:
  *         description: Password changed successfully

@@ -44,7 +44,19 @@ const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(helmet()); // Security headers
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        imgSrc: ["'self'", "data:", "https://cdnjs.cloudflare.com"],
+        connectSrc: ["'self'"],
+      },
+    },
+  })
+); // Security headers with Swagger support
 app.use(cors({ origin: "*" })); // Adjust in production
 app.use(express.json());
 app.use((err, req, res, next) => {
