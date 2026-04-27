@@ -16,6 +16,15 @@ const alertSchema = new mongoose.Schema(
             ref: "Vehicle",
             required: true,
         },
+        branchId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Branch",
+            required: true,
+        },
+        country: {
+            type: String,
+            required: true,
+        },
         status: {
             type: String,
             enum: ALERT_STATUSES,
@@ -50,6 +59,8 @@ const alertSchema = new mongoose.Schema(
 
 // Indexes for fast lookup
 alertSchema.index({ vehicleId: 1, status: 1 });
+alertSchema.index({ branchId: 1, status: 1 });
+alertSchema.index({ country: 1, status: 1 });
 alertSchema.index({ type: 1, status: 1 });
 alertSchema.index({ createdAt: -1 });
 

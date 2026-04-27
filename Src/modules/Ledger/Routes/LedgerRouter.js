@@ -9,6 +9,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 const VIEW_ACCESS_ROLES = [
     ROLES.ADMIN,
     ROLES.FINANCEADMIN,
+    ROLES.COUNTRYMANAGER,
 ];
 
 /**

@@ -22,6 +22,8 @@ const checkAndCreateMaintenanceAlert = async (vehicle) => {
             await createAlertRepo({
                 type: "MAINTENANCE",
                 vehicleId: vehicle._id,
+                branchId: vehicle.purchaseDetails.branch?._id || vehicle.purchaseDetails.branch,
+                country: vehicle.purchaseDetails.branch?.country || "UNKNOWN",
                 priority: "HIGH",
                 message: `Vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) has reached ${odometer}km. Service is due!`,
                 metadata: {
@@ -54,6 +56,8 @@ const checkAndCreateInsuranceAlert = async (vehicle) => {
             await createAlertRepo({
                 type: "INSURANCE",
                 vehicleId: vehicle._id,
+                branchId: vehicle.purchaseDetails.branch?._id || vehicle.purchaseDetails.branch,
+                country: vehicle.purchaseDetails.branch?.country || "UNKNOWN",
                 priority: diffDays <= 7 ? "HIGH" : "MEDIUM",
                 message: `Insurance for ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) expires in ${diffDays} days (${expiryDate.toDateString()}).`,
                 metadata: {
@@ -76,7 +80,7 @@ const runPeriodicVehicleChecks = async () => {
     const vehicles = await Vehicle.find({
         isDeleted: false,
         status: { $nin: ["RETIRED", "TRANSFER COMPLETE"] }
-    });
+    }).populate("purchaseDetails.branch");
 
     let insuranceCount = 0;
     let maintenanceCount = 0;

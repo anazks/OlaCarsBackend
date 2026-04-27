@@ -1,4 +1,5 @@
 const { getActiveAlertsRepo, getAllAlertsRepo, resolveAlertRepo } = require("../Repo/AlertRepo");
+const { ROLES } = require("../../../shared/constants/roles");
 
 /**
  * Gets all active alerts.
@@ -10,6 +11,14 @@ const getActiveAlerts = async (req, res) => {
         const filters = {};
         if (req.query.type) filters.type = req.query.type;
         if (req.query.vehicleId) filters.vehicleId = req.query.vehicleId;
+
+        // Role-based filtering
+        const user = req.user;
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if ([ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF].includes(user.role)) {
+            filters.branchId = user.branchId;
+        }
 
         const alerts = await getActiveAlertsRepo(filters);
         return res.status(200).json({
@@ -35,6 +44,14 @@ const getAllAlerts = async (req, res) => {
         if (req.query.type) filters.type = req.query.type;
         if (req.query.vehicleId) filters.vehicleId = req.query.vehicleId;
         if (req.query.status) filters.status = req.query.status;
+
+        // Role-based filtering
+        const user = req.user;
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if ([ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF].includes(user.role)) {
+            filters.branchId = user.branchId;
+        }
 
         const alerts = await getAllAlertsRepo(filters);
         return res.status(200).json({
