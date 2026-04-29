@@ -93,6 +93,7 @@ exports.remove = async (id) => {
  * to ensure past debts are cleared first and overpayments flow into future weeks.
  */
 exports.payRent = async (id, paymentData) => {
+    console.log(`[DriverService] payRent called for driver ${id} with data:`, JSON.stringify(paymentData));
     const { amount, paymentMethod, transactionId, note, createdBy, creatorRole } = paymentData;
     
     if (!amount || amount <= 0) throw new Error("Payment amount must be greater than 0");
@@ -178,11 +179,13 @@ exports.payRent = async (id, paymentData) => {
     await updateDriverService(id, updates);
 
     // Create Ledger & Payment Transaction
-    if (createdBy && creatorRole && amount > 0) {
-        try {
+    try {
+        console.log(`[DriverService] Starting ledger generation for driver ${id}`);
             const accCode = await AccountingCode.findOne({ code: "4100" });
+            console.log(`[DriverService] AccountingCode 4100 found: ${!!accCode}`);
             if (accCode) {
                 const driverName = driver.personalInfo?.fullName || "Unknown Driver";
+                console.log(`[DriverService] Driver Name: ${driverName}`);
                 let vehicleDesc = "Unassigned Vehicle";
                 if (driver.currentVehicle) {
                     const vehicle = await Vehicle.findById(driver.currentVehicle);
@@ -190,9 +193,19 @@ exports.payRent = async (id, paymentData) => {
                         vehicleDesc = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''} (${vehicle.legalDocs?.registrationNumber || vehicle.basicDetails?.vin || 'No Reg'})`.trim();
                     }
                 }
+                console.log(`[DriverService] Vehicle Description: ${vehicleDesc}`);
                 
                 const weekNote = paidWeeks.length > 0 ? ` for ${paidWeeks.join(', ')}` : '';
                 const enhancedNote = `Rent Payment${weekNote} by ${driverName} [${vehicleDesc}]${note ? ' - ' + note : ''}`;
+
+                // Map paymentMethod to match the PaymentTransaction enum
+                let normalizedMethod = "OTHER";
+                const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
+                
+                if (methodUpper.includes("CASH")) normalizedMethod = "CASH";
+                else if (methodUpper.includes("BANK") || methodUpper.includes("TRANSFER")) normalizedMethod = "BANK_TRANSFER";
+                else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
+                else if (methodUpper.includes("CHEQUE")) normalizedMethod = "CHEQUE";
 
                 const transactionData = {
                     accountingCode: accCode._id,
@@ -203,21 +216,24 @@ exports.payRent = async (id, paymentData) => {
                     isTaxInclusive: false,
                     baseAmount: amount,
                     totalAmount: amount,
-                    paymentMethod: paymentMethod ? paymentMethod.toUpperCase() : "CASH",
+                    paymentMethod: normalizedMethod,
                     status: "COMPLETED",
                     paymentDate: timestamp,
                     notes: enhancedNote,
                     createdBy,
                     creatorRole
                 };
+                console.log(`[DriverService] Creating PaymentTransaction for driver ${id}, amount ${amount}`);
                 const newTransaction = await PaymentTransaction.create(transactionData);
+                console.log(`[DriverService] PaymentTransaction created: ${newTransaction._id}`);
+                
                 const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
                 await LedgerService.autoGenerateLedgerEntry(populatedTx);
+                console.log(`[DriverService] Ledger entry generation triggered for ${newTransaction._id}`);
             }
         } catch (err) {
-            console.error("Failed to generate ledger for rent payment:", err);
+            console.error("[DriverService] Failed to generate ledger for rent payment:", err);
         }
-    }
 
     // After payment distribution, recalculate carryovers for the remaining timeline
     return await exports.rolloverOverdueRent(id);

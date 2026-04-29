@@ -7,6 +7,7 @@ const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
+const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -39,6 +40,9 @@ const PagoFacilRouter = require("./Src/modules/Payment/Routes/PagoFacilRouter");
 const InvoiceRouter = require("./Src/modules/Invoice/Routes/InvoiceRoutes");
 const AlertRouter = require("./Src/modules/Alert/Routes/AlertRoutes");
 const DriverAuthRouter = require("./Src/modules/DriverAuth/Routes/DriverAuthRouter");
+const ReportingRouter = require("./Src/modules/Reporting/Routes/ReportingRouter");
+const SalaryRouter = require("./Src/modules/Salary/Routes/SalaryRoutes");
+const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountRoutes");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const mongoose = require("mongoose");
 const app = express();
@@ -104,6 +108,9 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
+app.use("/api/reporting", ReportingRouter);
+app.use("/api/salaries", SalaryRouter);
+app.use("/api/bank-accounts", BankAccountRouter);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
@@ -144,6 +151,9 @@ const startServer = async () => {
 
     await seedSystemSettings();
     console.log("System settings verified/seeded");
+
+    await seedFinancePermissions();
+    console.log("Finance permissions verified/seeded");
 
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();

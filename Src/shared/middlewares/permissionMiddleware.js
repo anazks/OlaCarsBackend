@@ -1,4 +1,6 @@
 const AppError = require("../utils/AppError");
+const RoleTemplate = require("../../modules/AccessControl/Model/RoleTemplate");
+
 
 /**
  * Middleware to check if the authenticated user has a specific permission.
@@ -70,13 +72,20 @@ const hasPermission = (requiredPermissions) => {
 
       const userPermissions = currentUser.permissions || [];
 
+      // Fetch permissions from role template
+      const roleTemplate = await RoleTemplate.findOne({ roleName: userRole });
+      const rolePermissions = roleTemplate ? roleTemplate.permissions : [];
+
+      // Combine user-specific and role-based permissions
+      const combinedPermissions = [...new Set([...userPermissions, ...rolePermissions])];
+
       // Normalize required permissions to an array
       const requiredArr = Array.isArray(requiredPermissions)
         ? requiredPermissions
         : [requiredPermissions];
 
-      // Check if user has ALL required permissions (can modify to SOME if needed)
-      const hasAccess = requiredArr.every((perm) => userPermissions.includes(perm));
+      // Check if user has ALL required permissions
+      const hasAccess = requiredArr.every((perm) => combinedPermissions.includes(perm));
 
       if (!hasAccess) {
         throw new AppError(
@@ -85,8 +94,8 @@ const hasPermission = (requiredPermissions) => {
         );
       }
 
-      // Attach fresh permissions to request for downstream use if needed
-      req.user.permissions = userPermissions;
+      // Attach merged permissions to request for downstream use if needed
+      req.user.permissions = combinedPermissions;
       next();
     } catch (error) {
       next(error);

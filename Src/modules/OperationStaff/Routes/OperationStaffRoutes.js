@@ -139,7 +139,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN),
     hasPermission("STAFF_VIEW"),
     getOperationStaff
 );

@@ -22,7 +22,9 @@ router.get(
         ROLES.BRANCHMANAGER, 
         ROLES.WORKSHOPMANAGER,
         ROLES.OPERATIONADMIN, 
-        ROLES.OPERATIONSTAFF
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCEADMIN,
+        ROLES.FINANCESTAFF
     ),
     getAllAlerts
 );
@@ -37,7 +39,9 @@ router.get(
         ROLES.BRANCHMANAGER, 
         ROLES.WORKSHOPMANAGER,
         ROLES.OPERATIONADMIN, 
-        ROLES.OPERATIONSTAFF
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCEADMIN,
+        ROLES.FINANCESTAFF
     ),
     getActiveAlerts
 );

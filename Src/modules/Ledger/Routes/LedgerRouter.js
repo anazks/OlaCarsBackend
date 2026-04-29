@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getLedgerEntries } = require("../Controller/LedgerController");
+const ManualJournalController = require("../Controller/ManualJournalController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
@@ -10,6 +11,13 @@ const VIEW_ACCESS_ROLES = [
     ROLES.ADMIN,
     ROLES.FINANCEADMIN,
     ROLES.COUNTRYMANAGER,
+    ROLES.FINANCESTAFF,
+];
+
+const MANAGE_ROLES = [
+    ROLES.ADMIN,
+    ROLES.FINANCEADMIN,
+    ROLES.FINANCESTAFF,
 ];
 
 /**
@@ -19,19 +27,11 @@ const VIEW_ACCESS_ROLES = [
  *   description: Immutable Accounting Ledger APIs
  */
 
-// ONLY GET routes. Ledger is append-only by the system via Service triggers.
-/**
- * @swagger
- * /api/ledger:
- *   get:
- *     summary: Get all Ledger Entries
- *     tags: [Ledger]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: List of Ledger Entries
- */
+// Ledger Entries
 router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntries);
+
+// Manual Journals
+router.post("/journals", authenticate, authorize(...MANAGE_ROLES), hasPermission("JOURNAL_CREATE"), ManualJournalController.createJournal);
+router.get("/journals", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("JOURNAL_VIEW"), ManualJournalController.getJournals);
 
 module.exports = router;

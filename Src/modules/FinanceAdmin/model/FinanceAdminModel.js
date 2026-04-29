@@ -100,4 +100,7 @@ const financeAdminSchema = new mongoose.Schema(
 );
 
 const FinanceAdmin = mongoose.models.FinanceAdmin || mongoose.model("FinanceAdmin", financeAdminSchema);
+if (!mongoose.models.FINANCEADMIN) {
+  mongoose.model("FINANCEADMIN", financeAdminSchema, "financeadmins");
+}
 module.exports = FinanceAdmin;

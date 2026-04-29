@@ -100,4 +100,7 @@ const operationalAdminSchema = new mongoose.Schema(
 );
 
 const OperationalAdmin = mongoose.models.OperationalAdmin || mongoose.model("OperationalAdmin", operationalAdminSchema);
+if (!mongoose.models.OPERATIONADMIN) {
+  mongoose.model("OPERATIONADMIN", operationalAdminSchema, "operationaladmins");
+}
 module.exports = OperationalAdmin;

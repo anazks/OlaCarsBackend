@@ -124,7 +124,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN),
     hasPermission("STAFF_VIEW"),
     getWorkshopManager
 );

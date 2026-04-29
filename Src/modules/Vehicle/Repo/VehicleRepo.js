@@ -47,7 +47,8 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
                 { 
                     path: "insuranceDetails.plan", 
                     populate: { path: "supplier", select: "name email phone" } 
-                }
+                },
+                { path: "statusHistory.changedBy", select: "fullName email role" }
             ],
             ...options
         };
@@ -65,13 +66,20 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
  */
 exports.getVehicleByIdService = async (id) => {
     try {
-        return await Vehicle.findById(id)
+        const vehicle = await Vehicle.findById(id)
             .populate("purchaseDetails.branch")
             .populate("purchaseDetails.purchaseOrder")
             .populate({
                 path: "insuranceDetails.plan",
                 populate: { path: "supplier", select: "name email phone" }
-            });
+            })
+            .populate("statusHistory.changedBy", "fullName email role");
+        
+        if (vehicle?.statusHistory?.length > 0) {
+            console.log('[DEBUG] getVehicleByIdService - First history entry changedBy type:', typeof vehicle.statusHistory[0].changedBy);
+            console.log('[DEBUG] getVehicleByIdService - First history entry changedBy:', vehicle.statusHistory[0].changedBy);
+        }
+        return vehicle;
     } catch (error) {
         throw error;
     }

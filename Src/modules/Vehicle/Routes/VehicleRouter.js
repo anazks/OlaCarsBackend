@@ -178,7 +178,7 @@ router.get(
 router.get(
     "/available",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     hasPermission("VEHICLE_VIEW"),
     getAvailableCars
 );
@@ -571,7 +571,7 @@ router.post(
 router.post(
     "/:id/assign/:driverId",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_ASSIGN_VEHICLE"),
     validate(assignCarToDriverSchema),
     (req, res, next) => assignCarToDriver(req, res, next)
@@ -616,7 +616,7 @@ router.post(
 router.put(
     "/:id/lease-settings",
     authenticate,
-    authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
+    authorize(ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("VEHICLE_EDIT"),
     validate(updateLeaseSettingsSchema),
     updateVehicleLeaseSettings
@@ -654,7 +654,7 @@ router.put(
 router.put(
     "/:id/maintenance-settings",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN),
+    authorize(ROLES.ADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN),
     hasPermission("VEHICLE_EDIT"),
     validate(updateMaintenanceSettingsSchema),
     updateMaintenanceSettings

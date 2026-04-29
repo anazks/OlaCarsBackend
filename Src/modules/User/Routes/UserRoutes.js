@@ -104,7 +104,7 @@ router.get("/profile", authenticate, getProfile);
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    authorize(ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("USER_CREATE"),
     addUser
 );

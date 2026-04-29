@@ -223,7 +223,11 @@ const markRentAsPaid = async (req, res) => {
         }
 
         const paymentPayload = {
-            weekNumber, amount, paymentMethod, transactionId, note,
+            weekNumber: Number(weekNumber),
+            amount: Number(amount),
+            paymentMethod,
+            transactionId,
+            note,
             createdBy: req.user.id,
             creatorRole: req.user.role
         };

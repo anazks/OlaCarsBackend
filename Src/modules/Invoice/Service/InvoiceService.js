@@ -105,9 +105,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     }
 
     // Ledger & Payment Transaction
-    if (createdBy && creatorRole) {
-        await this.createLedgerEntry(amount, paymentMethod, invoice, createdBy, creatorRole, note);
-    }
+    await this.createLedgerEntry(amount, paymentMethod, invoice, createdBy, creatorRole, note);
 
     // Roll over carry over across all invoices
     await this.rolloverDriverInvoices(invoice.driver);
@@ -191,30 +189,47 @@ exports.rolloverDriverInvoices = async (driverId) => {
 
 exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note) => {
     try {
-        const { AccountingCode } = require("../../AccountingCode/Model/AccountingCodeModel");
+        console.log(`[InvoiceService] Starting ledger generation for invoice ${invoice.invoiceNumber}`);
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const accCode = await AccountingCode.findOne({ code: "4100" });
+        console.log(`[InvoiceService] AccountingCode 4100 found: ${!!accCode}`);
+        
         if (accCode) {
+            // Normalize paymentMethod to match PaymentTransaction enum
+            let normalizedMethod = "OTHER";
+            const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
+            
+            if (methodUpper.includes("CASH")) normalizedMethod = "CASH";
+            else if (methodUpper.includes("BANK") || methodUpper.includes("TRANSFER")) normalizedMethod = "BANK_TRANSFER";
+            else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
+            else if (methodUpper.includes("CHEQUE")) normalizedMethod = "CHEQUE";
+
             const transactionData = {
                 accountingCode: accCode._id,
-                referenceId: invoice.driver, // Treat driver as reference
+                referenceId: invoice.driver,
                 referenceModel: "Driver",
                 transactionCategory: "INCOME",
                 transactionType: "CREDIT",
                 isTaxInclusive: false,
                 baseAmount: amount,
                 totalAmount: amount,
-                paymentMethod: paymentMethod ? paymentMethod.toUpperCase() : "CASH",
+                paymentMethod: normalizedMethod,
                 status: "COMPLETED",
                 paymentDate: new Date(),
                 notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
                 createdBy,
                 creatorRole
             };
+            
+            console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
             const newTransaction = await PaymentTransaction.create(transactionData);
+            console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
+            
             const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
             await LedgerService.autoGenerateLedgerEntry(populatedTx);
+            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
         }
     } catch (err) {
-        console.error("Failed to generate ledger for invoice payment:", err);
+        console.error("[InvoiceService] Failed to generate ledger for invoice payment:", err);
     }
 };

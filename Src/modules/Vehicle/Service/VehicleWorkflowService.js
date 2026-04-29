@@ -373,6 +373,9 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
         await checkAndCreateMaintenanceAlert(updatedVehicle);
     }
 
+    // Populate statusHistory.changedBy before returning to ensure frontend has user names
+    await updatedVehicle.populate("statusHistory.changedBy", "fullName email role");
+
     return updatedVehicle;
 };
 

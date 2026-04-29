@@ -132,7 +132,7 @@ const hasSelfOrStaffPermission = (permission) => {
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     addDriver
 );
@@ -425,7 +425,7 @@ router.post(
 router.delete(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_DELETE"),
     deleteDriver
 );
@@ -433,7 +433,7 @@ router.delete(
 router.put(
     "/:id/rent/pay",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
     hasPermission("PAYMENT_CREATE"),
     markRentAsPaid
 );
@@ -441,7 +441,7 @@ router.put(
 router.put(
     "/:id/performance",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("STAFF_PERFORMANCE_EDIT"),
     updatePerformance
 );

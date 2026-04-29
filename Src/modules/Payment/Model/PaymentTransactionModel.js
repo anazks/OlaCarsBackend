@@ -79,14 +79,7 @@ const paymentTransactionSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [
-                ROLES.ADMIN,
-                ROLES.FINANCEADMIN,
-                ROLES.OPERATIONADMIN,
-                ROLES.COUNTRYMANAGER,
-                ROLES.BRANCHMANAGER,
-                ROLES.FINANCESTAFF,
-            ],
+            enum: Object.values(ROLES),
         },
     },
     { timestamps: true }
