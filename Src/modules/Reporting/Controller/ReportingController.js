@@ -1,8 +1,19 @@
 const ReportingService = require("../Service/ReportingService");
+const { ROLES } = require("../../../shared/constants/roles");
 
 exports.getPL = async (req, res) => {
     try {
-        const report = await ReportingService.getPLReport(req.query);
+        const filters = { ...req.query };
+        const user = req.user;
+
+        // Apply role-based restrictions
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF || user.role === ROLES.OPERATIONSTAFF) {
+            filters.branch = user.branchId;
+        }
+
+        const report = await ReportingService.getPLReport(filters);
         res.status(200).json({
             status: "success",
             data: report
@@ -17,7 +28,17 @@ exports.getPL = async (req, res) => {
 
 exports.getBalanceSheet = async (req, res) => {
     try {
-        const report = await ReportingService.getBalanceSheetReport(req.query);
+        const filters = { ...req.query };
+        const user = req.user;
+
+        // Apply role-based restrictions
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF) {
+            filters.branch = user.branchId;
+        }
+
+        const report = await ReportingService.getBalanceSheetReport(filters);
         res.status(200).json({
             status: "success",
             data: report
@@ -29,3 +50,4 @@ exports.getBalanceSheet = async (req, res) => {
         });
     }
 };
+

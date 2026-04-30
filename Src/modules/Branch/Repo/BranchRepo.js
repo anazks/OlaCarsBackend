@@ -63,6 +63,7 @@ exports.getBranchesService = async (queryParams = {}, options = {}) => {
             searchFields: ["name", "code", "city", "state"],
             filterFields: ["status", "country"],
             dateFilterField: "createdAt",
+            populate: { path: "countryManager", select: "fullName country" },
             ...options
         };
 
@@ -79,7 +80,7 @@ exports.getBranchesService = async (queryParams = {}, options = {}) => {
  */
 exports.getBranchByIdService = async (branchId) => {
     try {
-        const branch = await Branch.findById(branchId);
+        const branch = await Branch.findById(branchId).populate({ path: "countryManager", select: "fullName country" });
         if (!branch) return null;
 
         // const roleMapping = {

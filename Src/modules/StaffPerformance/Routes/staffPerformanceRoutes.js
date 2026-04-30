@@ -45,4 +45,41 @@ router.get(
     getPerformance
 );
 
+// Targets
+const targetController = require("../Controller/targetController");
+router.post(
+    "/targets",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    targetController.assignTarget
+);
+
+router.get(
+    "/targets",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    targetController.getTargets
+);
+
+// Tasks
+const taskController = require("../Controller/taskController");
+router.post(
+    "/tasks",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    taskController.delegateTask
+);
+
+router.patch(
+    "/tasks/:taskId/status",
+    authenticate,
+    taskController.updateTaskStatus
+);
+
+router.get(
+    "/tasks",
+    authenticate,
+    taskController.getTasks
+);
+
 module.exports = router;

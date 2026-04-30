@@ -18,6 +18,11 @@ exports.getPerformance = async (req, res) => {
             filters.branchId = req.user.branchId;
         }
 
+        // If country manager, restrict to their own country
+        if (req.user.role === "COUNTRYMANAGER" && req.user.country) {
+            filters.country = req.user.country;
+        }
+
         // Staff type filter
         if (req.query.type && ["finance", "operation"].includes(req.query.type)) {
             filters.type = req.query.type;

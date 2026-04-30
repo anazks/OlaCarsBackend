@@ -52,6 +52,10 @@ const branchSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    countryManager: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CountryManager",
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

@@ -10,8 +10,10 @@ const ACCESS_ROLES = [
     ROLES.ADMIN,
     ROLES.FINANCEADMIN,
     ROLES.COUNTRYMANAGER,
+    ROLES.BRANCHMANAGER,
     ROLES.FINANCESTAFF
 ];
+
 
 router.use(authenticate);
 router.use(authorize(...ACCESS_ROLES));

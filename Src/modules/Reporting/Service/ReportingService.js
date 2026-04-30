@@ -1,11 +1,20 @@
 const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+const Branch = require("../../Branch/Model/BranchModel");
 
 exports.getPLReport = async (filters) => {
-    const { branch, startDate, endDate } = filters;
+    const { branch, country, startDate, endDate } = filters;
     
     const query = {};
-    if (branch) query.branch = branch;
+    
+    if (branch) {
+        query.branch = branch;
+    } else if (country) {
+        const branches = await Branch.find({ country, isDeleted: false });
+        const branchIds = branches.map(b => b._id);
+        query.branch = { $in: branchIds };
+    }
+
     if (startDate || endDate) {
         query.entryDate = {};
         if (startDate) query.entryDate.$gte = new Date(startDate);
@@ -55,10 +64,18 @@ exports.getPLReport = async (filters) => {
 };
 
 exports.getBalanceSheetReport = async (filters) => {
-    const { branch, endDate } = filters;
+    const { branch, country, endDate } = filters;
     
     const query = {};
-    if (branch) query.branch = branch;
+    
+    if (branch) {
+        query.branch = branch;
+    } else if (country) {
+        const branches = await Branch.find({ country, isDeleted: false });
+        const branchIds = branches.map(b => b._id);
+        query.branch = { $in: branchIds };
+    }
+
     if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
@@ -109,3 +126,4 @@ exports.getBalanceSheetReport = async (filters) => {
         equityTotal
     };
 };
+
