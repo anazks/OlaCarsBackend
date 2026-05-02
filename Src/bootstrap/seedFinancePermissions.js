@@ -1,5 +1,5 @@
 const FinanceStaff = require("../modules/FinanceStaff/Model/FinanceStaffModel");
-const FinanceAdmin = require("../modules/FinanceAdmin/Model/FinanceAdminModel");
+const FinanceAdmin = require("../modules/FinanceAdmin/model/FinanceAdminModel");
 const RoleTemplate = require("../modules/AccessControl/Model/RoleTemplate");
 
 /**

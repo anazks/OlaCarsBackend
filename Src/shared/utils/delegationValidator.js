@@ -18,9 +18,9 @@ const validateDelegatedPermissions = async (delegatorId, delegatorRole, requeste
     let DelegatorModel;
     switch (delegatorRole) {
         case 'OPERATIONADMIN': 
-            DelegatorModel = require('../../modules/OperationAdmin/Model/OperationAdminModel'); break;
+            DelegatorModel = require('../../modules/OperationAdmin/model/OperationAdminModel'); break;
         case 'FINANCEADMIN': 
-            DelegatorModel = require('../../modules/FinanceAdmin/Model/FinanceAdminModel'); break;
+            DelegatorModel = require('../../modules/FinanceAdmin/model/FinanceAdminModel'); break;
         case 'COUNTRYMANAGER': 
             DelegatorModel = require('../../modules/CountryManager/Model/CountryManagerModel'); break;
         case 'BRANCHMANAGER': 

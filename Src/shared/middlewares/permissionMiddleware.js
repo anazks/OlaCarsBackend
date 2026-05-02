@@ -34,10 +34,10 @@ const hasPermission = (requiredPermissions) => {
 
       switch (userRole) {
         case "OPERATIONADMIN":
-          Model = require("../../modules/OperationAdmin/Model/OperationAdminModel");
+          Model = require("../../modules/OperationAdmin/model/OperationAdminModel");
           break;
         case "FINANCEADMIN":
-          Model = require("../../modules/FinanceAdmin/Model/FinanceAdminModel");
+          Model = require("../../modules/FinanceAdmin/model/FinanceAdminModel");
           break;
         case "COUNTRYMANAGER":
           Model = require("../../modules/CountryManager/Model/CountryManagerModel");
