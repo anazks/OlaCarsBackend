@@ -38,7 +38,11 @@ const seedFinancePermissions = async () => {
             "SUPPLIER_VIEW",
             "PURCHASE_ORDER_VIEW",
             "INVENTORY_VIEW",
-            "SERVICE_BILL_VIEW"
+            "SERVICE_BILL_VIEW",
+            "STAFF_VIEW",
+            "STAFF_CREATE",
+            "STAFF_EDIT",
+            "STAFF_DELETE"
         ];
 
         console.log("[SEEDER] Updating Finance Role Templates...");
