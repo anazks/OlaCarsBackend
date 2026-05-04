@@ -7,12 +7,38 @@ const RoleTemplate = require("../modules/AccessControl/Model/RoleTemplate");
  */
 const seedFinancePermissions = async () => {
     try {
-        const requiredPermissions = [
+        const staffPermissions = [
             "JOURNAL_CREATE",
             "JOURNAL_VIEW",
             "FINANCIAL_REPORT_VIEW",
             "LEDGER_VIEW",
-            "ACCOUNTING_CODE_VIEW"
+            "LEDGER_CREATE",
+            "ACCOUNTING_CODE_VIEW",
+            "BRANCH_VIEW",
+            "TAX_VIEW",
+            "PAYMENT_VIEW",
+            "PAYMENT_CREATE",
+            "REPORTS_VIEW",
+            "DASHBOARD_VIEW"
+        ];
+
+        const adminPermissions = [
+            ...staffPermissions,
+            "LEDGER_EDIT",
+            "LEDGER_DELETE",
+            "ACCOUNTING_CODE_CREATE",
+            "ACCOUNTING_CODE_EDIT",
+            "ACCOUNTING_CODE_DELETE",
+            "TAX_CREATE",
+            "TAX_EDIT",
+            "TAX_DELETE",
+            "PAYMENT_EDIT",
+            "PAYMENT_DELETE",
+            "PAYMENT_APPROVE",
+            "SUPPLIER_VIEW",
+            "PURCHASE_ORDER_VIEW",
+            "INVENTORY_VIEW",
+            "SERVICE_BILL_VIEW"
         ];
 
         console.log("[SEEDER] Updating Finance Role Templates...");
@@ -20,9 +46,10 @@ const seedFinancePermissions = async () => {
         // 1. Update Role Templates for persistence on new users
         const financeRoles = ["FINANCESTAFF", "FINANCEADMIN"];
         for (const role of financeRoles) {
+            const permsToUse = role === "FINANCEADMIN" ? adminPermissions : staffPermissions;
             let template = await RoleTemplate.findOne({ roleName: role });
             if (template) {
-                const newPerms = [...new Set([...template.permissions, ...requiredPermissions])];
+                const newPerms = [...new Set([...template.permissions, ...permsToUse])];
                 template.permissions = newPerms;
                 await template.save();
                 console.log(`[SEEDER] Updated RoleTemplate: ${role}`);
@@ -30,7 +57,7 @@ const seedFinancePermissions = async () => {
                 // Create template if missing
                 await RoleTemplate.create({
                     roleName: role,
-                    permissions: requiredPermissions,
+                    permissions: permsToUse,
                     description: `Standard ${role} permissions including Journal Entry access.`
                 });
                 console.log(`[SEEDER] Created missing RoleTemplate: ${role}`);
@@ -42,13 +69,13 @@ const seedFinancePermissions = async () => {
         
         const staffUpdate = await FinanceStaff.updateMany(
             { isDeleted: false },
-            { $addToSet: { permissions: { $each: requiredPermissions } } }
+            { $addToSet: { permissions: { $each: staffPermissions } } }
         );
         console.log(`[SEEDER] Updated ${staffUpdate.modifiedCount} Finance Staff users.`);
 
         const adminUpdate = await FinanceAdmin.updateMany(
             { isDeleted: false },
-            { $addToSet: { permissions: { $each: requiredPermissions } } }
+            { $addToSet: { permissions: { $each: adminPermissions } } }
         );
         console.log(`[SEEDER] Updated ${adminUpdate.modifiedCount} Finance Admin users.`);
 
