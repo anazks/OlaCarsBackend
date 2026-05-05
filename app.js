@@ -64,6 +64,10 @@ app.use(
 ); // Security headers with Swagger support
 app.use(cors({ origin: "*" })); // Adjust in production
 app.use(express.json());
+app.use((req, res, next) => {
+  console.log(`[REQUEST] ${req.method} ${req.url}`);
+  next();
+});
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({
@@ -76,6 +80,9 @@ app.use((err, req, res, next) => {
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+console.log("[DEBUG] Mounting ReportingRouter at /api/reporting");
+app.use("/api/reporting", ReportingRouter);
 
 app.use("/api/admin", AdminRouter);
 app.use("/api/branch", BranchRouter);
@@ -109,7 +116,6 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
-app.use("/api/reporting", ReportingRouter);
 app.use("/api/salaries", SalaryRouter);
 app.use("/api/bank-accounts", BankAccountRouter);
 

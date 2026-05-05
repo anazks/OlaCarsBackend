@@ -89,6 +89,12 @@ exports.create = async (data) => {
         creatorRole: data.creatorRole,
     });
 
+    // Link manager to branch
+    if (data.branchId) {
+        const Branch = require('../../Branch/Model/BranchModel.js');
+        await Branch.findByIdAndUpdate(data.branchId, { branchManager: newManager._id });
+    }
+
     const managerObj = newManager.toObject();
     delete managerObj.passwordHash;
     delete managerObj.refreshToken;
@@ -109,6 +115,11 @@ exports.update = async (id, body) => {
         new: true,
         runValidators: true,
     }).select('-passwordHash -refreshToken');
+
+    if (updated && filtered.branchId) {
+        const Branch = require('../../Branch/Model/BranchModel.js');
+        await Branch.findByIdAndUpdate(filtered.branchId, { branchManager: updated._id });
+    }
 
     if (!updated) throw new AppError('Branch Manager not found', 404);
     return updated;

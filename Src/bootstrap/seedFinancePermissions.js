@@ -19,7 +19,9 @@ const seedFinancePermissions = async () => {
             "PAYMENT_VIEW",
             "PAYMENT_CREATE",
             "REPORTS_VIEW",
-            "DASHBOARD_VIEW"
+            "DASHBOARD_VIEW",
+            "DRIVER_VIEW",
+            "STAFF_PERFORMANCE_VIEW"
         ];
 
         const adminPermissions = [

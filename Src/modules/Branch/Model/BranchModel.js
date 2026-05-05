@@ -56,6 +56,10 @@ const branchSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "CountryManager",
     },
+    branchManager: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BranchManager",
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -81,8 +85,12 @@ const branchSchema = new mongoose.Schema(
   },
   {
     timestamps: true, // createdAt & updatedAt
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+
 
 module.exports = mongoose.model("Branch", branchSchema);
 

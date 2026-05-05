@@ -14,7 +14,7 @@ exports.create = async (data) => {
     return newBranch;
 };
 
-const { getBranchesService } = require('../Repo/BranchRepo.js');
+const { getBranchesService, getBranchByIdService } = require('../Repo/BranchRepo.js');
 
 exports.getAll = async (queryParams = {}, options = {}) => {
     return await getBranchesService(queryParams, {
@@ -25,7 +25,7 @@ exports.getAll = async (queryParams = {}, options = {}) => {
 };
 
 exports.getById = async (id) => {
-    return await Branch.findOne({ _id: id, isDeleted: false });
+    return await getBranchByIdService(id);
 };
 
 exports.update = async (id, body) => {

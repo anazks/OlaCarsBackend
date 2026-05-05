@@ -11,6 +11,7 @@ const {
     markRentAsPaid,
     updatePerformance,
     getDriverMe,
+    bulkAddDrivers,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -135,6 +136,64 @@ router.post(
     authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     addDriver
+);
+// ─── POST /api/driver/bulk — Bulk Create Drivers ──────────────────────
+/**
+ * @swagger
+ * /api/driver/bulk:
+ *   post:
+ *     summary: Bulk-create driver applications from parsed CSV/TXT data
+ *     description: |
+ *       Accepts a JSON array of driver records (no branch column in CSV).
+ *       Branch assignment:
+ *         - OPERATIONSTAFF/FINANCESTAFF/BRANCHMANAGER: auto-assigned from JWT branchId.
+ *         - COUNTRYMANAGER/ADMIN: must provide a top-level `branch` field (selected via UI dropdown).
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - drivers
+ *             properties:
+ *               branch:
+ *                 type: string
+ *                 description: Branch ObjectId (required only for COUNTRYMANAGER/ADMIN roles)
+ *               drivers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - fullName
+ *                     - email
+ *                     - phone
+ *                   properties:
+ *                     fullName:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     phone:
+ *                       type: string
+ *                     nationality:
+ *                       type: string
+ *                     licenseNumber:
+ *                       type: string
+ *     responses:
+ *       201:
+ *         description: Drivers created (may contain partial errors)
+ *       400:
+ *         description: Invalid payload, missing branch, or all rows failed
+ */
+router.post(
+    "/bulk",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_CREATE"),
+    bulkAddDrivers
 );
 // ─── GET /api/driver — List Drivers ───────────────────────────────────
 /**

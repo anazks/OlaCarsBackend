@@ -10,6 +10,7 @@ const addBranchSchema = {
         phone: Joi.string().trim().required(),
         email: Joi.string().trim().email().allow("", null),
         country: Joi.string().trim().required(),
+        countryManager: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         status: Joi.string().trim().valid("ACTIVE", "INACTIVE").default("ACTIVE"),
     }),
 };
@@ -25,6 +26,7 @@ const editBranchSchema = {
         phone: Joi.string().trim(),
         email: Joi.string().trim().email().allow("", null),
         country: Joi.string().trim(),
+        countryManager: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         status: Joi.string().trim().valid("ACTIVE", "INACTIVE"),
     }).min(2), // id + at least one field to update
 };

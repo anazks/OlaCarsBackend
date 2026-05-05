@@ -256,6 +256,116 @@ const updatePerformance = async (req, res) => {
     }
 };
 
+/**
+ * Bulk-create driver applications from a parsed CSV/TXT payload.
+ * Branch assignment logic:
+ *   - OPERATIONSTAFF / FINANCESTAFF / BRANCHMANAGER: auto-assigned from JWT branchId.
+ *   - COUNTRYMANAGER / ADMIN: must send req.body.branch (selected via dropdown in frontend).
+ * The CSV file itself never contains a branch column.
+ * @route POST /api/driver/bulk
+ */
+const bulkAddDrivers = async (req, res) => {
+    try {
+        const { drivers, branch: selectedBranch } = req.body;
+
+        if (!Array.isArray(drivers) || drivers.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
+        }
+
+        if (drivers.length > 500) {
+            return res.status(400).json({ success: false, message: "Maximum 500 drivers per bulk upload." });
+        }
+
+        const userRole = req.user.role;
+        const userId = req.user.id;
+        const userBranchId = req.user.branchId; // Present for OPERATIONSTAFF / FINANCESTAFF / BRANCHMANAGER
+
+        // Roles that auto-assign branch from their own JWT branchId
+        const autoAssignRoles = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"];
+        const isAutoAssign = autoAssignRoles.includes(userRole);
+
+        // Determine the branch for ALL drivers in this batch
+        let branch;
+        if (isAutoAssign) {
+            branch = userBranchId;
+            if (!branch) {
+                return res.status(400).json({ success: false, message: "Your account has no branch assigned. Contact your administrator." });
+            }
+        } else {
+            // COUNTRYMANAGER / ADMIN must provide a branch via dropdown selection
+            branch = selectedBranch;
+            if (!branch || (typeof branch === "string" && !branch.trim())) {
+                return res.status(400).json({ success: false, message: "Please select a branch before uploading." });
+            }
+        }
+
+        const results = { created: [], errors: [] };
+
+        for (let i = 0; i < drivers.length; i++) {
+            const row = drivers[i];
+            const rowNum = i + 1;
+
+            // Validate required fields
+            if (!row.fullName || !row.fullName.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
+                continue;
+            }
+            if (!row.email || !row.email.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: email" });
+                continue;
+            }
+            if (!row.phone || !row.phone.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
+                continue;
+            }
+
+            try {
+                const driverData = {
+                    personalInfo: {
+                        fullName: row.fullName.trim(),
+                        email: row.email.trim().toLowerCase(),
+                        phone: row.phone.trim(),
+                        whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
+                        dateOfBirth: row.dateOfBirth || undefined,
+                        nationality: row.nationality ? row.nationality.trim() : undefined,
+                    },
+                    identityDocs: {
+                        idType: row.idType || undefined,
+                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
+                    },
+                    drivingLicense: {
+                        licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
+                        licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
+                        expiryDate: row.licenseExpiry || undefined,
+                    },
+                    emergencyContact: {
+                        name: row.emergencyName ? row.emergencyName.trim() : undefined,
+                        relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
+                        phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
+                    },
+                    branch: branch,
+                    createdBy: userId,
+                    creatorRole: userRole,
+                };
+
+                const newDriver = await DriverService.create(driverData);
+                results.created.push({ row: rowNum, id: newDriver._id, name: row.fullName });
+            } catch (err) {
+                results.errors.push({ row: rowNum, message: err.message });
+            }
+        }
+
+        const statusCode = results.created.length > 0 ? 201 : 400;
+        return res.status(statusCode).json({
+            success: results.created.length > 0,
+            message: `${results.created.length} driver(s) created, ${results.errors.length} error(s).`,
+            data: results,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -267,4 +377,5 @@ module.exports = {
     deleteDriver,
     markRentAsPaid,
     updatePerformance,
+    bulkAddDrivers,
 };

@@ -50,6 +50,7 @@ exports.deleteBranchService = async (branchId) => {
 }
 
 const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
+require("../../BranchManager/Model/BranchManagerModel.js");
 
 /**
  * Retrieves all branches using generic query features.
@@ -63,11 +64,16 @@ exports.getBranchesService = async (queryParams = {}, options = {}) => {
             searchFields: ["name", "code", "city", "state"],
             filterFields: ["status", "country"],
             dateFilterField: "createdAt",
-            populate: { path: "countryManager", select: "fullName country" },
+            populate: [
+                { path: "countryManager", select: "fullName country" },
+                { path: "branchManager" }
+            ],
             ...options
         };
 
-        return await applyQueryFeatures(Branch, queryParams, queryOptions);
+        const result = await applyQueryFeatures(Branch, queryParams, queryOptions);
+        console.log(`[DEBUG] getBranchesService returning ${result.data.length} branches. First branch manager:`, result.data[0]?.branchManager);
+        return result;
     } catch (error) {
         throw error;
     }
@@ -80,7 +86,10 @@ exports.getBranchesService = async (queryParams = {}, options = {}) => {
  */
 exports.getBranchByIdService = async (branchId) => {
     try {
-        const branch = await Branch.findById(branchId).populate({ path: "countryManager", select: "fullName country" });
+        const branch = await Branch.findById(branchId).populate([
+            { path: "countryManager", select: "fullName country" },
+            { path: "branchManager" }
+        ]);
         if (!branch) return null;
 
         // const roleMapping = {
