@@ -63,6 +63,10 @@ app.use(
   })
 ); // Security headers with Swagger support
 app.use(cors({ origin: "*" })); // Adjust in production
+app.use("/uploads", (req, res, next) => {
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+}, express.static(require("path").join(__dirname, "uploads")));
 app.use(express.json());
 app.use((req, res, next) => {
   console.log(`[REQUEST] ${req.method} ${req.url}`);

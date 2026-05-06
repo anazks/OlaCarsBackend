@@ -1,13 +1,26 @@
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
-const s3 = require("../config/s3");
+const uploadLocal = require("./uploadLocal");
 
 /**
- * Upload a file buffer to S3 and return the public URL.
+ * Upload a file buffer to S3 or local disk (fallback).
+ * If AWS credentials are configured, uploads to S3.
+ * Otherwise, saves to local /uploads/ directory.
  * @param {Object} file - Multer file object
- * @param {string} folder - Target folder in S3
- * @returns {Promise<string>} - S3 Public URL
+ * @param {string} folder - Target folder path
+ * @returns {Promise<string>} - Public URL or local path
  */
 const uploadToS3 = async (file, folder = "uploads") => {
+  // Check if AWS credentials are configured
+  const hasAWSConfig = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION;
+
+  if (!hasAWSConfig) {
+    // Fallback to local file storage
+    console.log("[Upload] AWS credentials not configured. Using local file storage.");
+    return uploadLocal(file, folder);
+  }
+
+  // Use S3 upload
+  const s3 = require("../config/s3");
   const timestamp = Date.now();
   const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
   const key = `${folder}/${timestamp}_${sanitizedFileName}`;

@@ -98,6 +98,7 @@ const hasPermission = (requiredPermissions) => {
       req.user.permissions = combinedPermissions;
       next();
     } catch (error) {
+      console.log(`[Permission DEBUG] Error: ${error.message}, Status: ${error.statusCode}`);
       next(error);
     }
   };

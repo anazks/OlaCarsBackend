@@ -103,10 +103,6 @@ const addPurchaseOrder = async (req, res) => {
         // Auto-calculate total and setup images
         let calculatedTotal = 0;
         if (poData.items && Array.isArray(poData.items)) {
-            const awsRegion = process.env.AWS_REGION || "ap-south-1";
-            const awsBucket = process.env.AWS_BUCKET_NAME || "ola-cars-uploads-2026";
-            const s3Domain = `https://${awsBucket}.s3.${awsRegion}.amazonaws.com`;
-
             for (let i = 0; i < poData.items.length; i++) {
                 const item = poData.items[i];
                 // Ensure numeric types for calculation if they came as strings from FormData
@@ -130,8 +126,8 @@ const addPurchaseOrder = async (req, res) => {
                 for (const file of itemFiles) {
                     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
                     const key = `purchase-orders/temp-${poData.purchaseOrderNumber}/items/${i}/${Date.now()}_${cleanName}`;
-                    const uploadedKey = await uploadToS3(file, key);
-                    uploadedUrls.push(`${s3Domain}/${uploadedKey}`);
+                    const uploadedUrl = await uploadToS3(file, key);
+                    uploadedUrls.push(uploadedUrl);
                 }
                 // Assign explicitly back to the original array reference
                 poData.items[i].images = uploadedUrls;
@@ -445,16 +441,13 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
         }
 
         const uploadedUrls = [];
-        const awsRegion = process.env.AWS_REGION || "ap-south-1";
-        const awsBucket = process.env.AWS_BUCKET_NAME || "ola-cars-uploads-2026";
-        const s3Domain = `https://${awsBucket}.s3.${awsRegion}.amazonaws.com`;
 
         // Upload loop
         for (const file of imageFiles) {
             const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
             const key = `purchase-orders/${po._id}/items/${item._id}/${Date.now()}_${cleanName}`;
-            const uploadedKey = await uploadToS3(file, key);
-            uploadedUrls.push(`${s3Domain}/${uploadedKey}`);
+            const uploadedUrl = await uploadToS3(file, key);
+            uploadedUrls.push(uploadedUrl);
         }
 
         // Update item images array
