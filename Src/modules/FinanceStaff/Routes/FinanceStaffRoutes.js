@@ -10,7 +10,8 @@ const {
     login,
     logout,
     refreshToken,
-    getNextFleetNumber
+    getNextFleetNumber,
+    checkFleetAvailability
 } = require("../Controller/FinanceStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -119,6 +120,31 @@ router.get(
     authenticate,
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
     getNextFleetNumber
+);
+
+/**
+ * @swagger
+ * /api/finance-staff/check-fleet/{fleetNumber}:
+ *   get:
+ *     summary: Check if a fleet number is available
+ *     tags: [FinanceStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: fleetNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Availability result
+ */
+router.get(
+    "/check-fleet/:fleetNumber",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.OPERATIONADMIN, ROLES.OPERATIONSTAFF),
+    checkFleetAvailability
 );
 
 /**

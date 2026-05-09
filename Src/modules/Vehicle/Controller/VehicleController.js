@@ -41,6 +41,20 @@ const addVehicle = async (req, res, next) => {
 
                 fleetToAssign = fleetToAssign.toString().trim();
 
+                // Check if fleet is already assigned to another staff
+                const otherStaff = await FinanceStaff.findOne({
+                    fleetNumbers: fleetToAssign,
+                    _id: { $ne: staff._id },
+                    isDeleted: false
+                });
+                if (otherStaff) {
+                    return res.status(409).json({ 
+                        success: false, 
+                        message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
+                        errorType: 'DUPLICATE_FLEET'
+                    });
+                }
+
                 if (!staff.fleetNumbers.includes(fleetToAssign)) {
                     console.log('[DEBUG] addVehicle - Updating staff fleetNumbers with:', fleetToAssign);
                     staff.fleetNumbers.push(fleetToAssign);

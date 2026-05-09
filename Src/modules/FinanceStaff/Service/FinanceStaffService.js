@@ -218,3 +218,15 @@ exports.generateNextFleetNumber = async () => {
 
     return (result[0].fleetNum + 1).toString();
 };
+
+exports.checkFleetAvailability = async (fleetNumber) => {
+    const staff = await FinanceStaff.findOne({
+        fleetNumbers: fleetNumber,
+        isDeleted: false
+    });
+    return {
+        available: !staff,
+        assignedTo: staff ? staff.fullName : null,
+        staffId: staff ? staff._id : null
+    };
+};

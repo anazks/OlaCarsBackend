@@ -125,6 +125,16 @@ const getNextFleetNumber = async (req, res) => {
     }
 };
 
+const checkFleetAvailability = async (req, res) => {
+    try {
+        const { fleetNumber } = req.params;
+        const result = await FinanceStaffService.checkFleetAvailability(fleetNumber);
+        return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
     logout,
@@ -135,5 +145,6 @@ module.exports = {
     editFinanceStaff,
     changePassword,
     deleteFinanceStaff,
-    getNextFleetNumber
+    getNextFleetNumber,
+    checkFleetAvailability
 };

@@ -374,7 +374,7 @@ const bulkAddDrivers = async (req, res) => {
  */
 const dataMigrateDrivers = async (req, res) => {
     try {
-        const { drivers, branch: selectedBranch, handlingStaff } = req.body;
+        const { drivers, branch: selectedBranch, handlingStaff, fleetNumber: providedFleetNumber } = req.body;
 
         if (!Array.isArray(drivers) || drivers.length === 0) {
             return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
@@ -411,17 +411,33 @@ const dataMigrateDrivers = async (req, res) => {
         const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
 
         let staffFleetNumber;
+        let handlingStaffObj = null;
+        let isNewFleetNumberAssigned = false;
         if (handlingStaff) {
-            const staff = await FinanceStaff.findById(handlingStaff);
-            if (staff) {
-                // Try to get from first record or generate a new one
+            handlingStaffObj = await FinanceStaff.findById(handlingStaff);
+            if (handlingStaffObj) {
+                // Try to get from request, first record or generate a new one
                 const firstRecordFleet = drivers.length > 0 ? (drivers[0].fleetNumber || drivers[0].vehicleFleetNumber) : null;
-                const fleetToAssign = (firstRecordFleet || await generateNextFleetNumber()).toString().trim();
+                const fleetToAssign = (providedFleetNumber || firstRecordFleet || await generateNextFleetNumber()).toString().trim();
                 
-                // Add to staff's fleetNumbers array if not already there
-                if (!staff.fleetNumbers.includes(fleetToAssign)) {
-                    staff.fleetNumbers.push(fleetToAssign);
-                    await staff.save();
+                // Check if fleet is already assigned to another staff
+                const otherStaff = await FinanceStaff.findOne({
+                    fleetNumbers: fleetToAssign,
+                    _id: { $ne: handlingStaffObj._id },
+                    isDeleted: false
+                });
+                if (otherStaff) {
+                    return res.status(409).json({ 
+                        success: false, 
+                        message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
+                        errorType: 'DUPLICATE_FLEET'
+                    });
+                }
+
+                // Add to staff's fleetNumbers array if not already there, but don't save yet
+                if (!handlingStaffObj.fleetNumbers.includes(fleetToAssign)) {
+                    handlingStaffObj.fleetNumbers.push(fleetToAssign);
+                    isNewFleetNumberAssigned = true;
                 }
                 staffFleetNumber = fleetToAssign;
             }
@@ -534,6 +550,11 @@ const dataMigrateDrivers = async (req, res) => {
             } catch (err) {
                 results.errors.push({ row: rowNum, message: err.message });
             }
+        }
+
+        // Save the new fleet number only if at least one driver was successfully migrated
+        if (handlingStaffObj && isNewFleetNumberAssigned && results.created.length > 0) {
+            await handlingStaffObj.save();
         }
 
         const statusCode = results.created.length > 0 ? 201 : 400;
