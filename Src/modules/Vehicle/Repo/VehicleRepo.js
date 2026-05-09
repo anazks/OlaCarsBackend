@@ -48,12 +48,20 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
                     path: "insuranceDetails.plan", 
                     populate: { path: "supplier", select: "name email phone" } 
                 },
-                { path: "statusHistory.changedBy", select: "fullName email role" }
+                { path: "statusHistory.changedBy", select: "fullName email role" },
+                { path: "handlingStaff", select: "fullName email phone fleetNumbers" }
             ],
             ...options
         };
 
-        return await applyQueryFeatures(Vehicle, queryParams, queryOptions);
+        const results = await applyQueryFeatures(Vehicle, queryParams, queryOptions);
+        
+        if (results.data && results.data.length > 0) {
+            console.log('[DEBUG] getVehiclesService - First result handlingStaff:', results.data[0].handlingStaff);
+            console.log('[DEBUG] getVehiclesService - First result basicDetails.fleetNumber:', results.data[0].basicDetails?.fleetNumber);
+        }
+        
+        return results;
     } catch (error) {
         throw error;
     }
@@ -73,11 +81,12 @@ exports.getVehicleByIdService = async (id) => {
                 path: "insuranceDetails.plan",
                 populate: { path: "supplier", select: "name email phone" }
             })
-            .populate("statusHistory.changedBy", "fullName email role");
+            .populate("statusHistory.changedBy", "fullName email role")
+            .populate("handlingStaff", "fullName email phone fleetNumbers");
         
-        if (vehicle?.statusHistory?.length > 0) {
-            console.log('[DEBUG] getVehicleByIdService - First history entry changedBy type:', typeof vehicle.statusHistory[0].changedBy);
-            console.log('[DEBUG] getVehicleByIdService - First history entry changedBy:', vehicle.statusHistory[0].changedBy);
+        if (vehicle) {
+            console.log('[DEBUG] getVehicleByIdService - handlingStaff:', vehicle.handlingStaff);
+            console.log('[DEBUG] getVehicleByIdService - basicDetails.fleetNumber:', vehicle.basicDetails?.fleetNumber);
         }
         return vehicle;
     } catch (error) {

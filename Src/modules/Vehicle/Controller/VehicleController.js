@@ -15,11 +15,44 @@ const uploadToS3 = require("../../../utils/uploadToS3");
  * @access Private
  */
 const addVehicle = async (req, res, next) => {
+    console.log('[DEBUG] addVehicle - Controller Started');
     try {
         let vehicleData = req.body;
         vehicleData.createdBy = req.user.id;
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
+        
+        // Handle Handling Staff and Fleet Number logic
+        if (vehicleData.handlingStaff) {
+            console.log('[DEBUG] addVehicle - Fetching staff with ID:', vehicleData.handlingStaff);
+            const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
+            const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
+            
+            const staff = await FinanceStaff.findById(vehicleData.handlingStaff);
+            console.log('[DEBUG] addVehicle - Staff lookup result:', staff ? `Found ${staff.fullName}` : 'NOT FOUND');
+            if (staff) {
+                let fleetToAssign = vehicleData.basicDetails?.fleetNumber;
+                console.log('[DEBUG] addVehicle - Incoming fleetNumber:', fleetToAssign);
+                
+                if (!fleetToAssign) {
+                    fleetToAssign = (staff.fleetNumbers && staff.fleetNumbers.length > 0) ? staff.fleetNumbers[0] : await generateNextFleetNumber();
+                    console.log('[DEBUG] addVehicle - Using generated/default fleet:', fleetToAssign);
+                }
+
+                fleetToAssign = fleetToAssign.toString().trim();
+
+                if (!staff.fleetNumbers.includes(fleetToAssign)) {
+                    console.log('[DEBUG] addVehicle - Updating staff fleetNumbers with:', fleetToAssign);
+                    staff.fleetNumbers.push(fleetToAssign);
+                    await staff.save();
+                    console.log('[DEBUG] addVehicle - Staff updated successfully');
+                }
+                
+                if (!vehicleData.basicDetails) vehicleData.basicDetails = {};
+                vehicleData.basicDetails.fleetNumber = fleetToAssign;
+                console.log('[DEBUG] addVehicle - Set basicDetails.fleetNumber to:', vehicleData.basicDetails.fleetNumber);
+            }
+        }
 
         // Handle the new insurance flow
         if (req.body.insuranceId) {
@@ -41,6 +74,7 @@ const addVehicle = async (req, res, next) => {
             vehicleData.purchaseDetails.branch = req.user.branchId;
         }
 
+        console.log('[DEBUG] addVehicle - Final Vehicle Data before create:', JSON.stringify(vehicleData, null, 2));
         const newVehicle = await addVehicleService(vehicleData);
 
         // If a Purchase Order is linked, mark it as used
@@ -57,7 +91,9 @@ const addVehicle = async (req, res, next) => {
             });
         }
 
-        return res.status(201).json({ success: true, data: newVehicle });
+        // Return populated vehicle
+        const populatedVehicle = await getVehicleByIdService(newVehicle._id);
+        return res.status(201).json({ success: true, data: populatedVehicle });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

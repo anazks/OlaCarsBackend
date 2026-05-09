@@ -51,8 +51,10 @@ const addVehicleSchema = {
             bodyType: Joi.string().trim().valid("Hatchback", "Saloon", "Coupe", "Convertible", "Truck"),
             odometer: Joi.number().min(0),
             gpsSerialNumber: Joi.string().trim(),
+            fleetNumber: Joi.string().trim().allow("", null),
             monthlyRent: Joi.number().min(0),
         }),
+        handlingStaff: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         insuranceId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
     }),
 };

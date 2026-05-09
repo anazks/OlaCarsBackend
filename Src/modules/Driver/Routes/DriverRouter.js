@@ -12,6 +12,7 @@ const {
     updatePerformance,
     getDriverMe,
     bulkAddDrivers,
+    dataMigrateDrivers,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -194,6 +195,55 @@ router.post(
     authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     bulkAddDrivers
+);
+// ─── POST /api/driver/data-migration — Data Migration (Driver + Vehicle) ──
+/**
+ * @swagger
+ * /api/driver/data-migration:
+ *   post:
+ *     summary: Data migration — bulk-create drivers with vehicles from legacy system
+ *     description: |
+ *       Creates both driver and vehicle records per row, assigns vehicles to drivers,
+ *       and auto-generates OLA-XXXXXX Driver IDs. Used for migrating data from legacy systems.
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - drivers
+ *             properties:
+ *               branch:
+ *                 type: string
+ *                 description: Branch ObjectId (required for COUNTRYMANAGER/ADMIN)
+ *               handlingStaff:
+ *                 type: string
+ *                 description: Finance Staff ObjectId assigned to handle these drivers
+ *               drivers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - fullName
+ *                     - email
+ *                     - phone
+ *                     - vehicleNumber
+ *     responses:
+ *       201:
+ *         description: Migration complete (may contain partial errors)
+ *       400:
+ *         description: Invalid payload or all rows failed
+ */
+router.post(
+    "/data-migration",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    hasPermission("DRIVER_CREATE"),
+    dataMigrateDrivers
 );
 // ─── GET /api/driver — List Drivers ───────────────────────────────────
 /**

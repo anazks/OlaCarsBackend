@@ -35,6 +35,10 @@ const vehicleSchema = new mongoose.Schema(
             enum: VEHICLE_STATUSES,
             default: "PENDING ENTRY",
         },
+        handlingStaff: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FinanceStaff'
+        },
 
         // 1. Procurement & Purchase Details
         purchaseDetails: {
@@ -86,6 +90,7 @@ const vehicleSchema = new mongoose.Schema(
             gpsSerialNumber: { type: String },
             weeklyRent: { type: Number, default: 0 },
             leaseDurationWeeks: { type: Number, default: 260 },
+            fleetNumber: { type: String, trim: true },
         },
 
         // 3. Registration & Legal Documents

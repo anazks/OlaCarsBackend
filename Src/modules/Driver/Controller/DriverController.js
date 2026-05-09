@@ -366,6 +366,187 @@ const bulkAddDrivers = async (req, res) => {
     }
 };
 
+/**
+ * Data Migration — Bulk-create drivers WITH vehicles from legacy system data.
+ * Creates a vehicle per row, creates a driver, and links them.
+ * Branch assignment follows the same logic as bulkAddDrivers.
+ * @route POST /api/driver/data-migration
+ */
+const dataMigrateDrivers = async (req, res) => {
+    try {
+        const { drivers, branch: selectedBranch, handlingStaff } = req.body;
+
+        if (!Array.isArray(drivers) || drivers.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
+        }
+
+        if (drivers.length > 500) {
+            return res.status(400).json({ success: false, message: "Maximum 500 records per data migration upload." });
+        }
+
+        const userRole = req.user.role;
+        const userId = req.user.id;
+        const userBranchId = req.user.branchId;
+
+        // Determine branch (same logic as bulkAddDrivers)
+        const autoAssignRoles = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"];
+        const isAutoAssign = autoAssignRoles.includes(userRole);
+
+        let branch;
+        if (isAutoAssign) {
+            branch = userBranchId;
+            if (!branch) {
+                return res.status(400).json({ success: false, message: "Your account has no branch assigned. Contact your administrator." });
+            }
+        } else {
+            branch = selectedBranch;
+            if (!branch || (typeof branch === "string" && !branch.trim())) {
+                return res.status(400).json({ success: false, message: "Please select a branch before uploading." });
+            }
+        }
+
+        // Lazy-load Vehicle repo to avoid circular dependency issues
+        const { addVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
+        const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
+        const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
+
+        let staffFleetNumber;
+        if (handlingStaff) {
+            const staff = await FinanceStaff.findById(handlingStaff);
+            if (staff) {
+                // Try to get from first record or generate a new one
+                const firstRecordFleet = drivers.length > 0 ? (drivers[0].fleetNumber || drivers[0].vehicleFleetNumber) : null;
+                const fleetToAssign = (firstRecordFleet || await generateNextFleetNumber()).toString().trim();
+                
+                // Add to staff's fleetNumbers array if not already there
+                if (!staff.fleetNumbers.includes(fleetToAssign)) {
+                    staff.fleetNumbers.push(fleetToAssign);
+                    await staff.save();
+                }
+                staffFleetNumber = fleetToAssign;
+            }
+        }
+
+        const results = { created: [], errors: [] };
+
+        for (let i = 0; i < drivers.length; i++) {
+            const row = drivers[i];
+            const rowNum = i + 1;
+
+            // Validate required fields
+            if (!row.fullName || !row.fullName.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
+                continue;
+            }
+            if (!row.email || !row.email.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: email" });
+                continue;
+            }
+            if (!row.phone || !row.phone.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
+                continue;
+            }
+            if (!row.vehicleNumber || !row.vehicleNumber.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: vehicleNumber" });
+                continue;
+            }
+
+            try {
+                // ── Step 1: Create Vehicle ──────────────────────────
+                const vehicleData = {
+                    status: "ACTIVE — RENTED",
+                    handlingStaff: handlingStaff || undefined,
+                    purchaseDetails: {
+                        branch: branch,
+                    },
+                    basicDetails: {
+                        make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
+                        model: row.vehicleModel ? row.vehicleModel.trim() : undefined,
+                        year: row.vehicleYear ? Number(row.vehicleYear) : undefined,
+                        category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
+                        fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
+                        colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
+                        vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
+                        fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
+                    },
+                    legalDocs: {
+                        registrationNumber: row.vehicleNumber.trim(),
+                    },
+                    statusHistory: [{
+                        status: "ACTIVE — RENTED",
+                        changedBy: userId,
+                        changedByRole: userRole,
+                        timestamp: new Date(),
+                        notes: "Vehicle migrated from legacy system.",
+                    }],
+                    createdBy: userId,
+                    creatorRole: userRole,
+                };
+
+                const newVehicle = await addVehicleService(vehicleData);
+
+                // ── Step 2: Create Driver ───────────────────────────
+                const driverData = {
+                    status: "ACTIVE",
+                    personalInfo: {
+                        fullName: row.fullName.trim(),
+                        email: row.email.trim().toLowerCase(),
+                        phone: row.phone.trim(),
+                        whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
+                        dateOfBirth: row.dateOfBirth || undefined,
+                        nationality: row.nationality ? row.nationality.trim() : undefined,
+                    },
+                    identityDocs: {
+                        idType: row.idType || undefined,
+                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
+                    },
+                    drivingLicense: {
+                        licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
+                        licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
+                        expiryDate: row.licenseExpiry || undefined,
+                    },
+                    emergencyContact: {
+                        name: row.emergencyName ? row.emergencyName.trim() : undefined,
+                        relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
+                        phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
+                    },
+                    // ── Migration-specific fields ───────────────────
+                    handlingStaff: row.handlingStaffId || handlingStaff || undefined,
+                    activationDate: row.activationDate || undefined,
+                    deactivationDate: row.deactivationDate || undefined,
+                    remarks: row.remarks ? row.remarks.trim() : undefined,
+                    currentVehicle: newVehicle._id,
+                    branch: branch,
+                    createdBy: userId,
+                    creatorRole: userRole,
+                };
+
+                const newDriver = await DriverService.create(driverData);
+
+                results.created.push({
+                    row: rowNum,
+                    driverId: newDriver.driverId,
+                    driverDbId: newDriver._id,
+                    vehicleId: newVehicle._id,
+                    name: row.fullName,
+                    vehicleNumber: row.vehicleNumber,
+                });
+            } catch (err) {
+                results.errors.push({ row: rowNum, message: err.message });
+            }
+        }
+
+        const statusCode = results.created.length > 0 ? 201 : 400;
+        return res.status(statusCode).json({
+            success: results.created.length > 0,
+            message: `${results.created.length} driver(s) migrated, ${results.errors.length} error(s).`,
+            data: results,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -378,4 +559,5 @@ module.exports = {
     markRentAsPaid,
     updatePerformance,
     bulkAddDrivers,
+    dataMigrateDrivers,
 };

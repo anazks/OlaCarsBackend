@@ -116,6 +116,15 @@ const refreshToken = async (req, res) => {
     }
 };
 
+const getNextFleetNumber = async (req, res) => {
+    try {
+        const nextFleet = await FinanceStaffService.generateNextFleetNumber();
+        return res.status(200).json({ success: true, data: nextFleet });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     login,
     logout,
@@ -125,6 +134,6 @@ module.exports = {
     getFinanceStaffById,
     editFinanceStaff,
     changePassword,
-    deleteFinanceStaff
+    deleteFinanceStaff,
+    getNextFleetNumber
 };
-

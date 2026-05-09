@@ -6,6 +6,7 @@ const {
     updateDriverService,
     deleteDriverService,
 } = require("../Repo/DriverRepo");
+const { getNextDriverId } = require("../../SystemSettings/Model/CounterModel");
 const LedgerService = require("../../Ledger/Service/LedgerService");
 const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
@@ -20,15 +21,21 @@ const BLOCKED_FIELDS = [
 
 /**
  * Creates a new driver profile with DRAFT status.
+ * Auto-generates a unique OLA-XXXXXX Driver ID.
  */
 exports.create = async (data) => {
-    data.status = "DRAFT";
+    // Auto-generate Driver ID if not already provided (migration may pre-set it)
+    if (!data.driverId) {
+        data.driverId = await getNextDriverId();
+    }
+
+    data.status = data.status || "DRAFT";
     data.statusHistory = [{
-        status: "DRAFT",
+        status: data.status,
         changedBy: data.createdBy,
         changedByRole: data.creatorRole,
         timestamp: new Date(),
-        notes: "Driver application initiated.",
+        notes: data.status === "ACTIVE" ? "Driver migrated from legacy system." : "Driver application initiated.",
     }];
     return await addDriverService(data);
 };

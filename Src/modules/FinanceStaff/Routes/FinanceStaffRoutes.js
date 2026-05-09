@@ -9,7 +9,8 @@ const {
     getFinanceStaffById,
     login,
     logout,
-    refreshToken
+    refreshToken,
+    getNextFleetNumber
 } = require("../Controller/FinanceStaffController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -100,6 +101,25 @@ router.post("/refresh", validate(refreshTokenSchema), refreshToken);
  *         description: Logout successful
  */
 router.post("/logout", authenticate, logout);
+
+/**
+ * @swagger
+ * /api/finance-staff/next-fleet-number:
+ *   get:
+ *     summary: Get the next consecutive fleet number
+ *     tags: [FinanceStaff]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Next fleet number retrieved successfully
+ */
+router.get(
+    "/next-fleet-number",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+    getNextFleetNumber
+);
 
 /**
  * @swagger

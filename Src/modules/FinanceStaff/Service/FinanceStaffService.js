@@ -7,7 +7,7 @@ const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
 const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions', 'fleetNumbers'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
@@ -85,6 +85,7 @@ exports.create = async (data) => {
         branchId: data.branchId,
         status: data.status,
         permissions: finalPermissions,
+        fleetNumbers: data.fleetNumbers || [],
         createdBy: data.createdBy,
         creatorRole: data.creatorRole,
     });
@@ -201,3 +202,19 @@ exports.refreshAccessToken = async (token) => {
     }
 };
 
+exports.generateNextFleetNumber = async () => {
+    // We use aggregation to unwind the fleetNumbers array and find the max numeric value
+    const result = await FinanceStaff.aggregate([
+        { $unwind: "$fleetNumbers" },
+        { $match: { fleetNumbers: { $regex: /^\d+$/ } } },
+        { $project: { fleetNum: { $toInt: "$fleetNumbers" } } },
+        { $sort: { fleetNum: -1 } },
+        { $limit: 1 }
+    ]);
+
+    if (result.length === 0) {
+        return "101"; // Starting point
+    }
+
+    return (result[0].fleetNum + 1).toString();
+};

@@ -63,6 +63,25 @@ const driverSchema = new mongoose.Schema(
             default: "DRAFT",
         },
 
+        // ── Driver ID (OLA-000001 format, auto-generated) ───────────
+        driverId: {
+            type: String,
+            unique: true,
+            sparse: true,
+            trim: true,
+        },
+
+        // ── Handling Staff (Finance Staff assigned to this driver) ───
+        handlingStaff: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "FinanceStaff",
+        },
+
+        // ── Migration / Lifecycle Dates ─────────────────────────────
+        activationDate: { type: Date },
+        deactivationDate: { type: Date },
+        remarks: { type: String, trim: true },
+
         // ── Auth Fields ──────────────────────────────────────────────
         refreshToken: { type: String },
         passwordHash: { type: String, required: false },
