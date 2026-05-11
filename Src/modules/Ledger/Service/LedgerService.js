@@ -11,6 +11,7 @@ const ALLOWED_CREATE_FIELDS = [
     'description', 
     'entryDate',
     'taxInfo',
+    'voucher',
     'createdBy',
     'creatorRole'
 ];

@@ -46,22 +46,5 @@ exports.createManualJournal = async (data) => {
         ledgerEntries.push(entry);
     }
 
-    // 3. Update Bank Balance if bank account is provided
-    if (journalData.paymentMethod === "BANK" && journalData.bankAccount) {
-        const BankAccountService = require("../../BankAccount/Service/BankAccountService");
-        // For a journal entry, we assume DEBIT increases and CREDIT decreases (for asset accounts like bank)
-        // But since we are recording it from the company perspective, 
-        // if the journal has a line with the bank's accounting code, we should use that.
-        // For simplicity, we use the totalDebit as the change if it's a payment, but journals can be complex.
-        
-        // Let's calculate net change from lines for this bank account
-        // Usually, in a manual journal, one line would be the bank account.
-        // We will just update the balance based on the totalDebit for now as a simple integration.
-        // A better way would be to check which line belongs to the bank.
-        
-        // For now, let's just log and update based on net effect.
-        await BankAccountService.updateBalance(journalData.bankAccount, totalDebit);
-    }
-
     return { journal, ledgerEntries };
 };

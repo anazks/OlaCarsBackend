@@ -13,6 +13,11 @@ const ledgerEntrySchema = new mongoose.Schema(
             ref: "ManualJournal",
             required: false,
         },
+        voucher: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Voucher",
+            required: false,
+        },
         branch: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Branch",
@@ -65,6 +70,7 @@ const ledgerEntrySchema = new mongoose.Schema(
 // Search indexes to query ledgers effectively
 ledgerEntrySchema.index({ transaction: 1 });
 ledgerEntrySchema.index({ manualJournal: 1 });
+ledgerEntrySchema.index({ voucher: 1 });
 ledgerEntrySchema.index({ branch: 1 });
 ledgerEntrySchema.index({ accountingCode: 1 });
 ledgerEntrySchema.index({ type: 1 });

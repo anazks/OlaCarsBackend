@@ -28,15 +28,6 @@ const manualJournalSchema = new mongoose.Schema(
             required: true,
             min: 0,
         },
-        paymentMethod: {
-            type: String,
-            enum: ["CASH", "BANK"],
-            default: "CASH",
-        },
-        bankAccount: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "BankAccount",
-        },
         status: {
             type: String,
             enum: ["DRAFT", "POSTED", "CANCELLED"],
