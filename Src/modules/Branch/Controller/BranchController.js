@@ -73,10 +73,25 @@ const deleteBranch = async (req, res) => {
     }
 };
 
+const getBranchExtendedDetails = async (req, res) => {
+    try {
+        const filters = {
+            startDate: req.query.startDate,
+            endDate: req.query.endDate
+        };
+        const branchDetails = await BranchService.getExtendedDetails(req.params.id, filters);
+        if (!branchDetails) return res.status(404).json({ success: false, message: 'Branch not found' });
+        return res.status(200).json({ success: true, data: branchDetails });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addBranch,
     editBranch,
     deleteBranch,
     getBranches,
-    getBranchById
-};
+    getBranchById,
+    getBranchExtendedDetails
+};

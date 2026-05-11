@@ -107,10 +107,10 @@ const deleteOperationStaff = async (req, res) => {
 
 const refreshStaffToken = async (req, res) => {
     try {
-        const { token } = req.body;
-        if (!token) throw new AppError('Refresh token is required', 400);
+        const { refreshToken } = req.body;
+        if (!refreshToken) throw new AppError('Refresh token is required', 400);
 
-        const tokens = await OperationStaffService.refreshSession(token);
+        const tokens = await OperationStaffService.refreshSession(refreshToken);
         return res.status(200).json({ success: true, ...tokens });
     } catch (error) {
         const statusCode = error.statusCode || 401;

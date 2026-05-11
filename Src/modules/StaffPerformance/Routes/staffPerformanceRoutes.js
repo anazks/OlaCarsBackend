@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getPerformance } = require("../Controller/staffPerformanceController");
+const { getPerformance, getIndividualPerformance } = require("../Controller/staffPerformanceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
@@ -43,6 +43,14 @@ router.get(
     authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
     hasPermission("STAFF_PERFORMANCE_VIEW"),
     getPerformance
+);
+
+router.get(
+    "/:id/details",
+    authenticate,
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    hasPermission("STAFF_PERFORMANCE_VIEW"),
+    getIndividualPerformance
 );
 
 // Targets

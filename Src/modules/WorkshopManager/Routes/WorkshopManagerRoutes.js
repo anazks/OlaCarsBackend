@@ -278,7 +278,7 @@ router.delete(
 
 /**
  * @swagger
- * /api/workshop-manager/refresh-token:
+ * /api/workshop-manager/refresh:
  *   post:
  *     summary: Refresh access token
  *     tags: [WorkshopManager]
@@ -289,14 +289,14 @@ router.delete(
  *           schema:
  *             type: object
  *             required:
- *               - token
+ *               - refreshToken
  *             properties:
- *               token:
+ *               refreshToken:
  *                 type: string
  *     responses:
  *       200:
  *         description: New tokens generated
  */
-router.post("/refresh-token", validate(refreshManagerTokenSchema), refreshManagerToken);
+router.post("/refresh", validate(refreshManagerTokenSchema), refreshManagerToken);
 
 module.exports = router;

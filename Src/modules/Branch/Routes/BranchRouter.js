@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch, editBranch, deleteBranch, getBranches, getBranchById } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch, getBranches, getBranchById, getBranchExtendedDetails } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
@@ -127,6 +127,40 @@ router.get(
   hasPermission("BRANCH_VIEW"),
   validate(getBranchByIdSchema),
   getBranchById
+);
+
+/**
+ * @swagger
+ * /api/branch/{id}/details:
+ *   get:
+ *     summary: Get extended branch details and analytics
+ *     tags: [Branch]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Extended branch details
+ */
+router.get(
+  "/:id/details",
+  authenticate,
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
+  hasPermission("BRANCH_VIEW"),
+  getBranchExtendedDetails
 );
 
 /**

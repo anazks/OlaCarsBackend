@@ -1,4 +1,4 @@
-const { getStaffPerformance } = require("../Service/staffPerformanceService");
+const { getStaffPerformance, getIndividualStaffPerformance } = require("../Service/staffPerformanceService");
 
 exports.getPerformance = async (req, res) => {
     try {
@@ -39,6 +39,33 @@ exports.getPerformance = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to fetch staff performance data",
+        });
+    }
+};
+
+exports.getIndividualPerformance = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { startDate, endDate } = req.query;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff ID is required",
+            });
+        }
+
+        const result = await getIndividualStaffPerformance(id, startDate, endDate);
+
+        return res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        console.error("Individual staff performance error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to fetch individual staff performance data",
         });
     }
 };

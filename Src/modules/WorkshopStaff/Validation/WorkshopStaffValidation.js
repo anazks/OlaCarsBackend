@@ -60,7 +60,7 @@ const getWorkshopStaffByIdSchema = {
 
 const refreshStaffTokenSchema = {
     body: Joi.object({
-        token: Joi.string().required(),
+        refreshToken: Joi.string().required(),
     }),
 };
 

@@ -634,3 +634,8 @@ exports.getStaffPerformance = async (filters = {}) => {
 
     return result;
 };
+
+const { getStaffDetailsRepo } = require("../Repo/StaffPerformanceRepo");
+exports.getIndividualStaffPerformance = async (staffId, startDate, endDate) => {
+    return await getStaffDetailsRepo(staffId, startDate, endDate);
+};

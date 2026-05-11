@@ -97,8 +97,8 @@ exports.changePassword = async (req, res) => {
 
 exports.refreshManagerToken = async (req, res) => {
     try {
-        const { token } = req.body;
-        const result = await WorkshopManagerService.refreshSessionService(token);
+        const { refreshToken } = req.body;
+        const result = await WorkshopManagerService.refreshSessionService(refreshToken);
         return res.status(200).json({ success: true, ...result });
     } catch (error) {
         const statusCode = error.statusCode || 401;

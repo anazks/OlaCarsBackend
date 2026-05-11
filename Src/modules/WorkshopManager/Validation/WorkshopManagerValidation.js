@@ -60,7 +60,7 @@ const getWorkshopManagerByIdSchema = {
 
 const refreshManagerTokenSchema = {
     body: Joi.object({
-        token: Joi.string().required(),
+        refreshToken: Joi.string().required(),
     }),
 };
 
