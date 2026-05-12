@@ -6,23 +6,22 @@ const PreBooking = require("../../AI/Model/PreBookingModel");
 const mongoose = require("mongoose");
 const AppError = require("../../../shared/utils/AppError");
 
-exports.initiateCall = async (req, res, next) => {
-    try {
-        const { caller_id } = req.body;
-
-        if (!caller_id) {
-            return res.json({
-                type: "conversation_initiation_client_data",
-                dynamic_variables: {
-                    is_existing_customer: "false",
-                    customer_id: "",
-                    customer_name: "",
-                    customer_phone: "",
-                    customer_status: ""
-                }
-            });
+exports.initiateCall = async (req, res) => {
+    const { caller_id } = req.body;
+    const fallback = {
+        type: "conversation_initiation_client_data",
+        dynamic_variables: {
+            is_existing_customer: "false",
+            customer_id: "",
+            customer_name: "",
+            customer_phone: caller_id || "",
+            customer_status: ""
         }
+    };
 
+    if (!caller_id) return res.json(fallback);
+
+    try {
         const driver = await Driver.findOne({ "personalInfo.phone": caller_id, isDeleted: false });
 
         if (driver) {
@@ -38,18 +37,10 @@ exports.initiateCall = async (req, res, next) => {
             });
         }
 
-        return res.json({
-            type: "conversation_initiation_client_data",
-            dynamic_variables: {
-                is_existing_customer: "false",
-                customer_id: "",
-                customer_name: "",
-                customer_phone: caller_id,
-                customer_status: ""
-            }
-        });
+        return res.json(fallback);
     } catch (error) {
-        next(error);
+        console.error("initiateCall DB error:", error.message);
+        return res.json(fallback);
     }
 };
 
@@ -316,6 +307,35 @@ exports.logCall = async (req, res, next) => {
             success: true,
             log_id: callLog._id
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getFollowUps = async (req, res, next) => {
+    try {
+        const followUps = await CallLog.find({
+            intent: "needs_follow_up",
+            followUpDone: { $ne: true }
+        }).sort({ timestamp: -1 });
+
+        res.json({ success: true, follow_ups: followUps });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.markFollowUpDone = async (req, res, next) => {
+    try {
+        const { logId } = req.params;
+
+        if (!mongoose.Types.ObjectId.isValid(logId)) {
+            return res.status(400).json({ success: false, error: "Invalid log ID" });
+        }
+
+        await CallLog.findByIdAndUpdate(logId, { followUpDone: true });
+
+        res.json({ success: true });
     } catch (error) {
         next(error);
     }

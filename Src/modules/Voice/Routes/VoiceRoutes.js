@@ -8,7 +8,9 @@ const {
     getAccountStatus,
     createLead,
     bookVehicle,
-    logCall
+    logCall,
+    getFollowUps,
+    markFollowUpDone
 } = require('../Controller/VoiceController');
 
 router.use(voiceAgentAuth);
@@ -20,5 +22,7 @@ router.get('/account-status/:customerId', getAccountStatus);
 router.post('/leads', createLead);
 router.post('/book-vehicle', bookVehicle);
 router.post('/log-call', logCall);
+router.get('/follow-ups', getFollowUps);
+router.patch('/follow-ups/:logId/done', markFollowUpDone);
 
 module.exports = router;
