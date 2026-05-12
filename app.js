@@ -45,6 +45,7 @@ const DriverAuthRouter = require("./Src/modules/DriverAuth/Routes/DriverAuthRout
 const ReportingRouter = require("./Src/modules/Reporting/Routes/ReportingRouter");
 const SalaryRouter = require("./Src/modules/Salary/Routes/SalaryRoutes");
 const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountRoutes");
+const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const mongoose = require("mongoose");
 const app = express();
@@ -124,6 +125,7 @@ app.use("/api/alerts", AlertRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
 app.use("/api/bank-accounts", BankAccountRouter);
+app.use("/api/voice", VoiceRoutes);
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });

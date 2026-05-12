@@ -1,0 +1,322 @@
+const { Driver } = require("../../Driver/Model/DriverModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+const Lead = require("../Model/LeadModel");
+const CallLog = require("../Model/CallLogModel");
+const PreBooking = require("../../AI/Model/PreBookingModel");
+const mongoose = require("mongoose");
+const AppError = require("../../../shared/utils/AppError");
+
+exports.initiateCall = async (req, res, next) => {
+    try {
+        const { caller_id } = req.body;
+
+        if (!caller_id) {
+            return res.json({
+                type: "conversation_initiation_client_data",
+                dynamic_variables: {
+                    is_existing_customer: "false",
+                    customer_id: "",
+                    customer_name: "",
+                    customer_phone: "",
+                    customer_status: ""
+                }
+            });
+        }
+
+        const driver = await Driver.findOne({ "personalInfo.phone": caller_id, isDeleted: false });
+
+        if (driver) {
+            return res.json({
+                type: "conversation_initiation_client_data",
+                dynamic_variables: {
+                    is_existing_customer: "true",
+                    customer_id: driver._id.toString(),
+                    customer_name: driver.personalInfo?.fullName || "Cliente",
+                    customer_phone: caller_id,
+                    customer_status: driver.status
+                }
+            });
+        }
+
+        return res.json({
+            type: "conversation_initiation_client_data",
+            dynamic_variables: {
+                is_existing_customer: "false",
+                customer_id: "",
+                customer_name: "",
+                customer_phone: caller_id,
+                customer_status: ""
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getAvailableVehicles = async (req, res, next) => {
+    try {
+        const vehicles = await Vehicle.find({ status: "ACTIVE — AVAILABLE", isDeleted: false })
+            .select("basicDetails purchaseDetails")
+            .populate("purchaseDetails.branch", "name city");
+
+        const formattedVehicles = vehicles.map(v => ({
+            id: v._id,
+            make: v.basicDetails?.make,
+            model: v.basicDetails?.model,
+            year: v.basicDetails?.year,
+            category: v.basicDetails?.category,
+            fuelType: v.basicDetails?.fuelType,
+            transmission: v.basicDetails?.transmission,
+            colour: v.basicDetails?.colour,
+            seats: v.basicDetails?.seats,
+            weeklyRent: v.basicDetails?.weeklyRent,
+            monthlyRent: v.basicDetails?.weeklyRent ? v.basicDetails.weeklyRent * 4 : 0,
+            branch: v.purchaseDetails?.branch?.name || "Unknown"
+        }));
+
+        res.status(200).json({
+            success: true,
+            vehicles: formattedVehicles
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getLeaseSchemes = async (req, res, next) => {
+    try {
+        // We aggregate the active vehicles to create lease schemes, or we could return static data
+        // For simplicity, let's group available vehicles by category and take the average weekly rent
+        const leaseSchemes = await Vehicle.aggregate([
+            { $match: { status: "ACTIVE — AVAILABLE", isDeleted: false, "basicDetails.weeklyRent": { $gt: 0 } } },
+            {
+                $group: {
+                    _id: "$basicDetails.category",
+                    avgWeeklyRent: { $avg: "$basicDetails.weeklyRent" },
+                    durationWeeks: { $first: "$basicDetails.leaseDurationWeeks" }
+                }
+            }
+        ]);
+
+        const formattedSchemes = leaseSchemes.map(scheme => {
+            const weeklyRent = Math.round(scheme.avgWeeklyRent);
+            const durationWeeks = scheme.durationWeeks || 52;
+            return {
+                category: scheme._id || "Other",
+                weeklyRent: weeklyRent,
+                durationWeeks: durationWeeks,
+                totalCost: weeklyRent * durationWeeks,
+                monthlyEquivalent: weeklyRent * 4,
+                maintenanceIncluded: true
+            };
+        });
+
+        // Fallback static schemes if no active vehicles found
+        if (formattedSchemes.length === 0) {
+            formattedSchemes.push(
+                {
+                    category: "Sedan",
+                    weeklyRent: 150,
+                    durationWeeks: 52,
+                    totalCost: 7800,
+                    monthlyEquivalent: 600,
+                    maintenanceIncluded: true
+                },
+                {
+                    category: "SUV",
+                    weeklyRent: 200,
+                    durationWeeks: 52,
+                    totalCost: 10400,
+                    monthlyEquivalent: 800,
+                    maintenanceIncluded: true
+                }
+            );
+        }
+
+        res.status(200).json({
+            success: true,
+            schemes: formattedSchemes
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.getAccountStatus = async (req, res, next) => {
+    try {
+        const { customerId } = req.params;
+
+        if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+            return res.status(400).json({ success: false, error: "Invalid customer ID" });
+        }
+
+        const driver = await Driver.findById(customerId);
+
+        if (!driver) {
+            return res.status(404).json({ success: false, error: "Customer not found" });
+        }
+
+        const pendingWeeks = driver.rentTracking
+            ?.filter(week => week.status === "PENDING" || week.status === "PARTIAL")
+            ?.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+            ?.map(week => ({
+                week_number: week.weekNumber,
+                amount_due: week.balance,
+                due_date: week.dueDate ? week.dueDate.toISOString().split("T")[0] : null,
+                status: week.status
+            })) || [];
+
+        const totalDue = pendingWeeks.reduce((sum, week) => sum + (week.amount_due || 0), 0);
+        const nextDueDate = pendingWeeks.length > 0 ? pendingWeeks[0].due_date : null;
+
+        res.status(200).json({
+            success: true,
+            customer_name: driver.personalInfo?.fullName || "Cliente",
+            pending_weeks: pendingWeeks,
+            total_due: totalDue,
+            next_due_date: nextDueDate
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.createLead = async (req, res, next) => {
+    try {
+        const { name, phone, interest, source, notes } = req.body;
+
+        if (!name || !phone) {
+            return res.status(400).json({ success: false, error: "Name and phone are required" });
+        }
+
+        const lead = new Lead({
+            name,
+            phone,
+            interest,
+            source: source || "VOICE_AGENT",
+            notes
+        });
+
+        await lead.save();
+
+        res.status(201).json({
+            success: true,
+            lead_id: lead._id,
+            message: "Lead created successfully"
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.bookVehicle = async (req, res, next) => {
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+
+        const { phone, vehicle_id, customer_name } = req.body;
+
+        if (!phone || !vehicle_id) {
+            return res.status(400).json({ success: false, error: "Phone number and vehicle_id are required" });
+        }
+
+        const vehicle = await Vehicle.findOne({ _id: vehicle_id, status: "ACTIVE — AVAILABLE", isDeleted: false }).session(session);
+        if (!vehicle) {
+            return res.status(404).json({ success: false, error: "Vehicle is not available or does not exist" });
+        }
+
+        let driver = await Driver.findOne({ "personalInfo.phone": phone, isDeleted: false }).session(session);
+        
+        if (!driver) {
+            driver = new Driver({
+                status: "DRAFT",
+                personalInfo: {
+                    fullName: customer_name || `AI Pre-booked (Phone: ${phone})`,
+                    phone: phone,
+                },
+                branch: vehicle.purchaseDetails.branch,
+                createdBy: new mongoose.Types.ObjectId(), // Placeholder
+                creatorRole: "ADMIN",
+            });
+            await driver.save({ session });
+        }
+
+        vehicle.status = "PRE-BOOKED";
+        vehicle.statusHistory.push({
+            status: "PRE-BOOKED",
+            notes: `Auto-reserved via Voice Agent for phone: ${phone}`,
+            changedBy: driver._id,
+            changedByRole: "DRIVER",
+        });
+        await vehicle.save({ session });
+
+        const preBooking = new PreBooking({
+            vehicle: vehicle._id,
+            driver: driver._id,
+            phone: phone,
+            status: "PENDING",
+        });
+        await preBooking.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        res.status(201).json({
+            success: true,
+            booking_id: preBooking._id,
+            message: "Vehicle pre-booked successfully"
+        });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        next(error);
+    }
+};
+
+exports.logCall = async (req, res, next) => {
+    try {
+        const {
+            call_id,
+            customer_phone,
+            customer_id,
+            is_existing_customer,
+            intent,
+            outcome,
+            summary,
+            duration_seconds,
+            timestamp
+        } = req.body;
+
+        if (!call_id) {
+            return res.status(400).json({ success: false, error: "call_id is required" });
+        }
+
+        // Clean customer_id if it's an empty string
+        let validCustomerId = null;
+        if (customer_id && mongoose.Types.ObjectId.isValid(customer_id)) {
+            validCustomerId = customer_id;
+        }
+
+        const callLog = new CallLog({
+            call_id,
+            customer_phone,
+            customer_id: validCustomerId,
+            is_existing_customer,
+            intent,
+            outcome,
+            summary,
+            duration_seconds,
+            timestamp: timestamp || Date.now()
+        });
+
+        await callLog.save();
+
+        res.status(201).json({
+            success: true,
+            log_id: callLog._id
+        });
+    } catch (error) {
+        next(error);
+    }
+};
