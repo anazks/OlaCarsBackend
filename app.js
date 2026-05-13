@@ -48,6 +48,7 @@ const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountR
 const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
+const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -124,6 +125,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
 app.use("/api/bank-accounts", BankAccountRouter);
