@@ -17,7 +17,7 @@ const addPurchaseOrderSchema = {
             Joi.string().required()
         ),
         branch: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
-        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         paymentDate: Joi.date(),
     }),
 };
@@ -27,7 +27,8 @@ const approvePurchaseOrderSchema = {
         id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
     }),
     body: Joi.object({
-        status: Joi.string().trim().valid("APPROVED", "REJECTED").required(),
+        status: Joi.string().trim().valid("APPROVED", "REJECTED", "MANAGER_APPROVED").required(),
+        supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
     }),
 };
 

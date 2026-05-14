@@ -277,6 +277,27 @@ const driverSchema = new mongoose.Schema(
             }],
         }],
 
+        // ── 16. Additional Payments (Deposits, Fees, etc.) ───────────
+        additionalPayments: [{
+            type: { type: String, enum: ["DEPOSIT", "ADMIN_FEE", "PENALTY", "OTHER"], required: true },
+            label: { type: String, required: true },
+            amount: { type: Number, required: true },
+            dueDate: { type: Date, required: true },
+            status: { type: String, enum: ["PENDING", "PAID", "PARTIAL", "OVERDUE", "CANCELLED"], default: "PENDING" },
+            amountPaid: { type: Number, default: 0 },
+            balance: { type: Number, default: 0 },
+            paidAt: { type: Date },
+            payments: [{
+                amount: { type: Number, required: true },
+                paidAt: { type: Date, default: Date.now },
+                paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Other"], default: "Cash" },
+                transactionId: { type: String },
+                note: { type: String },
+            }],
+            relatedVehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+            notes: { type: String },
+        }],
+
         // ── Audit ────────────────────────────────────────────────────
         statusHistory: [statusHistorySchema],
 
@@ -329,7 +350,11 @@ driverSchema.index({ "personalInfo.email": 1 }, { unique: true, sparse: true });
 driverSchema.index({ "drivingLicense.expiryDate": 1 });
 driverSchema.index({ "medicalFitness.expiryDate": 1 });
 
+const Driver = mongoose.model("Driver", driverSchema);
+mongoose.model("DRIVER", driverSchema, "drivers");
+mongoose.model("USER", driverSchema, "drivers");
+
 module.exports = {
-    Driver: mongoose.model("Driver", driverSchema),
+    Driver,
     DRIVER_STATUSES,
 };

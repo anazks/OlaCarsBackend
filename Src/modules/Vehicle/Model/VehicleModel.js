@@ -88,6 +88,7 @@ const vehicleSchema = new mongoose.Schema(
             },
             odometer: { type: Number },
             gpsSerialNumber: { type: String },
+            condition: { type: String, enum: ["New", "Used"] },
             weeklyRent: { type: Number, default: 0 },
             leaseDurationWeeks: { type: Number, default: 260 },
             fleetNumber: { type: String, trim: true },
@@ -260,10 +261,21 @@ const vehicleSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Pre-validate hook to handle empty/null VINs
+// Pre-validate hook to handle empty/null VINs and auto-calculate weeklyRent
 vehicleSchema.pre("validate", async function () {
     if (this.basicDetails && (this.basicDetails.vin === "" || this.basicDetails.vin === null)) {
         this.basicDetails.vin = undefined;
+    }
+
+    // Auto-calculate weeklyRent from purchasePrice / leaseDurationWeeks (default 260 = 5 years)
+    // Only if purchasePrice exists and weeklyRent is not manually set
+    if (
+        this.purchaseDetails?.purchasePrice > 0 &&
+        (!this.basicDetails?.weeklyRent || this.basicDetails.weeklyRent === 0)
+    ) {
+        if (!this.basicDetails) this.basicDetails = {};
+        const durationWeeks = this.basicDetails.leaseDurationWeeks || 260; // 5 years * 52 weeks
+        this.basicDetails.weeklyRent = Math.round((this.purchaseDetails.purchasePrice / durationWeeks) * 100) / 100;
     }
 });
 

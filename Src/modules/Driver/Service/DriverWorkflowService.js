@@ -126,13 +126,7 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.USER], // Added USER so driver can push past credit check if needed
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
-            const cc = driver.creditCheck || {};
-            if (!cc.score) {
-                return "Credit score must be recorded before manager review.";
-            }
-            if (cc.decision !== "MANUAL_REVIEW") {
-                return "Only borderline cases (score 500–649) require manager review.";
-            }
+            // No longer checking for score/decision as everything is auto-approved
             return null;
         },
     },
@@ -142,13 +136,7 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.USER],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator(driver) {
-            const cc = driver.creditCheck || {};
-            if (!cc.score) {
-                return "Credit score must be present.";
-            }
-            if (cc.decision === "DECLINED") {
-                return "Cannot approve a declined credit check. Transition to REJECTED instead.";
-            }
+            // Decision check removed to allow approval of any driver as per new policy
             return null;
         },
     },
@@ -220,26 +208,9 @@ function evaluateCreditScore(score, hasFraudAlert = false) {
         return { rating: "FRAUD", decision: "DECLINED" };
     }
 
-    let rating, decision;
-
-    if (score >= 750) {
-        rating = "EXCELLENT";
-        decision = "AUTO_APPROVED";
-    } else if (score >= 650) {
-        rating = "GOOD";
-        decision = "AUTO_APPROVED";
-    } else if (score >= 500) {
-        rating = "FAIR";
-        decision = "MANUAL_REVIEW";
-    } else if (score >= 350) {
-        rating = "POOR";
-        decision = "DECLINED";
-    } else {
-        rating = "VERY POOR";
-        decision = "DECLINED";
-    }
-
-    return { rating, decision };
+    // AUTO-APPROVE POLICY: Always approve regardless of score value
+    // Only fraud alerts cause rejection
+    return { rating: "GOOD", decision: "AUTO_APPROVED" };
 }
 
 // ─── Side Effects (post-transition actions) ───────────────────────────

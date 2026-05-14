@@ -118,7 +118,7 @@ router.post("/logout", authenticate, logout);
 router.get(
     "/next-fleet-number",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.FINANCESTAFF),
     getNextFleetNumber
 );
 
@@ -211,7 +211,7 @@ router.post(
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
     hasPermission("STAFF_VIEW"),
     getFinanceStaff
 );
@@ -237,7 +237,7 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
     hasPermission("STAFF_VIEW"),
     validate(getFinanceStaffByIdSchema),
     getFinanceStaffById

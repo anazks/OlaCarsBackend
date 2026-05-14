@@ -10,7 +10,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["WAITING", "APPROVED", "REJECTED"],
+            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED"],
             default: "WAITING",
         },
         purpose: {
@@ -28,7 +28,7 @@ const purchaseOrderSchema = new mongoose.Schema(
                 images: {
                     type: [String],
                     validate: {
-                        validator: function(v) {
+                        validator: function (v) {
                             return v.length <= 8;
                         },
                         message: props => `${props.path} exceeds the limit of 8 images.`
@@ -56,7 +56,6 @@ const purchaseOrderSchema = new mongoose.Schema(
         supplier: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Supplier",
-            required: true,
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -66,7 +65,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF],
+            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER],
         },
         approvedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -74,7 +73,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         },
         approverRole: {
             type: String,
-            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER],
+            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER],
         },
         isEdited: {
             type: Boolean,

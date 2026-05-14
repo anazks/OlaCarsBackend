@@ -16,6 +16,7 @@ const ROLE_LEVEL = {
     [ROLES.FINANCESTAFF]: 1,
     [ROLES.WORKSHOPSTAFF]: 1,
     [ROLES.BRANCHMANAGER]: 2,
+    [ROLES.WORKSHOPMANAGER]: 2,
     [ROLES.COUNTRYMANAGER]: 3,
     [ROLES.OPERATIONADMIN]: 4,
     [ROLES.FINANCEADMIN]: 4,
@@ -23,7 +24,7 @@ const ROLE_LEVEL = {
 };
 
 // Roles that are scoped to a branch (have branchId in JWT)
-const BRANCH_SCOPED_ROLES = [ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER];
+const BRANCH_SCOPED_ROLES = [ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER];
 // Roles that are global (see everything)
 const GLOBAL_ROLES = [ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.ADMIN];
 
@@ -138,11 +139,17 @@ const addPurchaseOrder = async (req, res) => {
         poData.createdBy = req.user.id;
         poData.creatorRole = req.user.role;
 
-        // Auto-approve if created by ADMIN
+        // Set status based on role
         if (req.user.role === ROLES.ADMIN) {
             poData.status = "APPROVED";
             poData.approvedBy = req.user.id;
             poData.approverRole = req.user.role;
+        } else if (req.user.role === ROLES.WORKSHOPSTAFF) {
+            poData.status = "REQUESTED";
+        } else if (req.user.role === ROLES.WORKSHOPMANAGER) {
+            poData.status = "MANAGER_APPROVED";
+        } else {
+            poData.status = "WAITING";
         }
 
         const newPO = await addPurchaseOrderService(poData);
@@ -189,8 +196,8 @@ const getPurchaseOrders = async (req, res) => {
         // 2. Execute with queryHelper (Repository takes care of search/filter/sort/pagination)
         const result = await getPurchaseOrdersService(req.query, { baseQuery });
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
@@ -233,13 +240,13 @@ const getPurchaseOrderById = async (req, res) => {
 const approvePurchaseOrder = async (req, res) => {
     try {
         const poId = req.params.id;
-        const { status } = req.body;
+        const { status, supplier } = req.body;
         const approverRole = req.user.role;
         const approverId = req.user.id;
 
         // Validate status
-        if (!["APPROVED", "REJECTED"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED or REJECTED." });
+        if (!["APPROVED", "REJECTED", "MANAGER_APPROVED"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED, REJECTED, or MANAGER_APPROVED." });
         }
 
         const currentPO = await getPurchaseOrderByIdService(poId);
@@ -247,7 +254,7 @@ const approvePurchaseOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: "Purchase Order not found." });
         }
 
-        if (currentPO.status !== "WAITING") {
+        if (!["WAITING", "REQUESTED", "MANAGER_APPROVED"].includes(currentPO.status)) {
             return res.status(400).json({ success: false, message: "Purchase order is already processed." });
         }
 
@@ -300,7 +307,7 @@ const approvePurchaseOrder = async (req, res) => {
         // Admin, OperationAdmin, FinanceAdmin → no scoping restriction
 
         // All checks passed — update status
-        const updatedPO = await updatePurchaseOrderStatusService(poId, status, approverId, approverRole);
+        const updatedPO = await updatePurchaseOrderStatusService(poId, status, approverId, approverRole, { supplier });
         return res.status(200).json({ success: true, data: updatedPO });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -517,8 +524,8 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
 
         const result = await getPurchaseOrdersService(req.query, { baseQuery });
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,

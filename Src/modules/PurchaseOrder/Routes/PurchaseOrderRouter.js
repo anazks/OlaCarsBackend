@@ -71,11 +71,13 @@ const upload = require("../../../utils/multerConfig.js");
  *             example: "https://example.com/image.jpg"
  *     PurchaseOrderStatus:
  *       type: string
- *       enum: [WAITING, APPROVED, REJECTED]
+ *       enum: [REQUESTED, MANAGER_APPROVED, WAITING, APPROVED, REJECTED]
  *       description: |
- *         - `WAITING` — Pending approval
- *         - `APPROVED` — Approved by authorized role
- *         - `REJECTED` — Rejected by authorized role
+ *         - `REQUESTED` — Requested by Workshop Technician
+ *         - `MANAGER_APPROVED` — Approved by Workshop Manager
+ *         - `WAITING` — Pending Financial Admin approval
+ *         - `APPROVED` — Fully approved
+ *         - `REJECTED` — Rejected by any approver role
  *     EditHistoryEntry:
  *       type: object
  *       properties:
@@ -132,13 +134,13 @@ const upload = require("../../../utils/multerConfig.js");
  *           description: Creator's User ObjectId
  *         creatorRole:
  *           type: string
- *           enum: [COUNTRYMANAGER, BRANCHMANAGER, OPERATIONSTAFF, FINANCESTAFF]
+ *           enum: [COUNTRYMANAGER, BRANCHMANAGER, OPERATIONSTAFF, FINANCESTAFF, WORKSHOPSTAFF, WORKSHOPMANAGER]
  *         approvedBy:
  *           type: string
  *           description: Approver's User ObjectId (null until approved/rejected)
  *         approverRole:
  *           type: string
- *           enum: [COUNTRYMANAGER, OPERATIONADMIN, FINANCEADMIN, ADMIN]
+ *           enum: [COUNTRYMANAGER, OPERATIONADMIN, FINANCEADMIN, ADMIN, WORKSHOPMANAGER]
  *         isEdited:
  *           type: boolean
  *           default: false
@@ -220,7 +222,7 @@ const upload = require("../../../utils/multerConfig.js");
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER),
     hasPermission("PURCHASE_ORDER_CREATE"),
     upload.any(),
     validate(addPurchaseOrderSchema),
@@ -576,7 +578,7 @@ router.get(
 router.put(
     "/:id/approve",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER),
     hasPermission("PURCHASE_ORDER_APPROVE"),
     validate(approvePurchaseOrderSchema),
     approvePurchaseOrder

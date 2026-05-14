@@ -46,7 +46,9 @@ const ReportingRouter = require("./Src/modules/Reporting/Routes/ReportingRouter"
 const SalaryRouter = require("./Src/modules/Salary/Routes/SalaryRoutes");
 const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountRoutes");
 const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
+const WorkshopProcurementRouter = require("./Src/modules/WorkshopProcurement/Routes/WorkshopProcurementRouter");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
+const { startInvoiceCronJob } = require("./Src/modules/Invoice/Service/InvoiceCronService");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const mongoose = require("mongoose");
@@ -91,6 +93,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 console.log("[DEBUG] Mounting ReportingRouter at /api/reporting");
 app.use("/api/reporting", ReportingRouter);
+app.use("/api/workshop-procurement", WorkshopProcurementRouter);
 
 app.use("/api/admin", AdminRouter);
 app.use("/api/branch", BranchRouter);
@@ -130,7 +133,6 @@ app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
 app.use("/api/bank-accounts", BankAccountRouter);
 app.use("/api/voice", VoiceRoutes);
-
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
@@ -179,6 +181,8 @@ const startServer = async () => {
 
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();
+      startInvoiceCronJob();
+      console.log("Internal cron schedulers (Alerts, Invoices) started");
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }

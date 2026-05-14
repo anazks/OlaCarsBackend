@@ -83,7 +83,8 @@ exports.updatePurchaseOrderStatusService = async (
     id,
     status,
     approvedBy,
-    approverRole
+    approverRole,
+    additionalUpdates = {}
 ) => {
     try {
         return await PurchaseOrder.findByIdAndUpdate(
@@ -92,6 +93,7 @@ exports.updatePurchaseOrderStatusService = async (
                 status,
                 approvedBy,
                 approverRole,
+                ...additionalUpdates,
             },
             { returnDocument: "after" }
         );

@@ -123,6 +123,8 @@ const generateWorkOrderNumber = async () => {
  */
 exports.createWorkOrder = async (data) => {
     try {
+        console.log("[DEBUG] Repo creating WorkOrder with creatorRole:", data.creatorRole);
+        console.log("[DEBUG] WorkOrder Model Enum:", WorkOrder.schema.path("creatorRole").options.enum);
         data.workOrderNumber = await generateWorkOrderNumber();
         const wo = await WorkOrder.create(data);
         return wo.toObject();
