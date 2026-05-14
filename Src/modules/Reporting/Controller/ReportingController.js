@@ -113,3 +113,25 @@ exports.getStaffPerformance = async (req, res) => {
         res.status(500).json({ status: "error", message: error.message });
     }
 };
+exports.getUnifiedStaff = async (req, res) => {
+    try {
+        const options = {
+            search: req.query.search,
+            role: req.query.role || "ALL",
+            branchId: req.query.branchId || "ALL",
+            page: parseInt(req.query.page) || 1,
+            limit: parseInt(req.query.limit) || 25
+        };
+
+        const result = await ReportingService.getUnifiedStaffList(options);
+        res.status(200).json({
+            status: "success",
+            ...result
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};

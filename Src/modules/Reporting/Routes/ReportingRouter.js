@@ -23,5 +23,6 @@ router.get("/balance-sheet", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingCo
 router.get("/daily-finance", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.getDailyFinance);
 router.get("/driver-performance", hasPermission("DRIVER_VIEW"), ReportingController.getDriverPerformance);
 router.get("/staff-performance", hasPermission("STAFF_PERFORMANCE_VIEW"), ReportingController.getStaffPerformance);
+router.get("/staff/unified", hasPermission("STAFF_PERFORMANCE_VIEW"), ReportingController.getUnifiedStaff);
 
 module.exports = router;

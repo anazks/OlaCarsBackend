@@ -268,3 +268,87 @@ exports.getStaffPerformanceReport = async (filters) => {
         };
     });
 };
+exports.getUnifiedStaffList = async (options) => {
+    const { search, role, branchId, page = 1, limit = 25 } = options;
+    const mongoose = require("mongoose");
+
+    const matchStage = { isDeleted: { $ne: true } };
+    if (search) {
+        matchStage.$or = [
+            { fullName: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } }
+        ];
+    }
+
+    const collections = [
+        { name: "financestaffs", role: "FINANCESTAFF" },
+        { name: "operationstaffs", role: "OPERATIONSTAFF" },
+        { name: "branchmanagers", role: "BRANCHMANAGER" },
+        { name: "countrymanagers", role: "COUNTRYMANAGER" },
+        { name: "workshopmanagers", role: "WORKSHOPMANAGER" },
+        { name: "workshopstaffs", role: "WORKSHOPSTAFF" },
+        { name: "financeadmins", role: "FINANCEADMIN" },
+        { name: "operationaladmins", role: "OPERATIONADMIN" } // Use explicit collection name if different
+    ];
+
+    let pipeline = [];
+    
+    // Start with an empty set from Branch collection (guaranteed to exist)
+    pipeline.push({ $limit: 1 }, { $project: { _id: 1 } }, { $match: { _id: null } });
+
+    const rolesToQuery = role === "ALL" ? collections : collections.filter(c => c.role === role);
+
+    rolesToQuery.forEach(coll => {
+        const collMatch = { ...matchStage };
+        // Apply branch filter only if collection has branchId and it's not ALL
+        if (branchId !== "ALL" && !["FINANCEADMIN", "OPERATIONADMIN", "COUNTRYMANAGER"].includes(coll.role)) {
+            collMatch.branchId = new mongoose.Types.ObjectId(branchId);
+        }
+
+        pipeline.push({
+            $unionWith: {
+                coll: coll.name,
+                pipeline: [
+                    { $match: collMatch },
+                    { $addFields: { role: coll.role } }
+                ]
+            }
+        });
+    });
+
+    pipeline.push(
+        { $sort: { fullName: 1 } },
+        {
+            $facet: {
+                metadata: [{ $count: "total" }],
+                data: [
+                    { $skip: (page - 1) * limit },
+                    { $limit: limit },
+                    {
+                        $lookup: {
+                            from: "branches",
+                            localField: "branchId",
+                            foreignField: "_id",
+                            as: "branchId"
+                        }
+                    },
+                    { $unwind: { path: "$branchId", preserveNullAndEmptyArrays: true } }
+                ]
+            }
+        }
+    );
+
+    const result = await Branch.aggregate(pipeline);
+    const total = result[0].metadata[0]?.total || 0;
+    const data = result[0].data || [];
+
+    return {
+        data,
+        pagination: {
+            total,
+            page,
+            limit,
+            pages: Math.ceil(total / limit)
+        }
+    };
+};
