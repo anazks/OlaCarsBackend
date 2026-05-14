@@ -363,57 +363,74 @@ exports.rolloverOverdueRent = async (driverId) => {
 };
 
 /**
- * Generate a multi-week rent plan for a driver.
+ * Generate a rent plan for a driver (Weekly or Monthly).
+ * - Monthly: Due on the 1st of every month, starting the month after assignment.
+ * - Weekly: Due on every Wednesday.
  */
-exports.generateRentPlan = async (driverId, { weeklyRent, durationWeeks, startFromNextWeek = true }, session = null) => {
+exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY' }, session = null) => {
     const installments = [];
-    const startDate = new Date();
-    
-    // Default start from next week if requested
-    if (startFromNextWeek) {
-        startDate.setDate(startDate.getDate() + 7);
+    const assignmentDate = new Date();
+    assignmentDate.setHours(0, 0, 0, 0);
+
+    const isWeekly = frequency.toUpperCase() === 'WEEKLY';
+    const amount = isWeekly ? (weeklyRent || Math.ceil(monthlyRent / 4)) : monthlyRent;
+    const count = isWeekly ? (durationWeeks || durationMonths * 4) : durationMonths;
+
+    let nextDueDate = new Date(assignmentDate);
+
+    if (isWeekly) {
+        // Set to the first Wednesday after assignment
+        // day 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+        const currentDay = nextDueDate.getDay();
+        const daysUntilWed = (3 - currentDay + 7) % 7;
+        const offset = daysUntilWed === 0 ? 7 : daysUntilWed; // If today is Wed, next Wed is 7 days away
+        nextDueDate.setDate(nextDueDate.getDate() + offset);
+    } else {
+        // Monthly: 1st of the month after assignment
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        nextDueDate.setDate(1);
     }
 
-    // Standardize to the start of the day
-    startDate.setHours(0, 0, 0, 0);
-
-    for (let i = 0; i < durationWeeks; i++) {
-        // Use millisecond-based offset from the baseline date to ensure reliable increments
-        const dueDate = new Date(startDate.getTime() + (i * 7 * 24 * 60 * 60 * 1000));
+    for (let i = 0; i < count; i++) {
+        const dueDate = new Date(nextDueDate);
+        if (isWeekly) {
+            dueDate.setDate(nextDueDate.getDate() + (i * 7));
+        } else {
+            dueDate.setMonth(nextDueDate.getMonth() + i);
+            dueDate.setDate(1); // Ensure it's always the 1st
+        }
         
-        const weekNum = i + 1;
+        const periodNum = i + 1;
         installments.push({
-            weekNumber: weekNum,
-            weekLabel: `Week ${weekNum} - ${dueDate.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}`,
+            weekNumber: periodNum,
+            weekLabel: isWeekly 
+                ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+                : `Month ${periodNum} - ${dueDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
             dueDate: dueDate,
-            amount: weeklyRent,
+            amount: amount,
             carryOver: 0,
-            totalDue: weeklyRent,
+            totalDue: amount,
             amountPaid: 0,
-            balance: weeklyRent,
+            balance: amount,
             status: "PENDING",
             payments: [],
         });
     }
 
     // Replace the entire rentTracking to avoid duplicates on re-assignment
-    // Explicitly use $set to ensure array replacement regardless of Mongoose settings
     const updatedDriver = await updateDriverService(driverId, {
         $set: { rentTracking: installments }
     }, session);
 
-    // Call InvoiceService to generate real Invoice documents parallel to rentTracking
-    // We assume the first vehicle assignment is the one here, or we pass null if none
+    // Generate Invoice documents
     const vehicleId = updatedDriver.currentVehicle || null;
     
-    // We don't have createdBy/creatorRole in this scope immediately unless they are passed.
-    // For automatic rent plan generation, we'll try to find an admin or leave it null.
     await InvoiceService.generateRentInvoices(
         driverId, 
         vehicleId, 
-        weeklyRent, 
-        durationWeeks, 
-        startFromNextWeek, 
+        amount, 
+        count, 
+        frequency, 
         updatedDriver.createdBy, 
         updatedDriver.creatorRole, 
         session

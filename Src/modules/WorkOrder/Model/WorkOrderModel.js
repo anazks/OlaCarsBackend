@@ -217,11 +217,12 @@ const workOrderSchema = new mongoose.Schema(
             type: String,
             required: true,
             enum: [
-                ROLES.WORKSHOPSTAFF,
-                ROLES.OPERATIONSTAFF,
-                ROLES.BRANCHMANAGER,
-                ROLES.COUNTRYMANAGER,
-                ROLES.ADMIN,
+                "WORKSHOPMANAGER",
+                "WORKSHOPSTAFF",
+                "OPERATIONSTAFF",
+                "BRANCHMANAGER",
+                "COUNTRYMANAGER",
+                "ADMIN",
             ],
         },
 
@@ -229,6 +230,8 @@ const workOrderSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+
+console.log("[DEBUG] WorkOrder creatorRole Enum:", workOrderSchema.path("creatorRole").options.enum);
 
 // ─── Pre-save: auto-compute totalCost on parts ──────────────────────
 workOrderPartSchema.pre("validate", async function () {
@@ -242,8 +245,12 @@ workOrderSchema.index({ vehicleId: 1 });
 workOrderSchema.index({ priority: 1, slaDeadline: 1 });
 workOrderSchema.index({ assignedTechnician: 1 });
 
+if (mongoose.models.WorkOrder) {
+    delete mongoose.models.WorkOrder;
+}
+
 module.exports = {
-    WorkOrder: mongoose.models.WorkOrder || mongoose.model("WorkOrder", workOrderSchema),
+    WorkOrder: mongoose.model("WorkOrder", workOrderSchema),
     WORK_ORDER_STATUSES,
     WORK_ORDER_TYPES,
     PRIORITIES,

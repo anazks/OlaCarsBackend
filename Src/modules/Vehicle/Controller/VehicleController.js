@@ -302,10 +302,18 @@ const getAvailableCars = async (req, res, next) => {
             baseQuery["purchaseDetails.branch"] = req.user.branchId;
         }
 
+        console.log('[DEBUG] getAvailableCars - baseQuery:', JSON.stringify(baseQuery, null, 2));
+
         const result = await getVehiclesService(queryParams, {
             baseQuery,
             defaultSort: { createdAt: -1 }
         });
+        
+        console.log('[DEBUG] getAvailableCars - Found vehicles:', result.data?.length || 0);
+        if (result.data && result.data.length > 0) {
+            console.log('[DEBUG] getAvailableCars - First Vehicle Status:', result.data[0].status);
+            console.log('[DEBUG] getAvailableCars - First Vehicle Branch:', result.data[0].purchaseDetails?.branch?._id || result.data[0].purchaseDetails?.branch);
+        }
         
         return res.status(200).json({ 
             success: true, 
@@ -339,16 +347,17 @@ const assignCarToDriver = async (req, res, next) => {
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
         const { 
-            durationWeeks, 
-            weeklyRent, 
+            durationMonths, 
+            monthlyRent, 
+            depositAmount = 0,
             notes, 
             agreementVersion, 
             generatedS3Key, 
             signedS3Key 
         } = req.body;
 
-        if (durationWeeks === undefined || weeklyRent === undefined) {
-            throw new Error("durationWeeks and weeklyRent are required during assignment.");
+        if (durationMonths === undefined || monthlyRent === undefined) {
+            throw new Error("durationMonths and monthlyRent are required during assignment.");
         }
 
         // 1. Verify vehicle exists and is available
@@ -369,21 +378,26 @@ const assignCarToDriver = async (req, res, next) => {
             throw new Error("Driver not found");
         }
 
-        // 3. Create Lease record
+        // 3. Validate rent calculation on backend
+        const purchasePrice = vehicle.purchaseDetails?.purchasePrice || 0;
+        const effectiveCost = Math.max(0, purchasePrice - depositAmount);
+        const expectedRent = durationMonths > 0 ? Math.ceil(effectiveCost / durationMonths) : 0;
+        console.log(`[DEBUG] Assignment Calc: Price=${purchasePrice}, Deposit=${depositAmount}, Effective=${effectiveCost}, Duration=${durationMonths}mo, Rent=${expectedRent}/mo (frontend sent ${monthlyRent})`);
+
+        // 4. Create Lease record
         const { createLeaseService } = require("../../Lease/Service/LeaseService");
         const lease = await createLeaseService({
             driver: driverId,
             vehicle: vehicleId,
-            durationWeeks,
-            weeklyRent,
-            notes,
+            durationWeeks: durationMonths * 4, // approximate for lease record compat
+            weeklyRent: Math.ceil(monthlyRent / 4), // approximate for lease record compat
+            notes: `Monthly: ${durationMonths}mo @ $${monthlyRent}/mo. Deposit: $${depositAmount}`,
             agreementVersion,
             generatedS3Key,
             signedS3Key
         }, req.user.id, req.user.role, session);
 
-        // 4. Perform assignment status updates
-        // Update Vehicle status
+        // 5. Update Vehicle status
         await updateVehicleService(vehicleId, { 
             status: "ACTIVE — RENTED",
             $push: { 
@@ -391,29 +405,53 @@ const assignCarToDriver = async (req, res, next) => {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease Duration: ${durationWeeks} weeks.`
+                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease: ${durationMonths} months @ $${monthlyRent}/mo. Deposit: $${depositAmount}.`
                 }
             }
         }, session);
 
-        await updateDriverService(driverId, { 
+        // 6. Update Driver — link vehicle + add deposit if applicable
+        const driverUpdate = { 
             currentVehicle: vehicleId,
             $push: {
                 statusHistory: {
-                    status: driver.status, // Keep current status
+                    status: driver.status,
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease Duration: ${durationWeeks} weeks.`
+                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease: ${durationMonths} months.`
                 }
             }
-        }, session);
+        };
 
-        // 5. Generate the multi-week rent plan automatically
+        await updateDriverService(driverId, driverUpdate, session);
+
+        // 7. If deposit exists, add it as an additional payment
+        if (depositAmount > 0) {
+            await updateDriverService(driverId, {
+                $push: {
+                    additionalPayments: {
+                        type: "DEPOSIT",
+                        label: `Vehicle Deposit — ${vehicle.basicDetails.make} ${vehicle.basicDetails.model}`,
+                        amount: depositAmount,
+                        dueDate: new Date(),
+                        status: "PENDING",
+                        amountPaid: 0,
+                        balance: depositAmount,
+                        relatedVehicle: vehicleId,
+                        notes: notes || "Deposit for vehicle assignment",
+                    }
+                }
+            }, session);
+        }
+
+        // 8. Generate the monthly/weekly rent plan
         const DriverService = require("../../Driver/Service/DriverService");
         await DriverService.generateRentPlan(driverId, {
-            weeklyRent: weeklyRent,
-            durationWeeks: durationWeeks,
-            startFromNextWeek: true 
+            monthlyRent: monthlyRent,
+            weeklyRent: req.body.weeklyRent,
+            durationMonths: durationMonths,
+            durationWeeks: req.body.durationWeeks,
+            frequency: req.body.frequency || 'MONTHLY'
         }, session);
 
         await session.commitTransaction();

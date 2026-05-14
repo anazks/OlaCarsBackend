@@ -568,6 +568,113 @@ const dataMigrateDrivers = async (req, res) => {
     }
 };
 
+/**
+ * Record a payment against a driver's additional payment (deposit, fee, etc.)
+ * @route POST /api/driver/:id/additional-payments/:paymentId/pay
+ */
+const payAdditionalPayment = async (req, res) => {
+    try {
+        const driverId = req.params.id;
+        const paymentId = req.params.paymentId;
+        const { amount, paymentMethod, note } = req.body;
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({ success: false, message: "Payment amount must be greater than 0" });
+        }
+
+        const driver = await getDriverByIdService(driverId);
+        if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
+
+        // Find the additional payment entry by _id
+        const apIndex = driver.additionalPayments.findIndex(
+            ap => ap._id.toString() === paymentId
+        );
+        if (apIndex === -1) {
+            return res.status(404).json({ success: false, message: "Additional payment entry not found" });
+        }
+
+        const ap = driver.additionalPayments[apIndex];
+        if (ap.status === "PAID") {
+            return res.status(400).json({ success: false, message: "This payment is already fully paid" });
+        }
+
+        const timestamp = new Date();
+        const paymentForThis = Math.min(amount, ap.balance);
+        const newPaid = (ap.amountPaid || 0) + paymentForThis;
+        const newBalance = Math.max(0, ap.amount - newPaid);
+        let newStatus = "PENDING";
+        if (newBalance <= 0) newStatus = "PAID";
+        else if (newPaid > 0) newStatus = "PARTIAL";
+
+        const paymentRecord = {
+            amount: paymentForThis,
+            paidAt: timestamp,
+            paymentMethod: paymentMethod || "Cash",
+            note: note || "",
+        };
+
+        const updates = {};
+        updates[`additionalPayments.${apIndex}.amountPaid`] = newPaid;
+        updates[`additionalPayments.${apIndex}.balance`] = newBalance;
+        updates[`additionalPayments.${apIndex}.status`] = newStatus;
+        if (newStatus === "PAID") {
+            updates[`additionalPayments.${apIndex}.paidAt`] = timestamp;
+        }
+        updates.$push = {};
+        updates.$push[`additionalPayments.${apIndex}.payments`] = paymentRecord;
+
+        await updateDriverService(driverId, updates);
+
+        // Create PaymentTransaction + Ledger entry on actual payment
+        try {
+            const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+            const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
+            const LedgerService = require("../../Ledger/Service/LedgerService");
+
+            const accCode = await AccountingCode.findOne({ code: "4000" });
+            if (accCode) {
+                const driverName = driver.personalInfo?.fullName || "Unknown Driver";
+
+                let normalizedMethod = "OTHER";
+                const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
+                if (methodUpper.includes("CASH")) normalizedMethod = "CASH";
+                else if (methodUpper.includes("BANK") || methodUpper.includes("TRANSFER")) normalizedMethod = "BANK_TRANSFER";
+                else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
+
+                const txData = {
+                    accountingCode: accCode._id,
+                    referenceId: driverId,
+                    referenceModel: "Driver",
+                    transactionCategory: "INCOME",
+                    transactionType: "CREDIT",
+                    isTaxInclusive: false,
+                    baseAmount: paymentForThis,
+                    totalAmount: paymentForThis,
+                    paymentMethod: normalizedMethod,
+                    status: "COMPLETED",
+                    paymentDate: timestamp,
+                    notes: `${ap.type} Payment: ${ap.label} by ${driverName}${note ? ' - ' + note : ''}`,
+                    createdBy: req.user.id,
+                    creatorRole: req.user.role,
+                };
+
+                const newTx = await PaymentTransaction.create(txData);
+                const populatedTx = { ...newTx.toObject(), accountingCode: accCode };
+                await LedgerService.autoGenerateLedgerEntry(populatedTx);
+                console.log(`[DriverController] Ledger entry created for additional payment ${paymentId}`);
+            }
+        } catch (ledgerErr) {
+            console.error("[DriverController] Failed to create ledger for additional payment:", ledgerErr);
+        }
+
+        const updatedDriver = await getDriverByIdService(driverId);
+        return res.status(200).json({ success: true, data: updatedDriver });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -581,4 +688,5 @@ module.exports = {
     updatePerformance,
     bulkAddDrivers,
     dataMigrateDrivers,
+    payAdditionalPayment,
 };

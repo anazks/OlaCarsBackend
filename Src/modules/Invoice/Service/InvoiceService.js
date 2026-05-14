@@ -18,31 +18,55 @@ exports.getById = async (id) => {
     return await getInvoiceByIdService(id);
 };
 
-exports.generateRentInvoices = async (driverId, vehicleId, weeklyRent, durationWeeks, startFromNextWeek = true, createdBy, creatorRole, session = null) => {
-    const startDate = new Date();
-    if (startFromNextWeek) {
-        startDate.setDate(startDate.getDate() + 7);
+exports.generateRentInvoices = async (driverId, vehicleId, amount, count, frequency = 'MONTHLY', createdBy, creatorRole, session = null) => {
+    const assignmentDate = new Date();
+    assignmentDate.setHours(0, 0, 0, 0);
+
+    const isWeekly = frequency.toUpperCase() === 'WEEKLY';
+    let nextDueDate = new Date(assignmentDate);
+
+    if (isWeekly) {
+        // Set to the first Wednesday after assignment
+        const currentDay = nextDueDate.getDay();
+        const daysUntilWed = (3 - currentDay + 7) % 7;
+        const offset = daysUntilWed === 0 ? 7 : daysUntilWed; 
+        nextDueDate.setDate(nextDueDate.getDate() + offset);
+    } else {
+        // Monthly: 1st of the month after assignment
+        nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+        nextDueDate.setDate(1);
     }
-    startDate.setHours(0, 0, 0, 0);
 
     const invoicesData = [];
     const ts = Date.now();
-    for (let i = 0; i < durationWeeks; i++) {
-        const dueDate = new Date(startDate.getTime() + (i * 7 * 24 * 60 * 60 * 1000));
-        const weekNum = i + 1;
+    
+    // ONLY generate the first invoice (Week/Month 1) upon assignment
+    const generateCount = 1; 
+
+    for (let i = 0; i < generateCount; i++) {
+        const dueDate = new Date(nextDueDate);
+        if (isWeekly) {
+            dueDate.setDate(nextDueDate.getDate() + (i * 7));
+        } else {
+            dueDate.setMonth(nextDueDate.getMonth() + i);
+            dueDate.setDate(1);
+        }
         
+        const periodNum = i + 1;
         invoicesData.push({
-            invoiceNumber: `INV-${ts}-${weekNum}`,
+            invoiceNumber: `INV-${ts}-${periodNum}`,
             driver: driverId,
             vehicle: vehicleId,
-            weekNumber: weekNum,
-            weekLabel: `Week ${weekNum} - ${dueDate.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })}`,
+            weekNumber: periodNum,
+            weekLabel: isWeekly 
+                ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
+                : `Month ${periodNum} - ${dueDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
             dueDate: dueDate,
-            baseAmount: weeklyRent,
+            baseAmount: amount,
             carryOverAmount: 0,
-            totalAmountDue: weeklyRent,
+            totalAmountDue: amount,
             amountPaid: 0,
-            balance: weeklyRent,
+            balance: amount,
             status: "PENDING",
             payments: [],
             createdBy,

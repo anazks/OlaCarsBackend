@@ -33,6 +33,7 @@ const getActiveAlertsRepo = async (filters = {}) => {
     const query = { status: "ACTIVE", isDeleted: false, ...filters };
     return await Alert.find(query)
         .populate("vehicleId", "basicDetails purchaseDetails status")
+        .populate("branchId", "name country")
         .sort({ createdAt: -1 });
 };
 
@@ -45,6 +46,7 @@ const getAllAlertsRepo = async (filters = {}) => {
     const query = { isDeleted: false, ...filters };
     return await Alert.find(query)
         .populate("vehicleId", "basicDetails purchaseDetails status")
+        .populate("branchId", "name country")
         .sort({ createdAt: -1 });
 };
 

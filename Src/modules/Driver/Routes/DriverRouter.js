@@ -13,6 +13,7 @@ const {
     getDriverMe,
     bulkAddDrivers,
     dataMigrateDrivers,
+    payAdditionalPayment,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -553,6 +554,14 @@ router.put(
     authorize(ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("STAFF_PERFORMANCE_EDIT"),
     updatePerformance
+);
+// ─── POST /api/driver/:id/additional-payments/:paymentId/pay ─────────
+router.post(
+    "/:id/additional-payments/:paymentId/pay",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("PAYMENT_CREATE"),
+    payAdditionalPayment
 );
 module.exports = router;
 
