@@ -34,13 +34,16 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *           schema:
  *             type: object
  *             required:
- *               - workOrderId
  *               - incidentDate
  *               - incidentDescription
  *               - claimAmount
  *             properties:
  *               workOrderId:
  *                 type: string
+ *                 description: Optional. Required if creating from a Work Order.
+ *               vehicleId:
+ *                 type: string
+ *                 description: Optional. Required if creating manually without a Work Order.
  *               incidentDate:
  *                 type: string
  *                 format: date-time

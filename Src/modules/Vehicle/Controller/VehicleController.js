@@ -144,7 +144,8 @@ const getVehicles = async (req, res, next) => {
             }
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[DEBUG GET VEHICLES ERROR]', error);
+        return res.status(500).json({ success: false, message: error.message, stack: error.stack });
     }
 };
 

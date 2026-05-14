@@ -333,3 +333,5 @@ module.exports = {
     Driver: mongoose.model("Driver", driverSchema),
     DRIVER_STATUSES,
 };
+
+mongoose.model("DRIVER", driverSchema, "drivers");

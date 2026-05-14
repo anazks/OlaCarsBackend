@@ -242,6 +242,8 @@ const vehicleSchema = new mongoose.Schema(
                 ROLES.FINANCESTAFF,
                 ROLES.COUNTRYMANAGER,
                 ROLES.ADMIN,
+                ROLES.FINANCEADMIN,
+                ROLES.OPERATIONADMIN,
             ],
         },
 

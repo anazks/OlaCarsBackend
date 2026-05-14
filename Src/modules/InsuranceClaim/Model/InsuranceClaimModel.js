@@ -15,7 +15,7 @@ const insuranceClaimSchema = new mongoose.Schema(
         claimNumber: { type: String, unique: true, required: true },
 
         // References
-        workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "WorkOrder", required: true },
+        workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "WorkOrder" },
         vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", required: true },
         branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true },
 
