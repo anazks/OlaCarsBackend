@@ -77,13 +77,8 @@ const addPaymentTransaction = async (req, res) => {
 
 const getPaymentTransactions = async (req, res) => {
     try {
-        const query = {};
-        if (req.query.status) query.status = req.query.status;
-        if (req.query.transactionCategory) query.transactionCategory = req.query.transactionCategory;
-        if (req.query.transactionType) query.transactionType = req.query.transactionType;
-
-        const payments = await getPaymentTransactionsService(query);
-        return res.status(200).json({ success: true, data: payments });
+        const result = await getPaymentTransactionsService(req.query);
+        return res.status(200).json({ success: true, ...result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

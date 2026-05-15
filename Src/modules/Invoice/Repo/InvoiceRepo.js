@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const { Invoice } = require("../Model/InvoiceModel");
 
 exports.addInvoiceService = async (data, session = null) => {
@@ -16,32 +17,133 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const limit = parseInt(queryParams.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const baseQuery = options.baseQuery || { isDeleted: false };
-    const query = { ...baseQuery };
+    const pipeline = [
+        { $match: { isDeleted: false } }
+    ];
 
-    if (queryParams.driver) query.driver = queryParams.driver;
-    if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
-    if (queryParams.status) query.status = queryParams.status;
-    if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
+    // Date Range Filter
+    if (queryParams.startDate || queryParams.endDate) {
+        const dateQuery = {};
+        if (queryParams.startDate) dateQuery.$gte = new Date(queryParams.startDate);
+        if (queryParams.endDate) {
+            const end = new Date(queryParams.endDate);
+            end.setHours(23, 59, 59, 999);
+            dateQuery.$lte = end;
+        }
+        pipeline.push({ $match: { dueDate: dateQuery } });
+    }
 
-    const totalCount = await Invoice.countDocuments(query);
-    const totalPages = Math.ceil(totalCount / limit);
+    // Status Filter
+    if (queryParams.status && queryParams.status !== 'ALL') {
+        pipeline.push({ $match: { status: queryParams.status } });
+    }
 
-    const sortOpt = options.defaultSort || { weekNumber: 1 };
+    // Driver/Vehicle direct ID filters
+    if (queryParams.driver) pipeline.push({ $match: { driver: new mongoose.Types.ObjectId(queryParams.driver) } });
+    if (queryParams.vehicle) pipeline.push({ $match: { vehicle: new mongoose.Types.ObjectId(queryParams.vehicle) } });
 
-    const data = await Invoice.find(query)
-        .populate("driver", "personalInfo.fullName personalInfo.email")
-        .populate("vehicle", "basicDetails.make basicDetails.model legalDocs.registrationNumber")
-        .sort(sortOpt)
-        .skip(skip)
-        .limit(limit)
-        .lean();
+    // Search Filter (Invoice Number or Driver Name)
+    if (queryParams.search) {
+        pipeline.push(
+            {
+                $lookup: {
+                    from: 'drivers',
+                    localField: 'driver',
+                    foreignField: '_id',
+                    as: 'driverInfo'
+                }
+            },
+            { $unwind: '$driverInfo' },
+            {
+                $match: {
+                    $or: [
+                        { invoiceNumber: { $regex: queryParams.search, $options: 'i' } },
+                        { 'driverInfo.personalInfo.fullName': { $regex: queryParams.search, $options: 'i' } },
+                        { 'driverInfo.personalInfo.email': { $regex: queryParams.search, $options: 'i' } }
+                    ]
+                }
+            }
+        );
+    } else {
+        // If no search, still need to populate driver for the response
+        pipeline.push(
+            {
+                $lookup: {
+                    from: 'drivers',
+                    localField: 'driver',
+                    foreignField: '_id',
+                    as: 'driverInfo'
+                }
+            },
+            { $unwind: '$driverInfo' }
+        );
+    }
+
+    // Lookup Vehicle info
+    pipeline.push(
+        {
+            $lookup: {
+                from: 'vehicles',
+                localField: 'vehicle',
+                foreignField: '_id',
+                as: 'vehicleInfo'
+            }
+        },
+        { $unwind: { path: '$vehicleInfo', preserveNullAndEmptyArrays: true } }
+    );
+
+    // Sort, skip, limit
+    const sortField = options.defaultSort ? Object.keys(options.defaultSort)[0] : 'weekNumber';
+    const sortOrder = options.defaultSort ? Object.values(options.defaultSort)[0] : 1;
+
+    pipeline.push(
+        {
+            $facet: {
+                metadata: [{ $count: 'total' }],
+                data: [
+                    { $sort: { [sortField]: sortOrder } },
+                    { $skip: skip },
+                    { $limit: limit },
+                    {
+                        $project: {
+                            invoiceNumber: 1,
+                            weekNumber: 1,
+                            weekLabel: 1,
+                            dueDate: 1,
+                            baseAmount: 1,
+                            carryOverAmount: 1,
+                            totalAmountDue: 1,
+                            amountPaid: 1,
+                            balance: 1,
+                            status: 1,
+                            paidAt: 1,
+                            payments: 1,
+                            generatedAt: 1,
+                            driver: {
+                                _id: '$driverInfo._id',
+                                personalInfo: '$driverInfo.personalInfo'
+                            },
+                            vehicle: {
+                                _id: '$vehicleInfo._id',
+                                basicDetails: '$vehicleInfo.basicDetails',
+                                legalDocs: '$vehicleInfo.legalDocs'
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    );
+
+    const result = await Invoice.aggregate(pipeline);
+    const totalCount = result[0].metadata[0]?.total || 0;
+    const data = result[0].data || [];
 
     return {
         data,
         pagination: {
             totalItems: totalCount,
-            totalPages,
+            totalPages: Math.ceil(totalCount / limit),
             currentPage: page,
             limit,
         },
