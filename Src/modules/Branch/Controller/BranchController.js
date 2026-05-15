@@ -87,11 +87,22 @@ const getBranchExtendedDetails = async (req, res) => {
     }
 };
 
+const getPublicBranchList = async (req, res) => {
+    try {
+        const result = await BranchService.getAll({ status: 'ACTIVE', limit: 100 }, {});
+        const branches = result.data.map(b => ({ _id: b._id, name: b.name }));
+        return res.status(200).json({ success: true, data: branches });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addBranch,
     editBranch,
     deleteBranch,
     getBranches,
     getBranchById,
-    getBranchExtendedDetails
-};
+    getBranchExtendedDetails,
+    getPublicBranchList
+};

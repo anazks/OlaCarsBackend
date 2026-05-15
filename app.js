@@ -51,6 +51,7 @@ const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertSchedul
 const { startInvoiceCronJob } = require("./Src/modules/Invoice/Service/InvoiceCronService");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
+const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -128,6 +129,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);

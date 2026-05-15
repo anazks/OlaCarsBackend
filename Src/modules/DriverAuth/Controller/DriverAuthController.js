@@ -105,19 +105,24 @@ const requestOTP = async (req, res) => {
 };
 
 /**
- * Driver login — Step 2: Verify OTP.
+ * Driver login — Login using email and mobile number.
  * @route POST /api/driver-auth/login
  */
 const login = async (req, res) => {
     try {
-        const { email, otp } = req.body;
+        const { email, phone } = req.body;
 
-        if (!email || !otp) {
-            throw new AppError("Email and OTP are required.", 400);
+        if (!email || !phone) {
+            throw new AppError("Email and Mobile Number are required.", 400);
         }
 
-        const driver = await Driver.findOne({ "personalInfo.email": email.toLowerCase(), isDeleted: false });
-        if (!driver) throw new AppError("Invalid credentials.", 401);
+        const driver = await Driver.findOne({ 
+            "personalInfo.email": email.toLowerCase(), 
+            "personalInfo.phone": phone,
+            isDeleted: false 
+        });
+
+        if (!driver) throw new AppError("Invalid credentials. Please check your email and mobile number.", 401);
 
         // Check account lock
         if (driver.lockUntil && driver.lockUntil > Date.now()) {
@@ -128,22 +133,7 @@ const login = async (req, res) => {
             throw new AppError(`Account is ${driver.status.toLowerCase()}.`, 403);
         }
 
-        // Verify OTP (DISABLED FOR TESTING - as per previous user request)
-        /*
-        if (!driver.otp || driver.otp !== otp || driver.otpExpires < Date.now()) {
-            driver.failedLoginAttempts = (driver.failedLoginAttempts || 0) + 1;
-            if (driver.failedLoginAttempts >= 5) {
-                driver.lockUntil = new Date(Date.now() + 30 * 60 * 1000);
-            }
-            await driver.save();
-            throw new AppError("Invalid or expired OTP.", 401);
-        }
-        */
-       console.log(`[TEST MODE] Bypassing OTP check for ${email}`);
-
-        // Reset OTP and failed attempts
-        driver.otp = undefined;
-        driver.otpExpires = undefined;
+        // Reset failed attempts
         driver.failedLoginAttempts = 0;
         driver.lockUntil = undefined;
         driver.lastLoginAt = new Date();
@@ -175,7 +165,7 @@ const login = async (req, res) => {
             message: "Login successful.",
             accessToken,
             refreshToken,
-            user: populatedDriver, // Returning the whole driver as the user object
+            user: populatedDriver,
             driver: populatedDriver,
         });
     } catch (error) {

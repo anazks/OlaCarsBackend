@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch, editBranch, deleteBranch, getBranches, getBranchById, getBranchExtendedDetails } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch, getBranches, getBranchById, getBranchExtendedDetails, getPublicBranchList } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
@@ -101,6 +101,8 @@ router.get(
   hasPermission("BRANCH_VIEW"),
   getBranches
 );
+
+router.get("/public/list", getPublicBranchList);
 
 /**
  * @swagger

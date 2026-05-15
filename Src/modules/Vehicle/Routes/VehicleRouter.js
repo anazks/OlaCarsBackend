@@ -204,7 +204,17 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    hasPermission("VEHICLE_VIEW"),
+    authorize(
+        ROLES.ADMIN,
+        ROLES.OPERATIONADMIN,
+        ROLES.FINANCEADMIN,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.WORKSHOPMANAGER,
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCESTAFF,
+        ROLES.USER
+    ),
     validate(getVehicleByIdSchema),
     getVehicleById
 );
