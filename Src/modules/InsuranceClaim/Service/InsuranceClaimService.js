@@ -151,7 +151,47 @@ const progressClaim = async (claimId, targetStatus, payload, user) => {
     return updated;
 };
 
+const createManualClaim = async (vehicleId, incidentData, user) => {
+    const { getVehicleByIdService } = require("../../Vehicle/Repo/VehicleRepo");
+    const vehicle = await getVehicleByIdService(vehicleId);
+    if (!vehicle) throw new Error("Vehicle not found.", { cause: 404 });
+
+    const branchId = vehicle.purchaseDetails?.branch?._id || vehicle.purchaseDetails?.branch;
+    if (!branchId) throw new Error("Vehicle is not assigned to a branch.", { cause: 400 });
+
+    const insurance = vehicle.insuranceDetails || {};
+
+    const claimData = {
+        vehicleId: vehicle._id,
+        branchId: branchId,
+        incidentDate: incidentData.incidentDate,
+        incidentDescription: incidentData.incidentDescription,
+        incidentLocation: incidentData.incidentLocation,
+        policeReportNumber: incidentData.policeReportNumber,
+        policeReportDocument: incidentData.policeReportDocument,
+        insurerName: incidentData.insurerName || insurance.provider || "Unknown",
+        policyNumber: incidentData.policyNumber || insurance.insuranceNumber || "Unknown",
+        insuranceType: incidentData.insuranceType || insurance.policyType,
+        excessAmount: incidentData.excessAmount || 0,
+        claimAmount: incidentData.claimAmount,
+        notes: incidentData.notes,
+        createdBy: user.id,
+        creatorRole: user.role,
+        statusHistory: [
+            {
+                status: "DRAFT",
+                changedBy: user.id,
+                changedByRole: user.role,
+                notes: "Manual claim created",
+            },
+        ],
+    };
+
+    return await createClaim(claimData);
+};
+
 module.exports = {
     createFromWorkOrder,
+    createManualClaim,
     progressClaim,
 };
