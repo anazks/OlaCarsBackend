@@ -11,17 +11,13 @@ const taskSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
-        assignedTo: {
-            type: mongoose.Schema.Types.ObjectId,
-            required: true,
-            refPath: "assignedToRoleModel",
-        },
-        assignedToRole: {
+        targetType: {
             type: String,
+            enum: ["COUNTRY", "BRANCH", "STAFF"],
             required: true,
         },
-        assignedToRoleModel: {
-            type: String,
+        targetId: {
+            type: String, // Can be country code, branchId, or userId
             required: true,
         },
         assignedBy: {
@@ -57,7 +53,7 @@ const taskSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-taskSchema.index({ assignedTo: 1, status: 1 });
+taskSchema.index({ targetType: 1, targetId: 1, status: 1 });
 taskSchema.index({ assignedBy: 1 });
 
 module.exports = mongoose.model("Task", taskSchema);

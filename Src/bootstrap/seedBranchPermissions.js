@@ -9,7 +9,7 @@ const OperationStaff = require("../modules/OperationStaff/Model/OperationStaffMo
  */
 const seedBranchPermissions = async () => {
     try {
-        const branchPermissions = ["BRANCH_VIEW"];
+        const branchPermissions = ["BRANCH_VIEW", "VEHICLE_VIEW"];
         const targetRoles = [
             "OPERATIONADMIN",
             "COUNTRYMANAGER",

@@ -40,7 +40,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 router.get(
     "/",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     hasPermission("STAFF_PERFORMANCE_VIEW"),
     getPerformance
 );
@@ -48,7 +48,7 @@ router.get(
 router.get(
     "/:id/details",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     hasPermission("STAFF_PERFORMANCE_VIEW"),
     getIndividualPerformance
 );
@@ -65,8 +65,14 @@ router.post(
 router.get(
     "/targets",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    authorize(ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
     targetController.getTargets
+);
+
+router.patch(
+    "/targets/:targetId/status",
+    authenticate,
+    targetController.updateTargetStatus
 );
 
 // Tasks

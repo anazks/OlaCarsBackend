@@ -1,4 +1,6 @@
 const OperationAdminService = require('../Service/OperationAdminService.js');
+const DashboardService = require('../../Dashboard/Service/DashboardService.js');
+const targetService = require('../../StaffPerformance/Service/targetService.js');
 
 const login = async (req, res) => {
   try {
@@ -104,6 +106,58 @@ const deleteOperationalAdmin = async (req, res) => {
   }
 };
 
+const getDashboardStats = async (req, res) => {
+  try {
+    const filters = {
+      country: req.query.country || req.user.country,
+      branch: req.query.branchId || req.user.branchId
+    };
+
+    const [summary, tasks] = await Promise.all([
+      DashboardService.getSummaryStats(filters),
+      targetService.getDashboardTaskStats(req.user)
+    ]);
+
+    // Format fleet status for Recharts
+    const fleetStatus = [
+      { name: 'Available', value: summary.fleetStatus.available, color: '#3B82F6' },
+      { name: 'Rented', value: summary.fleetStatus.rented, color: '#148F85' },
+      { name: 'Maintenance', value: summary.fleetStatus.maintenance, color: '#F59E0B' },
+      { name: 'Other', value: summary.fleetStatus.other + summary.fleetStatus.retired, color: '#6B7280' }
+    ];
+
+    const fleetUtilization = summary.stats.totalActiveVehicles > 0 
+      ? Math.round((summary.fleetStatus.rented / summary.stats.totalActiveVehicles) * 100)
+      : 0;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        vehicleKpis: {
+          totalVehicles: summary.totalVehicles || 0,
+          availableVehicles: summary.fleetStatus.available || 0,
+          activeVehicles: summary.fleetStatus.rented || 0,
+          maintenanceVehicles: summary.fleetStatus.maintenance || 0
+        },
+        driverKpis: {
+          activeDrivers: summary.stats.activeDrivers || 0
+        },
+        alertsSummary: {
+          critical: summary.alerts.CRITICAL || 0,
+          major: summary.alerts.MAJOR || 0,
+          minor: summary.alerts.MINOR || 0
+        },
+        tasks,
+        fleetStatus,
+        fleetUtilization
+      }
+    });
+  } catch (error) {
+    console.error("Operation Dashboard Stats Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   login,
   logout,
@@ -113,5 +167,6 @@ module.exports = {
   getOperationalAdminById,
   editOperationalAdmin,
   changePassword,
-  deleteOperationalAdmin
+  deleteOperationalAdmin,
+  getDashboardStats
 };
