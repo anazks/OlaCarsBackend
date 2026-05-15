@@ -9,9 +9,16 @@ const createEnquiry = async (data) => {
     }
 };
 
-const getAllEnquiries = async (filter = {}) => {
+const getAllEnquiries = async (queryParams = {}) => {
     try {
-        return await Enquiry.find(filter).sort({ createdAt: -1 });
+        const { limit, page, sort, ...filter } = queryParams;
+        const queryLimit = limit ? parseInt(limit, 10) : 0;
+        
+        let query = Enquiry.find(filter).populate('branchId', 'name location').sort({ createdAt: -1 });
+        if (queryLimit > 0) {
+            query = query.limit(queryLimit);
+        }
+        return await query;
     } catch (error) {
         throw error;
     }

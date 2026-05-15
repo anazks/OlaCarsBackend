@@ -7,6 +7,7 @@ const { authenticate, optionalAuthenticate } = require('../../../shared/middlewa
 
 router.post('/register', optionalAuthenticate, EnquiryController.registerEnquiry);
 router.get('/', authenticate, EnquiryController.getEnquiries);
+router.get('/list', authenticate, EnquiryController.getEnquiries);
 router.get('/my-complaints', authenticate, EnquiryController.getMyComplaints);
 
 module.exports = router;
