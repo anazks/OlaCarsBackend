@@ -34,6 +34,7 @@ const InventoryRouter = require("./Src/modules/Inventory/Routes/InventoryRouter"
 const ServiceBillRouter = require("./Src/modules/ServiceBill/Routes/ServiceBillRouter");
 const InsuranceClaimRouter = require("./Src/modules/InsuranceClaim/Routes/InsuranceClaimRouter");
 const InsuranceRouter = require("./Src/modules/Insurance/Routes/InsuranceRoutes");
+const VehiclePolicyRouter = require("./Src/modules/Insurance/Routes/VehiclePolicyRoutes");
 const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/SystemSettingsRoutes");
 const AgreementRouter = require("./Src/modules/Agreement/Routes/AgreementRouter");
 const AIRouter = require("./Src/modules/AI/Routes/AiRoutes");
@@ -122,6 +123,7 @@ app.use("/api/inventory", InventoryRouter);
 app.use("/api/service-bills", ServiceBillRouter);
 app.use("/api/insurance-claims", InsuranceClaimRouter);
 app.use("/api/insurance", InsuranceRouter);
+app.use("/api/vehicle-policy", VehiclePolicyRouter);
 app.use("/api/system-settings", SystemSettingsRouter);
 app.use("/api/agreements", AgreementRouter);
 app.use("/api/ai-service", AIRouter);

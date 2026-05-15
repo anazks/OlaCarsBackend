@@ -59,7 +59,10 @@ const createFromWorkOrder = async (woId, incidentData, user) => {
 
     // Auto-populate from vehicle insurance
     const vehicle = wo.vehicleId; // populated by getWorkOrderById
-    const insurance = vehicle?.insurancePolicy || {};
+    const { getVehiclePoliciesByVehicleIdService } = require("../../Insurance/Repo/VehiclePolicyRepo");
+    const policies = await getVehiclePoliciesByVehicleIdService(vehicle._id || wo.vehicleId);
+    const activePolicy = policies.length > 0 ? policies[0] : null;
+    const insurance = activePolicy ? activePolicy.insurance : {};
 
     const claimData = {
         workOrderId: wo._id,
@@ -70,10 +73,10 @@ const createFromWorkOrder = async (woId, incidentData, user) => {
         incidentLocation: incidentData.incidentLocation,
         policeReportNumber: incidentData.policeReportNumber,
         policeReportDocument: incidentData.policeReportDocument,
-        insurerName: incidentData.insurerName || insurance.providerName || "Unknown",
+        insurerName: incidentData.insurerName || (insurance.supplier && insurance.supplier.name) || "Unknown",
         policyNumber: incidentData.policyNumber || insurance.policyNumber || "Unknown",
-        insuranceType: insurance.insuranceType,
-        excessAmount: incidentData.excessAmount || insurance.excessAmount || 0,
+        insuranceType: incidentData.insuranceType || insurance.policyType,
+        excessAmount: incidentData.excessAmount || 0,
         claimAmount: incidentData.claimAmount,
         notes: incidentData.notes,
         createdBy: user.id,
@@ -159,7 +162,10 @@ const createManualClaim = async (vehicleId, incidentData, user) => {
     const branchId = vehicle.purchaseDetails?.branch?._id || vehicle.purchaseDetails?.branch;
     if (!branchId) throw new Error("Vehicle is not assigned to a branch.", { cause: 400 });
 
-    const insurance = vehicle.insuranceDetails || {};
+    const { getVehiclePoliciesByVehicleIdService } = require("../../Insurance/Repo/VehiclePolicyRepo");
+    const policies = await getVehiclePoliciesByVehicleIdService(vehicle._id);
+    const activePolicy = policies.length > 0 ? policies[0] : null;
+    const insurance = activePolicy ? activePolicy.insurance : {};
 
     const claimData = {
         vehicleId: vehicle._id,
@@ -169,8 +175,8 @@ const createManualClaim = async (vehicleId, incidentData, user) => {
         incidentLocation: incidentData.incidentLocation,
         policeReportNumber: incidentData.policeReportNumber,
         policeReportDocument: incidentData.policeReportDocument,
-        insurerName: incidentData.insurerName || insurance.provider || "Unknown",
-        policyNumber: incidentData.policyNumber || insurance.insuranceNumber || "Unknown",
+        insurerName: incidentData.insurerName || (insurance.supplier && insurance.supplier.name) || "Unknown",
+        policyNumber: incidentData.policyNumber || insurance.policyNumber || "Unknown",
         insuranceType: incidentData.insuranceType || insurance.policyType,
         excessAmount: incidentData.excessAmount || 0,
         claimAmount: incidentData.claimAmount,

@@ -44,10 +44,6 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
             populate: [
                 { path: "purchaseDetails.branch" },
                 { path: "purchaseDetails.purchaseOrder" },
-                { 
-                    path: "insuranceDetails.plan", 
-                    populate: { path: "supplier", select: "name email phone" } 
-                },
                 { path: "statusHistory.changedBy", select: "fullName email role" },
                 { path: "handlingStaff", select: "fullName email phone fleetNumbers" }
             ],
@@ -77,10 +73,6 @@ exports.getVehicleByIdService = async (id) => {
         const vehicle = await Vehicle.findById(id)
             .populate("purchaseDetails.branch")
             .populate("purchaseDetails.purchaseOrder")
-            .populate({
-                path: "insuranceDetails.plan",
-                populate: { path: "supplier", select: "name email phone" }
-            })
             .populate("statusHistory.changedBy", "fullName email role")
             .populate("handlingStaff", "fullName email phone fleetNumbers");
         

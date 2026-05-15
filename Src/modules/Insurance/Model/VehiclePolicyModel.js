@@ -1,38 +1,36 @@
 const mongoose = require("mongoose");
-const { ROLES } = require("../../../shared/constants/roles"); // Adjust path if needed
+const { ROLES } = require("../../../shared/constants/roles");
 
-const insuranceSchema = new mongoose.Schema(
+const vehiclePolicySchema = new mongoose.Schema(
     {
-        supplier: {
+        vehicle: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: "Supplier",
-            required: true
+            ref: "Vehicle",
+            required: true,
+            index: true
+        },
+        insurance: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Insurance",
+            required: true,
+            index: true
         },
         policyNumber: {
             type: String
         },
-        policyType: {
-            type: String,
-            enum: ["FLEET", "INDIVIDUAL"],
-            default: "FLEET"
+        startDate: {
+            type: Date
         },
-        coverageType: {
-            type: String,
-            enum: ["THIRD_PARTY", "COMPREHENSIVE"]
-        },
-
-        providerContact: {
-            name: String,
-            phone: String,
-            email: String
-        },
-        documents: {
-            policyDocumentUrl: String
+        expiryDate: {
+            type: Date,
+            index: true
         },
         insuredValue: {
             type: Number
         },
-
+        certificate: {
+            type: String // S3 Key for individual vehicle certificate if any
+        },
         status: {
             type: String,
             enum: ["ACTIVE", "EXPIRED", "CANCELLED"],
@@ -54,11 +52,6 @@ const insuranceSchema = new mongoose.Schema(
                 ROLES.BRANCHMANAGER,
                 ROLES.FINANCESTAFF
             ] 
-        },
-        country: {
-            type: String, // Storing raw string as per CountryManager / Branch
-            required: true,
-            trim: true
         }
     },
     {
@@ -66,4 +59,8 @@ const insuranceSchema = new mongoose.Schema(
     }
 );
 
-module.exports = mongoose.model("Insurance", insuranceSchema);
+// Performance Indexes
+vehiclePolicySchema.index({ vehicle: 1, status: 1 });
+vehiclePolicySchema.index({ expiryDate: 1 });
+
+module.exports = mongoose.model("VehiclePolicy", vehiclePolicySchema);

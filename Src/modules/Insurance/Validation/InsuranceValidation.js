@@ -6,10 +6,9 @@ const createInsuranceSchema = {
         policyNumber: Joi.string().trim(),
         policyType: Joi.string().trim().valid("FLEET", "INDIVIDUAL").default("FLEET"),
         coverageType: Joi.string().trim().valid("THIRD_PARTY", "COMPREHENSIVE"),
-        startDate: Joi.date(),
-        expiryDate: Joi.date().greater(Joi.ref("startDate")),
-        insuredValue: Joi.number().min(0),
+
         country: Joi.string().trim().required(),
+        insuredValue: Joi.number().min(0),
     }),
 };
 
@@ -22,11 +21,10 @@ const updateInsuranceSchema = {
         policyNumber: Joi.string().trim(),
         policyType: Joi.string().trim().valid("FLEET", "INDIVIDUAL"),
         coverageType: Joi.string().trim().valid("THIRD_PARTY", "COMPREHENSIVE"),
-        startDate: Joi.date(),
-        expiryDate: Joi.date().greater(Joi.ref("startDate")),
-        insuredValue: Joi.number().min(0),
+
         status: Joi.string().trim().valid("ACTIVE", "EXPIRED", "CANCELLED"),
         country: Joi.string().trim(),
+        insuredValue: Joi.number().min(0),
     }).min(1),
 };
 
