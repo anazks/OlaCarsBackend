@@ -12,7 +12,9 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const docs = await PaymentReceived.find();
+        const docs = await PaymentReceived.find()
+            .populate('driverId', 'name email avatarUrl')
+            .sort({ createdAt: -1 });
         res.status(200).json({ success: true, data: docs });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -21,7 +23,8 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
 exports.getPaymentReceivedById = async (req, res) => {
     try {
-        const doc = await PaymentReceived.findById(req.params.id);
+        const doc = await PaymentReceived.findById(req.params.id)
+            .populate('driverId', 'name email avatarUrl');
         if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
         res.status(200).json({ success: true, data: doc });
     } catch (error) {

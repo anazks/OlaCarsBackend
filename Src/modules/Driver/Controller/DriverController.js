@@ -662,6 +662,25 @@ const payAdditionalPayment = async (req, res) => {
                 const populatedTx = { ...newTx.toObject(), accountingCode: accCode };
                 await LedgerService.autoGenerateLedgerEntry(populatedTx);
                 console.log(`[DriverController] Ledger entry created for additional payment ${paymentId}`);
+
+                // Zoho Accounting Integration: Auto-create PaymentReceived record
+                try {
+                    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                    const prData = {
+                        paymentNumber: `PR-${Date.now()}`,
+                        driverId: driverId,
+                        amountReceived: paymentForThis,
+                        paymentDate: timestamp,
+                        paymentMethod: paymentMethod || "Cash",
+                        notes: `${ap.type} Payment: ${ap.label} by ${driverName}${note ? ' - ' + note : ''}`,
+                        invoices: [], // Additional payment recorded on account
+                        status: "COMPLETED"
+                    };
+                    const prDoc = await PaymentReceived.create(prData);
+                    console.log(`[DriverController] PaymentReceived record created for additional payment: ${prDoc.paymentNumber}`);
+                } catch (prErr) {
+                    console.error("[DriverController] Failed to auto-create PaymentReceived for additional payment:", prErr);
+                }
             }
         } catch (ledgerErr) {
             console.error("[DriverController] Failed to create ledger for additional payment:", ledgerErr);

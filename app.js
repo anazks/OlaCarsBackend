@@ -9,6 +9,7 @@ const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
 const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
 const { seedBranchPermissions } = require("./Src/bootstrap/seedBranchPermissions");
+const { seedAccountingCodes } = require("./Src/bootstrap/seedAccountingCodes");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -202,6 +203,9 @@ const startServer = async () => {
 
     await seedBranchPermissions();
     console.log("Branch permissions verified/seeded");
+
+    await seedAccountingCodes();
+    console.log("Essential accounting codes verified/seeded");
 
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();

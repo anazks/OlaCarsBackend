@@ -30,7 +30,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const sortOpt = options.defaultSort || { weekNumber: 1 };
 
     const data = await Invoice.find(query)
-        .populate("driver", "personalInfo.fullName personalInfo.email")
+        .populate("driver", "driverId personalInfo.fullName personalInfo.email")
         .populate("vehicle", "basicDetails.make basicDetails.model legalDocs.registrationNumber")
         .sort(sortOpt)
         .skip(skip)
@@ -50,7 +50,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
 exports.getInvoiceByIdService = async (id) => {
     const invoice = await Invoice.findById(id)
-        .populate("driver", "personalInfo.fullName personalInfo.email personalInfo.phone")
+        .populate("driver", "driverId personalInfo.fullName personalInfo.email personalInfo.phone")
         .populate("vehicle", "basicDetails.make basicDetails.model legalDocs.registrationNumber")
         .lean();
     if (!invoice || invoice.isDeleted) throw new Error("Invoice not found");

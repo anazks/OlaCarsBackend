@@ -7,7 +7,9 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 router.use(authenticate);
 
 router.get("/", InvoiceController.getInvoices);
+router.post("/", InvoiceController.createManualInvoice);
 router.get("/:id", InvoiceController.getInvoiceById);
 router.post("/:id/pay", InvoiceController.payInvoice);
+router.put("/:id", InvoiceController.updateInvoice);
 
 module.exports = router;
