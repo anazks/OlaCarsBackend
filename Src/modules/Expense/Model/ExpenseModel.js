@@ -1,0 +1,11 @@
+const mongoose = require('mongoose');
+
+const expenseSchema = new mongoose.Schema({
+    // Placeholder schema fields
+    name: { type: String, required: false },
+    referenceNumber: { type: String, required: false },
+    amount: { type: Number, required: false },
+    status: { type: String, default: 'DRAFT' }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Expense', expenseSchema);
