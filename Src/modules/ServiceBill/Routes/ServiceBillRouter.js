@@ -5,7 +5,7 @@ const {
     getBillsHandler,
     getBillByIdHandler,
     approveBillHandler,
-    markPaidHandler,
+    addPaymentHandler,
     voidBillHandler,
 } = require("../Controller/ServiceBillController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -145,9 +145,9 @@ router.put(
 
 /**
  * @swagger
- * /api/service-bills/{id}/pay:
- *   put:
- *     summary: Mark a bill as paid
+ * /api/service-bills/{id}/payments:
+ *   post:
+ *     summary: Record a payment for a service bill
  *     tags: [ServiceBill]
  *     security:
  *       - bearerAuth: []
@@ -163,22 +163,32 @@ router.put(
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - amount
+ *               - paymentMethod
  *             properties:
+ *               amount:
+ *                 type: number
  *               paymentMethod:
  *                 type: string
  *                 enum: [Cash, Bank Transfer, Credit Card, Insurance, Internal]
  *               paymentReference:
  *                 type: string
+ *               notes:
+ *                 type: string
+ *               paidAt:
+ *                 type: string
+ *                 format: date-time
  *     responses:
  *       200:
- *         description: Bill marked as paid
+ *         description: Payment recorded
  */
-router.put(
-    "/:id/pay",
+router.post(
+    "/:id/payments",
     authenticate,
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
     hasPermission("PAYMENT_CREATE"),
-    markPaidHandler
+    addPaymentHandler
 );
 
 /**

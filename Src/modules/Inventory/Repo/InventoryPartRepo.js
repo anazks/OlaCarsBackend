@@ -34,6 +34,28 @@ exports.createPart = async (data) => {
 };
 
 /**
+ * Create multiple inventory parts in bulk.
+ * Uses unordered insertMany to allow valid documents to pass even if some fail (e.g., duplicate keys).
+ */
+exports.bulkCreateParts = async (partsData) => {
+    try {
+        const result = await InventoryPart.insertMany(partsData, { ordered: false });
+        return { successCount: result.length, parts: result };
+    } catch (error) {
+        // If ordered is false, mongoose throws a BulkWriteError that contains insertedDocs
+        if (error.name === 'BulkWriteError' || error.code === 11000) {
+            return {
+                successCount: error.insertedDocs ? error.insertedDocs.length : 0,
+                parts: error.insertedDocs || [],
+                errorCount: error.writeErrors ? error.writeErrors.length : 1,
+                message: "Some parts could not be inserted (likely duplicate part numbers)."
+            };
+        }
+        throw error;
+    }
+};
+
+/**
  * Get all inventory parts with optional filters.
  */
 exports.getParts = async (filters = {}) => {

@@ -235,3 +235,74 @@ exports.getVehicleMovement = async (filters) => {
 
     return result;
 };
+
+exports.getWorkshopAnalytics = async (filters) => {
+    const { country, branch, startDate, endDate } = filters;
+    const branchIds = await getBranchIds(country, branch);
+
+    let start = startDate ? moment(startDate).startOf('day') : moment().subtract(30, 'days').startOf('day');
+    let end = endDate ? moment(endDate).endOf('day') : moment().endOf('day');
+    
+    const numDays = Math.max(1, end.diff(start, 'days') + 1);
+
+    const { WorkOrder } = require("../../WorkOrder/Model/WorkOrderModel");
+    
+    const woMatch = { createdAt: { $gte: start.toDate(), $lte: end.toDate() }, isDeleted: false };
+    if (branchIds) woMatch.branchId = { $in: branchIds };
+
+    const workOrders = await WorkOrder.find(woMatch).select("createdAt status").lean();
+
+    const datesObj = {};
+    for (let i = 0; i < numDays; i++) {
+        const d = moment(start).add(i, 'days').format("MMM DD");
+        datesObj[d] = { date: d, created: 0, completed: 0 };
+    }
+
+    workOrders.forEach(wo => {
+        const d = moment(wo.createdAt).format("MMM DD");
+        if (datesObj[d]) {
+            datesObj[d].created += 1;
+        }
+    });
+
+    const completedWoMatch = { updatedAt: { $gte: start.toDate(), $lte: end.toDate() }, status: { $in: ["CLOSED", "VEHICLE_RELEASED", "INVOICED"] }, isDeleted: false };
+    if (branchIds) completedWoMatch.branchId = { $in: branchIds };
+    const completedWorkOrders = await WorkOrder.find(completedWoMatch).select("updatedAt status").lean();
+
+    completedWorkOrders.forEach(wo => {
+        const d = moment(wo.updatedAt).format("MMM DD");
+        if (datesObj[d]) {
+            datesObj[d].completed += 1;
+        }
+    });
+
+    const workOrderTrends = Object.values(datesObj);
+
+    const { InventoryPart } = require("../../Inventory/Model/InventoryPartModel");
+    const stockMatch = { isActive: true };
+    if (branchIds) stockMatch.branchId = { $in: branchIds };
+    
+    const parts = await InventoryPart.find(stockMatch).select("quantityOnHand reorderLevel").lean();
+    console.log(`[DEBUG] Found ${parts.length} parts for Stock Health query:`, JSON.stringify(stockMatch));
+    let healthyStock = 0;
+    let lowStock = 0;
+    
+    parts.forEach(p => {
+        if (p.quantityOnHand <= (p.reorderLevel || 0)) {
+            lowStock += 1;
+        } else {
+            healthyStock += 1;
+        }
+    });
+
+    const stockHealth = [
+        { name: "Healthy", value: healthyStock },
+        { name: "Low Stock", value: lowStock }
+    ];
+    console.log('[DEBUG] Calculated Stock Health:', stockHealth);
+
+    return {
+        workOrderTrends,
+        stockHealth
+    };
+};

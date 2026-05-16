@@ -51,3 +51,14 @@ exports.getVehicleMovementData = async (req, res) => {
         res.status(500).json({ status: "error", message: error.message });
     }
 };
+
+exports.getWorkshopDashboardAnalytics = async (req, res) => {
+    try {
+        const filters = attachRoleFilters(req.user, req.query);
+        const data = await DashboardService.getWorkshopAnalytics(filters);
+        res.status(200).json({ status: "success", data });
+    } catch (error) {
+        console.error("Error getting workshop analytics:", error);
+        res.status(500).json({ status: "error", message: error.message });
+    }
+};

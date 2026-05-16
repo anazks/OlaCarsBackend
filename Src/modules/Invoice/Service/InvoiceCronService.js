@@ -1,27 +1,17 @@
 const cron = require('node-cron');
 const { Driver } = require("../../Driver/Model/DriverModel");
 const { Invoice } = require("../Model/InvoiceModel");
-const { Vehicle } = require("../../Vehicle/Model/VehicleModel"); // Ensure Vehicle is registered for populate
-const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+const { createAlertRepo, findActiveAlertRepo } = require("../../Alert/Repo/AlertRepo");
 
 const startInvoiceCronJob = () => {
-    // Run daily at 01:00 AM to check if today is the generation day
-    cron.schedule('0 1 * * *', async () => {
-        console.log('[InvoiceCronService] Checking daily scheduled task...');
+    // Run daily at midnight
+    cron.schedule('0 0 * * *', async () => {
+        console.log('[InvoiceCronService] Running daily invoice generation and overdue check...');
         try {
-            const today = new Date();
-            const currentDay = today.getDay(); // 0 (Sun) - 6 (Sat)
-            
-            // Get configured generation day (default 3 = Wednesday)
-            const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
-            const generationDay = setting ? parseInt(setting.value) : 3;
-
-            if (currentDay === generationDay) {
-                console.log(`[InvoiceCronService] Today is the configured generation day (${generationDay}). Starting bulk generation...`);
-                await exports.generateCurrentWeekInvoices();
-            }
+            await exports.generateDueInvoices();
+            await exports.checkOverdueInvoices();
         } catch (error) {
-            console.error('[InvoiceCronService] Error in cron job:', error);
+            console.error('[InvoiceCronService] Error generating/checking invoices:', error);
         }
     });
 };
@@ -168,6 +158,60 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
 exports.generateDueInvoices = async () => {
     // Keep this for backward compatibility if needed, but it's redundant now
     return await exports.generateCurrentWeekInvoices();
+};
+
+exports.checkOverdueInvoices = async () => {
+    console.log('[InvoiceCronService] Checking for overdue invoices...');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    try {
+        const overdueInvoices = await Invoice.find({
+            status: { $in: ["PENDING", "PARTIAL"] },
+            dueDate: { $lt: today },
+            isDeleted: false
+        }).populate("driver").populate({
+            path: "vehicle",
+            populate: { path: "purchaseDetails.branch" }
+        });
+
+        for (const invoice of overdueInvoices) {
+            // Update status to OVERDUE
+            invoice.status = "OVERDUE";
+            await invoice.save();
+            console.log(`[InvoiceCronService] Marked Invoice ${invoice.invoiceNumber} as OVERDUE.`);
+
+            // Create an alert if not exists
+            if (invoice.vehicle) {
+                // To avoid duplicate alerts for the same invoice, we check metadata.invoiceId
+                // findActiveAlertRepo checks by vehicle and type, but if there are multiple overdue invoices for the same vehicle,
+                // we might want multiple alerts. Let's just create one if we can't find an existing one for THIS invoice.
+                // Actually we should just query Alert directly for THIS invoice, or use vehicle + type and hope the user resolves it.
+                // Using findActiveAlertRepo will create 1 alert per vehicle.
+                const existing = await findActiveAlertRepo(invoice.vehicle._id, "INVOICE");
+                
+                if (!existing) {
+                    await createAlertRepo({
+                        type: "INVOICE",
+                        vehicleId: invoice.vehicle._id,
+                        branchId: invoice.vehicle.purchaseDetails?.branch?._id || invoice.vehicle.purchaseDetails?.branch,
+                        country: invoice.vehicle.purchaseDetails?.branch?.country || "UNKNOWN",
+                        priority: "MEDIUM", // Major Alert
+                        message: `Invoice ${invoice.invoiceNumber} for driver ${invoice.driver?.firstName || ''} ${invoice.driver?.lastName || ''} is overdue. Amount due: $${invoice.balance}`,
+                        metadata: {
+                            invoiceId: invoice._id,
+                            invoiceNumber: invoice.invoiceNumber,
+                            driverId: invoice.driver?._id,
+                            balance: invoice.balance
+                        }
+                    });
+                    console.log(`[InvoiceCronService] Created Major Alert for overdue invoice ${invoice.invoiceNumber}.`);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[InvoiceCronService] Error checking overdue invoices:', error);
+    }
 };
 
 exports.startInvoiceCronJob = startInvoiceCronJob;

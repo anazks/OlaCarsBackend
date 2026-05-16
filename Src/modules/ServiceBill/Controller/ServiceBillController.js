@@ -1,5 +1,5 @@
 const { getBills, getBillById } = require("../Repo/ServiceBillRepo");
-const { generateFromWorkOrder, approveBill, markPaid, voidBill } = require("../Service/ServiceBillService");
+const { generateFromWorkOrder, approveBill, addPayment, voidBill } = require("../Service/ServiceBillService");
 
 /**
  * Generate a bill from a work order.
@@ -65,12 +65,12 @@ const approveBillHandler = async (req, res) => {
 };
 
 /**
- * Mark a bill as paid.
- * @route PUT /api/service-bills/:id/pay
+ * Add a payment to a service bill.
+ * @route POST /api/service-bills/:id/payments
  */
-const markPaidHandler = async (req, res) => {
+const addPaymentHandler = async (req, res) => {
     try {
-        const bill = await markPaid(req.params.id, req.body);
+        const bill = await addPayment(req.params.id, req.body, req.user);
         return res.status(200).json({ success: true, data: bill });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -98,6 +98,6 @@ module.exports = {
     getBillsHandler,
     getBillByIdHandler,
     approveBillHandler,
-    markPaidHandler,
+    addPaymentHandler,
     voidBillHandler,
 };

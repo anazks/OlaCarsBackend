@@ -1,4 +1,4 @@
-const { getStaffPerformance, getIndividualStaffPerformance } = require("../Service/staffPerformanceService");
+const staffPerformanceService = require("../Service/staffPerformanceService");
 
 exports.getPerformance = async (req, res) => {
     try {
@@ -28,7 +28,7 @@ exports.getPerformance = async (req, res) => {
             filters.type = req.query.type;
         }
 
-        const result = await getStaffPerformance(filters);
+        const result = await staffPerformanceService.getStaffPerformance(filters);
 
         return res.status(200).json({
             success: true,
@@ -55,7 +55,7 @@ exports.getIndividualPerformance = async (req, res) => {
             });
         }
 
-        const result = await getIndividualStaffPerformance(id, startDate, endDate);
+        const result = await staffPerformanceService.getIndividualStaffPerformance(id, startDate, endDate);
 
         return res.status(200).json({
             success: true,

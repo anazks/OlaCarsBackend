@@ -4,7 +4,7 @@ const Task = require("../Model/TaskModel");
  * Delegate a task
  */
 exports.delegateTask = async (taskData, user) => {
-    const { title, description, assignedTo, assignedToRole, assignedToRoleModel, dueDate, notes } = taskData;
+    const { title, description, targetType, targetId, dueDate, notes } = taskData;
 
     let assignedByRoleModel = "";
     const role = user.role.toUpperCase().replace(" ", "");
@@ -33,9 +33,8 @@ exports.delegateTask = async (taskData, user) => {
     const task = new Task({
         title,
         description,
-        assignedTo,
-        assignedToRole,
-        assignedToRoleModel,
+        targetType,
+        targetId,
         assignedBy: user.id,
         assignedByRole: user.role,
         assignedByRoleModel,
@@ -54,8 +53,6 @@ exports.updateTaskStatus = async (taskId, status, user) => {
     const task = await Task.findById(taskId);
     if (!task) throw new Error("Task not found");
 
-    // Only assignedTo or assignedBy can update status?
-    // Let's keep it simple for now
     task.status = status;
     if (status === "COMPLETED") {
         task.completedAt = new Date();
@@ -71,17 +68,45 @@ exports.updateTaskStatus = async (taskId, status, user) => {
 exports.getTasks = async (filters, user) => {
     const query = {};
     const userId = user.id;
+    const role = user.role.toUpperCase().replace(" ", "");
 
-    // Default: Show tasks assigned TO the user OR assigned BY the user
-    query.$or = [
-        { assignedTo: userId },
-        { assignedBy: userId }
-    ];
+    console.log(`[TaskService] getTasks for role=${role}, userId=${userId}, branchId=${user.branchId}`);
 
-    // If explicit filters provided in query (e.g. by frontend), apply them
-    if (filters.assignedTo) query.assignedTo = filters.assignedTo;
-    if (filters.assignedBy) query.assignedBy = filters.assignedBy;
+    // Role-based jurisdiction filtering (similar to targetService)
+    if (!["ADMIN", "SUPERADMIN", "FINANCEADMIN", "OPERATIONADMIN"].includes(role)) {
+        if (role === "COUNTRYMANAGER") {
+            query.$or = [
+                { targetType: "COUNTRY", targetId: user.country },
+                { assignedBy: userId }
+            ];
+        } else if (role === "BRANCHMANAGER") {
+            query.$or = [
+                { targetType: "BRANCH", targetId: user.branchId },
+                { targetType: "STAFF", targetId: userId },
+                { assignedBy: userId }
+            ];
+        } else {
+            // OPERATIONSTAFF, FINANCESTAFF, etc.
+            const orConditions = [
+                { targetType: "STAFF", targetId: userId },
+                { assignedBy: userId }
+            ];
+            // Also show BRANCH-level tasks for their branch
+            if (user.branchId) {
+                orConditions.push({ targetType: "BRANCH", targetId: user.branchId.toString() });
+            }
+            query.$or = orConditions;
+        }
+    } else {
+        // Admins see everything or can filter
+        if (filters.targetId) query.targetId = filters.targetId;
+        if (filters.assignedBy) query.assignedBy = filters.assignedBy;
+    }
+
     if (filters.status) query.status = filters.status;
     
-    return await Task.find(query).populate("assignedBy", "fullName").sort({ dueDate: 1 });
+    console.log(`[TaskService] Query:`, JSON.stringify(query));
+    const results = await Task.find(query).populate("assignedBy", "fullName").sort({ dueDate: 1 });
+    console.log(`[TaskService] Found ${results.length} tasks`);
+    return results;
 };

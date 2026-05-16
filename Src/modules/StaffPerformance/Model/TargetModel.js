@@ -46,7 +46,14 @@ const targetSchema = new mongoose.Schema(
         assignedByRoleModel: {
             type: String,
             required: true,
-            // This is for dynamic ref
+        },
+        status: {
+            type: String,
+            enum: ["PENDING", "COMPLETED", "CANCELLED"],
+            default: "PENDING",
+        },
+        completedAt: {
+            type: Date,
         },
         notes: {
             type: String,
