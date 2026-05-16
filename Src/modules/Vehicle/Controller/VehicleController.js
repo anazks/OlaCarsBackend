@@ -111,7 +111,8 @@ const getVehicles = async (req, res, next) => {
             pagination: { total: result.total, page: result.page, limit: result.limit, totalPages: result.totalPages }
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.error('[DEBUG GET VEHICLES ERROR]', error);
+        return res.status(500).json({ success: false, message: error.message, stack: error.stack });
     }
 };
 

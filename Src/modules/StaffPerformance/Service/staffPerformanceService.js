@@ -15,7 +15,7 @@ const Lease = require("../../Lease/Model/LeaseModel");
  * Aggregates performance metrics for finance and operation staff
  * by cross-referencing Driver/Vehicle statusHistory records.
  */
-exports.getStaffPerformance = async (filters = {}) => {
+const getStaffPerformance = async (filters = {}) => {
     const { branchId, country, type = "all", startDate, endDate } = filters;
     let branchIds = branchId ? [branchId] : null;
 
@@ -285,7 +285,7 @@ exports.getStaffPerformance = async (filters = {}) => {
             { $group: { _id: "$branch", totalDrivers: { $sum: 1 }, activeDrivers: { $sum: { $cond: [{ $eq: ["$status", "ACTIVE"] }, 1, 0] } } } }
         ]);
         const bDrivers = {};
-        for(let d of driverAggr) { if(d._id) bDrivers[d._id.toString()] = d; }
+        for (let d of driverAggr) { if (d._id) bDrivers[d._id.toString()] = d; }
 
         // For Vehicles
         const vehicleAggr = await Vehicle.aggregate([
@@ -293,11 +293,11 @@ exports.getStaffPerformance = async (filters = {}) => {
             { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] }, 1, 0] } } } }
         ]);
         const bVehicles = {};
-        for(let v of vehicleAggr) { if(v._id) bVehicles[v._id.toString()] = v; }
+        for (let v of vehicleAggr) { if (v._id) bVehicles[v._id.toString()] = v; }
 
         for (const manager of managers) {
             const mBranchId = manager.branchId?._id?.toString() || manager.branchId?.toString();
-            
+
             // Re-format login history into a recent timeline
             const recentActivity = (manager.loginHistory || [])
                 .map(login => ({
@@ -341,7 +341,7 @@ exports.getStaffPerformance = async (filters = {}) => {
         // Need to relate countries to branches
         // get a map of country -> array of branch IDs
         const branches = await Branch.find({ isDeleted: false }).select("_id country").lean();
-        
+
         const bMap = {}; // branchId string -> country string
         const cMap = {}; // country string -> array of branchIds
         for (const b of branches) {
@@ -359,15 +359,15 @@ exports.getStaffPerformance = async (filters = {}) => {
             { $group: { _id: "$branch", totalDrivers: { $sum: 1 }, activeDrivers: { $sum: { $cond: [{ $eq: ["$status", "ACTIVE"] }, 1, 0] } } } }
         ]);
         const cDrivers = {};
-        for(let d of driverAggr) { 
-            if(d._id) {
+        for (let d of driverAggr) {
+            if (d._id) {
                 const country = bMap[d._id.toString()];
                 if (country) {
                     if (!cDrivers[country]) cDrivers[country] = { totalDrivers: 0, activeDrivers: 0 };
                     cDrivers[country].totalDrivers += d.totalDrivers;
                     cDrivers[country].activeDrivers += d.activeDrivers;
                 }
-            } 
+            }
         }
 
         // For Vehicles
@@ -376,7 +376,7 @@ exports.getStaffPerformance = async (filters = {}) => {
             { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] }, 1, 0] } } } }
         ]);
         const cVehicles = {};
-        for(let v of vehicleAggr) { 
+        for (let v of vehicleAggr) {
             if (v._id) {
                 const country = bMap[v._id.toString()];
                 if (country) {
@@ -384,12 +384,12 @@ exports.getStaffPerformance = async (filters = {}) => {
                     cVehicles[country].totalVehicles += v.totalVehicles;
                     cVehicles[country].activeVehicles += v.activeVehicles;
                 }
-            } 
+            }
         }
 
         for (const manager of managers) {
             const mCountry = manager.country;
-            
+
             // Re-format login history into a recent timeline
             const recentActivity = (manager.loginHistory || [])
                 .map(login => ({
@@ -425,7 +425,7 @@ exports.getStaffPerformance = async (filters = {}) => {
     if (type === "all" || type === "finance-admin" || type === "operation-admin") {
         // Calculate Global Totals Once
         const globalBranchesCount = await Branch.countDocuments({ isDeleted: false });
-        
+
         const driverAggr = await Driver.aggregate([
             { $match: { isDeleted: false } },
             { $group: { _id: null, totalDrivers: { $sum: 1 }, activeDrivers: { $sum: { $cond: [{ $eq: ["$status", "ACTIVE"] }, 1, 0] } } } }
@@ -636,6 +636,11 @@ exports.getStaffPerformance = async (filters = {}) => {
 };
 
 const { getStaffDetailsRepo } = require("../Repo/StaffPerformanceRepo");
-exports.getIndividualStaffPerformance = async (staffId, startDate, endDate) => {
+const getIndividualStaffPerformance = async (staffId, startDate, endDate) => {
     return await getStaffDetailsRepo(staffId, startDate, endDate);
+};
+
+module.exports = {
+    getStaffPerformance,
+    getIndividualStaffPerformance
 };

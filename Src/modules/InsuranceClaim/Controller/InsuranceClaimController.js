@@ -1,11 +1,19 @@
 const { getClaims, getClaimById } = require("../Repo/InsuranceClaimRepo");
-const { createFromWorkOrder, progressClaim } = require("../Service/InsuranceClaimService");
+const { createFromWorkOrder, createManualClaim, progressClaim } = require("../Service/InsuranceClaimService");
 
 const createClaimHandler = async (req, res) => {
     try {
-        const { workOrderId, ...incidentData } = req.body;
-        if (!workOrderId) return res.status(400).json({ success: false, message: "workOrderId is required" });
-        const claim = await createFromWorkOrder(workOrderId, incidentData, req.user);
+        const { workOrderId, vehicleId, ...incidentData } = req.body;
+        
+        let claim;
+        if (workOrderId) {
+            claim = await createFromWorkOrder(workOrderId, incidentData, req.user);
+        } else if (vehicleId) {
+            claim = await createManualClaim(vehicleId, incidentData, req.user);
+        } else {
+            return res.status(400).json({ success: false, message: "Either workOrderId or vehicleId is required" });
+        }
+
         return res.status(201).json({ success: true, data: claim });
     } catch (error) {
         const statusCode = error.cause || 500;

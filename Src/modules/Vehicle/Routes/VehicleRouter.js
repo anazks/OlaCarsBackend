@@ -178,7 +178,7 @@ router.get(
 router.get(
     "/available",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     hasPermission("VEHICLE_VIEW"),
     getAvailableCars
 );
@@ -204,7 +204,17 @@ router.get(
 router.get(
     "/:id",
     authenticate,
-    hasPermission("VEHICLE_VIEW"),
+    authorize(
+        ROLES.ADMIN,
+        ROLES.OPERATIONADMIN,
+        ROLES.FINANCEADMIN,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.WORKSHOPMANAGER,
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCESTAFF,
+        ROLES.USER
+    ),
     validate(getVehicleByIdSchema),
     getVehicleById
 );
@@ -238,7 +248,7 @@ router.get(
 router.put(
     "/:id",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER),
     hasPermission("VEHICLE_EDIT"),
     validate(updateVehicleSchema),
     updateVehicle
@@ -432,6 +442,8 @@ router.put(
     authorize(
         ROLES.OPERATIONSTAFF,
         ROLES.FINANCESTAFF,
+        ROLES.FINANCEADMIN,
+        ROLES.OPERATIONADMIN,
         ROLES.WORKSHOPSTAFF,
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
@@ -518,6 +530,8 @@ router.post(
     authorize(
         ROLES.OPERATIONSTAFF,
         ROLES.FINANCESTAFF,
+        ROLES.FINANCEADMIN,
+        ROLES.OPERATIONADMIN,
         ROLES.WORKSHOPSTAFF,
         ROLES.BRANCHMANAGER,
         ROLES.COUNTRYMANAGER,
@@ -571,7 +585,7 @@ router.post(
 router.post(
     "/:id/assign/:driverId",
     authenticate,
-    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     hasPermission("DRIVER_ASSIGN_VEHICLE"),
     validate(assignCarToDriverSchema),
     (req, res, next) => assignCarToDriver(req, res, next)

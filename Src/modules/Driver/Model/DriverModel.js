@@ -358,3 +358,5 @@ module.exports = {
     Driver,
     DRIVER_STATUSES,
 };
+
+mongoose.model("DRIVER", driverSchema, "drivers");

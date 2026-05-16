@@ -97,6 +97,8 @@ exports.getBalanceSheetReport = async (filters) => {
         equity: {}
     };
 
+    let cumulativeNetIncome = 0;
+
     entries.forEach(entry => {
         const code = entry.accountingCode;
         if (!code) return;
@@ -113,8 +115,19 @@ exports.getBalanceSheetReport = async (filters) => {
         } else if (code.category === "EQUITY") {
             const val = type === "CREDIT" ? amount : -amount;
             report.equity[code.name] = (report.equity[code.name] || 0) + val;
+        } else if (code.category === "INCOME") {
+            // Credit increases income, Debit decreases it
+            cumulativeNetIncome += (type === "CREDIT" ? amount : -amount);
+        } else if (code.category === "EXPENSE") {
+            // Debit increases expense, Credit decreases it
+            cumulativeNetIncome -= (type === "DEBIT" ? amount : -amount);
         }
     });
+
+    // Dynamically inject computed cumulative retained earnings (Net Income to date) into Equity to balance the books.
+    if (cumulativeNetIncome !== 0) {
+        report.equity["Retained Earnings (Current Period)"] = (report.equity["Retained Earnings (Current Period)"] || 0) + cumulativeNetIncome;
+    }
 
     const assetsArray = Object.keys(report.assets).map(name => ({ name, amount: report.assets[name] }));
     const liabilitiesArray = Object.keys(report.liabilities).map(name => ({ name, amount: report.liabilities[name] }));

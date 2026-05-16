@@ -21,7 +21,8 @@ const seedFinancePermissions = async () => {
             "REPORTS_VIEW",
             "DASHBOARD_VIEW",
             "DRIVER_VIEW",
-            "STAFF_PERFORMANCE_VIEW"
+            "STAFF_PERFORMANCE_VIEW",
+            "VEHICLE_VIEW"
         ];
 
         const adminPermissions = [
@@ -44,7 +45,11 @@ const seedFinancePermissions = async () => {
             "STAFF_VIEW",
             "STAFF_CREATE",
             "STAFF_EDIT",
-            "STAFF_DELETE"
+            "STAFF_DELETE",
+            "VEHICLE_CREATE",
+            "VEHICLE_EDIT",
+            "VEHICLE_APPROVE",
+            "VEHICLE_DELETE"
         ];
 
         console.log("[SEEDER] Updating Finance Role Templates...");

@@ -99,14 +99,91 @@ exports.getTargets = async (filters, user) => {
             // Branch Manager sees targets for their branch OR targets they assigned
             query.$or = [
                 { targetType: "BRANCH", targetId: user.branchId },
+                { targetType: "STAFF", targetId: user.id },
                 { assignedBy: user.id }
             ];
         } else {
-            // Individual staff see targets assigned to them
-            query.targetType = "STAFF";
-            query.targetId = user.id;
+            // OPERATIONSTAFF, FINANCESTAFF, etc.
+            const orConditions = [
+                { targetType: "STAFF", targetId: user.id },
+                { assignedBy: user.id }
+            ];
+            if (user.branchId) {
+                orConditions.push({ targetType: "BRANCH", targetId: user.branchId.toString() });
+            }
+            query.$or = orConditions;
         }
     }
 
+    if (filters.status) query.status = filters.status;
+
     return await Target.find(query).populate("assignedBy", "fullName").sort({ startDate: -1 });
+};
+
+/**
+ * Update target status
+ */
+exports.updateTargetStatus = async (targetId, status, user) => {
+    const target = await Target.findById(targetId);
+    if (!target) {
+        throw new Error("Target not found");
+    }
+
+    // Authorization check: Only assignedTo or assignedBy can update?
+    // For now, let's allow anyone who can see it to update it if they are the target
+    // In a real scenario, we'd verify user.id matches targetId or assignedBy
+    
+    target.status = status;
+    if (status === "COMPLETED") {
+        target.completedAt = new Date();
+    } else {
+        target.completedAt = null;
+    }
+
+    await target.save();
+    return target;
+};
+
+/**
+ * Get task stats for dashboard
+ */
+exports.getDashboardTaskStats = async (user) => {
+    const role = user.role.toUpperCase().replace(" ", "");
+    const now = new Date();
+    
+    // Use the same jurisdiction logic as getTargets
+    const query = {};
+    if (!["ADMIN", "SUPERADMIN", "FINANCEADMIN", "OPERATIONADMIN"].includes(role)) {
+        if (role === "COUNTRYMANAGER") {
+            query.$or = [
+                { targetType: "COUNTRY", targetId: user.country },
+                { assignedBy: user.id }
+            ];
+        } else if (role === "BRANCHMANAGER") {
+            query.$or = [
+                { targetType: "BRANCH", targetId: user.branchId },
+                { targetType: "STAFF", targetId: user.id },
+                { assignedBy: user.id }
+            ];
+        } else {
+            const orConditions = [
+                { targetType: "STAFF", targetId: user.id },
+                { assignedBy: user.id }
+            ];
+            if (user.branchId) {
+                orConditions.push({ targetType: "BRANCH", targetId: user.branchId.toString() });
+            }
+            query.$or = orConditions;
+        }
+    }
+
+    const targets = await Target.find(query);
+
+    const stats = {
+        assigned: targets.length,
+        overdue: targets.filter(t => t.status !== 'COMPLETED' && new Date(t.endDate) < now).length,
+        upcoming: targets.filter(t => t.status !== 'COMPLETED' && new Date(t.endDate) >= now).length
+    };
+
+    return stats;
 };

@@ -24,7 +24,7 @@ const checkAndCreateMaintenanceAlert = async (vehicle) => {
                 vehicleId: vehicle._id,
                 branchId: vehicle.purchaseDetails.branch?._id || vehicle.purchaseDetails.branch,
                 country: vehicle.purchaseDetails.branch?.country || "UNKNOWN",
-                priority: "HIGH",
+                priority: "MEDIUM",
                 message: `Vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) has reached ${odometer}km. Service is due!`,
                 metadata: {
                     currentOdometer: odometer,

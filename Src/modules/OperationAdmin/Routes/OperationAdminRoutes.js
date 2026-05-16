@@ -9,7 +9,8 @@ const {
     editOperationalAdmin,
     changePassword,
     deleteOperationalAdmin,
-    logout
+    logout,
+    getDashboardStats
 } = require("../Controller/OperationAdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -75,6 +76,20 @@ router.post("/login", validate(loginSchema), login);
  *         description: Logout successful
  */
 router.post("/logout", authenticate, logout);
+
+/**
+ * @swagger
+ * /api/operational-admin/dashboard/stats:
+ *   get:
+ *     summary: Get dashboard statistics for Operational Admin
+ *     tags: [OperationalAdmin]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Dashboard statistics retrieved successfully
+ */
+router.get("/dashboard/stats", authenticate, getDashboardStats);
 
 /**
  * @swagger
