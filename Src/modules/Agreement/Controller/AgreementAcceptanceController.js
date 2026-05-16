@@ -1,5 +1,6 @@
 const AgreementAcceptanceService = require("../Service/AgreementAcceptanceService");
 const uploadToS3 = require("../../../utils/uploadToS3");
+const getPresignedUrl = require("../../../utils/getPresignedUrl");
 
 /**
  * Record user acceptance of an agreement
@@ -30,10 +31,16 @@ const acceptAgreement = async (req, res) => {
             req.get("User-Agent")
         );
 
+        // Sign the URL if it's an S3 link
+        const obj = newAcceptance.toObject();
+        if (obj.signatureType === "DRAWN" && obj.signatureData) {
+            obj.signatureData = await getPresignedUrl(obj.signatureData);
+        }
+
         return res.status(201).json({
             success: true,
             message: "Agreement accepted successfully",
-            data: newAcceptance
+            data: obj
         });
     } catch (error) {
         return res.status(error.statusCode || 500).json({ success: false, message: error.message });
@@ -42,34 +49,47 @@ const acceptAgreement = async (req, res) => {
 
 /**
  * Get all agreements accepted by a user
- * @route GET /api/agreements/acceptances/:userId
- * @access Private (Admin or Self)
  */
 const getUserAcceptances = async (req, res) => {
     try {
         const { userId } = req.params;
         
         if (req.user.role !== "ADMIN" && req.user.id !== userId) {
-            return res.status(403).json({ success: false, message: "Not authorized to view these records." });
+            return res.status(403).json({ success: false, message: "Not authorized." });
         }
 
         const data = await AgreementAcceptanceService.getUserAcceptances(userId);
-        return res.status(200).json({ success: true, data });
+        
+        const processed = await Promise.all(data.map(async (acc) => {
+            const obj = acc.toObject();
+            if (obj.signatureType === "DRAWN" && obj.signatureData) {
+                obj.signatureData = await getPresignedUrl(obj.signatureData);
+            }
+            return obj;
+        }));
+
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * Verify if a user has accepted the latest version of an agreement
- * @route GET /api/agreements/verify/:userId/:agreementId
- * @access Private
+ * Verify latest acceptance
  */
 const verifyLatestAcceptance = async (req, res) => {
     try {
         const { userId, agreementId } = req.params;
         const result = await AgreementAcceptanceService.verifyLatestAcceptance(userId, agreementId);
         
+        if (result.acceptance) {
+            const obj = result.acceptance.toObject();
+            if (obj.signatureType === "DRAWN" && obj.signatureData) {
+                obj.signatureData = await getPresignedUrl(obj.signatureData);
+            }
+            result.acceptance = obj;
+        }
+
         return res.status(200).json({ 
             success: true, 
             accepted: result.accepted,

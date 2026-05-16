@@ -2,9 +2,9 @@ const DriverService = require("../Service/DriverService");
 const { processDriverProgress } = require("../Service/DriverWorkflowService");
 const { getDriverByIdService, updateDriverService } = require("../Repo/DriverRepo");
 const uploadToS3 = require("../../../utils/uploadToS3");
+const getPresignedUrl = require("../../../utils/getPresignedUrl");
 
 // ─── S3 field → DB path mapping ──────────────────────────────────────
-// Maps upload field names to their dot-notation paths in the Driver schema.
 const S3_FIELD_MAP = {
     photograph: "personalInfo.photograph",
     idFrontImage: "identityDocs.idFrontImage",
@@ -21,44 +21,67 @@ const S3_FIELD_MAP = {
 };
 
 /**
+ * Helper to process all S3 URLs in a driver object and replace them with Presigned URLs.
+ */
+const processDriverS3Urls = async (driver) => {
+    if (!driver) return null;
+    const obj = typeof driver.toObject === 'function' ? driver.toObject() : driver;
+
+    if (obj.personalInfo?.photograph) obj.personalInfo.photograph = await getPresignedUrl(obj.personalInfo.photograph);
+    
+    if (obj.identityDocs) {
+        if (obj.identityDocs.idFrontImage) obj.identityDocs.idFrontImage = await getPresignedUrl(obj.identityDocs.idFrontImage);
+        if (obj.identityDocs.idBackImage) obj.identityDocs.idBackImage = await getPresignedUrl(obj.identityDocs.idBackImage);
+    }
+
+    if (obj.drivingLicense) {
+        if (obj.drivingLicense.frontImage) obj.drivingLicense.frontImage = await getPresignedUrl(obj.drivingLicense.frontImage);
+        if (obj.drivingLicense.backImage) obj.drivingLicense.backImage = await getPresignedUrl(obj.drivingLicense.backImage);
+    }
+
+    if (obj.backgroundCheck?.document) obj.backgroundCheck.document = await getPresignedUrl(obj.backgroundCheck.document);
+    if (obj.addressProof?.document) obj.addressProof.document = await getPresignedUrl(obj.addressProof.document);
+    if (obj.medicalFitness?.certificate) obj.medicalFitness.certificate = await getPresignedUrl(obj.medicalFitness.certificate);
+    if (obj.creditCheck?.consentForm) obj.creditCheck.consentForm = await getPresignedUrl(obj.creditCheck.consentForm);
+    
+    if (obj.contract) {
+        if (obj.contract.generatedS3Key) obj.contract.generatedS3Key = await getPresignedUrl(obj.contract.generatedS3Key);
+        if (obj.contract.signedS3Key) obj.contract.signedS3Key = await getPresignedUrl(obj.contract.signedS3Key);
+    }
+
+    if (obj.activation?.checklistDocument) obj.activation.checklistDocument = await getPresignedUrl(obj.activation.checklistDocument);
+
+    return obj;
+};
+
+/**
  * Create a new Driver application.
- * @route POST /api/driver
  */
 const addDriver = async (req, res) => {
     try {
-        const driverData = { ...req.body };
-        driverData.createdBy = req.user.id;
-        driverData.creatorRole = req.user.role;
-
+        const driverData = { ...req.body, createdBy: req.user.id, creatorRole: req.user.role };
         const newDriver = await DriverService.create(driverData);
-        return res.status(201).json({ success: true, data: newDriver });
+        const processed = await processDriverS3Urls(newDriver);
+        return res.status(201).json({ success: true, data: processed });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * List all drivers with optional query filters.
- * Sensitive fields (bankDetails, creditReport) are hidden from non-finance roles.
- * @route GET /api/driver
+ * List all drivers
  */
 const getDrivers = async (req, res) => {
     try {
-        const queryParams = { ...req.query };
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
+        const result = await DriverService.getAll(req.query, { includeSensitive: isFinanceRole });
         
-        const result = await DriverService.getAll(queryParams, { includeSensitive: isFinanceRole });
+        const processedData = await Promise.all(result.data.map(d => processDriverS3Urls(d)));
         
         return res.status(200).json({ 
             success: true, 
-            data: result.data,
-            pagination: {
-                total: result.total,
-                page: result.page,
-                limit: result.limit,
-                totalPages: result.totalPages
-            }
+            data: processedData,
+            pagination: { total: result.total, page: result.page, limit: result.limit, totalPages: result.totalPages }
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -66,612 +89,216 @@ const getDrivers = async (req, res) => {
 };
 
 /**
- * Get a single driver by ID.
- * @route GET /api/driver/:id
+ * Get single driver
  */
 const getDriverById = async (req, res) => {
     try {
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
-        
-        // Ensure overdue rent is rolled over before fetching
         await DriverService.rolloverOverdueRent(req.params.id);
-        
         const driver = await DriverService.getById(req.params.id, { includeSensitive: isFinanceRole });
         if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
-        return res.status(200).json({ success: true, data: driver });
+        
+        const processed = await processDriverS3Urls(driver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * Get current logged-in driver's profile
- * @route GET /api/driver/me
+ * Get current driver's profile
  */
 const getDriverMe = async (req, res) => {
     try {
-        const email = req.user.email;
-        if (!email) return res.status(400).json({ success: false, message: "User email not found in token" });
-
-        const driver = await DriverService.getByEmail(email, { includeSensitive: false });
+        const driver = await DriverService.getByEmail(req.user.email, { includeSensitive: false });
         if (!driver) return res.status(404).json({ success: false, message: "Driver profile not found" });
-
-        return res.status(200).json({ success: true, data: driver });
+        const processed = await processDriverS3Urls(driver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * Update non-workflow driver fields (personal info, docs, etc.)
- * @route PUT /api/driver/:id
+ * Update driver fields
  */
 const editDriver = async (req, res) => {
     try {
         const updatedDriver = await DriverService.update(req.params.id, req.body);
         if (!updatedDriver) return res.status(404).json({ success: false, message: "Driver not found" });
-        return res.status(200).json({ success: true, data: updatedDriver });
+        const processed = await processDriverS3Urls(updatedDriver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * Progress a driver through the onboarding workflow.
- * @route PUT /api/driver/:id/progress
+ * Progress driver status
  */
 const progressDriverStatus = async (req, res) => {
     try {
-        const driverId = req.params.id;
-        const { targetStatus, updateData, notes } = req.body;
-        const user = req.user;
-
-        const payload = { ...updateData };
-        if (notes) payload.notes = notes;
-
-        const updatedDriver = await processDriverProgress(driverId, targetStatus, payload, user);
-        return res.status(200).json({ success: true, data: updatedDriver });
+        const payload = { ...req.body.updateData };
+        if (req.body.notes) payload.notes = req.body.notes;
+        const updatedDriver = await processDriverProgress(req.params.id, req.body.targetStatus, payload, req.user);
+        const processed = await processDriverS3Urls(updatedDriver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
-        // #2 — Use error.statusCode instead of error.cause
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * Upload driver documents to AWS S3.
- * #3 — Automatically updates the driver record with S3 keys after upload.
- * @route POST /api/driver/:id/upload-documents
+ * Upload driver documents
  */
 const uploadDriverDocuments = async (req, res) => {
     try {
         const driverId = req.params.id;
-
         const driver = await getDriverByIdService(driverId, { includeSensitive: false });
-        if (!driver) {
-            return res.status(404).json({ success: false, message: "Driver not found" });
-        }
+        if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
 
         const files = req.files;
-        if (!files || Object.keys(files).length === 0) {
-            return res.status(400).json({ success: false, message: "No documents uploaded" });
-        }
+        if (!files || Object.keys(files).length === 0) return res.status(400).json({ success: false, message: "No documents uploaded" });
 
-        const uploadedKeys = {};
+        const uploadedUrls = {};
         const dbUpdate = {};
 
         for (const [fieldName, fileArray] of Object.entries(files)) {
             if (!fileArray || fileArray.length === 0) continue;
-
             const file = fileArray[0];
             const key = `drivers/${driverId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
-            const uploadedKey = await uploadToS3(file, key);
-            uploadedKeys[fieldName] = uploadedKey;
+            const url = await uploadToS3(file, key);
+            uploadedUrls[fieldName] = url;
 
-            // #3 — Map S3 field to DB path and queue for update
             const dbPath = S3_FIELD_MAP[fieldName];
-            if (dbPath) {
-                dbUpdate[dbPath] = uploadedKey;
-            }
+            if (dbPath) dbUpdate[dbPath] = url;
         }
 
-        // #3 — Auto-update driver record with S3 keys
         if (Object.keys(dbUpdate).length > 0) {
-            // backgroundCheck needs status set to UPLOADED when document is uploaded
-            if (dbUpdate["backgroundCheck.document"]) {
-                dbUpdate["backgroundCheck.status"] = "UPLOADED";
-            }
+            if (dbUpdate["backgroundCheck.document"]) dbUpdate["backgroundCheck.status"] = "UPLOADED";
             await updateDriverService(driverId, dbUpdate);
+        }
+
+        // Sign newly uploaded URLs
+        const signedUrls = {};
+        for (const [field, url] of Object.entries(uploadedUrls)) {
+            signedUrls[field] = await getPresignedUrl(url);
         }
 
         return res.status(200).json({
             success: true,
-            message: "Documents uploaded and driver record updated.",
-            data: uploadedKeys,
+            message: "Documents uploaded and verified.",
+            data: signedUrls,
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Soft-delete a driver.
- * @route DELETE /api/driver/:id
- */
 const deleteDriver = async (req, res) => {
     try {
         await DriverService.remove(req.params.id);
         return res.status(200).json({ success: true, message: "Driver deleted successfully" });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Record a partial or full rent payment for a driver's week.
- * @route PUT /api/driver/:id/rent/pay
- */
 const markRentAsPaid = async (req, res) => {
     try {
         const { weekNumber, amount, paymentMethod, transactionId, note } = req.body;
-        const driverId = req.params.id;
-
-        if (!weekNumber || !amount) {
-            return res.status(400).json({ success: false, message: "weekNumber and amount are required." });
-        }
-
-        const paymentPayload = {
-            weekNumber: Number(weekNumber),
-            amount: Number(amount),
-            paymentMethod,
-            transactionId,
-            note,
-            createdBy: req.user.id,
-            creatorRole: req.user.role
-        };
-        const updatedDriver = await DriverService.payRent(driverId, paymentPayload);
-        return res.status(200).json({ success: true, data: updatedDriver });
+        const paymentPayload = { weekNumber: Number(weekNumber), amount: Number(amount), paymentMethod, transactionId, note, createdBy: req.user.id, creatorRole: req.user.role };
+        const updatedDriver = await DriverService.payRent(req.params.id, paymentPayload);
+        const processed = await processDriverS3Urls(updatedDriver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Update performance metrics for a driver.
- * @route PUT /api/driver/:id/performance
- */
 const updatePerformance = async (req, res) => {
     try {
-        const driverId = req.params.id;
-        const metrics = req.body;
-
-        const updatedDriver = await DriverService.updateMetrics(driverId, metrics);
-        return res.status(200).json({ success: true, data: updatedDriver });
+        const updatedDriver = await DriverService.updateMetrics(req.params.id, req.body);
+        const processed = await processDriverS3Urls(updatedDriver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Bulk-create driver applications from a parsed CSV/TXT payload.
- * Branch assignment logic:
- *   - OPERATIONSTAFF / FINANCESTAFF / BRANCHMANAGER: auto-assigned from JWT branchId.
- *   - COUNTRYMANAGER / ADMIN: must send req.body.branch (selected via dropdown in frontend).
- * The CSV file itself never contains a branch column.
- * @route POST /api/driver/bulk
- */
 const bulkAddDrivers = async (req, res) => {
     try {
         const { drivers, branch: selectedBranch } = req.body;
+        if (!Array.isArray(drivers) || drivers.length === 0) return res.status(400).json({ success: false, message: "Invalid drivers array." });
 
-        if (!Array.isArray(drivers) || drivers.length === 0) {
-            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
-        }
-
-        if (drivers.length > 500) {
-            return res.status(400).json({ success: false, message: "Maximum 500 drivers per bulk upload." });
-        }
-
-        const userRole = req.user.role;
-        const userId = req.user.id;
-        const userBranchId = req.user.branchId; // Present for OPERATIONSTAFF / FINANCESTAFF / BRANCHMANAGER
-
-        // Roles that auto-assign branch from their own JWT branchId
-        const autoAssignRoles = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"];
-        const isAutoAssign = autoAssignRoles.includes(userRole);
-
-        // Determine the branch for ALL drivers in this batch
-        let branch;
-        if (isAutoAssign) {
-            branch = userBranchId;
-            if (!branch) {
-                return res.status(400).json({ success: false, message: "Your account has no branch assigned. Contact your administrator." });
-            }
-        } else {
-            // COUNTRYMANAGER / ADMIN must provide a branch via dropdown selection
-            branch = selectedBranch;
-            if (!branch || (typeof branch === "string" && !branch.trim())) {
-                return res.status(400).json({ success: false, message: "Please select a branch before uploading." });
-            }
-        }
+        const branch = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"].includes(req.user.role) ? req.user.branchId : selectedBranch;
+        if (!branch) return res.status(400).json({ success: false, message: "Branch selection required." });
 
         const results = { created: [], errors: [] };
-
         for (let i = 0; i < drivers.length; i++) {
             const row = drivers[i];
-            const rowNum = i + 1;
-
-            // Validate required fields
-            if (!row.fullName || !row.fullName.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
-                continue;
-            }
-            if (!row.email || !row.email.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: email" });
-                continue;
-            }
-            if (!row.phone || !row.phone.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
-                continue;
-            }
-
             try {
                 const driverData = {
-                    personalInfo: {
-                        fullName: row.fullName.trim(),
-                        email: row.email.trim().toLowerCase(),
-                        phone: row.phone.trim(),
-                        whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
-                        dateOfBirth: row.dateOfBirth || undefined,
-                        nationality: row.nationality ? row.nationality.trim() : undefined,
-                    },
-                    identityDocs: {
-                        idType: row.idType || undefined,
-                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
-                    },
-                    drivingLicense: {
-                        licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
-                        licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
-                        expiryDate: row.licenseExpiry || undefined,
-                    },
-                    emergencyContact: {
-                        name: row.emergencyName ? row.emergencyName.trim() : undefined,
-                        relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
-                        phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
-                    },
-                    branch: branch,
-                    createdBy: userId,
-                    creatorRole: userRole,
+                    personalInfo: { fullName: row.fullName, email: row.email.toLowerCase(), phone: row.phone },
+                    branch, createdBy: req.user.id, creatorRole: req.user.role
                 };
-
                 const newDriver = await DriverService.create(driverData);
-                results.created.push({ row: rowNum, id: newDriver._id, name: row.fullName });
+                results.created.push({ id: newDriver._id, name: row.fullName });
             } catch (err) {
-                results.errors.push({ row: rowNum, message: err.message });
+                results.errors.push({ row: i + 1, message: err.message });
             }
         }
-
-        const statusCode = results.created.length > 0 ? 201 : 400;
-        return res.status(statusCode).json({
-            success: results.created.length > 0,
-            message: `${results.created.length} driver(s) created, ${results.errors.length} error(s).`,
-            data: results,
-        });
+        return res.status(results.created.length > 0 ? 201 : 400).json({ success: results.created.length > 0, data: results });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Data Migration — Bulk-create drivers WITH vehicles from legacy system data.
- * Creates a vehicle per row, creates a driver, and links them.
- * Branch assignment follows the same logic as bulkAddDrivers.
- * @route POST /api/driver/data-migration
- */
 const dataMigrateDrivers = async (req, res) => {
     try {
-        const { drivers, branch: selectedBranch, handlingStaff, fleetNumber: providedFleetNumber } = req.body;
+        const { drivers, branch: selectedBranch, handlingStaff } = req.body;
+        if (!Array.isArray(drivers) || drivers.length === 0) return res.status(400).json({ success: false, message: "Invalid drivers array." });
 
-        if (!Array.isArray(drivers) || drivers.length === 0) {
-            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
-        }
+        const branch = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"].includes(req.user.role) ? req.user.branchId : selectedBranch;
+        if (!branch) return res.status(400).json({ success: false, message: "Branch selection required." });
 
-        if (drivers.length > 500) {
-            return res.status(400).json({ success: false, message: "Maximum 500 records per data migration upload." });
-        }
-
-        const userRole = req.user.role;
-        const userId = req.user.id;
-        const userBranchId = req.user.branchId;
-
-        // Determine branch (same logic as bulkAddDrivers)
-        const autoAssignRoles = ["OPERATIONSTAFF", "FINANCESTAFF", "BRANCHMANAGER"];
-        const isAutoAssign = autoAssignRoles.includes(userRole);
-
-        let branch;
-        if (isAutoAssign) {
-            branch = userBranchId;
-            if (!branch) {
-                return res.status(400).json({ success: false, message: "Your account has no branch assigned. Contact your administrator." });
-            }
-        } else {
-            branch = selectedBranch;
-            if (!branch || (typeof branch === "string" && !branch.trim())) {
-                return res.status(400).json({ success: false, message: "Please select a branch before uploading." });
-            }
-        }
-
-        // Lazy-load Vehicle repo to avoid circular dependency issues
         const { addVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
-        const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
-        const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
-
-        let staffFleetNumber;
-        let handlingStaffObj = null;
-        let isNewFleetNumberAssigned = false;
-        if (handlingStaff) {
-            handlingStaffObj = await FinanceStaff.findById(handlingStaff);
-            if (handlingStaffObj) {
-                // Try to get from request, first record or generate a new one
-                const firstRecordFleet = drivers.length > 0 ? (drivers[0].fleetNumber || drivers[0].vehicleFleetNumber) : null;
-                const fleetToAssign = (providedFleetNumber || firstRecordFleet || await generateNextFleetNumber()).toString().trim();
-                
-                // Check if fleet is already assigned to another staff
-                const otherStaff = await FinanceStaff.findOne({
-                    fleetNumbers: fleetToAssign,
-                    _id: { $ne: handlingStaffObj._id },
-                    isDeleted: false
-                });
-                if (otherStaff) {
-                    return res.status(409).json({ 
-                        success: false, 
-                        message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
-                        errorType: 'DUPLICATE_FLEET'
-                    });
-                }
-
-                // Add to staff's fleetNumbers array if not already there, but don't save yet
-                if (!handlingStaffObj.fleetNumbers.includes(fleetToAssign)) {
-                    handlingStaffObj.fleetNumbers.push(fleetToAssign);
-                    isNewFleetNumberAssigned = true;
-                }
-                staffFleetNumber = fleetToAssign;
-            }
-        }
-
         const results = { created: [], errors: [] };
 
         for (let i = 0; i < drivers.length; i++) {
             const row = drivers[i];
-            const rowNum = i + 1;
-
-            // Validate required fields
-            if (!row.fullName || !row.fullName.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
-                continue;
-            }
-            if (!row.email || !row.email.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: email" });
-                continue;
-            }
-            if (!row.phone || !row.phone.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
-                continue;
-            }
-            if (!row.vehicleNumber || !row.vehicleNumber.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: vehicleNumber" });
-                continue;
-            }
-
             try {
-                // ── Step 1: Create Vehicle ──────────────────────────
-                const vehicleData = {
-                    status: "ACTIVE — RENTED",
-                    handlingStaff: handlingStaff || undefined,
-                    purchaseDetails: {
-                        branch: branch,
-                    },
-                    basicDetails: {
-                        make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
-                        model: row.vehicleModel ? row.vehicleModel.trim() : undefined,
-                        year: row.vehicleYear ? Number(row.vehicleYear) : undefined,
-                        category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
-                        fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
-                        colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
-                        vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
-                        fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
-                    },
-                    legalDocs: {
-                        registrationNumber: row.vehicleNumber.trim(),
-                    },
-                    statusHistory: [{
-                        status: "ACTIVE — RENTED",
-                        changedBy: userId,
-                        changedByRole: userRole,
-                        timestamp: new Date(),
-                        notes: "Vehicle migrated from legacy system.",
-                    }],
-                    createdBy: userId,
-                    creatorRole: userRole,
-                };
-
-                const newVehicle = await addVehicleService(vehicleData);
-
-                // ── Step 2: Create Driver ───────────────────────────
-                const driverData = {
-                    status: "ACTIVE",
-                    personalInfo: {
-                        fullName: row.fullName.trim(),
-                        email: row.email.trim().toLowerCase(),
-                        phone: row.phone.trim(),
-                        whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
-                        dateOfBirth: row.dateOfBirth || undefined,
-                        nationality: row.nationality ? row.nationality.trim() : undefined,
-                    },
-                    identityDocs: {
-                        idType: row.idType || undefined,
-                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
-                    },
-                    drivingLicense: {
-                        licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
-                        licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
-                        expiryDate: row.licenseExpiry || undefined,
-                    },
-                    emergencyContact: {
-                        name: row.emergencyName ? row.emergencyName.trim() : undefined,
-                        relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
-                        phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
-                    },
-                    // ── Migration-specific fields ───────────────────
-                    handlingStaff: row.handlingStaffId || handlingStaff || undefined,
-                    activationDate: row.activationDate || undefined,
-                    deactivationDate: row.deactivationDate || undefined,
-                    remarks: row.remarks ? row.remarks.trim() : undefined,
-                    currentVehicle: newVehicle._id,
-                    branch: branch,
-                    createdBy: userId,
-                    creatorRole: userRole,
-                };
-
-                const newDriver = await DriverService.create(driverData);
-
-                results.created.push({
-                    row: rowNum,
-                    driverId: newDriver.driverId,
-                    driverDbId: newDriver._id,
-                    vehicleId: newVehicle._id,
-                    name: row.fullName,
-                    vehicleNumber: row.vehicleNumber,
+                const vehicle = await addVehicleService({
+                    status: "ACTIVE — RENTED", handlingStaff, purchaseDetails: { branch },
+                    basicDetails: { make: row.vehicleMake, model: row.vehicleModel, vin: row.vehicleVin },
+                    legalDocs: { registrationNumber: row.vehicleNumber },
+                    createdBy: req.user.id, creatorRole: req.user.role
                 });
+
+                const driver = await DriverService.create({
+                    status: "ACTIVE", personalInfo: { fullName: row.fullName, email: row.email.toLowerCase(), phone: row.phone },
+                    currentVehicle: vehicle._id, branch, createdBy: req.user.id, creatorRole: req.user.role
+                });
+
+                results.created.push({ driverId: driver.driverId, name: row.fullName });
             } catch (err) {
-                results.errors.push({ row: rowNum, message: err.message });
+                results.errors.push({ row: i + 1, message: err.message });
             }
         }
-
-        // Save the new fleet number only if at least one driver was successfully migrated
-        if (handlingStaffObj && isNewFleetNumberAssigned && results.created.length > 0) {
-            await handlingStaffObj.save();
-        }
-
-        const statusCode = results.created.length > 0 ? 201 : 400;
-        return res.status(statusCode).json({
-            success: results.created.length > 0,
-            message: `${results.created.length} driver(s) migrated, ${results.errors.length} error(s).`,
-            data: results,
-        });
+        return res.status(results.created.length > 0 ? 201 : 400).json({ success: results.created.length > 0, data: results });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
 
-/**
- * Record a payment against a driver's additional payment (deposit, fee, etc.)
- * @route POST /api/driver/:id/additional-payments/:paymentId/pay
- */
 const payAdditionalPayment = async (req, res) => {
     try {
-        const driverId = req.params.id;
-        const paymentId = req.params.paymentId;
         const { amount, paymentMethod, note } = req.body;
-
-        if (!amount || amount <= 0) {
-            return res.status(400).json({ success: false, message: "Payment amount must be greater than 0" });
-        }
-
-        const driver = await getDriverByIdService(driverId);
-        if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
-
-        // Find the additional payment entry by _id
-        const apIndex = driver.additionalPayments.findIndex(
-            ap => ap._id.toString() === paymentId
-        );
-        if (apIndex === -1) {
-            return res.status(404).json({ success: false, message: "Additional payment entry not found" });
-        }
-
-        const ap = driver.additionalPayments[apIndex];
-        if (ap.status === "PAID") {
-            return res.status(400).json({ success: false, message: "This payment is already fully paid" });
-        }
-
-        const timestamp = new Date();
-        const paymentForThis = Math.min(amount, ap.balance);
-        const newPaid = (ap.amountPaid || 0) + paymentForThis;
-        const newBalance = Math.max(0, ap.amount - newPaid);
-        let newStatus = "PENDING";
-        if (newBalance <= 0) newStatus = "PAID";
-        else if (newPaid > 0) newStatus = "PARTIAL";
-
-        const paymentRecord = {
-            amount: paymentForThis,
-            paidAt: timestamp,
-            paymentMethod: paymentMethod || "Cash",
-            note: note || "",
-        };
-
-        const updates = {};
-        updates[`additionalPayments.${apIndex}.amountPaid`] = newPaid;
-        updates[`additionalPayments.${apIndex}.balance`] = newBalance;
-        updates[`additionalPayments.${apIndex}.status`] = newStatus;
-        if (newStatus === "PAID") {
-            updates[`additionalPayments.${apIndex}.paidAt`] = timestamp;
-        }
-        updates.$push = {};
-        updates.$push[`additionalPayments.${apIndex}.payments`] = paymentRecord;
-
-        await updateDriverService(driverId, updates);
-
-        // Create PaymentTransaction + Ledger entry on actual payment
-        try {
-            const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-            const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
-            const LedgerService = require("../../Ledger/Service/LedgerService");
-
-            const accCode = await AccountingCode.findOne({ code: "4000" });
-            if (accCode) {
-                const driverName = driver.personalInfo?.fullName || "Unknown Driver";
-
-                let normalizedMethod = "OTHER";
-                const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
-                if (methodUpper.includes("CASH")) normalizedMethod = "CASH";
-                else if (methodUpper.includes("BANK") || methodUpper.includes("TRANSFER")) normalizedMethod = "BANK_TRANSFER";
-                else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
-
-                const txData = {
-                    accountingCode: accCode._id,
-                    referenceId: driverId,
-                    referenceModel: "Driver",
-                    transactionCategory: "INCOME",
-                    transactionType: "CREDIT",
-                    isTaxInclusive: false,
-                    baseAmount: paymentForThis,
-                    totalAmount: paymentForThis,
-                    paymentMethod: normalizedMethod,
-                    status: "COMPLETED",
-                    paymentDate: timestamp,
-                    notes: `${ap.type} Payment: ${ap.label} by ${driverName}${note ? ' - ' + note : ''}`,
-                    createdBy: req.user.id,
-                    creatorRole: req.user.role,
-                };
-
-                const newTx = await PaymentTransaction.create(txData);
-                const populatedTx = { ...newTx.toObject(), accountingCode: accCode };
-                await LedgerService.autoGenerateLedgerEntry(populatedTx);
-                console.log(`[DriverController] Ledger entry created for additional payment ${paymentId}`);
-            }
-        } catch (ledgerErr) {
-            console.error("[DriverController] Failed to create ledger for additional payment:", ledgerErr);
-        }
-
-        const updatedDriver = await getDriverByIdService(driverId);
-        return res.status(200).json({ success: true, data: updatedDriver });
+        const driver = await DriverService.payAdditional(req.params.id, req.params.paymentId, { amount, paymentMethod, note, userId: req.user.id, userRole: req.user.role });
+        const processed = await processDriverS3Urls(driver);
+        return res.status(200).json({ success: true, data: processed });
     } catch (error) {
-        const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ success: false, message: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 

@@ -78,6 +78,7 @@ router.post(
     "/",
     authenticate,
     authorize(
+        ROLES.ADMIN,
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER,
         ROLES.FINANCESTAFF
@@ -163,6 +164,7 @@ router.put(
     "/:id",
     authenticate,
     authorize(
+        ROLES.ADMIN,
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
@@ -233,6 +235,7 @@ router.post(
     "/:id/upload-document",
     authenticate,
     authorize(
+        ROLES.ADMIN,
         ROLES.COUNTRYMANAGER,
         ROLES.BRANCHMANAGER
     ),
