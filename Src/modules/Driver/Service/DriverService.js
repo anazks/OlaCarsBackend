@@ -237,6 +237,26 @@ exports.payRent = async (id, paymentData) => {
                 const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
                 await LedgerService.autoGenerateLedgerEntry(populatedTx);
                 console.log(`[DriverService] Ledger entry generation triggered for ${newTransaction._id}`);
+
+                // Zoho Accounting Integration: Auto-create PaymentReceived record for Direct Rent Payment
+                try {
+                    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                    const prData = {
+                        paymentNumber: `PR-${Date.now()}`,
+                        driverId: id,
+                        amountReceived: amount,
+                        paymentDate: timestamp,
+                        paymentMethod: paymentMethod || "Cash",
+                        referenceNumber: transactionId || undefined,
+                        notes: enhancedNote,
+                        invoices: [], // Recorded as unapplied balance against general rent tracking
+                        status: "COMPLETED"
+                    };
+                    const prDoc = await PaymentReceived.create(prData);
+                    console.log(`[DriverService] PaymentReceived record created successfully: ${prDoc.paymentNumber}`);
+                } catch (prErr) {
+                    console.error("[DriverService] Failed to auto-create PaymentReceived record:", prErr);
+                }
             }
         } catch (err) {
             console.error("[DriverService] Failed to generate ledger for rent payment:", err);

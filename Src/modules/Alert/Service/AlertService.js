@@ -42,15 +42,18 @@ const checkAndCreateMaintenanceAlert = async (vehicle) => {
  * @param {Object} vehicle 
  */
 const checkAndCreateInsuranceAlert = async (vehicle) => {
-    const { toDate } = vehicle.insuranceDetails || {};
-    if (!toDate) return;
+    const { getVehiclePoliciesByVehicleIdService } = require("../../Insurance/Repo/VehiclePolicyRepo");
+    const policies = await getVehiclePoliciesByVehicleIdService(vehicle._id);
+    const activePolicy = policies.length > 0 ? policies[0] : null;
 
-    const expiryDate = new Date(toDate);
+    if (!activePolicy || !activePolicy.expiryDate) return;
+
+    const expiryDate = new Date(activePolicy.expiryDate);
     const today = new Date();
     const diffTime = expiryDate - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays <= 30) {
+    if (diffDays <= 30 && diffDays >= -30) {
         const existing = await findActiveAlertRepo(vehicle._id, "INSURANCE");
         if (!existing) {
             await createAlertRepo({
@@ -59,10 +62,13 @@ const checkAndCreateInsuranceAlert = async (vehicle) => {
                 branchId: vehicle.purchaseDetails.branch?._id || vehicle.purchaseDetails.branch,
                 country: vehicle.purchaseDetails.branch?.country || "UNKNOWN",
                 priority: diffDays <= 7 ? "HIGH" : "MEDIUM",
-                message: `Insurance for ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) expires in ${diffDays} days (${expiryDate.toDateString()}).`,
+                message: diffDays < 0 
+                    ? `Insurance for ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) EXPIRED ${Math.abs(diffDays)} days ago!`
+                    : `Insurance for ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}) expires in ${diffDays} days (${expiryDate.toDateString()}).`,
                 metadata: {
                     expiryDate: expiryDate,
-                    daysRemaining: diffDays
+                    daysRemaining: diffDays,
+                    policyId: activePolicy._id
                 }
             });
             console.log(`[ALERT] Insurance alert created for Vehicle: ${vehicle._id}`);

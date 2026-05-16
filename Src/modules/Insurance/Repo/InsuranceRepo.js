@@ -29,7 +29,7 @@ exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
             filterFields: ["status", "policyType", "coverageType", "country"],
             dateFilterField: "createdAt",
             populate: [
-                { path: "vehicles" },
+
                 { path: "supplier", select: "name email phone" }
             ],
             ...options
@@ -48,7 +48,7 @@ exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
  */
 exports.getInsuranceByIdService = async (id) => {
     try {
-        return await Insurance.findById(id).populate("vehicles");
+        return await Insurance.findById(id);
     } catch (error) {
         throw error;
     }

@@ -9,11 +9,18 @@ const invoicePaymentSchema = new mongoose.Schema({
     note: { type: String },
 }, { _id: true });
 
+const lineItemSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    description: { type: String },
+    qty: { type: Number, required: true, default: 1 },
+    unitPrice: { type: Number, required: true, default: 0 },
+    total: { type: Number, default: 0 },
+}, { _id: false });
+
 const invoiceSchema = new mongoose.Schema({
     invoiceNumber: { 
         type: String, 
-        required: true, 
-        unique: true 
+        required: true
     },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
@@ -71,6 +78,21 @@ const invoiceSchema = new mongoose.Schema({
     pdfS3Key: { 
         type: String 
     },
+
+    // Manual invoice fields
+    invoiceType: {
+        type: String,
+        enum: ["AUTO", "MANUAL"],
+        default: "AUTO"
+    },
+    lineItems: [lineItemSchema],
+    subtotal: { type: Number, default: 0 },
+    discountType: { type: String, enum: ["PERCENTAGE", "FIXED"], default: "PERCENTAGE" },
+    discountValue: { type: Number, default: 0 },
+    discountAmount: { type: Number, default: 0 },
+    taxRate: { type: Number, default: 0 },
+    taxAmount: { type: Number, default: 0 },
+    notes: { type: String },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         refPath: "creatorRole",
@@ -90,7 +112,8 @@ const invoiceSchema = new mongoose.Schema({
     isDeleted: { type: Boolean, default: false },
 }, { timestamps: true });
 
-invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true });
+invoiceSchema.index({ invoiceNumber: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 
