@@ -20,16 +20,7 @@ const insuranceSchema = new mongoose.Schema(
             type: String,
             enum: ["THIRD_PARTY", "COMPREHENSIVE"]
         },
-        startDate: {
-            type: Date,
-        },
-        expiryDate: {
-            type: Date,
-            index: true
-        },
-        insuredValue: {
-            type: Number
-        },
+
         providerContact: {
             name: String,
             phone: String,
@@ -38,12 +29,10 @@ const insuranceSchema = new mongoose.Schema(
         documents: {
             policyDocumentUrl: String
         },
-        vehicles: [
-            {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: "Vehicle"
-            }
-        ],
+        insuredValue: {
+            type: Number
+        },
+
         status: {
             type: String,
             enum: ["ACTIVE", "EXPIRED", "CANCELLED"],

@@ -9,6 +9,14 @@ const invoicePaymentSchema = new mongoose.Schema({
     note: { type: String },
 }, { _id: true });
 
+const lineItemSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    description: { type: String },
+    qty: { type: Number, required: true, default: 1 },
+    unitPrice: { type: Number, required: true, default: 0 },
+    total: { type: Number, default: 0 },
+}, { _id: false });
+
 const invoiceSchema = new mongoose.Schema({
     invoiceNumber: {
         type: String,
@@ -80,6 +88,21 @@ const invoiceSchema = new mongoose.Schema({
     pdfS3Key: {
         type: String
     },
+
+    // Manual invoice fields
+    invoiceType: {
+        type: String,
+        enum: ["AUTO", "MANUAL"],
+        default: "AUTO"
+    },
+    lineItems: [lineItemSchema],
+    subtotal: { type: Number, default: 0 },
+    discountType: { type: String, enum: ["PERCENTAGE", "FIXED"], default: "PERCENTAGE" },
+    discountValue: { type: Number, default: 0 },
+    discountAmount: { type: Number, default: 0 },
+    taxRate: { type: Number, default: 0 },
+    taxAmount: { type: Number, default: 0 },
+    notes: { type: String },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         refPath: "creatorRole",

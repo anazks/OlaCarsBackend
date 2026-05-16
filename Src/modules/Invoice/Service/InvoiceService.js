@@ -2,7 +2,9 @@ const {
     addManyInvoicesService, 
     getInvoicesService, 
     getInvoiceByIdService, 
-    updateInvoiceService 
+    updateInvoiceService,
+    deleteInvoiceService,
+    deleteAllInvoicesService
 } = require("../Repo/InvoiceRepo");
 const { Invoice } = require("../Model/InvoiceModel");
 const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
@@ -12,6 +14,16 @@ const { Driver } = require("../../Driver/Model/DriverModel");
 
 exports.getAll = async (queryParams = {}, options = {}) => {
     return await getInvoicesService(queryParams, options);
+};
+
+exports.getRegistry = async (queryParams = {}) => {
+    // Specifically for the registry page, uses standard list logic with search/date filters
+    return await getInvoicesService(queryParams);
+};
+
+exports.getPendingByDriver = async (driverId) => {
+    const { getPendingByDriverService } = require("../Repo/InvoiceRepo");
+    return await getPendingByDriverService(driverId);
 };
 
 exports.getById = async (id) => {
@@ -286,8 +298,174 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
             await LedgerService.autoGenerateLedgerEntry(populatedTx);
             console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+
+            // Zoho Accounting Integration: Auto-create PaymentReceived record
+            try {
+                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+
+                // Normalize paymentMethod to match PaymentReceived schema enum:
+                // ["Cash", "Bank Transfer", "Card", "Mobile Money", "Other"]
+                const methodUpper2 = (paymentMethod || "").toUpperCase();
+                let normalizedPRMethod = "Other";
+                if (methodUpper2.includes("CASH")) normalizedPRMethod = "Cash";
+                else if (methodUpper2.includes("BANK") || methodUpper2.includes("TRANSFER") || methodUpper2.includes("WIRE")) normalizedPRMethod = "Bank Transfer";
+                else if (methodUpper2.includes("CARD") || methodUpper2.includes("POS")) normalizedPRMethod = "Card";
+                else if (methodUpper2.includes("MOBILE") || methodUpper2.includes("MONEY")) normalizedPRMethod = "Mobile Money";
+
+                const prData = {
+                    paymentNumber: `PR-${Date.now()}`,
+                    driverId: invoice.driver,
+                    amountReceived: amount,
+                    paymentDate: new Date(),
+                    paymentMethod: normalizedPRMethod,
+                    notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
+                    invoices: [{
+                        invoiceId: invoice._id,
+                        invoiceNumber: invoice.invoiceNumber,
+                        amountApplied: amount
+                    }],
+                    status: "COMPLETED"
+                };
+                const prDoc = await PaymentReceived.create(prData);
+                console.log(`[InvoiceService] PaymentReceived record created successfully: ${prDoc.paymentNumber}`);
+            } catch (prErr) {
+                console.error("[InvoiceService] Failed to auto-create PaymentReceived record:", prErr);
+            }
         }
     } catch (err) {
         console.error("[InvoiceService] Failed to generate ledger for invoice payment:", err);
     }
+};
+
+exports.createManualInvoice = async (data, createdBy, creatorRole) => {
+    const { 
+        driver: driverId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
+        lineItems = [], discountType = 'PERCENTAGE', discountValue = 0, 
+        taxRate = 0, notes 
+    } = data;
+
+    if (!driverId) throw new Error("Driver is required for manual invoice creation");
+    if (!dueDate) throw new Error("Due date is required");
+    if (!lineItems || lineItems.length === 0) throw new Error("At least one line item is required");
+
+    // Compute subtotal from line items
+    const enrichedLineItems = lineItems.map(item => ({
+        name: item.name,
+        description: item.description || '',
+        qty: Number(item.qty) || 1,
+        unitPrice: Number(item.unitPrice) || 0,
+        total: Math.round((Number(item.qty) || 1) * (Number(item.unitPrice) || 0) * 100) / 100,
+    }));
+
+    const subtotal = enrichedLineItems.reduce((sum, item) => sum + item.total, 0);
+
+    // Compute discount
+    let discountAmount = 0;
+    if (discountValue > 0) {
+        if (discountType === 'PERCENTAGE') {
+            discountAmount = Math.round((subtotal * discountValue / 100) * 100) / 100;
+        } else {
+            discountAmount = Math.min(Number(discountValue), subtotal);
+        }
+    }
+
+    const afterDiscount = subtotal - discountAmount;
+    
+    // Compute tax
+    const taxAmount = taxRate > 0 ? Math.round((afterDiscount * taxRate / 100) * 100) / 100 : 0;
+    const totalAmountDue = Math.round((afterDiscount + taxAmount) * 100) / 100;
+
+    // Auto-assign weekNumber (next available for this driver)
+    const existingInvoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+    const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+
+    // Generate manual invoice number
+    const ts = Date.now();
+    const invoiceNumber = `MAN-${ts}`;
+
+    const invoiceData = {
+        invoiceNumber,
+        driver: driverId,
+        vehicle: vehicleId || undefined,
+        weekNumber: nextWeekNumber,
+        weekLabel: weekLabel || `Manual Invoice - ${new Date(dueDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+        dueDate: new Date(dueDate),
+        generatedAt: invoiceDate ? new Date(invoiceDate) : new Date(),
+        baseAmount: totalAmountDue,
+        carryOverAmount: 0,
+        totalAmountDue,
+        amountPaid: 0,
+        balance: totalAmountDue,
+        status: 'PENDING',
+        payments: [],
+        // Manual invoice specific fields
+        invoiceType: 'MANUAL',
+        lineItems: enrichedLineItems,
+        subtotal,
+        discountType,
+        discountValue: Number(discountValue),
+        discountAmount,
+        taxRate: Number(taxRate),
+        taxAmount,
+        notes: notes || '',
+        createdBy,
+        creatorRole,
+    };
+
+    const newInvoice = await Invoice.create(invoiceData);
+    return await Invoice.findById(newInvoice._id).populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
+};
+
+exports.updateInvoice = async (id, data) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const invoice = await Invoice.findById(id);
+    if (!invoice) throw new Error("Invoice not found");
+    if (invoice.status === 'PAID') throw new Error("Cannot edit a fully paid invoice");
+
+    if (data.dueDate) invoice.dueDate = new Date(data.dueDate);
+    if (data.weekLabel) invoice.weekLabel = data.weekLabel;
+    
+    if (typeof data.baseAmount === 'number') {
+        invoice.baseAmount = data.baseAmount;
+        invoice.totalAmountDue = invoice.baseAmount + (invoice.carryOverAmount || 0);
+        invoice.balance = Math.max(0, invoice.totalAmountDue - (invoice.amountPaid || 0));
+        
+        if (invoice.balance <= 0) invoice.status = 'PAID';
+        else if (invoice.amountPaid > 0) invoice.status = 'PARTIAL';
+        else invoice.status = 'PENDING';
+    }
+
+    return await invoice.save();
+};
+
+exports.deleteInvoice = async (id) => {
+    return await deleteInvoiceService(id);
+};
+
+exports.deleteAll = async () => {
+    return await deleteAllInvoicesService();
+};
+
+exports.getGenerationSettings = async () => {
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+    return {
+        generationDay: setting ? parseInt(setting.value) : 3, // Default Wednesday
+    };
+};
+
+exports.updateGenerationSettings = async (data) => {
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const { generationDay } = data;
+    await SystemSettings.findOneAndUpdate(
+        { key: 'invoice_generation_day' },
+        { value: generationDay, description: 'Day of the week to generate invoices (0-6)' },
+        { upsert: true, new: true }
+    );
+    return { success: true };
+};
+
+exports.triggerWeeklyGeneration = async (userId, userRole) => {
+    const InvoiceCronService = require("./InvoiceCronService");
+    return await InvoiceCronService.generateCurrentWeekInvoices(true, userId, userRole);
 };

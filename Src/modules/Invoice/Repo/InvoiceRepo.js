@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const { Invoice } = require("../Model/InvoiceModel");
+const { Driver } = require("../../Driver/Model/DriverModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 
 exports.addInvoiceService = async (data, session = null) => {
     const options = session ? { session } : {};
@@ -11,13 +14,21 @@ exports.addManyInvoicesService = async (dataArray, session = null) => {
     return await Invoice.insertMany(dataArray, options);
 };
 
-exports.getInvoicesService = async (queryParams = {}, options = {}) => {
-    const page = parseInt(queryParams.page) || 1;
-    const limit = parseInt(queryParams.limit) || 20;
-    const skip = (page - 1) * limit;
+exports.getInvoicesService = async (queryParams = {}) => {
+    const { 
+        page = 1, 
+        limit = 20, 
+        startDate, 
+        endDate, 
+        status, 
+        search, 
+        sortBy = 'dueDate', 
+        sortOrder = 'desc' 
+    } = queryParams;
 
-    const baseQuery = options.baseQuery || { isDeleted: false };
-    const query = { ...baseQuery };
+    const pageInt = parseInt(page, 10);
+    const limitInt = parseInt(limit, 10);
+    const skip = (pageInt - 1) * limitInt;
 
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
@@ -31,8 +42,25 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
 
-    const totalCount = await Invoice.countDocuments(query);
-    const totalPages = Math.ceil(totalCount / limit);
+    // 1. Initial Match (Direct fields)
+    const match = { isDeleted: false };
+    if (status && status !== 'ALL') match.status = status;
+    if (queryParams.driver && mongoose.Types.ObjectId.isValid(queryParams.driver)) {
+        match.driver = typeof queryParams.driver === 'string' ? new mongoose.Types.ObjectId(queryParams.driver) : queryParams.driver;
+    }
+    if (queryParams.vehicle && mongoose.Types.ObjectId.isValid(queryParams.vehicle)) {
+        match.vehicle = typeof queryParams.vehicle === 'string' ? new mongoose.Types.ObjectId(queryParams.vehicle) : queryParams.vehicle;
+    }
+    if (startDate || endDate) {
+        match.dueDate = {};
+        if (startDate) match.dueDate.$gte = new Date(startDate);
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            match.dueDate.$lte = end;
+        }
+    }
+    pipeline.push({ $match: match });
 
     // Dynamic sort: if workshop, sort by createdAt
     const sortOpt = options.defaultSort || (queryParams.invoiceType === 'WORKSHOP' ? { createdAt: -1 } : { weekNumber: 1 });
@@ -49,18 +77,33 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     return {
         data,
         pagination: {
-            totalItems: totalCount,
-            totalPages,
-            currentPage: page,
-            limit,
-        },
+            totalItems,
+            totalPages: Math.ceil(totalItems / limitInt),
+            currentPage: pageInt,
+            limit: limitInt
+        }
     };
+};
+
+exports.getPendingByDriverService = async (driverId) => {
+    return await Invoice.find({
+        driver: driverId,
+        status: { $in: ['PENDING', 'PARTIAL'] },
+        balance: { $gt: 0 },
+        isDeleted: false
+    })
+    .sort({ dueDate: 1 })
+    .lean();
 };
 
 exports.getInvoiceByIdService = async (id) => {
     const invoice = await Invoice.findById(id)
-        .populate("driver", "personalInfo.fullName personalInfo.email personalInfo.phone")
-        .populate("vehicle", "basicDetails.make basicDetails.model legalDocs.registrationNumber")
+        .populate({
+            path: "driver",
+            select: "driverId personalInfo.fullName personalInfo.email personalInfo.phone branch",
+            populate: { path: "branch", select: "name country" }
+        })
+        .populate("vehicle", "basicDetails.make basicDetails.model basicDetails.fleetNumber legalDocs.registrationNumber")
         .lean();
     if (!invoice || invoice.isDeleted) throw new Error("Invoice not found");
     return invoice;

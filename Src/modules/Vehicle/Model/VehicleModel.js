@@ -108,28 +108,7 @@ const vehicleSchema = new mongoose.Schema(
             transferOfOwnership: { type: String },
         },
 
-        // 4. Insurance Policy
-        insurance: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Insurance"
-        },
 
-        insuranceDetails: {
-            plan: { type: mongoose.Schema.Types.ObjectId, ref: "Insurance" },
-            insuranceNumber: { type: String },
-            fromDate: { type: Date },
-            toDate: { type: Date },
-            certificate: { type: String }, // S3 Key
-            provider: { type: String },
-            policyType: { type: String },
-            coverageType: { type: String },
-            supplier: {
-                _id: { type: String },
-                name: { type: String },
-                email: { type: String },
-                phone: { type: String }
-            }
-        },
 
         // 5. Importation & Landed Cost
         importationDetails: {

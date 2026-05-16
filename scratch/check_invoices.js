@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
 const { Invoice } = require('../Src/modules/Invoice/Model/InvoiceModel');
+// Register other models for population
+require('../Src/modules/Driver/Model/DriverModel');
+require('../Src/modules/Vehicle/Model/VehicleModel');
 
 async function checkInvoices() {
     try {

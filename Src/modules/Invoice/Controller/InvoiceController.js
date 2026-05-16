@@ -3,9 +3,37 @@ const InvoiceService = require("../Service/InvoiceService");
 exports.getInvoices = async (req, res) => {
     try {
         const queryParams = req.query;
-        // Optionally bind to a branch or driver context here
+        console.log('Invoice Query Params:', queryParams);
         const result = await InvoiceService.getAll(queryParams);
-        return res.status(200).json({ success: true, message: "Invoices retrieved successfully", data: result });
+        return res.status(200).json({ 
+            success: true, 
+            message: "Invoices retrieved successfully", 
+            data: result.data,
+            pagination: result.pagination
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getRegistryInvoices = async (req, res) => {
+    try {
+        const result = await InvoiceService.getRegistry(req.query);
+        console.log(`[InvoiceController] Retrieved ${result.data?.length || 0} registry invoices`);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: result.pagination
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getPendingInvoicesByDriver = async (req, res) => {
+    try {
+        const result = await InvoiceService.getPendingByDriver(req.params.driverId);
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -17,6 +45,17 @@ exports.getInvoiceById = async (req, res) => {
         return res.status(200).json({ success: true, message: "Invoice retrieved successfully", data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.createManualInvoice = async (req, res) => {
+    try {
+        const createdBy = req.user.id || req.user._id;
+        const creatorRole = req.user.role;
+        const result = await InvoiceService.createManualInvoice(req.body, createdBy, creatorRole);
+        return res.status(201).json({ success: true, message: "Manual invoice created successfully", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
     }
 };
 
@@ -34,5 +73,63 @@ exports.payInvoice = async (req, res) => {
         return res.status(200).json({ success: true, message: "Payment recorded successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.updateInvoice = async (req, res) => {
+    try {
+        const result = await InvoiceService.updateInvoice(req.params.id, req.body);
+        return res.status(200).json({ success: true, message: "Invoice updated successfully", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteInvoice = async (req, res) => {
+    try {
+        await InvoiceService.deleteInvoice(req.params.id);
+        return res.status(200).json({ success: true, message: "Invoice deleted successfully" });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteAllInvoices = async (req, res) => {
+    try {
+        await InvoiceService.deleteAll();
+        return res.status(200).json({ success: true, message: "All invoices deleted successfully" });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.getGenerationSettings = async (req, res) => {
+    try {
+        const result = await InvoiceService.getGenerationSettings();
+        return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.updateGenerationSettings = async (req, res) => {
+    try {
+        const result = await InvoiceService.updateGenerationSettings(req.body);
+        return res.status(200).json({ success: true, message: "Generation settings updated", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.triggerWeeklyGeneration = async (req, res) => {
+    try {
+        const result = await InvoiceService.triggerWeeklyGeneration(req.user._id, req.user.role);
+        return res.status(200).json({ 
+            success: true, 
+            message: `Invoice generation complete. Created ${result.generatedCount} invoices.`,
+            data: result 
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };

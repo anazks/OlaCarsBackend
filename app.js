@@ -9,6 +9,7 @@ const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
 const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
 const { seedBranchPermissions } = require("./Src/bootstrap/seedBranchPermissions");
+const { seedAccountingCodes } = require("./Src/bootstrap/seedAccountingCodes");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -34,6 +35,7 @@ const InventoryRouter = require("./Src/modules/Inventory/Routes/InventoryRouter"
 const ServiceBillRouter = require("./Src/modules/ServiceBill/Routes/ServiceBillRouter");
 const InsuranceClaimRouter = require("./Src/modules/InsuranceClaim/Routes/InsuranceClaimRouter");
 const InsuranceRouter = require("./Src/modules/Insurance/Routes/InsuranceRoutes");
+const VehiclePolicyRouter = require("./Src/modules/Insurance/Routes/VehiclePolicyRoutes");
 const SystemSettingsRouter = require("./Src/modules/SystemSettings/Routes/SystemSettingsRoutes");
 const AgreementRouter = require("./Src/modules/Agreement/Routes/AgreementRouter");
 const AIRouter = require("./Src/modules/AI/Routes/AiRoutes");
@@ -53,6 +55,15 @@ const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter"
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
+const CustomerRouter = require("./Src/modules/Customer/Routes/CustomerRoutes");
+const QuoteRouter = require("./Src/modules/Quote/Routes/QuoteRoutes");
+const SalesOrderRouter = require("./Src/modules/SalesOrder/Routes/SalesOrderRoutes");
+const CreditNoteRouter = require("./Src/modules/CreditNote/Routes/CreditNoteRoutes");
+const PaymentReceivedRouter = require("./Src/modules/PaymentReceived/Routes/PaymentReceivedRoutes");
+const ExpenseRouter = require("./Src/modules/Expense/Routes/ExpenseRoutes");
+const RecurringTransactionRouter = require("./Src/modules/RecurringTransaction/Routes/RecurringTransactionRoutes");
+const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeRoutes");
+const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -122,6 +133,7 @@ app.use("/api/inventory", InventoryRouter);
 app.use("/api/service-bills", ServiceBillRouter);
 app.use("/api/insurance-claims", InsuranceClaimRouter);
 app.use("/api/insurance", InsuranceRouter);
+app.use("/api/vehicle-policy", VehiclePolicyRouter);
 app.use("/api/system-settings", SystemSettingsRouter);
 app.use("/api/agreements", AgreementRouter);
 app.use("/api/ai-service", AIRouter);
@@ -137,6 +149,15 @@ app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
 app.use("/api/bank-accounts", BankAccountRouter);
 app.use("/api/voice", VoiceRoutes);
+app.use("/api/customers", CustomerRouter);
+app.use("/api/quotes", QuoteRouter);
+app.use("/api/sales-orders", SalesOrderRouter);
+app.use("/api/credit-notes", CreditNoteRouter);
+app.use("/api/payments-received", PaymentReceivedRouter);
+app.use("/api/expenses", ExpenseRouter);
+app.use("/api/recurring-transactions", RecurringTransactionRouter);
+app.use("/api/payments-made", PaymentMadeRouter);
+app.use("/api/vendor-credits", VendorCreditRouter);
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
@@ -182,6 +203,9 @@ const startServer = async () => {
 
     await seedBranchPermissions();
     console.log("Branch permissions verified/seeded");
+
+    await seedAccountingCodes();
+    console.log("Essential accounting codes verified/seeded");
 
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();
