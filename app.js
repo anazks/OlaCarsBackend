@@ -164,7 +164,7 @@ const startServer = async () => {
     try {
       const collections = await mongoose.connection.db.listCollections({ name: 'insurances' }).toArray();
       if (collections.length > 0) {
-        await mongoose.connection.db.collection('insurances').dropIndex('policyNumber_1').catch(() => {});
+        await mongoose.connection.db.collection('insurances').dropIndex('policyNumber_1').catch(() => { });
         console.log("Verified/Dropped deprecated policyNumber index");
       }
     } catch (e) {
@@ -191,7 +191,7 @@ const startServer = async () => {
       console.log("Internal cron scheduler disabled (using external service)");
     }
 
-    app.listen(PORT, "0.0.0.0",() => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
 

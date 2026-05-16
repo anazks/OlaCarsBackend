@@ -57,6 +57,18 @@ const serviceBillSchema = new mongoose.Schema(
 
         // Payment
         paymentStatus: { type: String, enum: ["UNPAID", "PARTIAL", "PAID"], default: "UNPAID" },
+        amountPaid: { type: Number, default: 0 },
+        payments: [
+            {
+                amount: { type: Number, required: true },
+                paidAt: { type: Date, default: Date.now },
+                paymentMethod: { type: String, enum: PAYMENT_METHODS, required: true },
+                paymentReference: { type: String },
+                transactionId: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentTransaction" },
+                recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+                notes: { type: String },
+            }
+        ],
         paymentMethod: { type: String, enum: PAYMENT_METHODS },
         paymentReference: { type: String },
         paidAt: { type: Date },

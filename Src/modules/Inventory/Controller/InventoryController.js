@@ -34,6 +34,31 @@ const createPartHandler = async (req, res) => {
 };
 
 /**
+ * Bulk create inventory parts.
+ * @route POST /api/inventory/bulk
+ */
+const bulkCreatePartsHandler = async (req, res) => {
+    try {
+        const { parts } = req.body;
+        if (!Array.isArray(parts) || parts.length === 0) {
+            return res.status(400).json({ success: false, message: "A valid array of parts is required." });
+        }
+
+        const enrichedParts = parts.map(part => ({
+            ...part,
+            createdBy: req.user.id,
+            creatorRole: req.user.role
+        }));
+
+        const result = await require("../Repo/InventoryPartRepo").bulkCreateParts(enrichedParts);
+        return res.status(201).json({ success: true, data: result });
+    } catch (error) {
+        const statusCode = error.cause || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+/**
  * Get all inventory parts with filters.
  * @route GET /api/inventory
  */
@@ -202,6 +227,7 @@ const getWorkshopRequirementsHandler = async (req, res) => {
 
 module.exports = {
     createPartHandler,
+    bulkCreatePartsHandler,
     getPartsHandler,
     getPartByIdHandler,
     updatePartHandler,

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
     createPartHandler,
+    bulkCreatePartsHandler,
     getPartsHandler,
     getPartByIdHandler,
     updatePartHandler,
@@ -25,6 +26,39 @@ const { ROLES } = require("../../../shared/constants/roles.js");
  *   name: Inventory
  *   description: Inventory & Parts Management APIs
  */
+
+/**
+ * @swagger
+ * /api/inventory/bulk:
+ *   post:
+ *     summary: Create multiple inventory parts in bulk
+ *     tags: [Inventory]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - parts
+ *             properties:
+ *               parts:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *     responses:
+ *       201:
+ *         description: Parts created
+ */
+router.post(
+    "/bulk",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_CREATE"),
+    bulkCreatePartsHandler
+);
 
 /**
  * @swagger

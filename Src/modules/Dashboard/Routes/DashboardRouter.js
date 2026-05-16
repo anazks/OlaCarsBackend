@@ -5,15 +5,22 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
 
-const ALLOWED_ROLES = [
+const FINANCE_ROLES = [
     ROLES.ADMIN, 
     ROLES.FINANCEADMIN, 
     ROLES.COUNTRYMANAGER, 
     ROLES.BRANCHMANAGER
 ];
 
+const WORKSHOP_ROLES = [
+    ROLES.ADMIN,
+    ROLES.COUNTRYMANAGER,
+    ROLES.BRANCHMANAGER,
+    ROLES.WORKSHOPMANAGER,
+    ROLES.WORKSHOPSTAFF
+];
+
 router.use(authenticate);
-router.use(authorize(...ALLOWED_ROLES));
 
 /**
  * @swagger
@@ -57,64 +64,12 @@ router.use(authorize(...ALLOWED_ROLES));
  *     responses:
  *       200:
  *         description: Aggregated financial dashboard insights returned successfully.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   example: "success"
- *                 data:
- *                   type: object
- *                   properties:
- *                     stats:
- *                       type: object
- *                       properties:
- *                         totalActiveVehicles: { type: integer, example: 2482 }
- *                         monthlyRevenue: { type: number, example: 1820000 }
- *                         outstandingCollections: { type: number, example: 142300 }
- *                         activeDrivers: { type: integer, example: 1964 }
- *                         collectionCompliance: { type: integer, example: 94 }
- *                         last12MonthsRevenue: { type: number, example: 21840 }
- *                         outstandingBalance: { type: number, example: 29880 }
- *                     alerts:
- *                       type: object
- *                       properties:
- *                         CRITICAL: { type: integer, example: 2 }
- *                         MAJOR: { type: integer, example: 1 }
- *                         MINOR: { type: integer, example: 1 }
- *                     fleetStatus:
- *                       type: object
- *                       properties:
- *                         available: { type: integer, example: 1420 }
- *                         rented: { type: integer, example: 820 }
- *                         maintenance: { type: integer, example: 182 }
- *                         retired: { type: integer, example: 60 }
- *                     totalVehicles: { type: integer, example: 2482 }
- *                     revenueOverview:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           name: { type: string, example: "Jan" }
- *                           currentYear: { type: number }
- *                           previousYear: { type: number }
- *                     overduePayments:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           customerName: { type: string }
- *                           vehicleNumber: { type: string }
- *                           amount: { type: number }
- *                           daysOverdue: { type: integer }
  *       401:
  *         description: Not authorized.
  *       500:
  *         description: Server breakdown.
  */
-router.get("/financial-summary", DashboardController.getFinancialDashboardSummary);
+router.get("/financial-summary", authorize(...FINANCE_ROLES), DashboardController.getFinancialDashboardSummary);
 
 /**
  * @swagger
@@ -135,21 +90,20 @@ router.get("/financial-summary", DashboardController.getFinancialDashboardSummar
  *     responses:
  *       200:
  *         description: Timeseries analytics for vehicle events.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       date: { type: string, example: "2026-04-12" }
- *                       removed: { type: integer }
- *                       returned: { type: integer }
- *                       sale: { type: integer }
  */
-router.get("/vehicle-movement", DashboardController.getVehicleMovementData);
+router.get("/vehicle-movement", authorize(...FINANCE_ROLES), DashboardController.getVehicleMovementData);
+
+/**
+ * @swagger
+ * /api/dashboard/workshop-analytics:
+ *   get:
+ *     summary: Retrieve Workshop Dashboard Analytics
+ *     description: Returns work order trends and stock health metrics for the workshop dashboard.
+ *     tags: [Dashboard]
+ *     responses:
+ *       200:
+ *         description: Workshop analytics returned successfully.
+ */
+router.get("/workshop-analytics", authorize(...WORKSHOP_ROLES), DashboardController.getWorkshopDashboardAnalytics);
 
 module.exports = router;
