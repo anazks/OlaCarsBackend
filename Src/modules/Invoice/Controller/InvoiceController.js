@@ -19,7 +19,7 @@ exports.getInvoices = async (req, res) => {
 exports.getRegistryInvoices = async (req, res) => {
     try {
         const result = await InvoiceService.getRegistry(req.query);
-        console.log('Invoice Registry Query Params:', result.data);
+        console.log(`[InvoiceController] Retrieved ${result.data?.length || 0} registry invoices`);
         return res.status(200).json({ 
             success: true, 
             data: result.data,
