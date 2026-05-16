@@ -2,7 +2,9 @@ const {
     addManyInvoicesService, 
     getInvoicesService, 
     getInvoiceByIdService, 
-    updateInvoiceService 
+    updateInvoiceService,
+    deleteInvoiceService,
+    deleteAllInvoicesService
 } = require("../Repo/InvoiceRepo");
 const { Invoice } = require("../Model/InvoiceModel");
 const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
@@ -400,4 +402,36 @@ exports.updateInvoice = async (id, data) => {
     }
 
     return await invoice.save();
+};
+
+exports.deleteInvoice = async (id) => {
+    return await deleteInvoiceService(id);
+};
+
+exports.deleteAll = async () => {
+    return await deleteAllInvoicesService();
+};
+
+exports.getGenerationSettings = async () => {
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+    return {
+        generationDay: setting ? parseInt(setting.value) : 3, // Default Wednesday
+    };
+};
+
+exports.updateGenerationSettings = async (data) => {
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const { generationDay } = data;
+    await SystemSettings.findOneAndUpdate(
+        { key: 'invoice_generation_day' },
+        { value: generationDay, description: 'Day of the week to generate invoices (0-6)' },
+        { upsert: true, new: true }
+    );
+    return { success: true };
+};
+
+exports.triggerWeeklyGeneration = async () => {
+    const InvoiceCronService = require("./InvoiceCronService");
+    return await InvoiceCronService.generateCurrentWeekInvoices(true);
 };

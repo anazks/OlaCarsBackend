@@ -13,5 +13,10 @@ router.get("/:id", InvoiceController.getInvoiceById);
 router.post("/", InvoiceController.createManualInvoice);
 router.post("/:id/pay", InvoiceController.payInvoice);
 router.put("/:id", InvoiceController.updateInvoice);
+router.post("/generate-weekly", InvoiceController.triggerWeeklyGeneration);
+router.get("/settings/generation", InvoiceController.getGenerationSettings);
+router.post("/settings/generation", InvoiceController.updateGenerationSettings);
+router.delete("/all", InvoiceController.deleteAllInvoices);
+router.delete("/:id", InvoiceController.deleteInvoice);
 
 module.exports = router;

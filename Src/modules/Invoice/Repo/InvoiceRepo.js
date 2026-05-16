@@ -214,3 +214,7 @@ exports.deleteInvoiceService = async (id) => {
     if (!deleted) throw new Error("Invoice not found");
     return deleted;
 };
+
+exports.deleteAllInvoicesService = async () => {
+    return await Invoice.updateMany({ isDeleted: false }, { isDeleted: true });
+};

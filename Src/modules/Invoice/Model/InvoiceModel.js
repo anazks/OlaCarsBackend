@@ -20,8 +20,7 @@ const lineItemSchema = new mongoose.Schema({
 const invoiceSchema = new mongoose.Schema({
     invoiceNumber: { 
         type: String, 
-        required: true, 
-        unique: true 
+        required: true
     },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
@@ -113,7 +112,8 @@ const invoiceSchema = new mongoose.Schema({
     isDeleted: { type: Boolean, default: false },
 }, { timestamps: true });
 
-invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true });
+invoiceSchema.index({ invoiceNumber: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
+invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true, partialFilterExpression: { isDeleted: false } });
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 

@@ -84,3 +84,52 @@ exports.updateInvoice = async (req, res) => {
         return res.status(400).json({ success: false, message: error.message });
     }
 };
+
+exports.deleteInvoice = async (req, res) => {
+    try {
+        await InvoiceService.deleteInvoice(req.params.id);
+        return res.status(200).json({ success: true, message: "Invoice deleted successfully" });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteAllInvoices = async (req, res) => {
+    try {
+        await InvoiceService.deleteAll();
+        return res.status(200).json({ success: true, message: "All invoices deleted successfully" });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.getGenerationSettings = async (req, res) => {
+    try {
+        const result = await InvoiceService.getGenerationSettings();
+        return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.updateGenerationSettings = async (req, res) => {
+    try {
+        const result = await InvoiceService.updateGenerationSettings(req.body);
+        return res.status(200).json({ success: true, message: "Generation settings updated", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+exports.triggerWeeklyGeneration = async (req, res) => {
+    try {
+        const result = await InvoiceService.triggerWeeklyGeneration();
+        return res.status(200).json({ 
+            success: true, 
+            message: `Invoice generation complete. Created ${result.generatedCount} invoices.`,
+            data: result 
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
