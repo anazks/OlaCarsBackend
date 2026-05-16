@@ -63,7 +63,11 @@ exports.getBillById = async (id) => {
     try {
         return await ServiceBill.findById(id)
             .populate("workOrderId")
-            .populate("vehicleId", "basicDetails.make basicDetails.model basicDetails.vin")
+            .populate({
+                path: "vehicleId",
+                select: "basicDetails.make basicDetails.model basicDetails.vin currentDriver",
+                populate: { path: "currentDriver" }
+            })
             .populate("branchId", "name")
             .populate("approvedBy", "name email");
     } catch (error) {

@@ -259,6 +259,10 @@ const vehicleSchema = new mongoose.Schema(
             }
         ],
         isDeleted: { type: Boolean, default: false },
+        currentDriver: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Driver",
+        },
     },
     { timestamps: true }
 );

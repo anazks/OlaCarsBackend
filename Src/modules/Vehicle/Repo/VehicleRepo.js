@@ -49,7 +49,8 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
                     populate: { path: "supplier", select: "name email phone" } 
                 },
                 { path: "statusHistory.changedBy", select: "fullName email role" },
-                { path: "handlingStaff", select: "fullName email phone fleetNumbers" }
+                { path: "handlingStaff", select: "fullName email phone fleetNumbers" },
+                { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
             ],
             ...options
         };
@@ -82,7 +83,8 @@ exports.getVehicleByIdService = async (id) => {
                 populate: { path: "supplier", select: "name email phone" }
             })
             .populate("statusHistory.changedBy", "fullName email role")
-            .populate("handlingStaff", "fullName email phone fleetNumbers");
+            .populate("handlingStaff", "fullName email phone fleetNumbers")
+            .populate("currentDriver", "personalInfo.fullName personalInfo.phone driverId");
         
         if (vehicle) {
             console.log('[DEBUG] getVehicleByIdService - handlingStaff:', vehicle.handlingStaff);

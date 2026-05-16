@@ -10,10 +10,15 @@ const invoicePaymentSchema = new mongoose.Schema({
 }, { _id: true });
 
 const invoiceSchema = new mongoose.Schema({
-    invoiceNumber: { 
-        type: String, 
-        required: true, 
-        unique: true 
+    invoiceNumber: {
+        type: String,
+        required: true,
+        unique: true
+    },
+    invoiceType: {
+        type: String,
+        enum: ["RENTAL", "WORKSHOP"],
+        default: "RENTAL"
     },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
@@ -24,52 +29,56 @@ const invoiceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Vehicle",
     },
-    weekNumber: { 
-        type: Number, 
-        required: true 
+    serviceBill: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ServiceBill",
     },
-    weekLabel: { 
-        type: String 
+    weekNumber: {
+        type: Number,
+        required: function() { return this.invoiceType === 'RENTAL'; }
     },
-    dueDate: { 
-        type: Date, 
-        required: true 
+    weekLabel: {
+        type: String
     },
-    baseAmount: { 
-        type: Number, 
-        required: true 
+    dueDate: {
+        type: Date,
+        required: true
     },
-    carryOverAmount: { 
-        type: Number, 
-        default: 0 
+    baseAmount: {
+        type: Number,
+        required: true
     },
-    totalAmountDue: { 
-        type: Number, 
-        default: 0 
+    carryOverAmount: {
+        type: Number,
+        default: 0
     },
-    amountPaid: { 
-        type: Number, 
-        default: 0 
+    totalAmountDue: {
+        type: Number,
+        default: 0
     },
-    balance: { 
-        type: Number, 
-        default: 0 
+    amountPaid: {
+        type: Number,
+        default: 0
     },
-    status: { 
-        type: String, 
-        enum: ["PENDING", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"], 
-        default: "PENDING" 
+    balance: {
+        type: Number,
+        default: 0
     },
-    paidAt: { 
-        type: Date 
+    status: {
+        type: String,
+        enum: ["PENDING", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"],
+        default: "PENDING"
+    },
+    paidAt: {
+        type: Date
     },
     payments: [invoicePaymentSchema],
-    generatedAt: { 
-        type: Date, 
-        default: Date.now 
+    generatedAt: {
+        type: Date,
+        default: Date.now
     },
-    pdfS3Key: { 
-        type: String 
+    pdfS3Key: {
+        type: String
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -78,19 +87,25 @@ const invoiceSchema = new mongoose.Schema({
     creatorRole: {
         type: String,
         enum: [
-            ROLES.ADMIN, 
-            ROLES.FINANCEADMIN, 
-            ROLES.OPERATIONADMIN, 
-            ROLES.COUNTRYMANAGER, 
-            ROLES.BRANCHMANAGER, 
+            ROLES.ADMIN,
+            ROLES.FINANCEADMIN,
+            ROLES.OPERATIONADMIN,
+            ROLES.COUNTRYMANAGER,
+            ROLES.BRANCHMANAGER,
             ROLES.FINANCESTAFF,
             ROLES.OPERATIONSTAFF,
+            "SYSTEM",
+            "WORKSHOPSTAFF",
+            "WORKSHOPMANAGER"
         ],
     },
     isDeleted: { type: Boolean, default: false },
 }, { timestamps: true });
 
-invoiceSchema.index({ driver: 1, weekNumber: 1 }, { unique: true });
+invoiceSchema.index({ driver: 1, weekNumber: 1 }, { 
+    unique: true,
+    partialFilterExpression: { invoiceType: 'RENTAL' }
+});
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 

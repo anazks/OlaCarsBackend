@@ -35,6 +35,8 @@ const serviceBillSchema = new mongoose.Schema(
         vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", required: true },
         branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true },
 
+        isDriverBilled: { type: Boolean, default: false },
+
         // Status
         status: { type: String, enum: BILL_STATUSES, default: "DRAFT" },
 

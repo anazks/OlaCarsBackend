@@ -401,6 +401,7 @@ const assignCarToDriver = async (req, res, next) => {
         // 5. Update Vehicle status
         await updateVehicleService(vehicleId, { 
             status: "ACTIVE — RENTED",
+            currentDriver: driverId,
             $push: { 
                 statusHistory: {
                     status: "ACTIVE — RENTED",

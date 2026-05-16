@@ -335,6 +335,11 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
         payload["purchaseDetails.branch"] = currentVehicle.transferDetails?.toBranch;
     }
 
+    // Clear driver on return to available
+    if (targetStatus === "ACTIVE — AVAILABLE") {
+        payload.currentDriver = null;
+    }
+
     // --- Apply status change ---
     payload.status = targetStatus;
     const updatedVehicle = await updateVehicleService(vehicleId, payload);

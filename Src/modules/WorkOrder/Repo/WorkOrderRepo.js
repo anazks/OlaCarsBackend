@@ -148,7 +148,11 @@ exports.getWorkOrders = async (filters = {}) => {
         if (filters.workOrderType) query.workOrderType = filters.workOrderType;
 
         return await WorkOrder.find(query)
-            .populate("vehicleId", "basicDetails.make basicDetails.model basicDetails.vin status")
+            .populate({
+                path: "vehicleId",
+                select: "basicDetails.make basicDetails.model basicDetails.vin status currentDriver",
+                populate: { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
+            })
             .populate("branchId", "name")
             .populate("assignedTechnician", "name email")
             .sort({ createdAt: -1 });
@@ -165,7 +169,10 @@ exports.getWorkOrders = async (filters = {}) => {
 exports.getWorkOrderById = async (id) => {
     try {
         return await WorkOrder.findById(id)
-            .populate("vehicleId")
+            .populate({
+                path: "vehicleId",
+                populate: { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
+            })
             .populate("branchId", "name")
             .populate("assignedTechnician", "name email")
             .populate("supervisedBy", "name email");

@@ -123,6 +123,40 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 
     const updatedInvoice = await Invoice.findByIdAndUpdate(invoiceId, updateData, { new: true });
 
+    // Sync with Service Bill if it's a workshop invoice
+    if (updatedInvoice.invoiceType === 'WORKSHOP' && updatedInvoice.serviceBill) {
+        try {
+            const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+            const bill = await ServiceBill.findById(updatedInvoice.serviceBill);
+            if (bill) {
+                const billAmount = amount - excessAmount; // Only apply the amount that went to this invoice
+                const newBillAmountPaid = (bill.amountPaid || 0) + billAmount;
+                const newBillPaymentStatus = newBillAmountPaid >= bill.totalAmount - 0.01 ? "PAID" : "PARTIAL";
+                const newBillStatus = newBillPaymentStatus === "PAID" ? "PAID" : bill.status;
+
+                const billPaymentEntry = {
+                    amount: billAmount,
+                    paidAt: timestamp,
+                    paymentMethod: paymentMethod || "Cash",
+                    paymentReference: transactionId,
+                    notes: note || `Payment synced from Invoice ${updatedInvoice.invoiceNumber}`,
+                    recordedBy: createdBy
+                };
+
+                await ServiceBill.findByIdAndUpdate(bill._id, {
+                    $inc: { amountPaid: billAmount },
+                    $push: { payments: billPaymentEntry },
+                    paymentStatus: newBillPaymentStatus,
+                    status: newBillStatus,
+                    paidAt: newBillPaymentStatus === "PAID" ? timestamp : bill.paidAt
+                });
+                console.log(`[InvoiceService] Synced payment to Service Bill ${bill.billNumber}`);
+            }
+        } catch (err) {
+            console.error(`[InvoiceService] Failed to sync payment to service bill for invoice ${invoiceId}:`, err);
+        }
+    }
+
     // Handle excess (apply to the next available invoice if possible)
     if (excessAmount > 0) {
         await this.applyExcessToNextInvoice(invoice.driver, excessAmount, paymentData);

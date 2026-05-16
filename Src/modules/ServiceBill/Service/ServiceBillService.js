@@ -140,6 +140,7 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         workOrderId: wo._id,
         vehicleId: wo.vehicleId,
         branchId: wo.branchId,
+        isDriverBilled: !!options.isDriverBilled,
         lineItems,
         subtotal,
         taxRate,
@@ -160,6 +161,8 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     return await createBill(billData);
 };
 
+const { generateWorkshopInvoiceNumber, addInvoiceService } = require("../../Invoice/Repo/InvoiceRepo");
+
 /**
  * Approve a service bill.
  */
@@ -171,12 +174,51 @@ const approveBill = async (billId, user) => {
         throw new Error(`Bill must be in DRAFT state. Current: ${bill.status}`, { cause: 400 });
     }
 
-    return await updateBill(billId, {
+    const updatedBill = await updateBill(billId, {
         status: "APPROVED",
         approvedBy: user.id,
         approvedByRole: user.role,
         approvedAt: new Date(),
     });
+
+    // Populate the updated bill to get vehicle and driver info for the invoice
+    const fullyPopulatedBill = await getBillById(billId);
+
+    // If driver billed, generate an official Invoice record
+    if (fullyPopulatedBill.isDriverBilled) {
+        if (!fullyPopulatedBill.vehicleId?.currentDriver) {
+            console.error(`[ServiceBillService] Cannot generate invoice for bill ${billId}: No current driver assigned to vehicle.`);
+        } else {
+            try {
+                const invoiceNumber = await generateWorkshopInvoiceNumber();
+                const invoiceData = {
+                    invoiceNumber,
+                    invoiceType: "WORKSHOP",
+                    driver: fullyPopulatedBill.vehicleId.currentDriver._id || fullyPopulatedBill.vehicleId.currentDriver,
+                    vehicle: fullyPopulatedBill.vehicleId._id || fullyPopulatedBill.vehicleId,
+                    serviceBill: fullyPopulatedBill._id,
+                    dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000), // Default 1 day due
+                    baseAmount: fullyPopulatedBill.totalAmount,
+                    totalAmountDue: fullyPopulatedBill.totalAmount,
+                    balance: fullyPopulatedBill.totalAmount,
+                    status: "PENDING",
+                    createdBy: user.id,
+                    creatorRole: user.role
+                };
+                const invoice = await addInvoiceService(invoiceData);
+                
+                // Return the bill with the temporary invoice number for the UI
+                return { 
+                    ...fullyPopulatedBill.toObject(), 
+                    invoiceNumber: invoice.invoiceNumber 
+                };
+            } catch (err) {
+                console.error(`[ServiceBillService] Failed to generate invoice for bill ${billId}:`, err);
+            }
+        }
+    }
+
+    return fullyPopulatedBill;
 };
 
 /**
@@ -247,13 +289,47 @@ const addPayment = async (billId, paymentData, user) => {
         notes: paymentData.notes
     };
 
-    return await updateBill(billId, {
+    const updatedBill = await updateBill(billId, {
         $inc: { amountPaid: amount },
         $push: { payments: paymentEntry },
         paymentStatus: newPaymentStatus,
         status: newStatus,
         paidAt: newPaymentStatus === "PAID" ? new Date() : undefined
     });
+
+    // 5. Sync with Invoice if exists
+    try {
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        const invoice = await Invoice.findOne({ serviceBill: billId });
+        if (invoice) {
+            const newInvoiceAmountPaid = (invoice.amountPaid || 0) + amount;
+            const newInvoiceBalance = Math.max(0, invoice.totalAmountDue - newInvoiceAmountPaid);
+            let newInvoiceStatus = "PENDING";
+            if (newInvoiceBalance <= 0) newInvoiceStatus = "PAID";
+            else if (newInvoiceAmountPaid > 0) newInvoiceStatus = "PARTIAL";
+
+            const invoicePaymentRecord = {
+                amount: amount,
+                paidAt: paymentData.paidAt || new Date(),
+                paymentMethod: paymentData.paymentMethod || "Cash",
+                transactionId: transaction._id,
+                note: paymentData.notes || `Payment synced from Service Bill ${bill.billNumber}`,
+            };
+
+            await Invoice.findByIdAndUpdate(invoice._id, {
+                amountPaid: newInvoiceAmountPaid,
+                balance: newInvoiceBalance,
+                status: newInvoiceStatus,
+                paidAt: newInvoiceStatus === "PAID" ? new Date() : invoice.paidAt,
+                $push: { payments: invoicePaymentRecord }
+            });
+            console.log(`[ServiceBillService] Synced payment to Invoice ${invoice.invoiceNumber}`);
+        }
+    } catch (err) {
+        console.error(`[ServiceBillService] Failed to sync payment to invoice for bill ${billId}:`, err);
+    }
+
+    return updatedBill;
 };
 
 /**

@@ -276,7 +276,6 @@ const driverSchema = new mongoose.Schema(
                 note: { type: String },
             }],
         }],
-
         // ── 16. Additional Payments (Deposits, Fees, etc.) ───────────
         additionalPayments: [{
             type: { type: String, enum: ["DEPOSIT", "ADMIN_FEE", "PENALTY", "OTHER"], required: true },
