@@ -123,7 +123,7 @@ exports.updateGenerationSettings = async (req, res) => {
 
 exports.triggerWeeklyGeneration = async (req, res) => {
     try {
-        const result = await InvoiceService.triggerWeeklyGeneration();
+        const result = await InvoiceService.triggerWeeklyGeneration(req.user._id, req.user.role);
         return res.status(200).json({ 
             success: true, 
             message: `Invoice generation complete. Created ${result.generatedCount} invoices.`,

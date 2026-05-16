@@ -431,7 +431,7 @@ exports.updateGenerationSettings = async (data) => {
     return { success: true };
 };
 
-exports.triggerWeeklyGeneration = async () => {
+exports.triggerWeeklyGeneration = async (userId, userRole) => {
     const InvoiceCronService = require("./InvoiceCronService");
-    return await InvoiceCronService.generateCurrentWeekInvoices(true);
+    return await InvoiceCronService.generateCurrentWeekInvoices(true, userId, userRole);
 };

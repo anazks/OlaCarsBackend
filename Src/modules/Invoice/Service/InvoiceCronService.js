@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const { Driver } = require("../../Driver/Model/DriverModel");
 const { Invoice } = require("../Model/InvoiceModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel"); // Ensure Vehicle is registered for populate
 const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
 
 const startInvoiceCronJob = () => {
@@ -25,10 +26,27 @@ const startInvoiceCronJob = () => {
     });
 };
 
-exports.generateCurrentWeekInvoices = async (manual = false) => {
-    console.log(`[InvoiceCronService] ${manual ? 'Manual' : 'Scheduled'} generation started...`);
+exports.generateCurrentWeekInvoices = async (manual = false, userId = null, userRole = null) => {
+    console.log(`[InvoiceCronService] ${manual ? 'Manual' : 'Scheduled'} generation started by ${userRole || 'SYSTEM'}...`);
     
-    // 1. Find all active drivers who have a vehicle
+    // 1. Resolve Creator Details (Schema requires valid ObjectId and Enum)
+    let finalUserId = userId;
+    let finalUserRole = userRole;
+
+    if (!finalUserId) {
+        // Find first active ADMIN for system-generated invoices
+        const Admin = require("../../Admin/model/adminModel");
+        const systemAdmin = await Admin.findOne({ role: 'ADMIN', isDeleted: false });
+        if (systemAdmin) {
+            finalUserId = systemAdmin._id;
+            finalUserRole = 'ADMIN';
+        } else {
+            console.error("[InvoiceCronService] Critical: No ADMIN found to attribute system invoices to.");
+            return { generatedCount: 0, skippedCount: 0, error: 'NO_ADMIN_FOUND' };
+        }
+    }
+
+    // 2. Find all active drivers who have a vehicle
     const activeDrivers = await Driver.find({
         status: 'ACTIVE',
         isDeleted: false,
@@ -83,14 +101,16 @@ exports.generateCurrentWeekInvoices = async (manual = false) => {
             dueLimit.setDate(today.getDate() + 7);
 
             const dueDate = new Date(nextPeriod.dueDate);
+            dueDate.setHours(0, 0, 0, 0);
             
             // Limit generation to "this week" (within next 7 days)
-            // This ensures we catch both past-due invoices and the upcoming one for the current week.
             if (dueDate > dueLimit) {
-                console.log(`[InvoiceCronService] Next period (Week ${nextPeriod.weekNumber}) for Driver ${driver.driverId} is too far in future (Due: ${dueDate.toLocaleDateString()}). Skipping.`);
+                console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Next period (Week ${nextPeriod.weekNumber}) is too far in future. Due: ${dueDate.toISOString().split('T')[0]}, Limit: ${dueLimit.toISOString().split('T')[0]}`);
                 skippedCount++;
                 continue;
             }
+
+            console.log(`[InvoiceCronService] PROCESSING ${driver.driverId}: Generating Week ${nextPeriod.weekNumber} (Due: ${dueDate.toISOString().split('T')[0]})`);
 
             // Ensure we don't generate the same week twice (extra safety)
             const existing = await Invoice.findOne({ 
@@ -100,7 +120,7 @@ exports.generateCurrentWeekInvoices = async (manual = false) => {
             });
             
             if (existing) {
-                console.log(`[InvoiceCronService] Invoice for Week ${nextPeriod.weekNumber} already exists for Driver ${driver.driverId}. Skipping.`);
+                console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Invoice for Week ${nextPeriod.weekNumber} already exists.`);
                 skippedCount++;
                 continue;
             }
@@ -129,11 +149,12 @@ exports.generateCurrentWeekInvoices = async (manual = false) => {
                 balance: newTotalDue,
                 status: "PENDING",
                 payments: [],
-                createdBy: "SYSTEM",
-                creatorRole: "SYSTEM"
+                createdBy: finalUserId,
+                creatorRole: finalUserRole
             });
 
             await newInvoice.save();
+            console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId}`);
             generatedCount++;
         } catch (err) {
             console.error(`[InvoiceCronService] Error processing driver ${driver.driverId}:`, err);
