@@ -174,10 +174,37 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
     const skip = (page - 1) * limit;
 
     const filter = { ...query };
+    
+    if (pagination.search) {
+        const searchRegex = { $regex: pagination.search, $options: 'i' };
+        
+        // Find matching drivers
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const drivers = await Driver.find({
+            $or: [
+                { "personalInfo.fullName": searchRegex },
+                { "driverId": searchRegex }
+            ]
+        }).select('_id');
+        const driverIds = drivers.map(d => d._id);
+
+        filter.$or = [
+            { creditNoteNumber: searchRegex },
+            { reason: searchRegex },
+            { notes: searchRegex },
+            { driverId: { $in: driverIds } }
+        ];
+    }
 
     const count = await CreditNote.countDocuments(filter);
+    
+    let sort = { createdAt: -1 };
+    if (pagination.sortBy) {
+        sort = { [pagination.sortBy]: pagination.sortOrder === 'desc' ? -1 : 1 };
+    }
+
     const items = await CreditNote.find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sort)
         .skip(skip)
         .limit(limit)
         .populate({

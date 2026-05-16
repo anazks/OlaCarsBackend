@@ -1,4 +1,6 @@
 const { Invoice } = require("../Model/InvoiceModel");
+const { Driver } = require("../../Driver/Model/DriverModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 
 exports.addInvoiceService = async (data, session = null) => {
     const options = session ? { session } : {};
@@ -19,15 +21,55 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const baseQuery = options.baseQuery || { isDeleted: false };
     const query = { ...baseQuery };
 
+    // Date Range Filtering
+    if (queryParams.startDate || queryParams.endDate) {
+        query.dueDate = {};
+        if (queryParams.startDate) query.dueDate.$gte = new Date(queryParams.startDate);
+        if (queryParams.endDate) query.dueDate.$lte = new Date(queryParams.endDate);
+    }
+
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
-    if (queryParams.status) query.status = queryParams.status;
+    if (queryParams.status && queryParams.status !== 'ALL') query.status = queryParams.status;
     if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
+
+    // Search Logic
+    if (queryParams.search) {
+        const searchRegex = { $regex: queryParams.search, $options: 'i' };
+        
+        // Find matching drivers
+        const drivers = await Driver.find({
+            $or: [
+                { "personalInfo.fullName": searchRegex },
+                { "driverId": searchRegex }
+            ]
+        }).select('_id');
+        const driverIds = drivers.map(d => d._id);
+
+        // Find matching vehicles
+        const vehicles = await Vehicle.find({
+            $or: [
+                { "legalDocs.registrationNumber": searchRegex },
+                { "basicDetails.make": searchRegex },
+                { "basicDetails.model": searchRegex }
+            ]
+        }).select('_id');
+        const vehicleIds = vehicles.map(v => v._id);
+
+        query.$or = [
+            { invoiceNumber: searchRegex },
+            { driver: { $in: driverIds } },
+            { vehicle: { $in: vehicleIds } }
+        ];
+    }
 
     const totalCount = await Invoice.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
 
-    const sortOpt = options.defaultSort || { weekNumber: 1 };
+    let sortOpt = { createdAt: -1 };
+    if (queryParams.sortBy) {
+        sortOpt = { [queryParams.sortBy]: queryParams.sortOrder === 'desc' ? -1 : 1 };
+    }
 
     const data = await Invoice.find(query)
         .populate("driver", "driverId personalInfo.fullName personalInfo.email")
@@ -46,6 +88,17 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
             limit,
         },
     };
+};
+
+exports.getPendingByDriverService = async (driverId) => {
+    return await Invoice.find({
+        driver: driverId,
+        status: { $in: ['PENDING', 'PARTIAL'] },
+        balance: { $gt: 0 },
+        isDeleted: false
+    })
+    .sort({ dueDate: 1 })
+    .lean();
 };
 
 exports.getInvoiceByIdService = async (id) => {

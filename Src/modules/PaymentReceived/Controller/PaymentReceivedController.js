@@ -12,10 +12,57 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const docs = await PaymentReceived.find()
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod } = req.query;
+        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod });
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        const query = {};
+        if (paymentMethod && paymentMethod !== 'ALL') {
+            query.paymentMethod = paymentMethod;
+        }
+
+        if (search) {
+            const searchRegex = { $regex: search, $options: 'i' };
+            
+            // Find matching drivers
+            const { Driver } = require('../../Driver/Model/DriverModel');
+            const drivers = await Driver.find({
+                $or: [
+                    { "personalInfo.fullName": searchRegex },
+                    { "driverId": searchRegex }
+                ]
+            }).select('_id');
+            const driverIds = drivers.map(d => d._id);
+
+            query.$or = [
+                { paymentNumber: searchRegex },
+                { referenceNumber: searchRegex },
+                { driverId: { $in: driverIds } }
+            ];
+        }
+        
+        let sort = { createdAt: -1 };
+        if (sortBy) {
+            sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+        }
+
+        const total = await PaymentReceived.countDocuments(query);
+        const docs = await PaymentReceived.find(query)
             .populate('driverId', 'name email avatarUrl')
-            .sort({ createdAt: -1 });
-        res.status(200).json({ success: true, data: docs });
+            .sort(sort)
+            .skip(skip)
+            .limit(parseInt(limit));
+            
+        res.status(200).json({ 
+            success: true, 
+            data: docs,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

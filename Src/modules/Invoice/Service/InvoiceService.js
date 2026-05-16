@@ -14,6 +14,16 @@ exports.getAll = async (queryParams = {}, options = {}) => {
     return await getInvoicesService(queryParams, options);
 };
 
+exports.getRegistry = async (queryParams = {}) => {
+    // Specifically for the registry page, uses standard list logic with search/date filters
+    return await getInvoicesService(queryParams);
+};
+
+exports.getPendingByDriver = async (driverId) => {
+    const { getPendingByDriverService } = require("../Repo/InvoiceRepo");
+    return await getPendingByDriverService(driverId);
+};
+
 exports.getById = async (id) => {
     return await getInvoiceByIdService(id);
 };

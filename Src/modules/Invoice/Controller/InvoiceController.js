@@ -3,8 +3,37 @@ const InvoiceService = require("../Service/InvoiceService");
 exports.getInvoices = async (req, res) => {
     try {
         const queryParams = req.query;
+        console.log('Invoice Query Params:', queryParams);
         const result = await InvoiceService.getAll(queryParams);
-        return res.status(200).json({ success: true, message: "Invoices retrieved successfully", data: result });
+        return res.status(200).json({ 
+            success: true, 
+            message: "Invoices retrieved successfully", 
+            data: result.data,
+            pagination: result.pagination
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getRegistryInvoices = async (req, res) => {
+    try {
+        const result = await InvoiceService.getRegistry(req.query);
+        console.log('Invoice Registry Query Params:', result.data);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: result.pagination
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getPendingInvoicesByDriver = async (req, res) => {
+    try {
+        const result = await InvoiceService.getPendingByDriver(req.params.driverId);
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
