@@ -195,10 +195,28 @@ const STATUS_RULES = {
         allowedFrom: ["READY_FOR_RELEASE"],
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
-        gateValidator: (wo, payload) => {
+        gateValidator: async (wo, payload) => {
             if (!payload.odometerAtRelease && !wo.odometerAtRelease) {
                 return "Final odometer reading is required for vehicle release.";
             }
+
+            // Enforce Payment before Release
+            if (!wo.serviceBillId) {
+                return "A service bill must be generated and linked before vehicle release.";
+            }
+
+            const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+            const bill = await ServiceBill.findById(wo.serviceBillId);
+            
+            if (!bill) {
+                return "Linked service bill not found.";
+            }
+
+            if (bill.paymentStatus !== "PAID") {
+                const balance = (bill.totalAmount || 0) - (bill.amountPaid || 0);
+                return `Vehicle cannot be released. Bill ${bill.billNumber} is not fully paid. Outstanding balance: $${balance.toLocaleString()}.`;
+            }
+
             return null;
         },
     },

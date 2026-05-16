@@ -14,26 +14,19 @@ exports.addManyInvoicesService = async (dataArray, session = null) => {
     return await Invoice.insertMany(dataArray, options);
 };
 
-exports.getInvoicesService = async (queryParams = {}) => {
-    const { 
-        page = 1, 
-        limit = 20, 
-        startDate, 
-        endDate, 
-        status, 
-        search, 
-        sortBy = 'dueDate', 
-        sortOrder = 'desc' 
-    } = queryParams;
+exports.getInvoicesService = async (queryParams = {}, options = {}) => {
+    const page = parseInt(queryParams.page) || 1;
+    const limit = parseInt(queryParams.limit) || 20;
+    const skip = (page - 1) * limit;
 
-    const pageInt = parseInt(page, 10);
-    const limitInt = parseInt(limit, 10);
-    const skip = (pageInt - 1) * limitInt;
+    const baseQuery = options.baseQuery || { isDeleted: false };
+    const query = { ...baseQuery };
 
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
-    if (queryParams.status) query.status = queryParams.status;
+    if (queryParams.status && queryParams.status !== 'ALL') query.status = queryParams.status;
     if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
+    
     if (queryParams.invoiceType) {
         if (queryParams.invoiceType === 'RENTAL') {
             query.invoiceType = { $in: ['RENTAL', null, undefined] };
@@ -42,32 +35,41 @@ exports.getInvoicesService = async (queryParams = {}) => {
         }
     }
 
-    // 1. Initial Match (Direct fields)
-    const match = { isDeleted: false };
-    if (status && status !== 'ALL') match.status = status;
-    if (queryParams.driver && mongoose.Types.ObjectId.isValid(queryParams.driver)) {
-        match.driver = typeof queryParams.driver === 'string' ? new mongoose.Types.ObjectId(queryParams.driver) : queryParams.driver;
-    }
-    if (queryParams.vehicle && mongoose.Types.ObjectId.isValid(queryParams.vehicle)) {
-        match.vehicle = typeof queryParams.vehicle === 'string' ? new mongoose.Types.ObjectId(queryParams.vehicle) : queryParams.vehicle;
-    }
-    if (startDate || endDate) {
-        match.dueDate = {};
-        if (startDate) match.dueDate.$gte = new Date(startDate);
-        if (endDate) {
-            const end = new Date(endDate);
+    if (queryParams.startDate || queryParams.endDate) {
+        query.dueDate = {};
+        if (queryParams.startDate) query.dueDate.$gte = new Date(queryParams.startDate);
+        if (queryParams.endDate) {
+            const end = new Date(queryParams.endDate);
             end.setHours(23, 59, 59, 999);
-            match.dueDate.$lte = end;
+            query.dueDate.$lte = end;
         }
     }
-    pipeline.push({ $match: match });
+
+    if (queryParams.search) {
+        // Simple search by invoice number if searching
+        query.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
+    }
+
+    const totalCount = await Invoice.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limit);
 
     // Dynamic sort: if workshop, sort by createdAt
     const sortOpt = options.defaultSort || (queryParams.invoiceType === 'WORKSHOP' ? { createdAt: -1 } : { weekNumber: 1 });
 
+    require("../../Driver/Model/DriverModel");
+    require("../../Vehicle/Model/VehicleModel");
+
     const data = await Invoice.find(query)
-        .populate("driver", "personalInfo.fullName personalInfo.email")
-        .populate("vehicle", "basicDetails.make basicDetails.model legalDocs.registrationNumber")
+        .populate({
+            path: "driver",
+            select: "personalInfo.fullName personalInfo.email personalInfo.phone",
+            model: "Driver"
+        })
+        .populate({
+            path: "vehicle",
+            select: "basicDetails.make basicDetails.model basicDetails.vin legalDocs.registrationNumber",
+            model: "Vehicle"
+        })
         .populate("serviceBill", "billNumber")
         .sort(sortOpt)
         .skip(skip)
@@ -77,11 +79,11 @@ exports.getInvoicesService = async (queryParams = {}) => {
     return {
         data,
         pagination: {
-            totalItems,
-            totalPages: Math.ceil(totalItems / limitInt),
-            currentPage: pageInt,
-            limit: limitInt
-        }
+            totalItems: totalCount,
+            totalPages,
+            currentPage: page,
+            limit,
+        },
     };
 };
 
@@ -103,7 +105,7 @@ exports.getInvoiceByIdService = async (id) => {
             select: "driverId personalInfo.fullName personalInfo.email personalInfo.phone branch",
             populate: { path: "branch", select: "name country" }
         })
-        .populate("vehicle", "basicDetails.make basicDetails.model basicDetails.fleetNumber legalDocs.registrationNumber")
+        .populate("vehicle", "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber")
         .lean();
     if (!invoice || invoice.isDeleted) throw new Error("Invoice not found");
     return invoice;

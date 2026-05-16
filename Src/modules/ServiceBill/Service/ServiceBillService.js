@@ -292,9 +292,11 @@ const addPayment = async (billId, paymentData, user) => {
     const updatedBill = await updateBill(billId, {
         $inc: { amountPaid: amount },
         $push: { payments: paymentEntry },
-        paymentStatus: newPaymentStatus,
-        status: newStatus,
-        paidAt: newPaymentStatus === "PAID" ? new Date() : undefined
+        $set: {
+            paymentStatus: newPaymentStatus,
+            status: newStatus,
+            paidAt: newPaymentStatus === "PAID" ? new Date() : undefined
+        }
     });
 
     // 5. Sync with Invoice if exists
@@ -317,10 +319,12 @@ const addPayment = async (billId, paymentData, user) => {
             };
 
             await Invoice.findByIdAndUpdate(invoice._id, {
-                amountPaid: newInvoiceAmountPaid,
-                balance: newInvoiceBalance,
-                status: newInvoiceStatus,
-                paidAt: newInvoiceStatus === "PAID" ? new Date() : invoice.paidAt,
+                $set: {
+                    amountPaid: newInvoiceAmountPaid,
+                    balance: newInvoiceBalance,
+                    status: newInvoiceStatus,
+                    paidAt: newInvoiceStatus === "PAID" ? new Date() : invoice.paidAt
+                },
                 $push: { payments: invoicePaymentRecord }
             });
             console.log(`[ServiceBillService] Synced payment to Invoice ${invoice.invoiceNumber}`);

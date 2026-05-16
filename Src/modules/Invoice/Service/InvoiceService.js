@@ -124,13 +124,15 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     };
 
     const updateData = {
-        amountPaid: newPaid,
-        balance: newBalance,
-        status: newStatus,
+        $set: {
+            amountPaid: newPaid,
+            balance: newBalance,
+            status: newStatus
+        },
         $push: { payments: paymentRecord }
     };
     if (newStatus === "PAID" && !invoice.paidAt) {
-        updateData.paidAt = timestamp;
+        updateData.$set.paidAt = timestamp;
     }
 
     const updatedInvoice = await Invoice.findByIdAndUpdate(invoiceId, updateData, { new: true });
@@ -158,9 +160,11 @@ exports.payInvoice = async (invoiceId, paymentData) => {
                 await ServiceBill.findByIdAndUpdate(bill._id, {
                     $inc: { amountPaid: billAmount },
                     $push: { payments: billPaymentEntry },
-                    paymentStatus: newBillPaymentStatus,
-                    status: newBillStatus,
-                    paidAt: newBillPaymentStatus === "PAID" ? timestamp : bill.paidAt
+                    $set: {
+                        paymentStatus: newBillPaymentStatus,
+                        status: newBillStatus,
+                        paidAt: newBillPaymentStatus === "PAID" ? timestamp : bill.paidAt
+                    }
                 });
                 console.log(`[InvoiceService] Synced payment to Service Bill ${bill.billNumber}`);
             }

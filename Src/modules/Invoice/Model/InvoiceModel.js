@@ -25,7 +25,7 @@ const invoiceSchema = new mongoose.Schema({
     },
     invoiceType: {
         type: String,
-        enum: ["RENTAL", "WORKSHOP"],
+        enum: ["RENTAL", "WORKSHOP", "MANUAL"],
         default: "RENTAL"
     },
     driver: {
@@ -90,11 +90,6 @@ const invoiceSchema = new mongoose.Schema({
     },
 
     // Manual invoice fields
-    invoiceType: {
-        type: String,
-        enum: ["AUTO", "MANUAL"],
-        default: "AUTO"
-    },
     lineItems: [lineItemSchema],
     subtotal: { type: Number, default: 0 },
     discountType: { type: String, enum: ["PERCENTAGE", "FIXED"], default: "PERCENTAGE" },

@@ -80,9 +80,13 @@ exports.getBillById = async (id) => {
  */
 exports.updateBill = async (id, updateData) => {
     try {
+        const update = Object.keys(updateData).some(key => key.startsWith('$')) 
+            ? updateData 
+            : { $set: updateData };
+
         return await ServiceBill.findByIdAndUpdate(
             id,
-            { $set: updateData },
+            update,
             { new: true, runValidators: true }
         );
     } catch (error) {
