@@ -51,6 +51,7 @@ const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter"
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
+const EmailConfigRouter = require("./Src/modules/EmailConfig/Routes/EmailConfigRoutes");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -129,6 +130,7 @@ app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
+app.use("/api/email-configs", EmailConfigRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);

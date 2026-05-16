@@ -1,9 +1,17 @@
 const Enquiry = require('../Model/EnquiryModel');
+const MailService = require('../../../services/MailService');
 
 const createEnquiry = async (data) => {
     try {
         const enquiry = new Enquiry(data);
-        return await enquiry.save();
+        const savedEnquiry = await enquiry.save();
+        
+        // Trigger email alert in background
+        MailService.sendGeneralEnquiryAlert(savedEnquiry).catch(err => {
+            console.error('[EnquiryService] Async email alert failed:', err.message);
+        });
+
+        return savedEnquiry;
     } catch (error) {
         throw error;
     }
