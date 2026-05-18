@@ -157,6 +157,53 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                     branchId = pmtMade.branch;
                 }
             }
+        } else if (paymentTransaction.referenceModel === "PaymentReceived") {
+            const PaymentReceived = require('../../PaymentReceived/Model/PaymentReceivedModel');
+            const pmtRec = await PaymentReceived.findById(paymentTransaction.referenceId).populate('driverId');
+            if (pmtRec) {
+                const driverName = pmtRec.driverId ? (pmtRec.driverId.personalInfo?.fullName || pmtRec.driverId.name) : "Unknown Driver";
+                
+                // Find Accounts Receivable account (code 1200)
+                const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+                const arAccount = await AccountingCode.findOne({ code: "1200", category: "ASSET" });
+                
+                if (arAccount) {
+                    console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable`);
+                    
+                    // Leg 1: DEBIT Bank/Cash Account (Asset increases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: pmtRec.branch || branchId,
+                        accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
+                        type: "DEBIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Payment Received (Debit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+
+                    // Leg 2: CREDIT Accounts Receivable (Asset decreases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: pmtRec.branch || branchId,
+                        accountingCode: arAccount._id,
+                        type: "CREDIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Payment Received (Credit Accounts Receivable) - Driver: ${driverName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+                    
+                    console.log(`[LedgerService] Standalone Payment Received double-entry posted successfully.`);
+                    return; // Return early since we fully logged both legs!
+                } else {
+                    console.error("[LedgerService] Accounts Receivable account (1200) not found. Falling back to default single entry.");
+                    description = `Payment Received from ${driverName} (PR: ${pmtRec.paymentNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
+                    branchId = pmtRec.branch;
+                }
+            }
         }
 
         const ledgerData = {

@@ -48,6 +48,16 @@ const paymentReceivedSchema = new mongoose.Schema({
         type: String, 
         enum: ["COMPLETED", "VOID"], 
         default: 'COMPLETED' 
+    },
+    depositedTo: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'AccountingCode',
+        required: false
+    },
+    branch: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Branch',
+        required: false
     }
 }, { timestamps: true });
 
