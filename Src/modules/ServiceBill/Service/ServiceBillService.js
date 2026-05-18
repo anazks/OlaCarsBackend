@@ -184,12 +184,18 @@ const approveBill = async (billId, user) => {
     // Populate the updated bill to get vehicle and driver info for the invoice
     const fullyPopulatedBill = await getBillById(billId);
 
-    // If driver billed, generate an official Invoice record
-    if (fullyPopulatedBill.isDriverBilled) {
+    // If driver billed or a current driver is assigned to the vehicle, generate an official Invoice record
+    if (fullyPopulatedBill.isDriverBilled || fullyPopulatedBill.vehicleId?.currentDriver) {
         if (!fullyPopulatedBill.vehicleId?.currentDriver) {
             console.error(`[ServiceBillService] Cannot generate invoice for bill ${billId}: No current driver assigned to vehicle.`);
         } else {
             try {
+                // Update the bill to isDriverBilled: true if it was not already marked
+                if (!fullyPopulatedBill.isDriverBilled) {
+                    await updateBill(billId, { isDriverBilled: true });
+                    fullyPopulatedBill.isDriverBilled = true;
+                }
+
                 const invoiceNumber = await generateWorkshopInvoiceNumber();
                 const invoiceData = {
                     invoiceNumber,
@@ -208,8 +214,9 @@ const approveBill = async (billId, user) => {
                 const invoice = await addInvoiceService(invoiceData);
                 
                 // Return the bill with the temporary invoice number for the UI
+                const billObj = fullyPopulatedBill.toObject ? fullyPopulatedBill.toObject() : fullyPopulatedBill;
                 return { 
-                    ...fullyPopulatedBill.toObject(), 
+                    ...billObj, 
                     invoiceNumber: invoice.invoiceNumber 
                 };
             } catch (err) {
