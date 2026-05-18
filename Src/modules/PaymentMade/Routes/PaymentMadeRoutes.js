@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const PaymentMadeController = require('../Controller/PaymentMadeController');
+const { authenticate } = require('../../../shared/middlewares/authMiddleware');
+
+router.use(authenticate);
 
 router.post('/', PaymentMadeController.createPaymentMade);
 router.get('/', PaymentMadeController.getAllPaymentMades);
