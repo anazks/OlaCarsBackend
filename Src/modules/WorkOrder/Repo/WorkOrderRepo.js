@@ -126,6 +126,21 @@ exports.createWorkOrder = async (data) => {
         console.log("[DEBUG] Repo creating WorkOrder with creatorRole:", data.creatorRole);
         console.log("[DEBUG] WorkOrder Model Enum:", WorkOrder.schema.path("creatorRole").options.enum);
         data.workOrderNumber = await generateWorkOrderNumber();
+
+        // Automatically map requiredParts to the parts array if present
+        if (data.requiredParts && Array.isArray(data.requiredParts)) {
+            data.parts = data.requiredParts.map(rp => ({
+                inventoryPartId: rp.inventoryPartId,
+                partName: rp.partName,
+                partNumber: rp.partNumber,
+                quantity: rp.quantity,
+                unitCost: rp.unitCost,
+                totalCost: (rp.quantity || 0) * (rp.unitCost || 0),
+                status: "REQUESTED",
+                source: "IN_STOCK"
+            }));
+        }
+
         const wo = await WorkOrder.create(data);
         return wo.toObject();
     } catch (error) {
