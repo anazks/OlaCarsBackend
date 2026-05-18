@@ -54,7 +54,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
         // Resolve branch from reference model
         let branchId = paymentTransaction.branch; // Try direct first
         
-        // Enrich description if this is a Purchase Order payment
+        // Enrich description if this is a Purchase Order or Bill payment
         if (paymentTransaction.referenceModel === "PurchaseOrder") {
             const PurchaseOrder = require('../../PurchaseOrder/Model/PurchaseOrderModel');
             const po = await PurchaseOrder.findById(paymentTransaction.referenceId).populate('supplier');
@@ -62,6 +62,100 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                 const supplierName = po.supplier ? po.supplier.name : "Unknown Supplier";
                 description = `Purchase Order Payment to ${supplierName} for ${po.purpose} (PO: ${po.purchaseOrderNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
                 branchId = po.branch;
+            }
+        } else if (paymentTransaction.referenceModel === "Bill") {
+            const Bill = require('../../Bill/Model/BillModel');
+            const bill = await Bill.findById(paymentTransaction.referenceId).populate('supplier');
+            if (bill) {
+                const supplierName = bill.supplier ? bill.supplier.name : "Unknown Supplier";
+                
+                // 1. Find Accounts Payable account (code 2100)
+                const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+                const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
+                
+                if (apAccount) {
+                    console.log(`[LedgerService] Generating double-entry for Bill Payment: Debit Accounts Payable, Credit Bank/Cash`);
+                    
+                    // Leg 1: DEBIT Accounts Payable (Liability decreases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: bill.branch || branchId,
+                        accountingCode: apAccount._id,
+                        type: "DEBIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Bill Payment (Debit Accounts Payable) to ${supplierName} (Bill: ${bill.billNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+
+                    // Leg 2: CREDIT Bank/Cash Account (Asset decreases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: bill.branch || branchId,
+                        accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
+                        type: "CREDIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Bill Payment (Credit Bank/Cash) - Taken from ${paymentTransaction.accountingCode.name || "selected account"} (Bill: ${bill.billNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+                    
+                    console.log(`[LedgerService] Standalone Bill Payment double-entry posted successfully.`);
+                    return; // Return early since we fully logged both legs!
+                } else {
+                    console.error("[LedgerService] Accounts Payable account (2100) not found. Falling back to default single entry.");
+                    description = `Bill Payment to ${supplierName} (Bill: ${bill.billNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
+                    branchId = bill.branch;
+                }
+            }
+        } else if (paymentTransaction.referenceModel === "PaymentMade") {
+            const PaymentMade = require('../../PaymentMade/Model/PaymentMadeModel');
+            const pmtMade = await PaymentMade.findById(paymentTransaction.referenceId).populate('supplier');
+            if (pmtMade) {
+                const supplierName = pmtMade.supplier ? pmtMade.supplier.name : "Unknown Supplier";
+                
+                // 1. Find Accounts Payable account (code 2100)
+                const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+                const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
+                
+                if (apAccount) {
+                    console.log(`[LedgerService] Generating double-entry for Payment Made: Debit Accounts Payable, Credit Bank/Cash`);
+                    
+                    // Leg 1: DEBIT Accounts Payable (Liability decreases/Prepayment increases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: pmtMade.branch || branchId,
+                        accountingCode: apAccount._id,
+                        type: "DEBIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Payment Made to Vendor (Debit Accounts Payable) - ${supplierName} (PMT: ${pmtMade.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+
+                    // Leg 2: CREDIT Bank/Cash Account (Asset decreases)
+                    await addLedgerEntryService({
+                        transaction: paymentTransaction._id,
+                        branch: pmtMade.branch || branchId,
+                        accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
+                        type: "CREDIT",
+                        amount: paymentTransaction.totalAmount,
+                        description: `Payment Made to Vendor (Credit Bank/Cash) - Taken from ${paymentTransaction.accountingCode.name || "selected account"} (PMT: ${pmtMade.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        entryDate: paymentTransaction.paymentDate || new Date(),
+                        createdBy: paymentTransaction.createdBy,
+                        creatorRole: paymentTransaction.creatorRole
+                    });
+                    
+                    console.log(`[LedgerService] Standalone Payment Made double-entry posted successfully.`);
+                    return; // Return early since we fully logged both legs!
+                } else {
+                    console.error("[LedgerService] Accounts Payable account (2100) not found. Falling back to default single entry.");
+                    description = `Payment Made to ${supplierName} (PMT: ${pmtMade.paymentNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
+                    branchId = pmtMade.branch;
+                }
             }
         }
 

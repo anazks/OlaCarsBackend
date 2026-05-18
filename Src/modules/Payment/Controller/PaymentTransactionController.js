@@ -64,9 +64,16 @@ const addPaymentTransaction = async (req, res) => {
             await autoGenerateLedgerEntry(newPayment);
         }
 
-        // Mark PO as billed if applicable
+        // Mark PO as billed or update Bill balance if applicable
         if (paymentData.referenceModel === "PurchaseOrder") {
             await updatePurchaseOrderService(paymentData.referenceId, { isBilled: true });
+        } else if (paymentData.referenceModel === "Bill" && newPayment.status === "COMPLETED") {
+            const Bill = require("../../Bill/Model/BillModel");
+            const bill = await Bill.findById(paymentData.referenceId);
+            if (bill) {
+                bill.amountPaid += newPayment.totalAmount;
+                await bill.save();
+            }
         }
 
         return res.status(201).json({ success: true, data: newPayment });
@@ -121,6 +128,16 @@ const updatePaymentStatus = async (req, res) => {
         // TRIGGER LEDGER ENTRY
         if (status === "COMPLETED") {
             await autoGenerateLedgerEntry(updatedPayment);
+
+            // Update Bill balance if applicable
+            if (updatedPayment.referenceModel === "Bill") {
+                const Bill = require("../../Bill/Model/BillModel");
+                const bill = await Bill.findById(updatedPayment.referenceId);
+                if (bill) {
+                    bill.amountPaid += updatedPayment.totalAmount;
+                    await bill.save();
+                }
+            }
         }
 
         return res.status(200).json({ success: true, data: updatedPayment });

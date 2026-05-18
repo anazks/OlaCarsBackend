@@ -22,7 +22,9 @@ const seedFinancePermissions = async () => {
             "DASHBOARD_VIEW",
             "DRIVER_VIEW",
             "STAFF_PERFORMANCE_VIEW",
-            "VEHICLE_VIEW"
+            "VEHICLE_VIEW",
+            "BILL_VIEW",
+            "BILL_CREATE"
         ];
 
         const adminPermissions = [
@@ -40,6 +42,10 @@ const seedFinancePermissions = async () => {
             "PAYMENT_APPROVE",
             "SUPPLIER_VIEW",
             "PURCHASE_ORDER_VIEW",
+            "PURCHASE_ORDER_EDIT",
+            "BILL_VIEW",
+            "BILL_CREATE",
+            "BILL_EDIT",
             "INVENTORY_VIEW",
             "SERVICE_BILL_VIEW",
             "STAFF_VIEW",

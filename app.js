@@ -64,6 +64,7 @@ const ExpenseRouter = require("./Src/modules/Expense/Routes/ExpenseRoutes");
 const RecurringTransactionRouter = require("./Src/modules/RecurringTransaction/Routes/RecurringTransactionRoutes");
 const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeRoutes");
 const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
+const BillRouter = require("./Src/modules/Bill/Routes/BillRoutes");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -158,6 +159,7 @@ app.use("/api/expenses", ExpenseRouter);
 app.use("/api/recurring-transactions", RecurringTransactionRouter);
 app.use("/api/payments-made", PaymentMadeRouter);
 app.use("/api/vendor-credits", VendorCreditRouter);
+app.use("/api/bills", BillRouter);
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });

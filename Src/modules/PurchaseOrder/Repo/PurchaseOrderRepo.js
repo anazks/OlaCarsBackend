@@ -51,7 +51,8 @@ exports.getPurchaseOrderByIdService = async (id) => {
         return await PurchaseOrder.findById(id)
             .populate("branch")
             .populate("supplier", "name contactPerson email")
-            .populate("createdBy", "name email");
+            .populate("createdBy", "name email")
+            .populate("items.accountId");
     } catch (error) {
         throw error;
     }
