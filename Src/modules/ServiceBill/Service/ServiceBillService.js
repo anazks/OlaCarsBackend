@@ -29,7 +29,9 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         );
     }
 
-    const hourlyRate = options.hourlyRate || 50;
+    const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo");
+    const configuredHourlyRate = (await getSetting("hourlyLabourRate")) || 150;
+    const hourlyRate = options.hourlyRate !== undefined ? Number(options.hourlyRate) : configuredHourlyRate;
     const taxRate = options.taxRate || 0;
     const discount = options.discount || 0;
 

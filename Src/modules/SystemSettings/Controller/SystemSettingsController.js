@@ -12,6 +12,7 @@ const getSystemSetting = async (req, res) => {
         let finalValue = value;
         if (value === null) {
             if (key === "poApprovalThreshold") finalValue = 1000;
+            if (key === "hourlyLabourRate") finalValue = 150;
         }
 
         return res.status(200).json({ success: true, key, value: finalValue });
