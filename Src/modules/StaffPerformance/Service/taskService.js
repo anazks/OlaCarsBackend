@@ -70,6 +70,9 @@ exports.getTasks = async (filters, user) => {
     const userId = user.id;
     const role = user.role.toUpperCase().replace(" ", "");
 
+    const page = parseInt(filters.page);
+    const limit = parseInt(filters.limit) || 10;
+
     console.log(`[TaskService] getTasks for role=${role}, userId=${userId}, branchId=${user.branchId}`);
 
     // Role-based jurisdiction filtering (similar to targetService)
@@ -103,10 +106,47 @@ exports.getTasks = async (filters, user) => {
         if (filters.assignedBy) query.assignedBy = filters.assignedBy;
     }
 
-    if (filters.status) query.status = filters.status;
+    if (filters.status) {
+        if (filters.status === 'PENDING') {
+            query.$and = query.$and || [];
+            query.$and.push({
+                $or: [{ status: 'PENDING' }, { status: { $exists: false } }, { status: null }]
+            });
+        } else {
+            query.status = filters.status;
+        }
+    }
+    
+    if (filters.dateFrom || filters.dateTo) {
+        query.dueDate = {};
+        if (filters.dateFrom) query.dueDate.$gte = new Date(filters.dateFrom);
+        if (filters.dateTo) {
+            let toDate = new Date(filters.dateTo);
+            toDate.setHours(23, 59, 59, 999);
+            query.dueDate.$lte = toDate;
+        }
+    }
     
     console.log(`[TaskService] Query:`, JSON.stringify(query));
-    const results = await Task.find(query).populate("assignedBy", "fullName").sort({ dueDate: 1 });
-    console.log(`[TaskService] Found ${results.length} tasks`);
-    return results;
+    
+    if (page) {
+        const skip = (page - 1) * limit;
+        const totalItems = await Task.countDocuments(query);
+        const results = await Task.find(query).populate("assignedBy", "fullName").sort({ dueDate: 1 }).skip(skip).limit(limit);
+        console.log(`[TaskService] Found ${results.length} tasks (Paginated)`);
+        
+        return {
+            data: results,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
+        };
+    } else {
+        const results = await Task.find(query).populate("assignedBy", "fullName").sort({ dueDate: 1 });
+        console.log(`[TaskService] Found ${results.length} tasks (All)`);
+        return { data: results };
+    }
 };

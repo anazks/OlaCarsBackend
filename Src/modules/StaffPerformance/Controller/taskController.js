@@ -38,10 +38,11 @@ exports.updateTaskStatus = async (req, res) => {
 
 exports.getTasks = async (req, res) => {
     try {
-        const tasks = await taskService.getTasks(req.query, req.user);
+        const result = await taskService.getTasks(req.query, req.user);
         return res.status(200).json({
             success: true,
-            data: tasks,
+            data: result.data,
+            pagination: result.pagination
         });
     } catch (error) {
         console.error("Get tasks error:", error);

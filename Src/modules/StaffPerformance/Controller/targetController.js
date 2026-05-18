@@ -19,10 +19,11 @@ exports.assignTarget = async (req, res) => {
 
 exports.getTargets = async (req, res) => {
     try {
-        const targets = await targetService.getTargets(req.query, req.user);
+        const result = await targetService.getTargets(req.query, req.user);
         return res.status(200).json({
             success: true,
-            data: targets,
+            data: result.data,
+            pagination: result.pagination
         });
     } catch (error) {
         console.error("Get targets error:", error);

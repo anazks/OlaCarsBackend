@@ -75,6 +75,9 @@ exports.getTargets = async (filters, user) => {
     const query = {};
     const role = user.role.toUpperCase().replace(" ", "");
 
+    const page = parseInt(filters.page);
+    const limit = parseInt(filters.limit) || 10;
+
     // 1. Base filters from query
     if (filters.targetType) query.targetType = filters.targetType;
     if (filters.targetId) query.targetId = filters.targetId;
@@ -84,6 +87,16 @@ exports.getTargets = async (filters, user) => {
         query.startDate = {};
         if (filters.startDate) query.startDate.$gte = new Date(filters.startDate);
         if (filters.endDate) query.startDate.$lte = new Date(filters.endDate);
+    }
+
+    if (filters.dateFrom || filters.dateTo) {
+        query.endDate = {};
+        if (filters.dateFrom) query.endDate.$gte = new Date(filters.dateFrom);
+        if (filters.dateTo) {
+            let toDate = new Date(filters.dateTo);
+            toDate.setHours(23, 59, 59, 999);
+            query.endDate.$lte = toDate;
+        }
     }
 
     // 2. Role-based jurisdiction filtering
@@ -115,9 +128,39 @@ exports.getTargets = async (filters, user) => {
         }
     }
 
-    if (filters.status) query.status = filters.status;
+    if (filters.status) {
+        if (filters.status === 'PENDING') {
+            query.$and = query.$and || [];
+            query.$and.push({
+                $or: [{ status: 'PENDING' }, { status: { $exists: false } }, { status: null }]
+            });
+        } else {
+            query.status = filters.status;
+        }
+    }
 
-    return await Target.find(query).populate("assignedBy", "fullName").sort({ startDate: -1 });
+    console.log(`[TargetService] Query:`, JSON.stringify(query));
+    
+    if (page) {
+        const skip = (page - 1) * limit;
+        const totalItems = await Target.countDocuments(query);
+        const results = await Target.find(query).populate("assignedBy", "fullName").sort({ startDate: -1 }).skip(skip).limit(limit);
+        console.log(`[TargetService] Found ${results.length} targets (Paginated)`);
+        
+        return {
+            data: results,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
+        };
+    } else {
+        const results = await Target.find(query).populate("assignedBy", "fullName").sort({ startDate: -1 });
+        console.log(`[TargetService] Found ${results.length} targets (All)`);
+        return { data: results };
+    }
 };
 
 /**
