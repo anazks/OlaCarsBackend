@@ -30,7 +30,26 @@ const generateBillHandler = async (req, res) => {
 const getBillsHandler = async (req, res) => {
     try {
         const bills = await getBills(req.query);
-        return res.status(200).json({ success: true, data: bills });
+        
+        const billsWithInvoices = await Promise.all(bills.map(async (bill) => {
+            const billObj = bill.toObject ? bill.toObject() : bill;
+            if (billObj.isDriverBilled) {
+                try {
+                    const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+                    const invoice = await Invoice.findOne({ serviceBill: billObj._id });
+                    if (invoice) {
+                        billObj.invoiceNumber = invoice.invoiceNumber;
+                        billObj.invoiceId = invoice._id;
+                        billObj.invoiceStatus = invoice.status;
+                    }
+                } catch (invoiceErr) {
+                    console.error("[ServiceBillController] Error fetching linked invoice:", invoiceErr);
+                }
+            }
+            return billObj;
+        }));
+        
+        return res.status(200).json({ success: true, data: billsWithInvoices });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -44,7 +63,23 @@ const getBillByIdHandler = async (req, res) => {
     try {
         const bill = await getBillById(req.params.id);
         if (!bill) return res.status(404).json({ success: false, message: "Bill not found" });
-        return res.status(200).json({ success: true, data: bill });
+        
+        const billObj = bill.toObject ? bill.toObject() : bill;
+        if (billObj.isDriverBilled) {
+            try {
+                const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+                const invoice = await Invoice.findOne({ serviceBill: billObj._id });
+                if (invoice) {
+                    billObj.invoiceNumber = invoice.invoiceNumber;
+                    billObj.invoiceId = invoice._id;
+                    billObj.invoiceStatus = invoice.status;
+                }
+            } catch (invoiceErr) {
+                console.error("[ServiceBillController] Error fetching linked invoice:", invoiceErr);
+            }
+        }
+        
+        return res.status(200).json({ success: true, data: billObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
