@@ -7,9 +7,10 @@ const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
 const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions', 'fleetNumbers'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
+
 
 exports.login = async (email, password) => {
     const staff = await OperationStaff.findOne({ email, isDeleted: false });
@@ -87,6 +88,7 @@ exports.create = async (data) => {
         branchId: data.branchId,
         status: data.status,
         permissions: finalPermissions,
+        fleetNumbers: data.fleetNumbers || [],
         createdBy: data.createdBy,
         creatorRole: data.creatorRole,
     });

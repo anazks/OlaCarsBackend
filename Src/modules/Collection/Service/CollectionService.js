@@ -57,7 +57,12 @@ const resolveImplicitFilters = async (user) => {
         case ROLES.OPERATIONSTAFF: {
             const staff = await OperationStaff.findOne({ _id: id, isDeleted: false });
             if (!staff) throw new AppError("Operation Staff record not found", 404);
-            branchIds = staff.branchId ? [staff.branchId] : [];
+            
+            if (staff.fleetNumbers && staff.fleetNumbers.length > 0) {
+                fleetNumbers = staff.fleetNumbers;
+            } else {
+                branchIds = staff.branchId ? [staff.branchId] : [];
+            }
             break;
         }
 
@@ -250,7 +255,9 @@ exports.getOverview = async (user, queryFilters) => {
         .map(inv => ({
             id: inv._id,
             invoiceNumber: inv.invoiceNumber,
+            driverId: inv.driver?._id,
             driverName: inv.driver?.personalInfo?.fullName || "Unknown",
+            vehicleId: inv.vehicle?._id,
             fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
             dueDate: inv.dueDate,
             balance: inv.balance,
@@ -267,7 +274,9 @@ exports.getOverview = async (user, queryFilters) => {
         .map(inv => ({
             id: inv._id,
             invoiceNumber: inv.invoiceNumber,
+            driverId: inv.driver?._id,
             driverName: inv.driver?.personalInfo?.fullName || "Unknown",
+            vehicleId: inv.vehicle?._id,
             fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
             dueDate: inv.dueDate,
             totalDue: inv.totalAmountDue,
@@ -353,6 +362,7 @@ exports.getList = async (user, queryFilters) => {
         invoiceNumber: inv.invoiceNumber,
         driverId: inv.driver?._id,
         driverName: inv.driver?.personalInfo?.fullName || "N/A",
+        vehicleId: inv.vehicle?._id,
         vehicleNumber: inv.vehicle?.legalDocs?.registrationNumber || "N/A",
         fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
         branch: inv.driver?.branch?.name || "N/A",

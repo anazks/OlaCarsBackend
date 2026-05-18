@@ -97,6 +97,75 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     if (!invoice || invoice.isDeleted) throw new Error("Invoice not found");
     if (invoice.status === "PAID") throw new Error("Invoice is already fully paid");
 
+    if (paymentMethod === "PREPAYMENT_CREDIT") {
+        // Settle this invoice using the driver's available prepayment credits, up to the specified amount
+        const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+        const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
+        
+        let remainingToApply = amount; // the amount the user wants to pay using prepayment credit
+        if (remainingToApply > invoice.balance) {
+            remainingToApply = invoice.balance;
+        }
+        
+        let totalAppliedFromCredit = 0;
+
+        for (const payment of payments) {
+            if (remainingToApply <= 0) break;
+
+            const amountAppliedTotal = payment.invoices?.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0) || 0;
+            const unappliedAmount = Math.max(0, payment.amountReceived - amountAppliedTotal);
+
+            if (unappliedAmount > 0) {
+                const toApply = Math.min(remainingToApply, unappliedAmount);
+                if (toApply > 0) {
+                    // 1. Update PaymentReceived record's invoices array
+                    payment.invoices.push({
+                        invoiceId: invoice._id,
+                        invoiceNumber: invoice.invoiceNumber,
+                        amountApplied: toApply
+                    });
+                    await payment.save();
+
+                    // 2. Add payment record to the Invoice
+                    const paymentRecord = {
+                        amount: toApply,
+                        paidAt: new Date(),
+                        paymentMethod: "Prepayment Credit",
+                        transactionId: payment.referenceNumber || payment.paymentNumber || undefined,
+                        note: note || `Applied prepayment credit from ${payment.paymentNumber}`,
+                    };
+
+                    invoice.payments.push(paymentRecord);
+                    
+                    remainingToApply -= toApply;
+                    totalAppliedFromCredit += toApply;
+                }
+            }
+        }
+
+        if (totalAppliedFromCredit <= 0) {
+            throw new Error("No available prepayment credit found for this driver");
+        }
+
+        const newPaid = (invoice.amountPaid || 0) + totalAppliedFromCredit;
+        const newBalance = Math.max(0, invoice.totalAmountDue - newPaid);
+        const newStatus = newBalance <= 0 ? "PAID" : "PARTIAL";
+
+        invoice.amountPaid = newPaid;
+        invoice.balance = newBalance;
+        invoice.status = newStatus;
+        if (newStatus === "PAID" && !invoice.paidAt) {
+            invoice.paidAt = new Date();
+        }
+
+        await invoice.save();
+
+        // Roll over carry over across all invoices
+        await exports.rolloverDriverInvoices(invoice.driver);
+
+        return invoice;
+    }
+
     const timestamp = new Date();
     
     // Apply payment directly to this invoice (the controller or frontend could choose the oldest unpaid)
@@ -417,7 +486,71 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     };
 
     const newInvoice = await Invoice.create(invoiceData);
+    await exports.applyPrepaymentsToInvoice(newInvoice._id);
     return await Invoice.findById(newInvoice._id).populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
+};
+
+exports.applyPrepaymentsToInvoice = async (invoiceId) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice || invoice.status === 'PAID') return;
+
+    // Find all completed PaymentReceived records for this driver
+    const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
+    
+    let remainingToPay = invoice.balance;
+    if (remainingToPay <= 0) return;
+
+    for (const payment of payments) {
+        if (remainingToPay <= 0) break;
+
+        const amountAppliedTotal = payment.invoices?.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0) || 0;
+        const unappliedAmount = Math.max(0, payment.amountReceived - amountAppliedTotal);
+
+        if (unappliedAmount > 0) {
+            const toApply = Math.min(remainingToPay, unappliedAmount);
+            if (toApply > 0) {
+                // 1. Update PaymentReceived record's invoices array
+                payment.invoices.push({
+                    invoiceId: invoice._id,
+                    invoiceNumber: invoice.invoiceNumber,
+                    amountApplied: toApply
+                });
+                await payment.save();
+
+                // 2. Add payment record to the Invoice
+                const paymentRecord = {
+                    amount: toApply,
+                    paidAt: new Date(),
+                    paymentMethod: payment.paymentMethod || "Cash",
+                    transactionId: payment.referenceNumber || undefined,
+                    note: `Applied prepayment from ${payment.paymentNumber}`,
+                };
+
+                const newPaid = (invoice.amountPaid || 0) + toApply;
+                const newBalance = Math.max(0, invoice.totalAmountDue - newPaid);
+                const newStatus = newBalance <= 0 ? "PAID" : "PARTIAL";
+
+                invoice.amountPaid = newPaid;
+                invoice.balance = newBalance;
+                invoice.status = newStatus;
+                invoice.payments.push(paymentRecord);
+                if (newStatus === "PAID" && !invoice.paidAt) {
+                    invoice.paidAt = new Date();
+                }
+
+                remainingToPay = newBalance;
+            }
+        }
+    }
+
+    if (remainingToPay < invoice.balance) {
+        await invoice.save();
+        // Also trigger rollover driver invoices to maintain carryover calculations
+        await exports.rolloverDriverInvoices(invoice.driver);
+    }
 };
 
 exports.updateInvoice = async (id, data) => {

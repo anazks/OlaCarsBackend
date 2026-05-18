@@ -4,7 +4,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 const invoicePaymentSchema = new mongoose.Schema({
     amount: { type: Number, required: true },
     paidAt: { type: Date, default: Date.now },
-    paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Other"], default: "Cash" },
+    paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Mobile Money", "Prepayment Credit", "Other"], default: "Cash" },
     transactionId: { type: String },
     note: { type: String },
 }, { _id: true });
