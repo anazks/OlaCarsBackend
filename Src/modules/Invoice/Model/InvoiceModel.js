@@ -118,6 +118,10 @@ const invoiceSchema = new mongoose.Schema({
         ],
     },
     isDeleted: { type: Boolean, default: false },
+    mailSentCreated: { type: Boolean, default: false },
+    mailSentReminder3d: { type: Boolean, default: false },
+    mailSentDueToday: { type: Boolean, default: false },
+    mailSentRecovery: { type: Boolean, default: false },
 }, { timestamps: true });
 
 invoiceSchema.index({ driver: 1, weekNumber: 1 }, { 
