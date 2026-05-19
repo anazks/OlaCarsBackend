@@ -99,8 +99,11 @@ async function postBillToLedger(bill, userData) {
     });
 }
 
-exports.getAllBills = async (query) => {
-    return await BillRepo.getAllBills(query);
+exports.getAllBills = async (query = {}) => {
+    const cleanedQuery = { ...query };
+    delete cleanedQuery.limit;
+    delete cleanedQuery.page;
+    return await BillRepo.getAllBills(cleanedQuery);
 };
 
 exports.getBillById = async (id) => {
