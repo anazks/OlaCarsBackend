@@ -4,7 +4,8 @@ console.log("[DEBUG] WorkshopProcurementRouter loaded");
 const {
     createRequest,
     getRequests,
-    approveRequest
+    approveRequest,
+    getRequestById
 } = require("../Controller/WorkshopProcurementController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -22,6 +23,13 @@ router.get(
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
     getRequests
+);
+
+router.get(
+    "/:id",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    getRequestById
 );
 
 router.put(
