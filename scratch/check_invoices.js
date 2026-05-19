@@ -1,28 +1,42 @@
-const mongoose = require('mongoose');
-require('dotenv').config();
-const { Invoice } = require('../Src/modules/Invoice/Model/InvoiceModel');
-// Register other models for population
-require('../Src/modules/Driver/Model/DriverModel');
-require('../Src/modules/Vehicle/Model/VehicleModel');
+const mongoose = require("mongoose");
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 
-async function checkInvoices() {
+async function run() {
     try {
-        await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ola-cars');
+        const mongoUri = process.env.MONGO_URI || "mongodb://localhost:27017/olacars";
+        console.log("Connecting to:", mongoUri);
+        await mongoose.connect(mongoUri);
+        console.log("Connected successfully!");
+
+        // Load Invoice Model
+        const { Invoice } = require("../Src/modules/Invoice/Model/InvoiceModel");
+        
         const count = await Invoice.countDocuments();
-        const types = await Invoice.aggregate([
-            { $group: { _id: '$invoiceType', count: { $sum: 1 } } }
+        console.log(`Total Invoices: ${count}`);
+
+        const statuses = await Invoice.aggregate([
+            { $group: { _id: "$status", count: { $sum: 1 } } }
         ]);
-        console.log('Total Invoices:', count);
-        console.log('Types:', JSON.stringify(types, null, 2));
-        
-        const sample = await Invoice.find().limit(5).lean();
-        console.log('Sample:', JSON.stringify(sample, null, 2));
-        
-        process.exit(0);
+        console.log("Invoice Statuses in DB:", statuses);
+
+        const overdueDetails = await Invoice.find({
+            status: { $ne: "PAID" },
+            isDeleted: false
+        })
+        .limit(10)
+        .lean();
+
+        console.log("Sample Unpaid/Pending Invoices:");
+        overdueDetails.forEach(inv => {
+            console.log(`- Number: ${inv.invoiceNumber}, Status: ${inv.status}, Due: ${inv.dueDate}, Balance: ${inv.balance}`);
+        });
+
     } catch (err) {
-        console.error(err);
-        process.exit(1);
+        console.error("Error:", err);
+    } finally {
+        await mongoose.disconnect();
     }
 }
 
-checkInvoices();
+run();
