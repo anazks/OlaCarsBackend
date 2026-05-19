@@ -90,6 +90,7 @@ const vehicleSchema = new mongoose.Schema(
             gpsSerialNumber: { type: String },
             condition: { type: String, enum: ["New", "Used"] },
             weeklyRent: { type: Number, default: 0 },
+            sellingValue: { type: Number, default: 0 },
             leaseDurationWeeks: { type: Number, default: 260 },
             fleetNumber: { type: String, trim: true },
         },

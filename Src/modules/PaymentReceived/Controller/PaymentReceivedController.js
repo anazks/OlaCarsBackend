@@ -3,7 +3,7 @@ const PaymentReceived = require('../Model/PaymentReceivedModel');
 exports.createPaymentReceived = async (req, res) => {
     try {
         const { driverId, amountReceived, paymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
-        
+
         if (!driverId || !amountReceived || !depositedTo) {
             return res.status(400).json({ success: false, message: "Missing required fields: driverId, amountReceived, depositedTo are required." });
         }
@@ -149,7 +149,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
         const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod } = req.query;
         console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod });
         const skip = (parseInt(page) - 1) * parseInt(limit);
-        
+
         const query = {};
         if (paymentMethod && paymentMethod !== 'ALL') {
             query.paymentMethod = paymentMethod;
@@ -157,7 +157,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         if (search) {
             const searchRegex = { $regex: search, $options: 'i' };
-            
+
             // Find matching drivers
             const { Driver } = require('../../Driver/Model/DriverModel');
             const drivers = await Driver.find({
@@ -174,7 +174,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
                 { driverId: { $in: driverIds } }
             ];
         }
-        
+
         let sort = { createdAt: -1 };
         if (sortBy) {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
@@ -187,9 +187,9 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             .sort(sort)
             .skip(skip)
             .limit(parseInt(limit));
-            
-        res.status(200).json({ 
-            success: true, 
+
+        res.status(200).json({
+            success: true,
             data: docs,
             pagination: {
                 total,

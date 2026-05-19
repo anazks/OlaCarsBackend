@@ -427,19 +427,57 @@ const assignCarToDriver = async (req, res, next) => {
 
         await updateDriverService(driverId, driverUpdate, session);
 
-        // 7. If deposit exists, add it as an additional payment
+        // 7. If deposit exists, add it as an additional payment and create a separate invoice for it
         if (depositAmount > 0) {
+            const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+            const invoiceDueDate = new Date();
+            invoiceDueDate.setDate(invoiceDueDate.getDate() + 14); // 2 weeks from now
+
+            const ts = Date.now();
+            const invoiceNumber = `DEP-${ts}`;
+
+            const depositInvoice = await Invoice.create([{
+                invoiceNumber,
+                invoiceType: "DEPOSIT",
+                driver: driverId,
+                vehicle: vehicleId,
+                dueDate: invoiceDueDate,
+                baseAmount: depositAmount,
+                carryOverAmount: 0,
+                totalAmountDue: depositAmount,
+                amountPaid: 0,
+                balance: depositAmount,
+                status: "PENDING",
+                payments: [],
+                lineItems: [{
+                    name: `Down Payment / Deposit — ${vehicle.basicDetails.make} ${vehicle.basicDetails.model}`,
+                    description: `Security deposit for vehicle assignment`,
+                    qty: 1,
+                    unitPrice: depositAmount,
+                    total: depositAmount
+                }],
+                subtotal: depositAmount,
+                createdBy: req.user.id,
+                creatorRole: req.user.role,
+                notes: notes || "Deposit for vehicle assignment"
+            }], { session });
+
+            // Since Invoice.create with a session returns an array of documents
+            const createdInvoice = depositInvoice[0];
+
             await updateDriverService(driverId, {
                 $push: {
                     additionalPayments: {
                         type: "DEPOSIT",
                         label: `Vehicle Deposit — ${vehicle.basicDetails.make} ${vehicle.basicDetails.model}`,
                         amount: depositAmount,
-                        dueDate: new Date(),
+                        dueDate: invoiceDueDate,
                         status: "PENDING",
                         amountPaid: 0,
                         balance: depositAmount,
                         relatedVehicle: vehicleId,
+                        invoiceRef: createdInvoice._id,
+                        invoiceNumber: invoiceNumber,
                         notes: notes || "Deposit for vehicle assignment",
                     }
                 }
@@ -488,17 +526,26 @@ const updateVehicleLeaseSettings = async (req, res, next) => {
     try {
         console.log('[DEBUG] updateVehicleLeaseSettings - Body:', JSON.stringify(req.body, null, 2));
         const vehicleId = req.params.id;
-        const { durationWeeks, weeklyRent } = req.body;
+        const { durationWeeks, weeklyRent, sellingValue } = req.body;
         
-        if (typeof durationWeeks !== 'number' || typeof weeklyRent !== 'number') {
-            return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks/weeklyRent fields." });
+        if (typeof durationWeeks !== 'number') {
+            return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks field." });
+        }
+
+        const updateData = {
+            "basicDetails.leaseDurationWeeks": durationWeeks
+        };
+
+        if (typeof weeklyRent === 'number') {
+            updateData["basicDetails.weeklyRent"] = weeklyRent;
+        }
+
+        if (typeof sellingValue === 'number') {
+            updateData["basicDetails.sellingValue"] = sellingValue;
         }
 
         const { updateVehicleService } = require("../Repo/VehicleRepo");
-        const updatedVehicle = await updateVehicleService(vehicleId, {
-            "basicDetails.leaseDurationWeeks": durationWeeks,
-            "basicDetails.weeklyRent": weeklyRent
-        });
+        const updatedVehicle = await updateVehicleService(vehicleId, updateData);
 
         if (!updatedVehicle) {
             return res.status(404).json({ success: false, message: "Vehicle not found" });

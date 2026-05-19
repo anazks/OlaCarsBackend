@@ -25,7 +25,7 @@ const invoiceSchema = new mongoose.Schema({
     },
     invoiceType: {
         type: String,
-        enum: ["RENTAL", "WORKSHOP", "MANUAL"],
+        enum: ["RENTAL", "WORKSHOP", "MANUAL", "DEPOSIT"],
         default: "RENTAL"
     },
     driver: {

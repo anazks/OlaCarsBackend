@@ -55,7 +55,7 @@ const createCreditNote = async (data, actor) => {
             // FIX: Bind explicitly to Driver Model so it registers under Driver Ledger Accounts!
             const transactionData = {
                 accountingCode: accCode._id,
-                referenceId: driverId, 
+                referenceId: driverId,
                 referenceModel: "Driver",
                 transactionCategory: "INCOME",
                 transactionType: "DEBIT", // Reduces the driver receivable account
@@ -99,7 +99,7 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
     if (!invoice) {
         throw new Error("Invoice not found.");
     }
-    
+
     if (invoice.status === 'PAID') {
         throw new Error("Cannot apply credit to a fully paid invoice.");
     }
@@ -114,14 +114,14 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
     const appliedAmount = Math.min(creditNote.amount, invoice.balance);
     const newAmountPaid = (invoice.amountPaid || 0) + appliedAmount;
     const newBalance = Math.max(0, invoice.balance - appliedAmount);
-    
+
     let newStatus = invoice.status;
     if (newBalance <= 0) {
         newStatus = 'PAID';
     } else if (newAmountPaid > 0) {
         newStatus = 'PARTIAL';
     }
-    
+
     // New payment entry using only valid enum values
     const newPaymentEntry = {
         amount: appliedAmount,
@@ -144,7 +144,7 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
         },
         { runValidators: false }
     );
-    
+
     // Trigger carry-over dynamic balance rollovers
     try {
         const InvoiceService = require("../../Invoice/Service/InvoiceService");
@@ -174,17 +174,17 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
     const skip = (page - 1) * limit;
 
     const filter = { ...query };
-    
+
     // Date Range Filtering
     if (pagination.startDate || pagination.endDate) {
         filter.creditNoteDate = {};
         if (pagination.startDate) filter.creditNoteDate.$gte = new Date(pagination.startDate);
         if (pagination.endDate) filter.creditNoteDate.$lte = new Date(pagination.endDate);
     }
-    
+
     if (pagination.search) {
         const searchRegex = { $regex: pagination.search, $options: 'i' };
-        
+
         // Find matching drivers
         const { Driver } = require("../../Driver/Model/DriverModel");
         const drivers = await Driver.find({
@@ -204,7 +204,7 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
     }
 
     const count = await CreditNote.countDocuments(filter);
-    
+
     let sort = { createdAt: -1 };
     if (pagination.sortBy) {
         sort = { [pagination.sortBy]: pagination.sortOrder === 'desc' ? -1 : 1 };
@@ -265,7 +265,7 @@ const voidCreditNote = async (id) => {
             // but we must cap it properly to ensure integrity.
             invoice.amountPaid = Math.max(0, (invoice.amountPaid || 0) - creditNote.amount);
             invoice.balance = invoice.totalAmountDue - invoice.amountPaid;
-            
+
             if (invoice.balance >= invoice.totalAmountDue) {
                 invoice.status = 'PENDING';
             } else if (invoice.amountPaid > 0) {
@@ -287,7 +287,7 @@ const voidCreditNote = async (id) => {
 const updateCreditNote = async (id, data) => {
     const creditNote = await CreditNote.findById(id);
     if (!creditNote) throw new Error("Credit Note not found.");
-    
+
     if (!['OPEN', 'DRAFT'].includes(creditNote.status)) {
         throw new Error("Only OPEN or DRAFT credit notes can be edited. CLOSED or VOID notes are frozen.");
     }

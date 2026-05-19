@@ -33,6 +33,9 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
                     // Handle query params that come in as strings "true"/"false"
                     if (filters[field] === 'true') query[field] = true;
                     else if (filters[field] === 'false') query[field] = false;
+                    else if (typeof filters[field] === 'string' && filters[field].includes(',')) {
+                        query[field] = { $in: filters[field].split(',') };
+                    }
                     else query[field] = filters[field];
                 }
             });
