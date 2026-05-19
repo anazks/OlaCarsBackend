@@ -166,7 +166,12 @@ exports.getRecentOverduePayments = async (filters) => {
     const { country, branch } = filters;
     const branchIds = await getBranchIds(country, branch);
 
-    const match = { status: "OVERDUE", isDeleted: false };
+    const match = { 
+        status: { $in: ["OVERDUE", "PENDING", "PARTIAL"] }, 
+        dueDate: { $lt: new Date() },
+        balance: { $gt: 0 },
+        isDeleted: false 
+    };
     
     let rawInvoices = await Invoice.find(match)
         .populate({

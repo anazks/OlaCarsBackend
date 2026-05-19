@@ -5,8 +5,15 @@ exports.createManualJournalRepo = async (data) => {
 };
 
 exports.getManualJournalsRepo = async (query = {}, options = {}) => {
-    const { sort = { createdAt: -1 }, populate = "" } = options;
-    return await ManualJournal.find(query).sort(sort).populate(populate);
+    const { sort = { createdAt: -1 }, populate = "", skip, limit } = options;
+    let dbQuery = ManualJournal.find(query).sort(sort).populate(populate);
+    if (skip !== undefined) {
+        dbQuery = dbQuery.skip(skip);
+    }
+    if (limit !== undefined) {
+        dbQuery = dbQuery.limit(limit);
+    }
+    return await dbQuery;
 };
 
 exports.getManualJournalByIdRepo = async (id) => {
