@@ -214,6 +214,12 @@ const approveBill = async (billId, user) => {
                     creatorRole: user.role
                 };
                 const invoice = await addInvoiceService(invoiceData);
+                try {
+                    const LedgerService = require("../../Ledger/Service/LedgerService");
+                    await LedgerService.generateInvoiceLedgerEntries(invoice);
+                } catch (ledgerErr) {
+                    console.error("[ServiceBillService] Failed to generate ledger entries for workshop invoice:", ledgerErr);
+                }
                 
                 // Return the bill with the temporary invoice number for the UI
                 const billObj = fullyPopulatedBill.toObject ? fullyPopulatedBill.toObject() : fullyPopulatedBill;

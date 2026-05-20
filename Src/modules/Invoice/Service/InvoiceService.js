@@ -86,7 +86,17 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
         });
     }
 
-    return await addManyInvoicesService(invoicesData, session);
+    const createdInvoices = await addManyInvoicesService(invoicesData, session);
+    if (createdInvoices && createdInvoices.length > 0) {
+        for (const inv of createdInvoices) {
+            try {
+                await LedgerService.generateInvoiceLedgerEntries(inv);
+            } catch (ledgerErr) {
+                console.error("[InvoiceService] Failed to generate ledger entries for rent invoice:", ledgerErr);
+            }
+        }
+    }
+    return createdInvoices;
 };
 
 exports.payInvoice = async (invoiceId, paymentData) => {
@@ -332,12 +342,41 @@ exports.rolloverDriverInvoices = async (driverId) => {
 
 exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note) => {
     try {
-        console.log(`[InvoiceService] Starting ledger generation for invoice ${invoice.invoiceNumber}`);
+        console.log(`[InvoiceService] Starting ledger generation for invoice payment ${invoice.invoiceNumber}`);
+        const mongoose = require("mongoose");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-        const accCode = await AccountingCode.findOne({ code: "4100" });
-        console.log(`[InvoiceService] AccountingCode 4100 found: ${!!accCode}`);
+        const { Driver } = require("../../Driver/Model/DriverModel");
         
-        if (accCode) {
+        // 1. Resolve Driver and Branch
+        const driverDoc = await Driver.findById(invoice.driver);
+        const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
+
+        // 2. Normalize creator details to avoid validation errors
+        let finalCreatedBy = createdBy;
+        let finalCreatorRole = creatorRole ? creatorRole.toUpperCase() : "ADMIN";
+
+        const { ROLES } = require("../../../shared/constants/roles");
+        if (!Object.values(ROLES).includes(finalCreatorRole)) {
+            finalCreatorRole = "ADMIN";
+        }
+
+        if (!finalCreatedBy || !mongoose.Types.ObjectId.isValid(finalCreatedBy)) {
+            const Admin = require("../../Admin/model/adminModel");
+            const firstAdmin = await Admin.findOne({ role: "ADMIN" });
+            if (firstAdmin) {
+                finalCreatedBy = firstAdmin._id;
+            } else {
+                finalCreatedBy = new mongoose.Types.ObjectId();
+            }
+        }
+
+        // 3. Resolve the Cash/Bank account for the Debit side
+        let targetCode = "1100"; // default cash/bank code
+        const cashBankAccount = await AccountingCode.findOne({ code: targetCode, isDeleted: false }) || 
+                                await AccountingCode.findOne({ category: "ASSET", code: { $ne: "1200" }, isDeleted: false }) ||
+                                await AccountingCode.findOne({ category: "ASSET", isDeleted: false });
+
+        if (cashBankAccount) {
             // Normalize paymentMethod to match PaymentTransaction enum
             let normalizedMethod = "OTHER";
             const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
@@ -347,37 +386,11 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
             else if (methodUpper.includes("CHEQUE")) normalizedMethod = "CHEQUE";
 
-            const transactionData = {
-                accountingCode: accCode._id,
-                referenceId: invoice.driver,
-                referenceModel: "Driver",
-                transactionCategory: "INCOME",
-                transactionType: "CREDIT",
-                isTaxInclusive: false,
-                baseAmount: amount,
-                totalAmount: amount,
-                paymentMethod: normalizedMethod,
-                status: "COMPLETED",
-                paymentDate: new Date(),
-                notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
-                createdBy,
-                creatorRole
-            };
-            
-            console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
-            const newTransaction = await PaymentTransaction.create(transactionData);
-            console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
-            
-            const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
-            await LedgerService.autoGenerateLedgerEntry(populatedTx);
-            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
-
-            // Zoho Accounting Integration: Auto-create PaymentReceived record
+            // 4. Zoho Accounting Integration: Auto-create PaymentReceived record first
+            let prDoc = null;
             try {
                 const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
 
-                // Normalize paymentMethod to match PaymentReceived schema enum:
-                // ["Cash", "Bank Transfer", "Card", "Mobile Money", "Other"]
                 const methodUpper2 = (paymentMethod || "").toUpperCase();
                 let normalizedPRMethod = "Other";
                 if (methodUpper2.includes("CASH")) normalizedPRMethod = "Cash";
@@ -392,6 +405,8 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                     paymentDate: new Date(),
                     paymentMethod: normalizedPRMethod,
                     notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
+                    depositedTo: cashBankAccount._id, // Set the deposited account
+                    branch: branchId,
                     invoices: [{
                         invoiceId: invoice._id,
                         invoiceNumber: invoice.invoiceNumber,
@@ -399,11 +414,41 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                     }],
                     status: "COMPLETED"
                 };
-                const prDoc = await PaymentReceived.create(prData);
+                prDoc = await PaymentReceived.create(prData);
                 console.log(`[InvoiceService] PaymentReceived record created successfully: ${prDoc.paymentNumber}`);
             } catch (prErr) {
                 console.error("[InvoiceService] Failed to auto-create PaymentReceived record:", prErr);
             }
+
+            // 5. Create a PaymentTransaction referencing the PaymentReceived record
+            // This is transactionType: "CREDIT" on the Cash/Bank Asset Account, 
+            // which LedgerService will process as: Credit Cash/Bank, Debit Accounts Receivable (1200).
+            const transactionData = {
+                accountingCode: cashBankAccount._id,
+                referenceId: prDoc ? prDoc._id : invoice.driver,
+                referenceModel: prDoc ? "PaymentReceived" : "Driver",
+                transactionCategory: "ASSET",
+                transactionType: "CREDIT",
+                isTaxInclusive: false,
+                baseAmount: amount,
+                totalAmount: amount,
+                paymentMethod: normalizedMethod,
+                status: "COMPLETED",
+                paymentDate: new Date(),
+                notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
+                createdBy: finalCreatedBy,
+                creatorRole: finalCreatorRole
+            };
+            
+            console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
+            const newTransaction = await PaymentTransaction.create(transactionData);
+            console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
+            
+            const populatedTx = { ...newTransaction.toObject(), accountingCode: cashBankAccount };
+            await LedgerService.autoGenerateLedgerEntry(populatedTx);
+            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+        } else {
+            console.error("[InvoiceService] No Asset account found to debit for invoice payment.");
         }
     } catch (err) {
         console.error("[InvoiceService] Failed to generate ledger for invoice payment:", err);
@@ -486,6 +531,11 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     };
 
     const newInvoice = await Invoice.create(invoiceData);
+    try {
+        await LedgerService.generateInvoiceLedgerEntries(newInvoice);
+    } catch (ledgerErr) {
+        console.error("[InvoiceService] Failed to generate ledger entries for manual invoice:", ledgerErr);
+    }
     await exports.applyPrepaymentsToInvoice(newInvoice._id);
     return await Invoice.findById(newInvoice._id).populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
 };

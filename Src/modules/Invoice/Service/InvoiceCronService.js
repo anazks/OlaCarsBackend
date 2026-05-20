@@ -154,6 +154,12 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             });
 
             await newInvoice.save();
+            try {
+                const LedgerService = require("../../Ledger/Service/LedgerService");
+                await LedgerService.generateInvoiceLedgerEntries(newInvoice);
+            } catch (ledgerErr) {
+                console.error("[InvoiceCronService] Failed to generate ledger entries for invoice:", ledgerErr);
+            }
             console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId}`);
 
             // Immediate Created Email Notification for RENTAL invoices (duplicate-safe)
