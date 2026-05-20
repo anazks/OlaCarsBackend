@@ -386,6 +386,19 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             await LedgerService.autoGenerateLedgerEntry(populatedTx);
             console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
 
+            // Fetch driver details to get the branch
+            const { Driver } = require("../../Driver/Model/DriverModel");
+            const driverDoc = await Driver.findById(invoice.driver);
+            const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
+
+            // Fetch a cash/bank asset account
+            let cashBankAccount = await AccountingCode.findOne({ category: "ASSET", code: { $ne: "1200" } });
+            if (!cashBankAccount) {
+                cashBankAccount = await AccountingCode.findOne({ code: "1200" });
+            }
+
+            let prDoc = null;
+
             // Zoho Accounting Integration: Auto-create PaymentReceived record
             try {
                 const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
@@ -404,7 +417,7 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                     paymentDate: new Date(),
                     paymentMethod: normalizedPRMethod,
                     notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
-                    depositedTo: cashBankAccount._id, // Set the deposited account
+                    depositedTo: cashBankAccount ? cashBankAccount._id : undefined, // Set the deposited account
                     branch: branchId,
                     invoices: [{
                         invoiceId: invoice._id,
@@ -419,33 +432,35 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                 console.error("[InvoiceService] Failed to auto-create PaymentReceived record:", prErr);
             }
 
-            // 5. Create a PaymentTransaction referencing the PaymentReceived record
-            // This is transactionType: "CREDIT" on the Cash/Bank Asset Account, 
-            // which LedgerService will process as: Credit Cash/Bank, Debit Accounts Receivable (1200).
-            const transactionData = {
-                accountingCode: cashBankAccount._id,
-                referenceId: prDoc ? prDoc._id : invoice.driver,
-                referenceModel: prDoc ? "PaymentReceived" : "Driver",
-                transactionCategory: "ASSET",
-                transactionType: "CREDIT",
-                isTaxInclusive: false,
-                baseAmount: amount,
-                totalAmount: amount,
-                paymentMethod: normalizedMethod,
-                status: "COMPLETED",
-                paymentDate: new Date(),
-                notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
-                createdBy: finalCreatedBy,
-                creatorRole: finalCreatorRole
-            };
-            
-            console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
-            const newTransaction = await PaymentTransaction.create(transactionData);
-            console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
-            
-            const populatedTx = { ...newTransaction.toObject(), accountingCode: cashBankAccount };
-            await LedgerService.autoGenerateLedgerEntry(populatedTx);
-            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+            if (cashBankAccount) {
+                // 5. Create a PaymentTransaction referencing the PaymentReceived record
+                // This is transactionType: "CREDIT" on the Cash/Bank Asset Account, 
+                // which LedgerService will process as: Credit Cash/Bank, Debit Accounts Receivable (1200).
+                const prTransactionData = {
+                    accountingCode: cashBankAccount._id,
+                    referenceId: prDoc ? prDoc._id : invoice.driver,
+                    referenceModel: prDoc ? "PaymentReceived" : "Driver",
+                    transactionCategory: "ASSET",
+                    transactionType: "CREDIT",
+                    isTaxInclusive: false,
+                    baseAmount: amount,
+                    totalAmount: amount,
+                    paymentMethod: normalizedMethod,
+                    status: "COMPLETED",
+                    paymentDate: new Date(),
+                    notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
+                    createdBy,
+                    creatorRole
+                };
+                
+                console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
+                const prNewTransaction = await PaymentTransaction.create(prTransactionData);
+                console.log(`[InvoiceService] PaymentTransaction created: ${prNewTransaction._id}`);
+                
+                const prPopulatedTx = { ...prNewTransaction.toObject(), accountingCode: cashBankAccount };
+                await LedgerService.autoGenerateLedgerEntry(prPopulatedTx);
+                console.log(`[InvoiceService] Ledger entry generation triggered for ${prNewTransaction._id}`);
+            }
         } else {
             console.error("[InvoiceService] No Asset account found to debit for invoice payment.");
         }
