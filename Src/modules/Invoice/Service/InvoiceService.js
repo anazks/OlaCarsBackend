@@ -1,7 +1,7 @@
-const { 
-    addManyInvoicesService, 
-    getInvoicesService, 
-    getInvoiceByIdService, 
+const {
+    addManyInvoicesService,
+    getInvoicesService,
+    getInvoiceByIdService,
     updateInvoiceService,
     deleteInvoiceService,
     deleteAllInvoicesService
@@ -41,7 +41,7 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
         // Set to the first Wednesday after assignment
         const currentDay = nextDueDate.getDay();
         const daysUntilWed = (3 - currentDay + 7) % 7;
-        const offset = daysUntilWed === 0 ? 7 : daysUntilWed; 
+        const offset = daysUntilWed === 0 ? 7 : daysUntilWed;
         nextDueDate.setDate(nextDueDate.getDate() + offset);
     } else {
         // Monthly: 1st of the month after assignment
@@ -51,9 +51,9 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
 
     const invoicesData = [];
     const ts = Date.now();
-    
+
     // ONLY generate the first invoice (Week/Month 1) upon assignment
-    const generateCount = 1; 
+    const generateCount = 1;
 
     for (let i = 0; i < generateCount; i++) {
         const dueDate = new Date(nextDueDate);
@@ -63,14 +63,14 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
             dueDate.setMonth(nextDueDate.getMonth() + i);
             dueDate.setDate(1);
         }
-        
+
         const periodNum = i + 1;
         invoicesData.push({
             invoiceNumber: `INV-${ts}-${periodNum}`,
             driver: driverId,
             vehicle: vehicleId,
             weekNumber: periodNum,
-            weekLabel: isWeekly 
+            weekLabel: isWeekly
                 ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
                 : `Month ${periodNum} - ${dueDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
             dueDate: dueDate,
@@ -111,12 +111,12 @@ exports.payInvoice = async (invoiceId, paymentData) => {
         // Settle this invoice using the driver's available prepayment credits, up to the specified amount
         const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
         const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
-        
+
         let remainingToApply = amount; // the amount the user wants to pay using prepayment credit
         if (remainingToApply > invoice.balance) {
             remainingToApply = invoice.balance;
         }
-        
+
         let totalAppliedFromCredit = 0;
 
         for (const payment of payments) {
@@ -146,7 +146,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
                     };
 
                     invoice.payments.push(paymentRecord);
-                    
+
                     remainingToApply -= toApply;
                     totalAppliedFromCredit += toApply;
                 }
@@ -169,6 +169,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
         }
 
         await invoice.save();
+        await exports.syncInvoiceToAdditionalPayments(invoice);
 
         // Roll over carry over across all invoices
         await exports.rolloverDriverInvoices(invoice.driver);
@@ -177,12 +178,12 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     }
 
     const timestamp = new Date();
-    
+
     // Apply payment directly to this invoice (the controller or frontend could choose the oldest unpaid)
     let newPaid = (invoice.amountPaid || 0) + amount;
     let newBalance = Math.max(0, invoice.totalAmountDue - newPaid);
     let newStatus = "PENDING";
-    
+
     // Evaluate if we have overpaid
     let excessAmount = 0;
     if (newPaid > invoice.totalAmountDue) {
@@ -215,6 +216,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     }
 
     const updatedInvoice = await Invoice.findByIdAndUpdate(invoiceId, updateData, { new: true });
+    await exports.syncInvoiceToAdditionalPayments(updatedInvoice);
 
     // Sync with Service Bill if it's a workshop invoice
     if (updatedInvoice.invoiceType === 'WORKSHOP' && updatedInvoice.serviceBill) {
@@ -267,50 +269,51 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 };
 
 exports.applyExcessToNextInvoice = async (driverId, excessAmount, paymentData) => {
-     // Find the next UNPAID invoice ordered by weekNumber
-     const nextInvoices = await Invoice.find({ driver: driverId, status: { $ne: 'PAID' }, isDeleted: false })
-     .sort({ weekNumber: 1 });
+    // Find the next UNPAID invoice ordered by weekNumber
+    const nextInvoices = await Invoice.find({ driver: driverId, status: { $ne: 'PAID' }, isDeleted: false })
+        .sort({ weekNumber: 1 });
 
-     let rem = excessAmount;
-     for (const nextInv of nextInvoices) {
-         if (rem <= 0) break;
-         
-         const toPay = Math.min(rem, nextInv.balance);
-         if (toPay <= 0) continue;
-         
-         let newPaid = (nextInv.amountPaid || 0) + toPay;
-         let newBalance = Math.max(0, nextInv.totalAmountDue - newPaid);
-         let newStatus = newBalance <= 0 ? "PAID" : "PARTIAL";
+    let rem = excessAmount;
+    for (const nextInv of nextInvoices) {
+        if (rem <= 0) break;
 
-         const paymentRecord = {
-             amount: toPay,
-             paidAt: new Date(),
-             paymentMethod: paymentData.paymentMethod || "Cash",
-             transactionId: paymentData.transactionId || undefined,
-             note: "Rollover excess from previous payment",
-         };
-         
-         const upd = {
-             amountPaid: newPaid,
-             balance: newBalance,
-             status: newStatus,
-             $push: { payments: paymentRecord }
-         };
-         if (newStatus === "PAID" && !nextInv.paidAt) {
-             upd.paidAt = new Date();
-         }
-         await Invoice.findByIdAndUpdate(nextInv._id, upd);
-         rem -= toPay;
-     }
+        const toPay = Math.min(rem, nextInv.balance);
+        if (toPay <= 0) continue;
+
+        let newPaid = (nextInv.amountPaid || 0) + toPay;
+        let newBalance = Math.max(0, nextInv.totalAmountDue - newPaid);
+        let newStatus = newBalance <= 0 ? "PAID" : "PARTIAL";
+
+        const paymentRecord = {
+            amount: toPay,
+            paidAt: new Date(),
+            paymentMethod: paymentData.paymentMethod || "Cash",
+            transactionId: paymentData.transactionId || undefined,
+            note: "Rollover excess from previous payment",
+        };
+
+        const upd = {
+            amountPaid: newPaid,
+            balance: newBalance,
+            status: newStatus,
+            $push: { payments: paymentRecord }
+        };
+        if (newStatus === "PAID" && !nextInv.paidAt) {
+            upd.paidAt = new Date();
+        }
+        const updatedInv = await Invoice.findByIdAndUpdate(nextInv._id, upd, { new: true });
+        await exports.syncInvoiceToAdditionalPayments(updatedInv);
+        rem -= toPay;
+    }
 }
 
 exports.rolloverDriverInvoices = async (driverId) => {
     // Read all invoices sorted by week
     const invoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: 1 });
-    
+
     let totalCarryOver = 0;
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
 
     for (let i = 0; i < invoices.length; i++) {
         const inv = invoices[i];
@@ -324,7 +327,7 @@ exports.rolloverDriverInvoices = async (driverId) => {
             const newCarryOver = totalCarryOver;
             const newTotalDue = inv.baseAmount + newCarryOver;
             const newBalance = Math.max(0, newTotalDue - inv.amountPaid);
-            
+
             if (inv.carryOverAmount !== newCarryOver || inv.totalAmountDue !== newTotalDue) {
                 await Invoice.findByIdAndUpdate(inv._id, {
                     carryOverAmount: newCarryOver,
@@ -345,49 +348,45 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
         console.log(`[InvoiceService] Starting ledger generation for invoice payment ${invoice.invoiceNumber}`);
         const mongoose = require("mongoose");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-        const { Driver } = require("../../Driver/Model/DriverModel");
-        
-        // 1. Resolve Driver and Branch
-        const driverDoc = await Driver.findById(invoice.driver);
-        const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
+        const accCode = await AccountingCode.findOne({ code: "4100" });
+        console.log(`[InvoiceService] AccountingCode 4100 found: ${!!accCode}`);
 
-        // 2. Normalize creator details to avoid validation errors
-        let finalCreatedBy = createdBy;
-        let finalCreatorRole = creatorRole ? creatorRole.toUpperCase() : "ADMIN";
-
-        const { ROLES } = require("../../../shared/constants/roles");
-        if (!Object.values(ROLES).includes(finalCreatorRole)) {
-            finalCreatorRole = "ADMIN";
-        }
-
-        if (!finalCreatedBy || !mongoose.Types.ObjectId.isValid(finalCreatedBy)) {
-            const Admin = require("../../Admin/model/adminModel");
-            const firstAdmin = await Admin.findOne({ role: "ADMIN" });
-            if (firstAdmin) {
-                finalCreatedBy = firstAdmin._id;
-            } else {
-                finalCreatedBy = new mongoose.Types.ObjectId();
-            }
-        }
-
-        // 3. Resolve the Cash/Bank account for the Debit side
-        let targetCode = "1100"; // default cash/bank code
-        const cashBankAccount = await AccountingCode.findOne({ code: targetCode, isDeleted: false }) || 
-                                await AccountingCode.findOne({ category: "ASSET", code: { $ne: "1200" }, isDeleted: false }) ||
-                                await AccountingCode.findOne({ category: "ASSET", isDeleted: false });
-
-        if (cashBankAccount) {
+        if (accCode) {
             // Normalize paymentMethod to match PaymentTransaction enum
             let normalizedMethod = "OTHER";
             const methodUpper = paymentMethod ? paymentMethod.toUpperCase() : "CASH";
-            
+
             if (methodUpper.includes("CASH")) normalizedMethod = "CASH";
             else if (methodUpper.includes("BANK") || methodUpper.includes("TRANSFER")) normalizedMethod = "BANK_TRANSFER";
             else if (methodUpper.includes("CARD")) normalizedMethod = "CREDIT_CARD";
             else if (methodUpper.includes("CHEQUE")) normalizedMethod = "CHEQUE";
 
-            // 4. Zoho Accounting Integration: Auto-create PaymentReceived record first
-            let prDoc = null;
+            const transactionData = {
+                accountingCode: accCode._id,
+                referenceId: invoice.driver,
+                referenceModel: "Driver",
+                transactionCategory: "INCOME",
+                transactionType: "CREDIT",
+                isTaxInclusive: false,
+                baseAmount: amount,
+                totalAmount: amount,
+                paymentMethod: normalizedMethod,
+                status: "COMPLETED",
+                paymentDate: new Date(),
+                notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
+                createdBy,
+                creatorRole
+            };
+
+            console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
+            const newTransaction = await PaymentTransaction.create(transactionData);
+            console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
+
+            const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
+            await LedgerService.autoGenerateLedgerEntry(populatedTx);
+            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+
+            // Zoho Accounting Integration: Auto-create PaymentReceived record
             try {
                 const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
 
@@ -456,10 +455,10 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
 };
 
 exports.createManualInvoice = async (data, createdBy, creatorRole) => {
-    const { 
+    const {
         driver: driverId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
-        lineItems = [], discountType = 'PERCENTAGE', discountValue = 0, 
-        taxRate = 0, notes 
+        lineItems = [], discountType = 'PERCENTAGE', discountValue = 0,
+        taxRate = 0, notes
     } = data;
 
     if (!driverId) throw new Error("Driver is required for manual invoice creation");
@@ -488,7 +487,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     }
 
     const afterDiscount = subtotal - discountAmount;
-    
+
     // Compute tax
     const taxAmount = taxRate > 0 ? Math.round((afterDiscount * taxRate / 100) * 100) / 100 : 0;
     const totalAmountDue = Math.round((afterDiscount + taxAmount) * 100) / 100;
@@ -549,7 +548,7 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
 
     // Find all completed PaymentReceived records for this driver
     const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
-    
+
     let remainingToPay = invoice.balance;
     if (remainingToPay <= 0) return;
 
@@ -598,6 +597,7 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
 
     if (remainingToPay < invoice.balance) {
         await invoice.save();
+        await exports.syncInvoiceToAdditionalPayments(invoice);
         // Also trigger rollover driver invoices to maintain carryover calculations
         await exports.rolloverDriverInvoices(invoice.driver);
     }
@@ -611,18 +611,20 @@ exports.updateInvoice = async (id, data) => {
 
     if (data.dueDate) invoice.dueDate = new Date(data.dueDate);
     if (data.weekLabel) invoice.weekLabel = data.weekLabel;
-    
+
     if (typeof data.baseAmount === 'number') {
         invoice.baseAmount = data.baseAmount;
         invoice.totalAmountDue = invoice.baseAmount + (invoice.carryOverAmount || 0);
         invoice.balance = Math.max(0, invoice.totalAmountDue - (invoice.amountPaid || 0));
-        
+
         if (invoice.balance <= 0) invoice.status = 'PAID';
         else if (invoice.amountPaid > 0) invoice.status = 'PARTIAL';
         else invoice.status = 'PENDING';
     }
 
-    return await invoice.save();
+    const savedInvoice = await invoice.save();
+    await exports.syncInvoiceToAdditionalPayments(savedInvoice);
+    return savedInvoice;
 };
 
 exports.deleteInvoice = async (id) => {
@@ -655,4 +657,46 @@ exports.updateGenerationSettings = async (data) => {
 exports.triggerWeeklyGeneration = async (userId, userRole) => {
     const InvoiceCronService = require("./InvoiceCronService");
     return await InvoiceCronService.generateCurrentWeekInvoices(true, userId, userRole);
+};
+
+exports.syncInvoiceToAdditionalPayments = async (invoice) => {
+    try {
+        const mongoose = require("mongoose");
+        const Driver = mongoose.model("Driver");
+        const driver = await Driver.findOne({
+            _id: invoice.driver,
+            $or: [
+                { "additionalPayments.invoiceNumber": invoice.invoiceNumber },
+                { "additionalPayments.invoiceRef": invoice._id }
+            ]
+        });
+        if (!driver) return;
+
+        const paymentItem = driver.additionalPayments.find(p =>
+            p.invoiceNumber === invoice.invoiceNumber ||
+            (p.invoiceRef && p.invoiceRef.toString() === invoice._id.toString())
+        );
+
+        if (paymentItem) {
+            paymentItem.amountPaid = invoice.amountPaid || 0;
+            paymentItem.balance = invoice.balance;
+            paymentItem.status = invoice.status;
+            paymentItem.paidAt = invoice.paidAt;
+
+            // Map payments
+            paymentItem.payments = (invoice.payments || []).map(p => ({
+                amount: p.amount,
+                paidAt: p.paidAt,
+                paymentMethod: p.paymentMethod || "Cash",
+                transactionId: p.transactionId,
+                note: p.note
+            }));
+
+            driver.markModified("additionalPayments");
+            await driver.save();
+            console.log(`[InvoiceService] Synced invoice ${invoice.invoiceNumber} status (${invoice.status}) to driver additional payments`);
+        }
+    } catch (err) {
+        console.error("[InvoiceService] Error in syncInvoiceToAdditionalPayments:", err);
+    }
 };

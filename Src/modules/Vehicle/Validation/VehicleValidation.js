@@ -53,6 +53,8 @@ const addVehicleSchema = {
             gpsSerialNumber: Joi.string().trim(),
             fleetNumber: Joi.string().trim().allow("", null),
             monthlyRent: Joi.number().min(0),
+            weeklyRent: Joi.number().min(0),
+            sellingValue: Joi.number().min(0),
         }),
         handlingStaff: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         insuranceId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
@@ -126,7 +128,8 @@ const updateLeaseSettingsSchema = {
     }),
     body: Joi.object({
         durationWeeks: Joi.number().min(1).required(),
-        weeklyRent: Joi.number().min(0).required(),
+        weeklyRent: Joi.number().min(0),
+        sellingValue: Joi.number().min(0),
     }),
 };
 

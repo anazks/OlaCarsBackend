@@ -483,6 +483,7 @@ const dataMigrateDrivers = async (req, res) => {
                         fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                         colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
                         vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
+                        sellingValue: (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : ((row.currentSellingValue && !isNaN(row.currentSellingValue)) ? Number(row.currentSellingValue) : undefined),
                         fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
                     },
                     legalDocs: {
@@ -624,6 +625,37 @@ const payAdditionalPayment = async (req, res) => {
         updates.$push[`additionalPayments.${apIndex}.payments`] = paymentRecord;
 
         await updateDriverService(driverId, updates);
+
+        // ── Sync linked Invoice status ──────────────────────────────────
+        if (ap.invoiceRef) {
+            try {
+                const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+                const invoice = await Invoice.findById(ap.invoiceRef);
+                if (invoice) {
+                    invoice.amountPaid = (invoice.amountPaid || 0) + paymentForThis;
+                    invoice.balance = Math.max(0, invoice.totalAmountDue - invoice.amountPaid);
+
+                    if (invoice.balance <= 0) {
+                        invoice.status = "PAID";
+                        invoice.paidAt = timestamp;
+                    } else if (invoice.amountPaid > 0) {
+                        invoice.status = "PARTIAL";
+                    }
+
+                    invoice.payments.push({
+                        amount: paymentForThis,
+                        paidAt: timestamp,
+                        paymentMethod: paymentMethod || "Cash",
+                        note: note || `Additional payment recorded`,
+                    });
+
+                    await invoice.save();
+                    console.log(`[DriverController] Synced Invoice ${invoice.invoiceNumber} → status: ${invoice.status}, balance: ${invoice.balance}`);
+                }
+            } catch (invoiceSyncErr) {
+                console.error("[DriverController] Failed to sync linked Invoice:", invoiceSyncErr);
+            }
+        }
 
         // Create PaymentTransaction + Ledger entry on actual payment
         try {

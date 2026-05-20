@@ -80,7 +80,7 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const partsTotal = lineItems.filter(i => i.type === "PART").reduce((sum, item) => sum + item.lineTotal, 0);
     const labourTotal = lineItems.filter(i => i.type === "LABOUR").reduce((sum, item) => sum + item.lineTotal, 0);
     const miscTotal = lineItems.filter(i => i.type === "MISC").reduce((sum, item) => sum + item.lineTotal, 0);
-    
+
     const subtotal = partsTotal + labourTotal + miscTotal;
     const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
     const totalAmount = subtotal + taxAmount - discount;
@@ -214,18 +214,12 @@ const approveBill = async (billId, user) => {
                     creatorRole: user.role
                 };
                 const invoice = await addInvoiceService(invoiceData);
-                try {
-                    const LedgerService = require("../../Ledger/Service/LedgerService");
-                    await LedgerService.generateInvoiceLedgerEntries(invoice);
-                } catch (ledgerErr) {
-                    console.error("[ServiceBillService] Failed to generate ledger entries for workshop invoice:", ledgerErr);
-                }
-                
+
                 // Return the bill with the temporary invoice number for the UI
                 const billObj = fullyPopulatedBill.toObject ? fullyPopulatedBill.toObject() : fullyPopulatedBill;
-                return { 
-                    ...billObj, 
-                    invoiceNumber: invoice.invoiceNumber 
+                return {
+                    ...billObj,
+                    invoiceNumber: invoice.invoiceNumber
                 };
             } catch (err) {
                 console.error(`[ServiceBillService] Failed to generate invoice for bill ${billId}:`, err);
@@ -260,9 +254,9 @@ const addPayment = async (billId, paymentData, user) => {
     // 1. Find Accounting Code for Cash/Bank (Asset)
     // Support custom code if provided (e.g. for choosing different bank accounts)
     const targetCode = paymentData.accountingCode || "1100";
-    const accCode = await AccountingCode.findOne({ code: targetCode, isDeleted: false }) || 
-                    await AccountingCode.findOne({ category: "ASSET", isDeleted: false });
-    
+    const accCode = await AccountingCode.findOne({ code: targetCode, isDeleted: false }) ||
+        await AccountingCode.findOne({ category: "ASSET", isDeleted: false });
+
     if (!accCode) throw new Error("Accounting code for payment not found. Please ensure code 1100 (Cash) exists.", { cause: 500 });
 
     // 2. Create Payment Transaction

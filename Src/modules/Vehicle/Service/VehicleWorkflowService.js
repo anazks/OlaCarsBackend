@@ -125,7 +125,7 @@ const STATUS_RULES = {
     },
     "BRANCH MANAGER APPROVAL": {
         allowedFrom: ["GPS ACTIVATION", "ACTIVE — AVAILABLE"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
             const combinedGps = { ...vehicle.gpsConfiguration, ...payload.gpsConfiguration };
@@ -137,8 +137,17 @@ const STATUS_RULES = {
     },
     "ACTIVE — AVAILABLE": {
         allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
-        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
+        gateValidator: (vehicle, payload) => {
+            if (vehicle.status === "BRANCH MANAGER APPROVAL") {
+                const combinedBasic = { ...vehicle.basicDetails, ...payload.basicDetails };
+                if (!combinedBasic.sellingValue || combinedBasic.sellingValue <= 0) {
+                    return "Current Selling Value is mandatory and must be greater than 0 before final approval.";
+                }
+            }
+            return null;
+        }
     },
     "ACTIVE — RENTED": {
         allowedFrom: ["ACTIVE — AVAILABLE"],
@@ -276,6 +285,10 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
 
     const isDecision = onboardingDecisions.some(d => d.from === currentVehicle.status && d.to === targetStatus);
     
+    if (currentVehicle.status === "BRANCH MANAGER APPROVAL" && user.role === ROLES.OPERATIONSTAFF) {
+        throw new Error("Access denied. Operational staff is not authorized to approve or decline vehicles in the Branch Manager Approval stage.", { cause: 403 });
+    }
+
     if (isDecision && user.role !== ROLES.ADMIN) {
         if (!user.permissions || !user.permissions.includes("VEHICLE_APPROVE")) {
             const action = targetStatus.includes('AVAILABLE') || targetStatus.includes('INSPECTION') ? 'approve' : 'decline';
