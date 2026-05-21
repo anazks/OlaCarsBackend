@@ -43,7 +43,7 @@ exports.login = async (email, password) => {
     );
 
     const refreshToken = jwt.sign(
-        { id: staff._id },
+        { id: staff._id, nonce: Math.random().toString() },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: jwtConfig.refreshTokenExpiry }
     );
@@ -145,8 +145,14 @@ exports.getAll = async (queryParams = {}, options = {}) => {
 exports.getById = async (id) => {
     return await WorkshopStaff.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
 };
+const { isTokenBlacklisted, blacklistToken } = require('../../../shared/utils/blacklistHelper.js');
+
 exports.refreshSession = async (token) => {
     try {
+        if (await isTokenBlacklisted(token)) {
+            throw new AppError('Token is blacklisted', 401);
+        }
+
         const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
         const staff = await WorkshopStaff.findById(decoded.id);
 
@@ -161,10 +167,12 @@ exports.refreshSession = async (token) => {
         );
 
         const newRefreshToken = jwt.sign(
-            { id: staff._id },
+            { id: staff._id, nonce: Math.random().toString() },
             process.env.JWT_REFRESH_SECRET,
             { expiresIn: jwtConfig.refreshTokenExpiry }
         );
+
+        await blacklistToken(token);
 
         staff.refreshToken = newRefreshToken;
         await staff.save();

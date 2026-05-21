@@ -1,5 +1,5 @@
 const jwtConfig = {
-  accessTokenExpiry: "2h",
+  accessTokenExpiry: "15m",
   refreshTokenExpiry: "7d",
 };
 

@@ -738,6 +738,135 @@ const getVehiclesDueForService = async (req, res, next) => {
     }
 };
 
+/**
+ * Bulk-create vehicles from a parsed payload.
+ * @route POST /api/vehicle/bulk
+ */
+const bulkAddVehicles = async (req, res) => {
+    try {
+        const { vehicles, branch: selectedBranch } = req.body;
+
+        if (!Array.isArray(vehicles) || vehicles.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'vehicles' array." });
+        }
+
+        if (vehicles.length > 500) {
+            return res.status(400).json({ success: false, message: "Maximum 500 vehicles per bulk upload." });
+        }
+
+        const userRole = req.user.role;
+        const userId = req.user.id;
+        const userBranchId = req.user.branchId;
+
+        const branchRoles = [
+            "BRANCHMANAGER",
+            "OPERATIONSTAFF",
+            "FINANCESTAFF",
+            "WORKSHOPSTAFF"
+        ];
+        const isAutoAssign = branchRoles.includes(userRole);
+
+        let branch;
+        if (isAutoAssign) {
+            branch = userBranchId;
+            if (!branch) {
+                return res.status(400).json({ success: false, message: "Your account has no branch assigned. Contact your administrator." });
+            }
+        } else {
+            branch = selectedBranch;
+            if (!branch || (typeof branch === "string" && !branch.trim())) {
+                return res.status(400).json({ success: false, message: "Please select a branch before uploading." });
+            }
+        }
+
+        const results = { created: [], errors: [] };
+
+        for (let i = 0; i < vehicles.length; i++) {
+            const row = vehicles[i];
+            const rowNum = i + 1;
+
+            // Validate basic required fields
+            if (!row.make || !row.make.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: make" });
+                continue;
+            }
+            if (!row.model || !row.model.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: model" });
+                continue;
+            }
+            if (!row.year || isNaN(row.year)) {
+                results.errors.push({ row: rowNum, message: "Missing or invalid required field: year" });
+                continue;
+            }
+            if (!row.vin || !row.vin.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: vin" });
+                continue;
+            }
+            if (!row.registrationNumber || !row.registrationNumber.trim()) {
+                results.errors.push({ row: rowNum, message: "Missing required field: registrationNumber" });
+                continue;
+            }
+
+            try {
+                // Prepare vehicle structure
+                const vehicleData = {
+                    status: "PENDING ENTRY",
+                    createdBy: userId,
+                    creatorRole: userRole,
+                    purchaseDetails: {
+                        branch: branch,
+                        vendorName: row.vendorName ? row.vendorName.trim() : undefined,
+                        purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
+                        purchasePrice: (row.purchasePrice && !isNaN(row.purchasePrice)) ? Number(row.purchasePrice) : undefined,
+                        paymentMethod: row.paymentMethod || undefined,
+                    },
+                    basicDetails: {
+                        make: row.make.trim(),
+                        model: row.model.trim(),
+                        year: Number(row.year),
+                        category: row.category ? row.category.trim() : undefined,
+                        fuelType: row.fuelType ? row.fuelType.trim() : undefined,
+                        transmission: row.transmission || undefined,
+                        colour: row.colour ? row.colour.trim() : undefined,
+                        vin: row.vin.trim().toUpperCase(),
+                        odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                        gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                        sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                        leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
+                        fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
+                    },
+                    legalDocs: {
+                        registrationNumber: row.registrationNumber.trim(),
+                        registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
+                    },
+                    statusHistory: [{
+                        status: "PENDING ENTRY",
+                        changedBy: userId,
+                        changedByRole: userRole,
+                        timestamp: new Date(),
+                        notes: "Vehicle created via bulk upload.",
+                    }]
+                };
+
+                const newVehicle = await addVehicleService(vehicleData);
+                results.created.push({ row: rowNum, id: newVehicle._id, vin: newVehicle.basicDetails.vin, make: newVehicle.basicDetails.make, model: newVehicle.basicDetails.model });
+            } catch (err) {
+                results.errors.push({ row: rowNum, message: err.message });
+            }
+        }
+
+        const statusCode = results.created.length > 0 ? 201 : 400;
+        return res.status(statusCode).json({
+            success: results.created.length > 0,
+            message: `${results.created.length} vehicle(s) created, ${results.errors.length} error(s).`,
+            data: results,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -750,4 +879,5 @@ module.exports = {
     updateMaintenanceSettings,
     updateVehicle,
     getVehiclesDueForService,
+    bulkAddVehicles,
 };

@@ -5,6 +5,7 @@ const { jwtConfig } = require('../../../config/jwtConfig.js');
 const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
+const { isTokenBlacklisted, blacklistToken } = require('../../../shared/utils/blacklistHelper.js');
 
 const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'status', 'twoFactorEnabled'];
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -48,7 +49,7 @@ exports.login = async (email, password) => {
     );
 
     const refreshToken = jwt.sign(
-        { id: admin._id },
+        { id: admin._id, nonce: Math.random().toString() },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: jwtConfig.refreshTokenExpiry }
     );
@@ -67,6 +68,10 @@ exports.login = async (email, password) => {
  * Refreshes access token using a valid refresh token.
  */
 exports.refreshAccessToken = async (token) => {
+    if (await isTokenBlacklisted(token)) {
+        throw new AppError('Token is blacklisted', 401);
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     const admin = await Admin.findById(decoded.id);
 
@@ -80,7 +85,18 @@ exports.refreshAccessToken = async (token) => {
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
 
-    return { accessToken: newAccessToken };
+    const newRefreshToken = jwt.sign(
+        { id: admin._id, nonce: Math.random().toString() },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: jwtConfig.refreshTokenExpiry }
+    );
+
+    await blacklistToken(token);
+
+    admin.refreshToken = newRefreshToken;
+    await admin.save();
+
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 };
 
 /**
