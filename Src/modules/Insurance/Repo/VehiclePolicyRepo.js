@@ -47,7 +47,7 @@ exports.getVehiclePolicyByIdService = async (id) => {
 
 exports.getVehiclePoliciesByVehicleIdService = async (vehicleId) => {
     try {
-        return await VehiclePolicy.find({ vehicle: vehicleId, status: "ACTIVE" })
+        return await VehiclePolicy.find({ vehicle: vehicleId })
             .populate({
                 path: "insurance",
                 populate: { path: "supplier", select: "name email phone" }
