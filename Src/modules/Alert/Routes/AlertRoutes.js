@@ -9,7 +9,8 @@ const {
     getAllAlerts,
     resolveAlert,
     runManualVehicleChecks,
-    triggerCronChecks
+    triggerCronChecks,
+    createManualMaintenanceAlert
 } = require("../Controller/AlertController");
 
 // Get all alerts (including resolved)
@@ -55,6 +56,7 @@ router.put(
         ROLES.COUNTRYMANAGER, 
         ROLES.BRANCHMANAGER, 
         ROLES.WORKSHOPMANAGER,
+        ROLES.WORKSHOPSTAFF,
         ROLES.OPERATIONADMIN
     ),
     resolveAlert
@@ -72,6 +74,21 @@ router.post(
 router.post(
     "/cron-trigger",
     triggerCronChecks
+);
+
+// Workshop: manually create a maintenance alert (Pull Maintenance)
+router.post(
+    "/pull-maintenance",
+    authenticate,
+    authorize(
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER,
+        ROLES.WORKSHOPSTAFF,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.OPERATIONADMIN
+    ),
+    createManualMaintenanceAlert
 );
 
 module.exports = router;

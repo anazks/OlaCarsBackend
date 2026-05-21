@@ -433,6 +433,9 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             }
 
             if (cashBankAccount) {
+            
+
+                
                 // 5. Create a PaymentTransaction referencing the PaymentReceived record
                 // This is transactionType: "CREDIT" on the Cash/Bank Asset Account, 
                 // which LedgerService will process as: Credit Cash/Bank, Debit Accounts Receivable (1200).

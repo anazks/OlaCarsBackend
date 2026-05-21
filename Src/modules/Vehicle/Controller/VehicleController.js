@@ -610,6 +610,134 @@ const updateVehicle = async (req, res, next) => {
     }
 };
 
+/**
+ * Get vehicles due for (or approaching) service based on maintenance threshold.
+ * @route GET /api/vehicle/due-for-service
+ * @access Private (Workshop/Admin)
+ */
+const getVehiclesDueForService = async (req, res, next) => {
+    try {
+        const { Vehicle } = require("../Model/VehicleModel");
+        const warningPercent = parseFloat(req.query.warningPercent) || 0.8; // default 80%
+
+        const baseQuery = {
+            isDeleted: false,
+            status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE"] },
+        };
+
+        // Branch-scope for branch-level roles
+        const branchRoles = ["BRANCHMANAGER", "OPERATIONSTAFF", "FINANCESTAFF", "WORKSHOPSTAFF", "WORKSHOPMANAGER"];
+        if (branchRoles.includes(req.user.role) && req.user.branchId) {
+            baseQuery["purchaseDetails.branch"] = req.user.branchId;
+        }
+
+        const vehicles = await Vehicle.find(baseQuery)
+            .populate("purchaseDetails.branch", "name country")
+            .populate("currentDriver", "personalInfo.fullName personalInfo.phone driverId")
+            .sort({ "basicDetails.odometer": -1 })
+            .lean();
+
+        // Query active maintenance alerts to check if vehicle has been pulled already
+        const { Alert } = require("../../Alert/Model/AlertModel");
+        const activeAlerts = await Alert.find({
+            vehicleId: { $in: vehicles.map(v => v._id) },
+            type: "MAINTENANCE",
+            status: "ACTIVE",
+            isDeleted: false
+        }).lean();
+
+        const alertMap = {};
+        activeAlerts.forEach(a => {
+            alertMap[a.vehicleId.toString()] = a;
+        });
+
+        // Compute maintenance status for each vehicle
+        const result = vehicles.map(v => {
+            const odometer = v.basicDetails?.odometer || 0;
+            const threshold = v.maintenanceDetails?.maintenanceThresholdKm || 1000;
+            const lastServiceOdo = v.maintenanceDetails?.lastMaintenanceOdometer || 0;
+            const distanceSinceService = Math.max(0, odometer - lastServiceOdo);
+            const percentUsed = threshold > 0 ? (distanceSinceService / threshold) : 0;
+
+            let serviceStatus = 'OK';
+            if (percentUsed >= 1) serviceStatus = 'OVERDUE';
+            else if (percentUsed >= warningPercent) serviceStatus = 'APPROACHING';
+
+            const activeAlert = alertMap[v._id.toString()];
+            const isPulled = !!(activeAlert && activeAlert.metadata?.source === 'WORKSHOP_PULL');
+            const activeAlertId = activeAlert ? activeAlert._id : null;
+
+            return {
+                _id: v._id,
+                basicDetails: v.basicDetails,
+                purchaseDetails: v.purchaseDetails,
+                status: v.status,
+                currentDriver: v.currentDriver,
+                maintenanceDetails: v.maintenanceDetails,
+                // Computed fields
+                distanceSinceService,
+                threshold,
+                lastServiceOdometer: lastServiceOdo,
+                percentUsed: Math.round(percentUsed * 100),
+                serviceStatus,
+                isPulled,
+                activeAlertId,
+            };
+        });
+
+        // Filter: only include vehicles that are APPROACHING or OVERDUE (or all if requested)
+        const showAll = req.query.showAll === 'true';
+        let filtered = showAll ? result : result.filter(v => v.percentUsed >= (warningPercent * 100));
+
+        // Category Filter
+        const activeFilter = req.query.filter || 'ALL';
+        if (activeFilter === 'DUE') {
+            filtered = filtered.filter(v => v.serviceStatus === 'OVERDUE');
+        } else if (activeFilter === 'APPROACHING') {
+            filtered = filtered.filter(v => v.serviceStatus === 'APPROACHING');
+        } else if (activeFilter === 'OK') {
+            filtered = filtered.filter(v => v.serviceStatus === 'OK');
+        }
+
+        // Search Filter
+        const search = (req.query.search || "").trim().toLowerCase();
+        if (search) {
+            filtered = filtered.filter(v => {
+                const make = (v.basicDetails?.make || '').toLowerCase();
+                const model = (v.basicDetails?.model || '').toLowerCase();
+                const vin = (v.basicDetails?.vin || '').toLowerCase();
+                const reg = (v.basicDetails?.registrationNumber || '').toLowerCase();
+                return make.includes(search) || model.includes(search) || vin.includes(search) || reg.includes(search);
+            });
+        }
+
+        // Calculate counts based on entire fleet due-for-service status
+        const counts = {
+            all: result.length,
+            due: result.filter(v => v.serviceStatus === 'OVERDUE').length,
+            approaching: result.filter(v => v.serviceStatus === 'APPROACHING').length,
+            ok: result.filter(v => v.serviceStatus === 'OK').length
+        };
+
+        // Pagination
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 15);
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / limit);
+        const startIndex = (page - 1) * limit;
+        const paginated = filtered.slice(startIndex, startIndex + limit);
+
+        return res.status(200).json({
+            success: true,
+            data: paginated,
+            pagination: { total, page, limit, totalPages },
+            counts
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -620,5 +748,6 @@ module.exports = {
     assignCarToDriver,
     updateVehicleLeaseSettings,
     updateMaintenanceSettings,
-    updateVehicle
+    updateVehicle,
+    getVehiclesDueForService,
 };
