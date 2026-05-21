@@ -32,9 +32,11 @@ const createWorkOrderHandler = async (req, res) => {
         }
 
         // Auto-calculate estimated total cost if not manually provided
-        if (!data.estimatedTotalCost && data.estimatedLabourHours && data.estimatedPartsCost) {
-            const labourRate = 50; // default hourly rate — can be made configurable
-            data.estimatedTotalCost = (data.estimatedLabourHours * labourRate) + data.estimatedPartsCost;
+        if (!data.estimatedTotalCost && data.estimatedLabourHours !== undefined) {
+            const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo");
+            const labourRate = (await getSetting("hourlyLabourRate")) || 150;
+            const partsCost = data.estimatedPartsCost || 0;
+            data.estimatedTotalCost = (Number(data.estimatedLabourHours) * labourRate) + partsCost;
         }
 
         const wo = await WorkOrderRepo.createWorkOrder(data);

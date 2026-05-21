@@ -427,19 +427,57 @@ const assignCarToDriver = async (req, res, next) => {
 
         await updateDriverService(driverId, driverUpdate, session);
 
-        // 7. If deposit exists, add it as an additional payment
+        // 7. If deposit exists, add it as an additional payment and create a separate invoice for it
         if (depositAmount > 0) {
+            const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+            const invoiceDueDate = new Date();
+            invoiceDueDate.setDate(invoiceDueDate.getDate() + 14); // 2 weeks from now
+
+            const ts = Date.now();
+            const invoiceNumber = `DEP-${ts}`;
+
+            const depositInvoice = await Invoice.create([{
+                invoiceNumber,
+                invoiceType: "DEPOSIT",
+                driver: driverId,
+                vehicle: vehicleId,
+                dueDate: invoiceDueDate,
+                baseAmount: depositAmount,
+                carryOverAmount: 0,
+                totalAmountDue: depositAmount,
+                amountPaid: 0,
+                balance: depositAmount,
+                status: "PENDING",
+                payments: [],
+                lineItems: [{
+                    name: `Down Payment / Deposit — ${vehicle.basicDetails.make} ${vehicle.basicDetails.model}`,
+                    description: `Security deposit for vehicle assignment`,
+                    qty: 1,
+                    unitPrice: depositAmount,
+                    total: depositAmount
+                }],
+                subtotal: depositAmount,
+                createdBy: req.user.id,
+                creatorRole: req.user.role,
+                notes: notes || "Deposit for vehicle assignment"
+            }], { session });
+
+            // Since Invoice.create with a session returns an array of documents
+            const createdInvoice = depositInvoice[0];
+
             await updateDriverService(driverId, {
                 $push: {
                     additionalPayments: {
                         type: "DEPOSIT",
                         label: `Vehicle Deposit — ${vehicle.basicDetails.make} ${vehicle.basicDetails.model}`,
                         amount: depositAmount,
-                        dueDate: new Date(),
+                        dueDate: invoiceDueDate,
                         status: "PENDING",
                         amountPaid: 0,
                         balance: depositAmount,
                         relatedVehicle: vehicleId,
+                        invoiceRef: createdInvoice._id,
+                        invoiceNumber: invoiceNumber,
                         notes: notes || "Deposit for vehicle assignment",
                     }
                 }
@@ -488,17 +526,26 @@ const updateVehicleLeaseSettings = async (req, res, next) => {
     try {
         console.log('[DEBUG] updateVehicleLeaseSettings - Body:', JSON.stringify(req.body, null, 2));
         const vehicleId = req.params.id;
-        const { durationWeeks, weeklyRent } = req.body;
+        const { durationWeeks, weeklyRent, sellingValue } = req.body;
         
-        if (typeof durationWeeks !== 'number' || typeof weeklyRent !== 'number') {
-            return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks/weeklyRent fields." });
+        if (typeof durationWeeks !== 'number') {
+            return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks field." });
+        }
+
+        const updateData = {
+            "basicDetails.leaseDurationWeeks": durationWeeks
+        };
+
+        if (typeof weeklyRent === 'number') {
+            updateData["basicDetails.weeklyRent"] = weeklyRent;
+        }
+
+        if (typeof sellingValue === 'number') {
+            updateData["basicDetails.sellingValue"] = sellingValue;
         }
 
         const { updateVehicleService } = require("../Repo/VehicleRepo");
-        const updatedVehicle = await updateVehicleService(vehicleId, {
-            "basicDetails.leaseDurationWeeks": durationWeeks,
-            "basicDetails.weeklyRent": weeklyRent
-        });
+        const updatedVehicle = await updateVehicleService(vehicleId, updateData);
 
         if (!updatedVehicle) {
             return res.status(404).json({ success: false, message: "Vehicle not found" });
@@ -563,6 +610,134 @@ const updateVehicle = async (req, res, next) => {
     }
 };
 
+/**
+ * Get vehicles due for (or approaching) service based on maintenance threshold.
+ * @route GET /api/vehicle/due-for-service
+ * @access Private (Workshop/Admin)
+ */
+const getVehiclesDueForService = async (req, res, next) => {
+    try {
+        const { Vehicle } = require("../Model/VehicleModel");
+        const warningPercent = parseFloat(req.query.warningPercent) || 0.8; // default 80%
+
+        const baseQuery = {
+            isDeleted: false,
+            status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE"] },
+        };
+
+        // Branch-scope for branch-level roles
+        const branchRoles = ["BRANCHMANAGER", "OPERATIONSTAFF", "FINANCESTAFF", "WORKSHOPSTAFF", "WORKSHOPMANAGER"];
+        if (branchRoles.includes(req.user.role) && req.user.branchId) {
+            baseQuery["purchaseDetails.branch"] = req.user.branchId;
+        }
+
+        const vehicles = await Vehicle.find(baseQuery)
+            .populate("purchaseDetails.branch", "name country")
+            .populate("currentDriver", "personalInfo.fullName personalInfo.phone driverId")
+            .sort({ "basicDetails.odometer": -1 })
+            .lean();
+
+        // Query active maintenance alerts to check if vehicle has been pulled already
+        const { Alert } = require("../../Alert/Model/AlertModel");
+        const activeAlerts = await Alert.find({
+            vehicleId: { $in: vehicles.map(v => v._id) },
+            type: "MAINTENANCE",
+            status: "ACTIVE",
+            isDeleted: false
+        }).lean();
+
+        const alertMap = {};
+        activeAlerts.forEach(a => {
+            alertMap[a.vehicleId.toString()] = a;
+        });
+
+        // Compute maintenance status for each vehicle
+        const result = vehicles.map(v => {
+            const odometer = v.basicDetails?.odometer || 0;
+            const threshold = v.maintenanceDetails?.maintenanceThresholdKm || 1000;
+            const lastServiceOdo = v.maintenanceDetails?.lastMaintenanceOdometer || 0;
+            const distanceSinceService = Math.max(0, odometer - lastServiceOdo);
+            const percentUsed = threshold > 0 ? (distanceSinceService / threshold) : 0;
+
+            let serviceStatus = 'OK';
+            if (percentUsed >= 1) serviceStatus = 'OVERDUE';
+            else if (percentUsed >= warningPercent) serviceStatus = 'APPROACHING';
+
+            const activeAlert = alertMap[v._id.toString()];
+            const isPulled = !!(activeAlert && activeAlert.metadata?.source === 'WORKSHOP_PULL');
+            const activeAlertId = activeAlert ? activeAlert._id : null;
+
+            return {
+                _id: v._id,
+                basicDetails: v.basicDetails,
+                purchaseDetails: v.purchaseDetails,
+                status: v.status,
+                currentDriver: v.currentDriver,
+                maintenanceDetails: v.maintenanceDetails,
+                // Computed fields
+                distanceSinceService,
+                threshold,
+                lastServiceOdometer: lastServiceOdo,
+                percentUsed: Math.round(percentUsed * 100),
+                serviceStatus,
+                isPulled,
+                activeAlertId,
+            };
+        });
+
+        // Filter: only include vehicles that are APPROACHING or OVERDUE (or all if requested)
+        const showAll = req.query.showAll === 'true';
+        let filtered = showAll ? result : result.filter(v => v.percentUsed >= (warningPercent * 100));
+
+        // Category Filter
+        const activeFilter = req.query.filter || 'ALL';
+        if (activeFilter === 'DUE') {
+            filtered = filtered.filter(v => v.serviceStatus === 'OVERDUE');
+        } else if (activeFilter === 'APPROACHING') {
+            filtered = filtered.filter(v => v.serviceStatus === 'APPROACHING');
+        } else if (activeFilter === 'OK') {
+            filtered = filtered.filter(v => v.serviceStatus === 'OK');
+        }
+
+        // Search Filter
+        const search = (req.query.search || "").trim().toLowerCase();
+        if (search) {
+            filtered = filtered.filter(v => {
+                const make = (v.basicDetails?.make || '').toLowerCase();
+                const model = (v.basicDetails?.model || '').toLowerCase();
+                const vin = (v.basicDetails?.vin || '').toLowerCase();
+                const reg = (v.basicDetails?.registrationNumber || '').toLowerCase();
+                return make.includes(search) || model.includes(search) || vin.includes(search) || reg.includes(search);
+            });
+        }
+
+        // Calculate counts based on entire fleet due-for-service status
+        const counts = {
+            all: result.length,
+            due: result.filter(v => v.serviceStatus === 'OVERDUE').length,
+            approaching: result.filter(v => v.serviceStatus === 'APPROACHING').length,
+            ok: result.filter(v => v.serviceStatus === 'OK').length
+        };
+
+        // Pagination
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 15);
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / limit);
+        const startIndex = (page - 1) * limit;
+        const paginated = filtered.slice(startIndex, startIndex + limit);
+
+        return res.status(200).json({
+            success: true,
+            data: paginated,
+            pagination: { total, page, limit, totalPages },
+            counts
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -573,5 +748,6 @@ module.exports = {
     assignCarToDriver,
     updateVehicleLeaseSettings,
     updateMaintenanceSettings,
-    updateVehicle
+    updateVehicle,
+    getVehiclesDueForService,
 };

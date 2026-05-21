@@ -42,7 +42,7 @@ exports.getSummaryStats = async (filters) => {
     }
 
     // Counts
-    const totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"] } });
+    let totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"] } });
     const activeDrivers = await Driver.countDocuments({ ...baseQuery, status: "ACTIVE" });
 
     // Aggregation for Revenue / Outstanding via Ledger (Income category)
@@ -92,23 +92,39 @@ exports.getSummaryStats = async (filters) => {
         else if (g._id === "LOW") alerts.MINOR = g.count;
     });
 
-    // Fleet Status
-    const fleetAggregation = await Vehicle.aggregate([
-        { $match: vehicleQuery },
-        { $group: { _id: "$status", count: { $sum: 1 } } }
-    ]);
+    // Fleet Status & Maintenance Calculation
+    const { WorkOrder } = require("../../WorkOrder/Model/WorkOrderModel");
+    const activeWoQuery = {
+        status: { $nin: ["CLOSED", "VEHICLE_RELEASED", "INVOICED", "CANCELLED"] },
+        isDeleted: false
+    };
+    if (branchIds) {
+        activeWoQuery.branchId = { $in: branchIds };
+    }
+    const activeWoVehicles = await WorkOrder.distinct("vehicleId", activeWoQuery);
+    const maintenanceVehicleIds = new Set(activeWoVehicles.map(id => id.toString()));
+
+    const vehicles = await Vehicle.find(vehicleQuery).select("status _id").lean();
 
     const fleetStatus = {
         available: 0, rented: 0, maintenance: 0, retired: 0, other: 0
     };
-    fleetAggregation.forEach(f => {
-        const s = f._id;
-        if (s === "ACTIVE — AVAILABLE") fleetStatus.available += f.count;
-        else if (s === "ACTIVE — RENTED") fleetStatus.rented += f.count;
-        else if (s === "ACTIVE — MAINTENANCE" || s === "REPAIR IN PROGRESS") fleetStatus.maintenance += f.count;
-        else if (s === "RETIRED") fleetStatus.retired += f.count;
-        else fleetStatus.other += f.count;
+    
+    vehicles.forEach(v => {
+        const idStr = v._id.toString();
+        if (maintenanceVehicleIds.has(idStr)) {
+            fleetStatus.maintenance += 1;
+        } else {
+            const s = v.status;
+            if (s === "ACTIVE — AVAILABLE") fleetStatus.available += 1;
+            else if (s === "ACTIVE — RENTED") fleetStatus.rented += 1;
+            else if (s === "ACTIVE — MAINTENANCE" || s === "REPAIR IN PROGRESS") fleetStatus.maintenance += 1;
+            else if (s === "RETIRED") fleetStatus.retired += 1;
+            else fleetStatus.other += 1;
+        }
     });
+
+    totalActiveVehicles = fleetStatus.available + fleetStatus.rented;
 
     return {
         stats: {
@@ -166,7 +182,12 @@ exports.getRecentOverduePayments = async (filters) => {
     const { country, branch } = filters;
     const branchIds = await getBranchIds(country, branch);
 
-    const match = { status: "OVERDUE", isDeleted: false };
+    const match = { 
+        status: { $in: ["OVERDUE", "PENDING", "PARTIAL"] }, 
+        dueDate: { $lt: new Date() },
+        balance: { $gt: 0 },
+        isDeleted: false 
+    };
     
     let rawInvoices = await Invoice.find(match)
         .populate({

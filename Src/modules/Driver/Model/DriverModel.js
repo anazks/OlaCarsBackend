@@ -235,7 +235,7 @@ const driverSchema = new mongoose.Schema(
         branch: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Branch",
-            required: function() { return this.status !== "DRAFT"; },
+            required: function () { return this.status !== "DRAFT"; },
         },
         currentVehicle: {
             type: mongoose.Schema.Types.ObjectId,
@@ -260,7 +260,7 @@ const driverSchema = new mongoose.Schema(
         rentTracking: [{
             weekNumber: { type: Number }, // 1, 2, 3...
             weekLabel: { type: String }, // e.g., "Week 1", "Week 2 - May 2026"
-            dueDate: { type: Date }, 
+            dueDate: { type: Date },
             amount: { type: Number, required: true }, // Original weekly rent amount
             carryOver: { type: Number, default: 0 }, // Unpaid balance rolled from previous week
             totalDue: { type: Number, default: 0 }, // amount + carryOver = total owed this week
@@ -294,6 +294,8 @@ const driverSchema = new mongoose.Schema(
                 note: { type: String },
             }],
             relatedVehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+            invoiceRef: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+            invoiceNumber: { type: String },
             notes: { type: String },
         }],
 
@@ -313,9 +315,9 @@ const driverSchema = new mongoose.Schema(
 
         isDeleted: { type: Boolean, default: false },
     },
-    { 
-        timestamps: true, 
-        toJSON: { 
+    {
+        timestamps: true,
+        toJSON: {
             getters: true,
             transform(doc, ret) {
                 delete ret.passwordHash;
@@ -326,8 +328,8 @@ const driverSchema = new mongoose.Schema(
                 delete ret.otpExpires;
                 return ret;
             }
-        }, 
-        toObject: { 
+        },
+        toObject: {
             getters: true,
             transform(doc, ret) {
                 delete ret.passwordHash;
@@ -338,7 +340,7 @@ const driverSchema = new mongoose.Schema(
                 delete ret.otpExpires;
                 return ret;
             }
-        } 
+        }
     }
 );
 

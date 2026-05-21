@@ -14,6 +14,9 @@ exports.getProcurementRequests = async (query = {}, options = {}) => {
             { path: "approvedBy", select: "fullName" },
             { path: "supplier", select: "name" }
         ],
+        filterFields: ["status", "branch", "requestedBy", "approvedBy"],
+        searchFields: ["requestNumber", "notes"],
+        dateFilterField: "createdAt",
         ...options
     };
     return await applyQueryFeatures(WorkshopProcurement, query, queryOptions);

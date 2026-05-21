@@ -2,16 +2,23 @@ const cron = require('node-cron');
 const { Driver } = require("../../Driver/Model/DriverModel");
 const { Invoice } = require("../Model/InvoiceModel");
 const { createAlertRepo, findActiveAlertRepo } = require("../../Alert/Repo/AlertRepo");
+const {
+    sendInvoiceCreatedEmail,
+    sendInvoiceReminderEmail,
+    sendInvoiceDueTodayEmail,
+    sendVehicleRecoveryEmail
+} = require("../../../utils/emailService");
 
 const startInvoiceCronJob = () => {
     // Run daily at midnight
     cron.schedule('0 0 * * *', async () => {
-        console.log('[InvoiceCronService] Running daily invoice generation and overdue check...');
+        console.log('[InvoiceCronService] Running daily invoice generation, reminders, and overdue check...');
         try {
             await exports.generateDueInvoices();
+            await exports.checkAndSendRentReminders();
             await exports.checkOverdueInvoices();
         } catch (error) {
-            console.error('[InvoiceCronService] Error generating/checking invoices:', error);
+            console.error('[InvoiceCronService] Error in daily invoice cron routines:', error);
         }
     });
 };
@@ -41,7 +48,10 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
         status: 'ACTIVE',
         isDeleted: false,
         currentVehicle: { $ne: null }
-    }).populate('currentVehicle');
+    }).populate('currentVehicle').populate({
+        path: 'branch',
+        populate: { path: 'branchManager' }
+    });
 
     console.log(`[InvoiceCronService] Found ${activeDrivers.length} active drivers with vehicles.`);
 
@@ -144,7 +154,29 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             });
 
             await newInvoice.save();
+            try {
+                const LedgerService = require("../../Ledger/Service/LedgerService");
+                await LedgerService.generateInvoiceLedgerEntries(newInvoice);
+            } catch (ledgerErr) {
+                console.error("[InvoiceCronService] Failed to generate ledger entries for invoice:", ledgerErr);
+            }
             console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId}`);
+
+            // Immediate Created Email Notification for RENTAL invoices (duplicate-safe)
+            if (driver.personalInfo?.email && !newInvoice.mailSentCreated) {
+                const sent = await sendInvoiceCreatedEmail(
+                    driver.personalInfo.email,
+                    newInvoice,
+                    driver.personalInfo.fullName || "Driver",
+                    driver.branch?.address || "",
+                    driver.branch?.branchManager?.fullName || ""
+                );
+                if (sent) {
+                    newInvoice.mailSentCreated = true;
+                    await newInvoice.save();
+                }
+            }
+
             generatedCount++;
         } catch (err) {
             console.error(`[InvoiceCronService] Error processing driver ${driver.driverId}:`, err);
@@ -170,7 +202,13 @@ exports.checkOverdueInvoices = async () => {
             status: { $in: ["PENDING", "PARTIAL"] },
             dueDate: { $lt: today },
             isDeleted: false
-        }).populate("driver").populate({
+        }).populate({
+            path: "driver",
+            populate: {
+                path: "branch",
+                populate: { path: "branchManager" }
+            }
+        }).populate({
             path: "vehicle",
             populate: { path: "purchaseDetails.branch" }
         });
@@ -180,6 +218,21 @@ exports.checkOverdueInvoices = async () => {
             invoice.status = "OVERDUE";
             await invoice.save();
             console.log(`[InvoiceCronService] Marked Invoice ${invoice.invoiceNumber} as OVERDUE.`);
+
+            // Send Vehicle Recovery Email for overdue RENTAL invoices
+            if (invoice.invoiceType === 'RENTAL' && invoice.driver?.personalInfo?.email && !invoice.mailSentRecovery) {
+                const sent = await sendVehicleRecoveryEmail(
+                    invoice.driver.personalInfo.email,
+                    invoice,
+                    invoice.driver.personalInfo.fullName || "Driver",
+                    invoice.driver.branch?.address || "",
+                    invoice.driver.branch?.branchManager?.fullName || ""
+                );
+                if (sent) {
+                    invoice.mailSentRecovery = true;
+                    await invoice.save();
+                }
+            }
 
             // Create an alert if not exists
             if (invoice.vehicle) {
@@ -211,6 +264,93 @@ exports.checkOverdueInvoices = async () => {
         }
     } catch (error) {
         console.error('[InvoiceCronService] Error checking overdue invoices:', error);
+    }
+};
+
+exports.checkAndSendRentReminders = async () => {
+    console.log('[InvoiceCronService] Checking and sending rent reminders (3 days before & due today)...');
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 1. FRIENDLY REMINDER: 3 DAYS BEFORE DUE DATE
+    const threeDaysFromNowStart = new Date(today);
+    threeDaysFromNowStart.setDate(today.getDate() + 3);
+    const threeDaysFromNowEnd = new Date(today);
+    threeDaysFromNowEnd.setDate(today.getDate() + 4);
+
+    try {
+        const invoices3d = await Invoice.find({
+            invoiceType: 'RENTAL',
+            status: { $in: ["PENDING", "PARTIAL"] },
+            dueDate: { $gte: threeDaysFromNowStart, $lt: threeDaysFromNowEnd },
+            mailSentReminder3d: false,
+            isDeleted: false
+        }).populate({
+            path: "driver",
+            populate: {
+                path: "branch",
+                populate: { path: "branchManager" }
+            }
+        });
+
+        console.log(`[InvoiceCronService] Found ${invoices3d.length} invoices due in 3 days.`);
+        for (const invoice of invoices3d) {
+            if (invoice.driver?.personalInfo?.email) {
+                const sent = await sendInvoiceReminderEmail(
+                    invoice.driver.personalInfo.email,
+                    invoice,
+                    invoice.driver.personalInfo.fullName || "Driver",
+                    invoice.driver.branch?.address || "",
+                    invoice.driver.branch?.branchManager?.fullName || ""
+                );
+                if (sent) {
+                    invoice.mailSentReminder3d = true;
+                    await invoice.save();
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[InvoiceCronService] Error in 3-day reminder:', error);
+    }
+
+    // 2. DUE TODAY REMINDER
+    const todayEnd = new Date(today);
+    todayEnd.setDate(today.getDate() + 1);
+
+    try {
+        const invoicesToday = await Invoice.find({
+            invoiceType: 'RENTAL',
+            status: { $in: ["PENDING", "PARTIAL"] },
+            dueDate: { $gte: today, $lt: todayEnd },
+            mailSentDueToday: false,
+            isDeleted: false
+        }).populate({
+            path: "driver",
+            populate: {
+                path: "branch",
+                populate: { path: "branchManager" }
+            }
+        });
+
+        console.log(`[InvoiceCronService] Found ${invoicesToday.length} invoices due today.`);
+        for (const invoice of invoicesToday) {
+            if (invoice.driver?.personalInfo?.email) {
+                const sent = await sendInvoiceDueTodayEmail(
+                    invoice.driver.personalInfo.email,
+                    invoice,
+                    invoice.driver.personalInfo.fullName || "Driver",
+                    invoice.driver.branch?.address || "",
+                    invoice.driver.branch?.branchManager?.fullName || ""
+                );
+                if (sent) {
+                    invoice.mailSentDueToday = true;
+                    await invoice.save();
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[InvoiceCronService] Error in due today reminder:', error);
     }
 };
 

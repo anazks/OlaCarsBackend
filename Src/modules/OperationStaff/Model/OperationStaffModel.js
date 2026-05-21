@@ -25,6 +25,10 @@ const operationStaffSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        fleetNumbers: {
+            type: [String],
+            default: []
+        },
         
         role: {
             type: String,

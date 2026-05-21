@@ -4,7 +4,7 @@ const { ROLES } = require("../../../shared/constants/roles");
 const invoicePaymentSchema = new mongoose.Schema({
     amount: { type: Number, required: true },
     paidAt: { type: Date, default: Date.now },
-    paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Other"], default: "Cash" },
+    paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Mobile Money", "Prepayment Credit", "Other"], default: "Cash" },
     transactionId: { type: String },
     note: { type: String },
 }, { _id: true });
@@ -25,7 +25,7 @@ const invoiceSchema = new mongoose.Schema({
     },
     invoiceType: {
         type: String,
-        enum: ["RENTAL", "WORKSHOP", "MANUAL"],
+        enum: ["RENTAL", "WORKSHOP", "MANUAL", "DEPOSIT"],
         default: "RENTAL"
     },
     driver: {
@@ -118,6 +118,10 @@ const invoiceSchema = new mongoose.Schema({
         ],
     },
     isDeleted: { type: Boolean, default: false },
+    mailSentCreated: { type: Boolean, default: false },
+    mailSentReminder3d: { type: Boolean, default: false },
+    mailSentDueToday: { type: Boolean, default: false },
+    mailSentRecovery: { type: Boolean, default: false },
 }, { timestamps: true });
 
 invoiceSchema.index({ driver: 1, weekNumber: 1 }, { 

@@ -6,7 +6,8 @@ const {
     deleteWorkshopManager,
     getWorkshopManagers,
     getWorkshopManagerById,
-    login
+    login,
+    refreshManagerToken
 } = require("../Controller/WorkshopManagerController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -210,5 +211,28 @@ router.delete(
     authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER),
     deleteWorkshopManager
 );
+
+/**
+ * @swagger
+ * /api/workshop-manager/refresh:
+ *   post:
+ *     summary: Refresh access token
+ *     tags: [WorkshopManager]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - refreshToken
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: New tokens generated
+ */
+router.post("/refresh", refreshManagerToken);
 
 module.exports = router;
