@@ -9,7 +9,15 @@ const OperationStaff = require("../modules/OperationStaff/Model/OperationStaffMo
  */
 const seedBranchPermissions = async () => {
     try {
-        const branchPermissions = ["BRANCH_VIEW", "VEHICLE_VIEW"];
+        const branchPermissions = [
+            "BRANCH_VIEW",
+            "VEHICLE_VIEW",
+            "DRIVER_VIEW",
+            "DRIVER_CREATE",
+            "DRIVER_EDIT",
+            "DRIVER_ONBOARD",
+            "DRIVER_ASSIGN_VEHICLE"
+        ];
         const targetRoles = [
             "OPERATIONADMIN",
             "COUNTRYMANAGER",
