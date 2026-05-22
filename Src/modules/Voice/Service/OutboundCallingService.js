@@ -2,7 +2,7 @@ const { Driver } = require("../../Driver/Model/DriverModel");
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const OUTBOUND_AGENT_ID = process.env.OUTBOUND_AGENT_ID;
-const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER;
+const ELEVENLABS_PHONE_NUMBER_ID = process.env.ELEVENLABS_PHONE_NUMBER_ID;
 
 const SPANISH_MONTHS = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -61,11 +61,13 @@ const runOutboundReminders = async () => {
 
             recipients.push({
                 phone_number: driver.personalInfo.phone,
-                customer_variables: {
-                    customer_name: driver.personalInfo.fullName || "Cliente",
-                    amount_due: String(entry.balance || 0),
-                    due_date: toSpanishDate(dueDateStr),
-                    days_remaining: String(Math.max(0, daysRemaining))
+                conversation_initiation_client_data: {
+                    dynamic_variables: {
+                        customer_name: driver.personalInfo.fullName || "Cliente",
+                        amount_due: String(entry.balance || 0),
+                        due_date: toSpanishDate(dueDateStr),
+                        days_remaining: String(Math.max(0, daysRemaining))
+                    }
                 }
             });
 
@@ -88,8 +90,9 @@ const runOutboundReminders = async () => {
         },
         body: JSON.stringify({
             agent_id: OUTBOUND_AGENT_ID,
+            call_name: `Payment Reminders ${new Date().toISOString().split("T")[0]}`,
             scheduled_time_unix: Math.floor(Date.now() / 1000),
-            from_number: TWILIO_FROM_NUMBER,
+            agent_phone_number_id: ELEVENLABS_PHONE_NUMBER_ID,
             recipients
         })
     });

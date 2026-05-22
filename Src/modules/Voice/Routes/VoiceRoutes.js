@@ -10,8 +10,12 @@ const {
     bookVehicle,
     logCall,
     getFollowUps,
-    markFollowUpDone
+    markFollowUpDone,
+    testOutboundCall
 } = require('../Controller/VoiceController');
+
+// Local test only — no auth, blocked in production by the controller
+router.post('/test-outbound', testOutboundCall);
 
 router.use(voiceAgentAuth);
 

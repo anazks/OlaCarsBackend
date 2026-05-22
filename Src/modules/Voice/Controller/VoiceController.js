@@ -6,6 +6,56 @@ const PreBooking = require("../../AI/Model/PreBookingModel");
 const mongoose = require("mongoose");
 const AppError = require("../../../shared/utils/AppError");
 
+// LOCAL TEST ONLY — triggers a single outbound call without cron or DB query
+exports.testOutboundCall = async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ success: false, error: "Not available in production" });
+    }
+
+    const { phone_number, customer_name, amount_due, due_date, days_remaining } = req.body;
+
+    if (!phone_number) {
+        return res.status(400).json({ success: false, error: "phone_number is required" });
+    }
+
+    try {
+        const response = await fetch("https://api.elevenlabs.io/v1/convai/batch-calling/submit", {
+            method: "POST",
+            headers: {
+                "xi-api-key": process.env.ELEVENLABS_API_KEY,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                agent_id: process.env.OUTBOUND_AGENT_ID,
+                call_name: `Test Call ${new Date().toISOString()}`,
+                scheduled_time_unix: Math.floor(Date.now() / 1000),
+                agent_phone_number_id: process.env.ELEVENLABS_PHONE_NUMBER_ID,
+                recipients: [{
+                    phone_number,
+                    conversation_initiation_client_data: {
+                        dynamic_variables: {
+                            customer_name: customer_name || "Test User",
+                            amount_due: amount_due || "150",
+                            due_date: due_date || "22 de mayo",
+                            days_remaining: days_remaining || "0"
+                        }
+                    }
+                }]
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            return res.status(502).json({ success: false, elevenlabs_error: data });
+        }
+
+        res.json({ success: true, elevenlabs_response: data });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
 exports.initiateCall = async (req, res) => {
     const { caller_id } = req.body;
     const fallback = {
