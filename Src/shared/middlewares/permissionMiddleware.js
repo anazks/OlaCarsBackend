@@ -16,6 +16,11 @@ const hasPermission = (requiredPermissions) => {
         throw new AppError("Authentication required.", 401);
       }
 
+      // If this was flagged as a self-action, bypass permission check
+      if (req.isSelfAction) {
+        return next();
+      }
+
       // If no permissions required, allow access
       if (!requiredPermissions || requiredPermissions.length === 0) {
         return next();

@@ -69,8 +69,8 @@ exports.createVoucher = async (data) => {
  * Retrieves vouchers with filtering and pagination.
  */
 exports.getAllVouchers = async (query = {}) => {
-    const { page = 1, limit = 20, type, branch, status, startDate, endDate } = query;
-    
+    const { page = 1, limit = 20, type, branch, status, startDate, endDate, search } = query;
+
     const filter = {};
     if (type) filter.type = type;
     if (branch) filter.branch = branch;
@@ -79,6 +79,13 @@ exports.getAllVouchers = async (query = {}) => {
         filter.date = {};
         if (startDate) filter.date.$gte = new Date(startDate);
         if (endDate) filter.date.$lte = new Date(endDate);
+    }
+    if (search) {
+        filter.$or = [
+            { voucherNumber: { $regex: search, $options: "i" } },
+            { narration: { $regex: search, $options: "i" } },
+            { "referenceInfo.partyName": { $regex: search, $options: "i" } }
+        ];
     }
 
     const vouchers = await Voucher.find(filter)
@@ -109,7 +116,7 @@ exports.getVoucherById = async (id) => {
         .populate("branch", "name code")
         .populate("lines.accountingCode", "name code")
         .populate("lines.taxInfo.taxApplied");
-    
+
     if (!voucher) {
         throw new AppError("Voucher not found", 404);
     }
