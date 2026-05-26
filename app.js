@@ -55,6 +55,7 @@ const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter"
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
+const PaymentRequestRouter = require("./Src/modules/PaymentRequest/Routes/PaymentRequestRouter");
 const CustomerRouter = require("./Src/modules/Customer/Routes/CustomerRoutes");
 const QuoteRouter = require("./Src/modules/Quote/Routes/QuoteRoutes");
 const SalesOrderRouter = require("./Src/modules/SalesOrder/Routes/SalesOrderRoutes");
@@ -145,6 +146,7 @@ app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
+app.use("/api/payment-requests", PaymentRequestRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
