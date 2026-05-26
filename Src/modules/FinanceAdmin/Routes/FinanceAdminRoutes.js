@@ -11,7 +11,7 @@ const {
     deleteFinanceAdmin
 } = require("../Controller/FinanceAdminController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { authorize, authorizeSelfOr } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 const validate = require("../../../shared/middlewares/validate.js");
@@ -259,7 +259,7 @@ router.put(
 router.post(
     "/:id/change-password",
     authenticate,
-    authorize(ROLES.ADMIN),
+    authorizeSelfOr(ROLES.ADMIN),
     hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword
