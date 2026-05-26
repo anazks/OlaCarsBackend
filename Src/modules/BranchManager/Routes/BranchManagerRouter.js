@@ -11,7 +11,7 @@ const {
     logout,
     refreshToken
 } = require("../Controller/BranchManagerController.js");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { authorize, authorizeSelfOr } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
@@ -288,7 +288,7 @@ router.put(
 router.post(
     "/:id/change-password",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
+    authorizeSelfOr(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
     hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword

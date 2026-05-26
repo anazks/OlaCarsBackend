@@ -147,6 +147,8 @@ const progressDriverStatus = async (req, res) => {
 const uploadDriverDocuments = async (req, res) => {
     try {
         const driverId = req.params.id;
+        
+        console.log(`[Driver Upload] Starting upload for driver: ${driverId}`);
 
         const driver = await getDriverByIdService(driverId, { includeSensitive: false });
         if (!driver) {
@@ -154,43 +156,70 @@ const uploadDriverDocuments = async (req, res) => {
         }
 
         const files = req.files;
+        console.log(`[Driver Upload] Files received:`, Object.keys(files || {}));
+        
         if (!files || Object.keys(files).length === 0) {
+            console.warn(`[Driver Upload] No files provided`);
             return res.status(400).json({ success: false, message: "No documents uploaded" });
         }
 
         const uploadedKeys = {};
         const dbUpdate = {};
+        const uploadErrors = [];
 
         for (const [fieldName, fileArray] of Object.entries(files)) {
             if (!fileArray || fileArray.length === 0) continue;
 
-            const file = fileArray[0];
-            const key = `drivers/${driverId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
-            const uploadedKey = await uploadToS3(file, key);
-            uploadedKeys[fieldName] = uploadedKey;
+            try {
+                const file = fileArray[0];
+                console.log(`[Driver Upload] Processing field: ${fieldName}, file: ${file.originalname}`);
+                
+                // Pass folder path only - uploadToS3 will handle timestamp and filename
+                const folder = `drivers/${driverId}/documents`;
+                const uploadedKey = await uploadToS3(file, folder);
+                uploadedKeys[fieldName] = uploadedKey;
+                console.log(`[Driver Upload] ✓ Field: ${fieldName}, URL: ${uploadedKey}`);
 
-            // #3 — Map S3 field to DB path and queue for update
-            const dbPath = S3_FIELD_MAP[fieldName];
-            if (dbPath) {
-                dbUpdate[dbPath] = uploadedKey;
+                // #3 — Map S3 field to DB path and queue for update
+                const dbPath = S3_FIELD_MAP[fieldName];
+                if (dbPath) {
+                    dbUpdate[dbPath] = uploadedKey;
+                }
+            } catch (fieldError) {
+                console.error(`[Driver Upload] ✗ Error uploading ${fieldName}:`, fieldError.message);
+                uploadErrors.push(`${fieldName}: ${fieldError.message}`);
             }
+        }
+
+        if (uploadErrors.length > 0) {
+            console.warn(`[Driver Upload] Some uploads failed:`, uploadErrors);
         }
 
         // #3 — Auto-update driver record with S3 keys
         if (Object.keys(dbUpdate).length > 0) {
-            // backgroundCheck needs status set to UPLOADED when document is uploaded
-            if (dbUpdate["backgroundCheck.document"]) {
-                dbUpdate["backgroundCheck.status"] = "UPLOADED";
+            try {
+                // backgroundCheck needs status set to UPLOADED when document is uploaded
+                if (dbUpdate["backgroundCheck.document"]) {
+                    dbUpdate["backgroundCheck.status"] = "UPLOADED";
+                }
+                console.log(`[Driver Upload] Updating driver record with:`, dbUpdate);
+                await updateDriverService(driverId, dbUpdate);
+                console.log(`[Driver Upload] ✓ Driver record updated successfully`);
+            } catch (dbError) {
+                console.error(`[Driver Upload] ✗ Error updating driver record:`, dbError.message);
             }
-            await updateDriverService(driverId, dbUpdate);
         }
 
         return res.status(200).json({
             success: true,
-            message: "Documents uploaded and driver record updated.",
+            message: uploadErrors.length > 0 
+                ? `Uploaded ${Object.keys(uploadedKeys).length} files with ${uploadErrors.length} error(s)` 
+                : "Documents uploaded and driver record updated.",
             data: uploadedKeys,
+            errors: uploadErrors.length > 0 ? uploadErrors : undefined,
         });
     } catch (error) {
+        console.error(`[Driver Upload] ✗ Fatal error:`, error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
