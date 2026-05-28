@@ -51,10 +51,12 @@ const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
 const WorkshopProcurementRouter = require("./Src/modules/WorkshopProcurement/Routes/WorkshopProcurementRouter");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const { startInvoiceCronJob } = require("./Src/modules/Invoice/Service/InvoiceCronService");
+const { initOutboundCallScheduler } = require("./Src/modules/Voice/Scheduler/OutboundCallScheduler");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
+const PaymentRequestRouter = require("./Src/modules/PaymentRequest/Routes/PaymentRequestRouter");
 const CustomerRouter = require("./Src/modules/Customer/Routes/CustomerRoutes");
 const QuoteRouter = require("./Src/modules/Quote/Routes/QuoteRoutes");
 const SalesOrderRouter = require("./Src/modules/SalesOrder/Routes/SalesOrderRoutes");
@@ -145,6 +147,7 @@ app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
+app.use("/api/payment-requests", PaymentRequestRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
@@ -212,7 +215,8 @@ const startServer = async () => {
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();
       startInvoiceCronJob();
-      console.log("Internal cron schedulers (Alerts, Invoices) started");
+      initOutboundCallScheduler();
+      console.log("Internal cron schedulers (Alerts, Invoices, Outbound Calls) started");
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }

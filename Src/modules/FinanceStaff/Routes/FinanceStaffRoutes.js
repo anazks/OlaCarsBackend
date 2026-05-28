@@ -13,7 +13,7 @@ const {
     getNextFleetNumber,
     checkFleetAvailability
 } = require("../Controller/FinanceStaffController.js");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { authorize, authorizeSelfOr } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
@@ -330,7 +330,7 @@ router.put(
 router.post(
     "/:id/change-password",
     authenticate,
-    authorize(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
+    authorizeSelfOr(ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.FINANCEADMIN),
     hasPermission("STAFF_EDIT"),
     validate(changePasswordSchema),
     changePassword

@@ -268,6 +268,7 @@ const driverSchema = new mongoose.Schema(
             balance: { type: Number, default: 0 }, // totalDue - amountPaid = remaining
             status: { type: String, enum: ["PAID", "PARTIAL", "PENDING"], default: "PENDING" },
             paidAt: { type: Date }, // Set when fully paid
+            reminderSent: { type: Boolean, default: false },
             payments: [{ // Individual partial payments log
                 amount: { type: Number, required: true },
                 paidAt: { type: Date, default: Date.now },
