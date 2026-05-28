@@ -3,18 +3,30 @@ const OperationAdmin = require("../modules/OperationAdmin/model/OperationAdminMo
 const CountryManager = require("../modules/CountryManager/Model/CountryManagerModel");
 const BranchManager = require("../modules/BranchManager/Model/BranchManagerModel");
 const OperationStaff = require("../modules/OperationStaff/Model/OperationStaffModel");
+const WorkshopManager = require("../modules/WorkshopManager/Model/WorkshopManagerModel");
+const WorkshopStaff = require("../modules/WorkshopStaff/Model/WorkshopStaffModel");
 
 /**
  * Seeds Branch-related permissions to various administrative roles.
  */
 const seedBranchPermissions = async () => {
     try {
-        const branchPermissions = ["BRANCH_VIEW", "VEHICLE_VIEW"];
+        const branchPermissions = [
+            "BRANCH_VIEW",
+            "VEHICLE_VIEW",
+            "DRIVER_VIEW",
+            "DRIVER_CREATE",
+            "DRIVER_EDIT",
+            "DRIVER_ONBOARD",
+            "DRIVER_ASSIGN_VEHICLE"
+        ];
         const targetRoles = [
             "OPERATIONADMIN",
             "COUNTRYMANAGER",
             "BRANCHMANAGER",
-            "OPERATIONSTAFF"
+            "OPERATIONSTAFF",
+            "WORKSHOPMANAGER",
+            "WORKSHOPSTAFF"
         ];
 
         console.log("[SEEDER] Updating Branch permissions for Role Templates...");
@@ -58,6 +70,18 @@ const seedBranchPermissions = async () => {
 
         // Update Operation Staff
         await OperationStaff.updateMany(
+            { isDeleted: false },
+            { $addToSet: { permissions: { $each: branchPermissions } } }
+        );
+
+        // Update Workshop Managers
+        await WorkshopManager.updateMany(
+            { isDeleted: false },
+            { $addToSet: { permissions: { $each: branchPermissions } } }
+        );
+
+        // Update Workshop Staff
+        await WorkshopStaff.updateMany(
             { isDeleted: false },
             { $addToSet: { permissions: { $each: branchPermissions } } }
         );

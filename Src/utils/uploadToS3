@@ -1,45 +1,68 @@
 const { PutObjectCommand } = require("@aws-sdk/client-s3");
-const uploadLocal = require("./uploadLocal");
+const s3 = require("../config/s3");
 
 /**
- * Upload a file buffer to S3 or local disk (fallback).
- * If AWS credentials are configured, uploads to S3.
- * Otherwise, saves to local /uploads/ directory.
+ * Upload a file buffer to S3.
+ * Throws an error if AWS credentials are not configured or upload fails.
  * @param {Object} file - Multer file object
  * @param {string} folder - Target folder path
- * @returns {Promise<string>} - Public URL or local path
+ * @returns {Promise<string>} - Public S3 URL
  */
 const uploadToS3 = async (file, folder = "uploads") => {
   // Check if AWS credentials are configured
-  const hasAWSConfig = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION;
+  const hasAWSConfig = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION && process.env.AWS_BUCKET_NAME;
 
   if (!hasAWSConfig) {
-    // Fallback to local file storage
-    console.log("[Upload] AWS credentials not configured. Using local file storage.");
-    return uploadLocal(file, folder);
+    const missing = [];
+    if (!process.env.AWS_ACCESS_KEY_ID) missing.push("AWS_ACCESS_KEY_ID");
+    if (!process.env.AWS_SECRET_ACCESS_KEY) missing.push("AWS_SECRET_ACCESS_KEY");
+    if (!process.env.AWS_REGION) missing.push("AWS_REGION");
+    if (!process.env.AWS_BUCKET_NAME) missing.push("AWS_BUCKET_NAME");
+    
+    const errorMsg = `[Upload] AWS credentials not fully configured. Missing: ${missing.join(", ")}`;
+    console.error(errorMsg);
+    throw new Error(errorMsg);
   }
 
-  // Use S3 upload
-  const s3 = require("../config/s3");
-  const timestamp = Date.now();
-  const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-  const key = `${folder}/${timestamp}_${sanitizedFileName}`;
+  try {
+    const timestamp = Date.now();
+    const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    const key = `${folder}/${timestamp}_${sanitizedFileName}`;
 
-  const command = new PutObjectCommand({
-    Bucket: process.env.AWS_BUCKET_NAME,
-    Key: key,
-    Body: file.buffer,
-    ContentType: file.mimetype,
-  });
+    console.log(`[Upload] Starting S3 upload...`);
+    console.log(`[Upload] Bucket: ${process.env.AWS_BUCKET_NAME}`);
+    console.log(`[Upload] Region: ${process.env.AWS_REGION}`);
+    console.log(`[Upload] Key: ${key}`);
+    console.log(`[Upload] File size: ${file.buffer.length} bytes`);
+    console.log(`[Upload] Content-Type: ${file.mimetype}`);
 
-  await s3.send(command);
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    });
 
-  // Construct URL based on region
-  const region = process.env.AWS_REGION;
-  const bucket = process.env.AWS_BUCKET_NAME;
-  
-  // Standard regional URL format: https://bucket.s3.region.amazonaws.com/key
-  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+    console.log(`[Upload] Executing PutObjectCommand...`);
+    const response = await s3.send(command);
+    
+    console.log(`[Upload] S3 response:`, response);
+    
+    // Construct URL based on region
+    const region = process.env.AWS_REGION;
+    const bucket = process.env.AWS_BUCKET_NAME;
+    const s3Url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+    
+    console.log(`[Upload] ✓ S3 upload successful: ${s3Url}`);
+    return s3Url;
+  } catch (error) {
+    console.error("[Upload] ✗ S3 upload failed!");
+    console.error("[Upload] Error name:", error.name);
+    console.error("[Upload] Error message:", error.message);
+    if (error.Code) console.error("[Upload] Error code:", error.Code);
+    console.error("[Upload] Error details:", error);
+    throw error;
+  }
 };
 
 module.exports = uploadToS3;

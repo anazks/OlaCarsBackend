@@ -10,7 +10,9 @@ const {
     assignCarToDriver,
     updateVehicleLeaseSettings,
     updateMaintenanceSettings,
-    updateVehicle
+    updateVehicle,
+    getVehiclesDueForService,
+    bulkAddVehicles
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -144,6 +146,14 @@ router.post(
     addVehicle
 );
 
+router.post(
+    "/bulk",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    hasPermission("VEHICLE_CREATE"),
+    bulkAddVehicles
+);
+
 /**
  * @swagger
  * /api/vehicle:
@@ -181,6 +191,47 @@ router.get(
     authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     hasPermission("VEHICLE_VIEW"),
     getAvailableCars
+);
+
+/**
+ * @swagger
+ * /api/vehicle/due-for-service:
+ *   get:
+ *     summary: Get vehicles approaching or exceeding maintenance service threshold
+ *     tags: [Vehicle]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: warningPercent
+ *         schema:
+ *           type: number
+ *         description: Percentage threshold for warning (default 0.8 = 80%)
+ *       - in: query
+ *         name: showAll
+ *         schema:
+ *           type: boolean
+ *         description: If true, return all vehicles including OK status
+ *     responses:
+ *       200:
+ *         description: Vehicles with computed maintenance status
+ */
+router.get(
+    "/due-for-service",
+    authenticate,
+    authorize(
+        ROLES.ADMIN,
+        ROLES.OPERATIONADMIN,
+        ROLES.FINANCEADMIN,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.WORKSHOPMANAGER,
+        ROLES.WORKSHOPSTAFF,
+        ROLES.OPERATIONSTAFF,
+        ROLES.FINANCESTAFF
+    ),
+    hasPermission("VEHICLE_VIEW"),
+    getVehiclesDueForService
 );
 
 /**

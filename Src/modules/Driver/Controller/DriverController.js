@@ -147,6 +147,8 @@ const progressDriverStatus = async (req, res) => {
 const uploadDriverDocuments = async (req, res) => {
     try {
         const driverId = req.params.id;
+        
+        console.log(`[Driver Upload] Starting upload for driver: ${driverId}`);
 
         const driver = await getDriverByIdService(driverId, { includeSensitive: false });
         if (!driver) {
@@ -154,43 +156,70 @@ const uploadDriverDocuments = async (req, res) => {
         }
 
         const files = req.files;
+        console.log(`[Driver Upload] Files received:`, Object.keys(files || {}));
+        
         if (!files || Object.keys(files).length === 0) {
+            console.warn(`[Driver Upload] No files provided`);
             return res.status(400).json({ success: false, message: "No documents uploaded" });
         }
 
         const uploadedKeys = {};
         const dbUpdate = {};
+        const uploadErrors = [];
 
         for (const [fieldName, fileArray] of Object.entries(files)) {
             if (!fileArray || fileArray.length === 0) continue;
 
-            const file = fileArray[0];
-            const key = `drivers/${driverId}/documents/${fieldName}_${Date.now()}_${file.originalname}`;
-            const uploadedKey = await uploadToS3(file, key);
-            uploadedKeys[fieldName] = uploadedKey;
+            try {
+                const file = fileArray[0];
+                console.log(`[Driver Upload] Processing field: ${fieldName}, file: ${file.originalname}`);
+                
+                // Pass folder path only - uploadToS3 will handle timestamp and filename
+                const folder = `drivers/${driverId}/documents`;
+                const uploadedKey = await uploadToS3(file, folder);
+                uploadedKeys[fieldName] = uploadedKey;
+                console.log(`[Driver Upload] ✓ Field: ${fieldName}, URL: ${uploadedKey}`);
 
-            // #3 — Map S3 field to DB path and queue for update
-            const dbPath = S3_FIELD_MAP[fieldName];
-            if (dbPath) {
-                dbUpdate[dbPath] = uploadedKey;
+                // #3 — Map S3 field to DB path and queue for update
+                const dbPath = S3_FIELD_MAP[fieldName];
+                if (dbPath) {
+                    dbUpdate[dbPath] = uploadedKey;
+                }
+            } catch (fieldError) {
+                console.error(`[Driver Upload] ✗ Error uploading ${fieldName}:`, fieldError.message);
+                uploadErrors.push(`${fieldName}: ${fieldError.message}`);
             }
+        }
+
+        if (uploadErrors.length > 0) {
+            console.warn(`[Driver Upload] Some uploads failed:`, uploadErrors);
         }
 
         // #3 — Auto-update driver record with S3 keys
         if (Object.keys(dbUpdate).length > 0) {
-            // backgroundCheck needs status set to UPLOADED when document is uploaded
-            if (dbUpdate["backgroundCheck.document"]) {
-                dbUpdate["backgroundCheck.status"] = "UPLOADED";
+            try {
+                // backgroundCheck needs status set to UPLOADED when document is uploaded
+                if (dbUpdate["backgroundCheck.document"]) {
+                    dbUpdate["backgroundCheck.status"] = "UPLOADED";
+                }
+                console.log(`[Driver Upload] Updating driver record with:`, dbUpdate);
+                await updateDriverService(driverId, dbUpdate);
+                console.log(`[Driver Upload] ✓ Driver record updated successfully`);
+            } catch (dbError) {
+                console.error(`[Driver Upload] ✗ Error updating driver record:`, dbError.message);
             }
-            await updateDriverService(driverId, dbUpdate);
         }
 
         return res.status(200).json({
             success: true,
-            message: "Documents uploaded and driver record updated.",
+            message: uploadErrors.length > 0 
+                ? `Uploaded ${Object.keys(uploadedKeys).length} files with ${uploadErrors.length} error(s)` 
+                : "Documents uploaded and driver record updated.",
             data: uploadedKeys,
+            errors: uploadErrors.length > 0 ? uploadErrors : undefined,
         });
     } catch (error) {
+        console.error(`[Driver Upload] ✗ Fatal error:`, error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -310,21 +339,13 @@ const bulkAddDrivers = async (req, res) => {
                 results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
                 continue;
             }
-            if (!row.email || !row.email.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: email" });
-                continue;
-            }
-            if (!row.phone || !row.phone.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
-                continue;
-            }
 
             try {
                 const driverData = {
                     personalInfo: {
                         fullName: row.fullName.trim(),
-                        email: row.email.trim().toLowerCase(),
-                        phone: row.phone.trim(),
+                        email: row.email ? row.email.trim().toLowerCase() : undefined,
+                        phone: row.phone ? row.phone.trim() : undefined,
                         whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
                         dateOfBirth: row.dateOfBirth || undefined,
                         nationality: row.nationality ? row.nationality.trim() : undefined,
@@ -351,7 +372,13 @@ const bulkAddDrivers = async (req, res) => {
                 const newDriver = await DriverService.create(driverData);
                 results.created.push({ row: rowNum, id: newDriver._id, name: row.fullName });
             } catch (err) {
-                results.errors.push({ row: rowNum, message: err.message });
+                if (err.message && err.message.includes("E11000") && err.message.includes("email")) {
+                    results.errors.push({ row: rowNum, message: `Email '${row.email}' is already in use by another driver in the database. Please use a unique email.` });
+                } else if (err.message && err.message.includes("E11000") && err.message.includes("phone")) {
+                    results.errors.push({ row: rowNum, message: `Phone number '${row.phone}' is already in use by another driver.` });
+                } else {
+                    results.errors.push({ row: rowNum, message: err.message });
+                }
             }
         }
 
@@ -374,7 +401,7 @@ const bulkAddDrivers = async (req, res) => {
  */
 const dataMigrateDrivers = async (req, res) => {
     try {
-        const { drivers, branch: selectedBranch, handlingStaff, fleetNumber: providedFleetNumber } = req.body;
+        const { drivers, branch: selectedBranch, handlingStaff, fleetNumber: providedFleetNumber, updateExisting } = req.body;
 
         if (!Array.isArray(drivers) || drivers.length === 0) {
             return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
@@ -406,7 +433,9 @@ const dataMigrateDrivers = async (req, res) => {
         }
 
         // Lazy-load Vehicle repo to avoid circular dependency issues
-        const { addVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
+        const { addVehicleService, updateVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
+        const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
         const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
         const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
 
@@ -454,102 +483,216 @@ const dataMigrateDrivers = async (req, res) => {
                 results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
                 continue;
             }
-            if (!row.email || !row.email.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: email" });
-                continue;
-            }
-            if (!row.phone || !row.phone.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: phone" });
-                continue;
-            }
             if (!row.vehicleNumber || !row.vehicleNumber.trim()) {
                 results.errors.push({ row: rowNum, message: "Missing required field: vehicleNumber" });
                 continue;
             }
 
             try {
-                // ── Step 1: Create Vehicle ──────────────────────────
-                const vehicleData = {
-                    status: "ACTIVE — RENTED",
-                    handlingStaff: handlingStaff || undefined,
-                    purchaseDetails: {
-                        branch: branch,
-                    },
-                    basicDetails: {
-                        make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
-                        model: row.vehicleModel ? row.vehicleModel.trim() : undefined,
-                        year: row.vehicleYear ? Number(row.vehicleYear) : undefined,
-                        category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
-                        fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
-                        colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
-                        vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
-                        sellingValue: (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : ((row.currentSellingValue && !isNaN(row.currentSellingValue)) ? Number(row.currentSellingValue) : undefined),
-                        fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
-                    },
-                    legalDocs: {
-                        registrationNumber: row.vehicleNumber.trim(),
-                    },
-                    statusHistory: [{
+                let vehicleId = null;
+                let isVehicleUpdated = false;
+
+                // ── 1. Vehicle Logic ──
+                let existingVehicle = null;
+                if (row.vehicleVin && row.vehicleVin.trim()) {
+                    existingVehicle = await Vehicle.findOne({ "basicDetails.vin": row.vehicleVin.trim() });
+                }
+                if (!existingVehicle && row.vehicleNumber && row.vehicleNumber.trim()) {
+                    existingVehicle = await Vehicle.findOne({ "legalDocs.registrationNumber": row.vehicleNumber.trim() });
+                }
+
+                if (existingVehicle) {
+                    const newFleetNumber = staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim();
+                    const currentFleetNumber = existingVehicle.basicDetails.fleetNumber;
+
+                    if (currentFleetNumber && newFleetNumber && currentFleetNumber !== newFleetNumber) {
+                        results.errors.push({ row: rowNum, message: `Vehicle ${row.vehicleNumber.trim()} is already assigned to fleet ${currentFleetNumber}. Cannot change fleet number to ${newFleetNumber}.` });
+                        continue;
+                    }
+
+                    // Update existing vehicle
+                    const vehicleUpdateData = {};
+                    if (row.vehicleMake) vehicleUpdateData["basicDetails.make"] = row.vehicleMake.trim();
+                    if (row.vehicleModel) vehicleUpdateData["basicDetails.model"] = row.vehicleModel.trim();
+                    if (row.vehicleYear) vehicleUpdateData["basicDetails.year"] = Number(row.vehicleYear);
+                    if (row.vehicleCategory) vehicleUpdateData["basicDetails.category"] = row.vehicleCategory.trim();
+                    if (row.vehicleFuelType) vehicleUpdateData["basicDetails.fuelType"] = row.vehicleFuelType.trim();
+                    if (row.vehicleColour) vehicleUpdateData["basicDetails.colour"] = row.vehicleColour.trim();
+                    if (row.vehicleSellingValue || row.currentSellingValue) {
+                        vehicleUpdateData["basicDetails.sellingValue"] = (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : Number(row.currentSellingValue);
+                    }
+                    if (!currentFleetNumber && newFleetNumber) {
+                        vehicleUpdateData["basicDetails.fleetNumber"] = newFleetNumber;
+                    }
+                    
+                    if (Object.keys(vehicleUpdateData).length > 0) {
+                        await updateVehicleService(existingVehicle._id, vehicleUpdateData);
+                    }
+                    vehicleId = existingVehicle._id;
+                    isVehicleUpdated = true;
+                } else {
+                    // Create new vehicle
+                    const vehicleData = {
                         status: "ACTIVE — RENTED",
-                        changedBy: userId,
-                        changedByRole: userRole,
-                        timestamp: new Date(),
-                        notes: "Vehicle migrated from legacy system.",
-                    }],
-                    createdBy: userId,
-                    creatorRole: userRole,
-                };
+                        handlingStaff: handlingStaff || undefined,
+                        purchaseDetails: { branch: branch },
+                        basicDetails: {
+                            make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
+                            model: row.vehicleModel ? row.vehicleModel.trim() : undefined,
+                            year: row.vehicleYear ? Number(row.vehicleYear) : undefined,
+                            category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
+                            fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
+                            colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
+                            vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
+                            sellingValue: (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : ((row.currentSellingValue && !isNaN(row.currentSellingValue)) ? Number(row.currentSellingValue) : undefined),
+                            fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
+                        },
+                        legalDocs: {
+                            registrationNumber: row.vehicleNumber.trim(),
+                        },
+                        statusHistory: [{
+                            status: "ACTIVE — RENTED",
+                            changedBy: userId,
+                            changedByRole: userRole,
+                            timestamp: new Date(),
+                            notes: "Vehicle migrated from legacy system.",
+                        }],
+                        createdBy: userId,
+                        creatorRole: userRole,
+                    };
+                    const newVehicle = await addVehicleService(vehicleData);
+                    vehicleId = newVehicle._id;
+                }
 
-                const newVehicle = await addVehicleService(vehicleData);
+                // ── 2. Driver Logic ──
+                let existingDriver = null;
 
-                // ── Step 2: Create Driver ───────────────────────────
-                const driverData = {
-                    status: "ACTIVE",
-                    personalInfo: {
-                        fullName: row.fullName.trim(),
-                        email: row.email.trim().toLowerCase(),
-                        phone: row.phone.trim(),
-                        whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
-                        dateOfBirth: row.dateOfBirth || undefined,
-                        nationality: row.nationality ? row.nationality.trim() : undefined,
-                    },
-                    identityDocs: {
-                        idType: row.idType || undefined,
-                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
-                    },
-                    drivingLicense: {
-                        licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
-                        licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
-                        expiryDate: row.licenseExpiry || undefined,
-                    },
-                    emergencyContact: {
-                        name: row.emergencyName ? row.emergencyName.trim() : undefined,
-                        relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
-                        phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
-                    },
-                    // ── Migration-specific fields ───────────────────
-                    handlingStaff: row.handlingStaffId || handlingStaff || undefined,
-                    activationDate: row.activationDate || undefined,
-                    deactivationDate: row.deactivationDate || undefined,
-                    remarks: row.remarks ? row.remarks.trim() : undefined,
-                    currentVehicle: newVehicle._id,
-                    branch: branch,
-                    createdBy: userId,
-                    creatorRole: userRole,
-                };
+                // Create a flexible name regex to handle extra spaces and case insensitivity
+                const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
 
-                const newDriver = await DriverService.create(driverData);
+                // 1. Try to match by currentVehicle (strongest link)
+                if (vehicleId) {
+                    existingDriver = await Driver.findOne({ 
+                        "personalInfo.fullName": nameRegex,
+                        "currentVehicle": vehicleId
+                    });
+                }
 
-                results.created.push({
-                    row: rowNum,
-                    driverId: newDriver.driverId,
-                    driverDbId: newDriver._id,
-                    vehicleId: newVehicle._id,
-                    name: row.fullName,
-                    vehicleNumber: row.vehicleNumber,
-                });
+                // 2. Try to match by phone
+                if (!existingDriver && row.phone && row.phone.trim()) {
+                    existingDriver = await Driver.findOne({ "personalInfo.phone": row.phone.trim() });
+                }
+
+                // 3. Try to match by email 
+                if (!existingDriver && row.email && row.email.trim()) {
+                    existingDriver = await Driver.findOne({ 
+                        "personalInfo.fullName": nameRegex,
+                        "personalInfo.email": row.email.trim().toLowerCase() 
+                    });
+                }
+
+                // 4. Try to match by fullName alone (last resort)
+                if (!existingDriver) {
+                    existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex });
+                }
+
+                if (existingDriver) {
+                    // Update existing driver
+                    const driverUpdateData = {};
+                    if (row.fullName) driverUpdateData["personalInfo.fullName"] = row.fullName.trim();
+                    if (row.email) driverUpdateData["personalInfo.email"] = row.email.trim().toLowerCase();
+                    if (row.whatsappNumber) driverUpdateData["personalInfo.whatsappNumber"] = row.whatsappNumber.trim();
+                    if (row.dateOfBirth) driverUpdateData["personalInfo.dateOfBirth"] = row.dateOfBirth;
+                    if (row.nationality) driverUpdateData["personalInfo.nationality"] = row.nationality.trim();
+                    
+                    if (row.idType) driverUpdateData["identityDocs.idType"] = row.idType;
+                    if (row.idNumber) driverUpdateData["identityDocs.idNumber"] = row.idNumber.trim();
+                    
+                    if (row.licenseNumber) driverUpdateData["drivingLicense.licenseNumber"] = row.licenseNumber.trim();
+                    if (row.licenseCountry) driverUpdateData["drivingLicense.licenseCountry"] = row.licenseCountry.trim();
+                    if (row.licenseExpiry) driverUpdateData["drivingLicense.expiryDate"] = row.licenseExpiry;
+
+                    if (row.emergencyName) driverUpdateData["emergencyContact.name"] = row.emergencyName.trim();
+                    if (row.emergencyRelationship) driverUpdateData["emergencyContact.relationship"] = row.emergencyRelationship.trim();
+                    if (row.emergencyPhone) driverUpdateData["emergencyContact.phone"] = row.emergencyPhone.trim();
+
+                    if (row.handlingStaffId || handlingStaff) driverUpdateData["handlingStaff"] = row.handlingStaffId || handlingStaff;
+                    if (row.activationDate) driverUpdateData["activationDate"] = row.activationDate;
+                    if (row.deactivationDate) driverUpdateData["deactivationDate"] = row.deactivationDate;
+                    if (row.remarks) driverUpdateData["remarks"] = row.remarks.trim();
+                    if (branch) driverUpdateData["branch"] = branch;
+
+                    driverUpdateData["currentVehicle"] = vehicleId;
+
+                    if (Object.keys(driverUpdateData).length > 0) {
+                        await updateDriverService(existingDriver._id, driverUpdateData);
+                    }
+
+                    results.created.push({
+                        row: rowNum,
+                        driverId: existingDriver.driverId,
+                        driverDbId: existingDriver._id,
+                        vehicleId: vehicleId,
+                        name: row.fullName,
+                        vehicleNumber: row.vehicleNumber,
+                        updated: true
+                    });
+                } else {
+                    // Create new driver
+                    const driverData = {
+                        status: "ACTIVE",
+                        personalInfo: {
+                            fullName: row.fullName.trim(),
+                            email: row.email ? row.email.trim().toLowerCase() : undefined,
+                            phone: row.phone ? row.phone.trim() : undefined,
+                            whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
+                            dateOfBirth: row.dateOfBirth || undefined,
+                            nationality: row.nationality ? row.nationality.trim() : undefined,
+                        },
+                        identityDocs: {
+                            idType: row.idType || undefined,
+                            idNumber: row.idNumber ? row.idNumber.trim() : undefined,
+                        },
+                        drivingLicense: {
+                            licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
+                            licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
+                            expiryDate: row.licenseExpiry || undefined,
+                        },
+                        emergencyContact: {
+                            name: row.emergencyName ? row.emergencyName.trim() : undefined,
+                            relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
+                            phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
+                        },
+                        handlingStaff: row.handlingStaffId || handlingStaff || undefined,
+                        activationDate: row.activationDate || undefined,
+                        deactivationDate: row.deactivationDate || undefined,
+                        remarks: row.remarks ? row.remarks.trim() : undefined,
+                        currentVehicle: vehicleId,
+                        branch: branch,
+                        createdBy: userId,
+                        creatorRole: userRole,
+                    };
+                    const newDriver = await DriverService.create(driverData);
+
+                    results.created.push({
+                        row: rowNum,
+                        driverId: newDriver.driverId,
+                        driverDbId: newDriver._id,
+                        vehicleId: vehicleId,
+                        name: row.fullName,
+                        vehicleNumber: row.vehicleNumber,
+                        updated: false
+                    });
+                }
             } catch (err) {
-                results.errors.push({ row: rowNum, message: err.message });
+                if (err.message && err.message.includes("E11000") && err.message.includes("email")) {
+                    results.errors.push({ row: rowNum, message: `Email '${row.email}' is already in use by another driver in the database. Please use a unique email.` });
+                } else if (err.message && err.message.includes("E11000") && err.message.includes("phone")) {
+                    results.errors.push({ row: rowNum, message: `Phone number '${row.phone}' is already in use by another driver.` });
+                } else {
+                    results.errors.push({ row: rowNum, message: err.message });
+                }
             }
         }
 

@@ -125,9 +125,8 @@ const addPurchaseOrder = async (req, res) => {
 
                 const uploadedUrls = [];
                 for (const file of itemFiles) {
-                    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
-                    const key = `purchase-orders/temp-${poData.purchaseOrderNumber}/items/${i}/${Date.now()}_${cleanName}`;
-                    const uploadedUrl = await uploadToS3(file, key);
+                    const folder = `purchase-orders/temp-${poData.purchaseOrderNumber}/items/${i}`;
+                    const uploadedUrl = await uploadToS3(file, folder);
                     uploadedUrls.push(uploadedUrl);
                 }
                 // Assign explicitly back to the original array reference
@@ -451,9 +450,8 @@ const uploadPurchaseOrderItemImages = async (req, res) => {
 
         // Upload loop
         for (const file of imageFiles) {
-            const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, "");
-            const key = `purchase-orders/${po._id}/items/${item._id}/${Date.now()}_${cleanName}`;
-            const uploadedUrl = await uploadToS3(file, key);
+            const folder = `purchase-orders/${po._id}/items/${item._id}`;
+            const uploadedUrl = await uploadToS3(file, folder);
             uploadedUrls.push(uploadedUrl);
         }
 
