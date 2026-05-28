@@ -161,7 +161,7 @@ exports.loginService = async (email, password) => {
     );
 
     const refreshToken = jwt.sign(
-        { id: manager._id },
+        { id: manager._id, nonce: Math.random().toString() },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: jwtConfig.refreshTokenExpiry }
     );

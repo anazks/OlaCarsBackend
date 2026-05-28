@@ -103,7 +103,8 @@ exports.getStaffPerformance = async (req, res) => {
             return res.status(403).json({ status: "error", message: "Unauthorized access to staff performance reports." });
         }
 
-        if (!filters.branch && !filters.country && user.role !== ROLES.ADMIN) {
+        const isAdminRole = [ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN].includes(user.role);
+        if (!filters.branch && !filters.country && !isAdminRole) {
             return res.status(400).json({ status: "error", message: "Branch ID or Country is required for staff reports." });
         }
 

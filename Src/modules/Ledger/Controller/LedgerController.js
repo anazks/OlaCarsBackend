@@ -10,6 +10,7 @@ const getLedgerEntries = async (req, res) => {
         if (req.query.type) query.type = req.query.type; 
         if (req.query.manualJournal) query.manualJournal = req.query.manualJournal;
         if (req.query.voucher) query.voucher = req.query.voucher;
+        if (req.query.transaction) query.transaction = req.query.transaction;
 
         // Optional Branch Filter
         if (req.query.branch) query.branch = req.query.branch;
@@ -75,6 +76,27 @@ const getLedgerEntries = async (req, res) => {
     }
 };
 
+const getLedgerEntryById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const entry = await LedgerEntry.findById(id)
+            .populate("transaction")
+            .populate("manualJournal")
+            .populate("voucher")
+            .populate("accountingCode", "code name category")
+            .populate("createdBy", "name email");
+
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        return res.status(200).json({ success: true, data: entry });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
+    getLedgerEntryById,
 };
