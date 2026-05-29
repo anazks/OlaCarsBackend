@@ -16,6 +16,10 @@ exports.createRequest = async (req, res) => {
             requestNumber: `WR-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
         };
 
+        if (req.user.role === ROLES.WORKSHOPMANAGER || req.user.role === ROLES.BRANCHMANAGER) {
+            data.status = "PENDING_FINANCE_APPROVAL";
+        }
+
         if (!data.branch) {
             return res.status(400).json({ success: false, message: "Branch ID is required" });
         }
@@ -52,7 +56,7 @@ exports.approveRequest = async (req, res) => {
         const { status, supplier, rejectionReason, quantity } = req.body;
         console.log("[DEBUG] approveRequest body:", req.body);
 
-        if (!["APPROVED", "REJECTED"].includes(status)) {
+        if (!["APPROVED", "REJECTED", "PENDING_FINANCE_APPROVAL"].includes(status)) {
             return res.status(400).json({ success: false, message: "Invalid status" });
         }
 

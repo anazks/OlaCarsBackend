@@ -479,11 +479,11 @@ const dataMigrateDrivers = async (req, res) => {
             const rowNum = i + 1;
 
             // Validate required fields
-            if (!row.fullName || !row.fullName.trim()) {
+            if (!row.fullName || !String(row.fullName || "").trim()) {
                 results.errors.push({ row: rowNum, message: "Missing required field: fullName" });
                 continue;
             }
-            if (!row.vehicleNumber || !row.vehicleNumber.trim()) {
+            if (!row.vehicleNumber || !String(row.vehicleNumber || "").trim()) {
                 results.errors.push({ row: rowNum, message: "Missing required field: vehicleNumber" });
                 continue;
             }
@@ -494,11 +494,11 @@ const dataMigrateDrivers = async (req, res) => {
 
                 // ── 1. Vehicle Logic ──
                 let existingVehicle = null;
-                if (row.vehicleVin && row.vehicleVin.trim()) {
-                    existingVehicle = await Vehicle.findOne({ "basicDetails.vin": row.vehicleVin.trim() });
+                if (row.vehicleVin && String(row.vehicleVin || "").trim()) {
+                    existingVehicle = await Vehicle.findOne({ "basicDetails.vin": String(row.vehicleVin || "").trim() });
                 }
-                if (!existingVehicle && row.vehicleNumber && row.vehicleNumber.trim()) {
-                    existingVehicle = await Vehicle.findOne({ "legalDocs.registrationNumber": row.vehicleNumber.trim() });
+                if (!existingVehicle && row.vehicleNumber && String(row.vehicleNumber || "").trim()) {
+                    existingVehicle = await Vehicle.findOne({ "legalDocs.registrationNumber": String(row.vehicleNumber || "").trim() });
                 }
 
                 if (existingVehicle) {
@@ -518,9 +518,6 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.vehicleCategory) vehicleUpdateData["basicDetails.category"] = row.vehicleCategory.trim();
                     if (row.vehicleFuelType) vehicleUpdateData["basicDetails.fuelType"] = row.vehicleFuelType.trim();
                     if (row.vehicleColour) vehicleUpdateData["basicDetails.colour"] = row.vehicleColour.trim();
-                    if (row.vehicleSellingValue || row.currentSellingValue) {
-                        vehicleUpdateData["basicDetails.sellingValue"] = (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : Number(row.currentSellingValue);
-                    }
                     if (!currentFleetNumber && newFleetNumber) {
                         vehicleUpdateData["basicDetails.fleetNumber"] = newFleetNumber;
                     }
@@ -543,8 +540,7 @@ const dataMigrateDrivers = async (req, res) => {
                             category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
                             fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                             colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
-                            vin: row.vehicleVin ? row.vehicleVin.trim() : undefined,
-                            sellingValue: (row.vehicleSellingValue && !isNaN(row.vehicleSellingValue)) ? Number(row.vehicleSellingValue) : ((row.currentSellingValue && !isNaN(row.currentSellingValue)) ? Number(row.currentSellingValue) : undefined),
+                            vin: row.vehicleVin ? String(row.vehicleVin || "").trim() : undefined,
                             fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
                         },
                         legalDocs: {
@@ -600,33 +596,42 @@ const dataMigrateDrivers = async (req, res) => {
                 if (existingDriver) {
                     // Update existing driver
                     const driverUpdateData = {};
-                    if (row.fullName) driverUpdateData["personalInfo.fullName"] = row.fullName.trim();
-                    if (row.email) driverUpdateData["personalInfo.email"] = row.email.trim().toLowerCase();
-                    if (row.whatsappNumber) driverUpdateData["personalInfo.whatsappNumber"] = row.whatsappNumber.trim();
+                    if (row.fullName) driverUpdateData["personalInfo.fullName"] = String(row.fullName || "").trim();
+                    if (row.email) driverUpdateData["personalInfo.email"] = String(row.email || "").trim().toLowerCase();
+                    if (row.whatsappNumber) driverUpdateData["personalInfo.whatsappNumber"] = String(row.whatsappNumber || "").trim();
                     if (row.dateOfBirth) driverUpdateData["personalInfo.dateOfBirth"] = row.dateOfBirth;
-                    if (row.nationality) driverUpdateData["personalInfo.nationality"] = row.nationality.trim();
+                    if (row.nationality) driverUpdateData["personalInfo.nationality"] = String(row.nationality || "").trim();
                     
                     if (row.idType) driverUpdateData["identityDocs.idType"] = row.idType;
-                    if (row.idNumber) driverUpdateData["identityDocs.idNumber"] = row.idNumber.trim();
+                    if (row.idNumber) driverUpdateData["identityDocs.idNumber"] = String(row.idNumber || "").trim();
                     
-                    if (row.licenseNumber) driverUpdateData["drivingLicense.licenseNumber"] = row.licenseNumber.trim();
-                    if (row.licenseCountry) driverUpdateData["drivingLicense.licenseCountry"] = row.licenseCountry.trim();
+                    if (row.licenseNumber) driverUpdateData["drivingLicense.licenseNumber"] = String(row.licenseNumber || "").trim();
+                    if (row.licenseCountry) driverUpdateData["drivingLicense.licenseCountry"] = String(row.licenseCountry || "").trim();
                     if (row.licenseExpiry) driverUpdateData["drivingLicense.expiryDate"] = row.licenseExpiry;
 
-                    if (row.emergencyName) driverUpdateData["emergencyContact.name"] = row.emergencyName.trim();
-                    if (row.emergencyRelationship) driverUpdateData["emergencyContact.relationship"] = row.emergencyRelationship.trim();
-                    if (row.emergencyPhone) driverUpdateData["emergencyContact.phone"] = row.emergencyPhone.trim();
+                    if (row.emergencyName) driverUpdateData["emergencyContact.name"] = String(row.emergencyName || "").trim();
+                    if (row.emergencyRelationship) driverUpdateData["emergencyContact.relationship"] = String(row.emergencyRelationship || "").trim();
+                    if (row.emergencyPhone) driverUpdateData["emergencyContact.phone"] = String(row.emergencyPhone || "").trim();
 
                     if (row.handlingStaffId || handlingStaff) driverUpdateData["handlingStaff"] = row.handlingStaffId || handlingStaff;
                     if (row.activationDate) driverUpdateData["activationDate"] = row.activationDate;
                     if (row.deactivationDate) driverUpdateData["deactivationDate"] = row.deactivationDate;
-                    if (row.remarks) driverUpdateData["remarks"] = row.remarks.trim();
+                    if (row.remarks) driverUpdateData["remarks"] = String(row.remarks || "").trim();
                     if (branch) driverUpdateData["branch"] = branch;
 
                     driverUpdateData["currentVehicle"] = vehicleId;
 
                     if (Object.keys(driverUpdateData).length > 0) {
                         await updateDriverService(existingDriver._id, driverUpdateData);
+                    }
+
+                    // Generate Rent Plan if provided
+                    if (row.weeklyRent && row.durationWeeks) {
+                        await DriverService.generateMigrationRentPlan(existingDriver._id, {
+                            weeklyRent: Number(row.weeklyRent),
+                            durationWeeks: Number(row.durationWeeks),
+                            activationDate: row.activationDate || undefined
+                        });
                     }
 
                     results.created.push({
@@ -643,37 +648,51 @@ const dataMigrateDrivers = async (req, res) => {
                     const driverData = {
                         status: "ACTIVE",
                         personalInfo: {
-                            fullName: row.fullName.trim(),
-                            email: row.email ? row.email.trim().toLowerCase() : undefined,
-                            phone: row.phone ? row.phone.trim() : undefined,
-                            whatsappNumber: row.whatsappNumber ? row.whatsappNumber.trim() : undefined,
+                            fullName: String(row.fullName || "").trim(),
+                            email: row.email ? String(row.email || "").trim().toLowerCase() : undefined,
+                            phone: row.phone ? String(row.phone || "").trim() : undefined,
+                            whatsappNumber: row.whatsappNumber ? String(row.whatsappNumber || "").trim() : undefined,
                             dateOfBirth: row.dateOfBirth || undefined,
-                            nationality: row.nationality ? row.nationality.trim() : undefined,
+                            nationality: row.nationality ? String(row.nationality || "").trim() : undefined,
                         },
                         identityDocs: {
                             idType: row.idType || undefined,
-                            idNumber: row.idNumber ? row.idNumber.trim() : undefined,
+                            idNumber: row.idNumber ? String(row.idNumber || "").trim() : undefined,
                         },
                         drivingLicense: {
-                            licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
-                            licenseCountry: row.licenseCountry ? row.licenseCountry.trim() : undefined,
+                            licenseNumber: row.licenseNumber ? String(row.licenseNumber || "").trim() : undefined,
+                            licenseCountry: row.licenseCountry ? String(row.licenseCountry || "").trim() : undefined,
                             expiryDate: row.licenseExpiry || undefined,
                         },
                         emergencyContact: {
-                            name: row.emergencyName ? row.emergencyName.trim() : undefined,
-                            relationship: row.emergencyRelationship ? row.emergencyRelationship.trim() : undefined,
-                            phone: row.emergencyPhone ? row.emergencyPhone.trim() : undefined,
+                            name: row.emergencyName ? String(row.emergencyName || "").trim() : undefined,
+                            relationship: row.emergencyRelationship ? String(row.emergencyRelationship || "").trim() : undefined,
+                            phone: row.emergencyPhone ? String(row.emergencyPhone || "").trim() : undefined,
                         },
                         handlingStaff: row.handlingStaffId || handlingStaff || undefined,
                         activationDate: row.activationDate || undefined,
                         deactivationDate: row.deactivationDate || undefined,
-                        remarks: row.remarks ? row.remarks.trim() : undefined,
+                        remarks: row.remarks ? String(row.remarks || "").trim() : undefined,
                         currentVehicle: vehicleId,
                         branch: branch,
                         createdBy: userId,
                         creatorRole: userRole,
                     };
                     const newDriver = await DriverService.create(driverData);
+
+                    console.log("[DEBUG MIGRATION] newDriver._id:", newDriver._id, "weeklyRent:", row.weeklyRent, "durationWeeks:", row.durationWeeks, "activationDate:", row.activationDate);
+
+                    // Generate Rent Plan if provided
+                    if (row.weeklyRent && row.durationWeeks) {
+                        const rentResult = await DriverService.generateMigrationRentPlan(newDriver._id, {
+                            weeklyRent: Number(row.weeklyRent),
+                            durationWeeks: Number(row.durationWeeks),
+                            activationDate: row.activationDate || undefined
+                        });
+                        console.log("[DEBUG MIGRATION] generateMigrationRentPlan returned rentTracking length:", rentResult.rentTracking ? rentResult.rentTracking.length : 0);
+                    } else {
+                        console.log("[DEBUG MIGRATION] Skipped generateMigrationRentPlan because weeklyRent or durationWeeks is missing");
+                    }
 
                     results.created.push({
                         row: rowNum,

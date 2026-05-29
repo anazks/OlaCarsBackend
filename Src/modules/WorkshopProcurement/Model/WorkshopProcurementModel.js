@@ -19,7 +19,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING", "APPROVED", "REJECTED", "CONVERTED_TO_PO"],
+            enum: ["PENDING", "PENDING_FINANCE_APPROVAL", "APPROVED", "REJECTED", "CONVERTED_TO_PO"],
             default: "PENDING",
         },
         branch: {

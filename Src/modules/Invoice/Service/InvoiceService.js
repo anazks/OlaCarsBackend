@@ -663,12 +663,22 @@ exports.getGenerationSettings = async () => {
 
 exports.updateGenerationSettings = async (data) => {
     const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const DriverService = require("../../Driver/Service/DriverService");
     const { generationDay } = data;
+
     await SystemSettings.findOneAndUpdate(
         { key: 'invoice_generation_day' },
         { value: generationDay, description: 'Day of the week to generate invoices (0-6)' },
         { upsert: true, new: true }
     );
+
+    // Trigger dynamic rent plan update for all drivers
+    try {
+        await DriverService.reconfigureAllPendingRentPlans(generationDay);
+    } catch (err) {
+        console.error("[InvoiceService] Failed to reconfigure pending rent plans:", err);
+    }
+
     return { success: true };
 };
 
