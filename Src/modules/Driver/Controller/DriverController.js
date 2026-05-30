@@ -575,20 +575,15 @@ const dataMigrateDrivers = async (req, res) => {
                     });
                 }
 
-                // 2. Try to match by phone
-                if (!existingDriver && row.phone && row.phone.trim()) {
-                    existingDriver = await Driver.findOne({ "personalInfo.phone": row.phone.trim() });
-                }
-
-                // 3. Try to match by email 
-                if (!existingDriver && row.email && row.email.trim()) {
+                // 2. Try to match by licenseNumber
+                if (!existingDriver && row.licenseNumber && String(row.licenseNumber || "").trim()) {
                     existingDriver = await Driver.findOne({ 
                         "personalInfo.fullName": nameRegex,
-                        "personalInfo.email": row.email.trim().toLowerCase() 
+                        "drivingLicense.licenseNumber": String(row.licenseNumber || "").trim() 
                     });
                 }
 
-                // 4. Try to match by fullName alone (last resort)
+                // 3. Try to match by fullName alone (last resort)
                 if (!existingDriver) {
                     existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex });
                 }
