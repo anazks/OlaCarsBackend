@@ -11,6 +11,7 @@ router.get("/driver/:driverId/pending", InvoiceController.getPendingInvoicesByDr
 router.get("/", InvoiceController.getInvoices);
 router.get("/:id", InvoiceController.getInvoiceById);
 router.post("/", InvoiceController.createManualInvoice);
+router.post("/bulk-upload", InvoiceController.bulkUploadInvoices);
 router.post("/:id/pay", InvoiceController.payInvoice);
 router.put("/:id", InvoiceController.updateInvoice);
 router.post("/generate-weekly", InvoiceController.triggerWeeklyGeneration);

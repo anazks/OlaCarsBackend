@@ -728,3 +728,104 @@ exports.syncInvoiceToAdditionalPayments = async (invoice) => {
         console.error("[InvoiceService] Error in syncInvoiceToAdditionalPayments:", err);
     }
 };
+
+exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const { Driver } = require("../../Driver/Model/DriverModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    
+    const ts = Date.now();
+    let prefix = "INV";
+    if (invoiceType === "WORKSHOP") prefix = "WRK";
+    else if (invoiceType === "DEPOSIT") prefix = "DEP";
+
+    const createdInvoices = [];
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row.licenseNumber) {
+            errors.push(`Row ${i + 1}: Missing licenseNumber`);
+            continue;
+        }
+        
+        // Find driver by license number
+        const driver = await Driver.findOne({ "personalInfo.licenseNumber": row.licenseNumber, isDeleted: false });
+        if (!driver) {
+            errors.push(`Row ${i + 1}: Driver with license ${row.licenseNumber} not found`);
+            continue;
+        }
+
+        const baseAmount = Number(row.amount) || 0;
+        const amountPaid = Number(row.amountPaid) || 0;
+        const balance = Math.max(0, baseAmount - amountPaid);
+        
+        let status = "PENDING";
+        if (balance <= 0 && baseAmount > 0) status = "PAID";
+        else if (amountPaid > 0) status = "PARTIAL";
+
+        const invoiceNumber = `${prefix}-${ts}-${i + 1}`;
+        const dueDate = row.dueDate ? new Date(row.dueDate) : new Date();
+
+        const payments = [];
+        let paidAt = undefined;
+        if (amountPaid > 0) {
+            payments.push({
+                amount: amountPaid,
+                paidAt: new Date(),
+                paymentMethod: "Other", 
+                note: row.notes || "Bulk upload initial payment"
+            });
+            if (status === "PAID") {
+                paidAt = new Date();
+            }
+        }
+
+        const existingInvoices = await Invoice.find({ driver: driver._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+        const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+
+        const newInvoiceData = {
+            invoiceNumber,
+            invoiceType: invoiceType,
+            driver: driver._id,
+            weekNumber: invoiceType === 'RENTAL' ? nextWeekNumber : undefined,
+            weekLabel: row.weekLabel || (invoiceType === 'RENTAL' ? `Week ${nextWeekNumber}` : invoiceType),
+            dueDate,
+            baseAmount,
+            totalAmountDue: baseAmount,
+            amountPaid,
+            balance,
+            status,
+            paidAt,
+            payments,
+            notes: row.notes || row.description || '',
+            createdBy,
+            creatorRole
+        };
+
+        try {
+            const created = await Invoice.create(newInvoiceData);
+            createdInvoices.push(created);
+            
+            // Sync Ledger
+            try {
+                await LedgerService.generateInvoiceLedgerEntries(created);
+                if (amountPaid > 0) {
+                    await exports.createLedgerEntry(amountPaid, "Other", created, createdBy, creatorRole, "Bulk upload payment");
+                }
+            } catch (ledgerErr) {
+                console.error(`[InvoiceService] Failed ledger generation for bulk invoice ${invoiceNumber}:`, ledgerErr);
+            }
+        } catch (err) {
+            errors.push(`Row ${i + 1}: Failed to create invoice - ${err.message}`);
+        }
+    }
+
+    return {
+        successCount: createdInvoices.length,
+        errorCount: errors.length,
+        errors,
+        createdInvoices: createdInvoices.map(inv => inv.invoiceNumber)
+    };
+};
+

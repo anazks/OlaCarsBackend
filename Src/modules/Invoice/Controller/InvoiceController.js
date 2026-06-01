@@ -59,6 +59,24 @@ exports.createManualInvoice = async (req, res) => {
     }
 };
 
+exports.bulkUploadInvoices = async (req, res) => {
+    try {
+        const { rows, invoiceType } = req.body;
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+            return res.status(400).json({ success: false, message: "No data rows provided for bulk upload." });
+        }
+        if (!invoiceType) {
+            return res.status(400).json({ success: false, message: "Invoice type is required." });
+        }
+        const createdBy = req.user.id || req.user._id;
+        const creatorRole = req.user.role;
+        const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole);
+        return res.status(201).json({ success: true, message: "Bulk upload completed", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
 exports.payInvoice = async (req, res) => {
     try {
         const paymentData = {
