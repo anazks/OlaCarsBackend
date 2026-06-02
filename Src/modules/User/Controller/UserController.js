@@ -111,6 +111,10 @@ const getProfile = async (req, res) => {
             case 'USER':
                 userData = await UserService.getById(id);
                 break;
+            case 'MERCHENDISE':
+                const MerchendiseService = require('../../Merchendise/Service/MerchendiseService.js');
+                userData = await MerchendiseService.getById(id);
+                break;
             default:
                 throw new Error('Invalid role');
         }

@@ -10,7 +10,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED", "DISPOSED"],
+            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED", "DISPOSED", "PENDING_FINANCE_APPROVAL"],
             default: "WAITING",
         },
         purpose: {
@@ -26,6 +26,7 @@ const purchaseOrderSchema = new mongoose.Schema(
                 description: { type: String },
                 unitPrice: { type: Number, required: true },
                 accountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
+                merchandiserPrice: { type: Number },
                 images: {
                     type: [String],
                     validate: {
@@ -41,6 +42,22 @@ const purchaseOrderSchema = new mongoose.Schema(
         totalAmount: {
             type: Number,
             required: true,
+        },
+        merchandiserTotalAmount: {
+            type: Number,
+        },
+        originalTotalAmount: {
+            type: Number,
+        },
+        documents: {
+            type: [String],
+            default: [],
+        },
+        rejectionNote: {
+            type: String,
+        },
+        approvalNote: {
+            type: String,
         },
         purchaseOrderDate: {
             type: Date,

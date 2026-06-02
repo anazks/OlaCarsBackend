@@ -19,7 +19,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING", "APPROVED", "REJECTED", "CONVERTED_TO_PO"],
+            enum: ["PENDING", "APPROVED", "REJECTED", "CONVERTED_TO_PO", "PENDING_FINANCE_APPROVAL"],
             default: "PENDING",
         },
         branch: {
@@ -43,7 +43,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         approvedByRole: {
             type: String,
-            enum: ["WORKSHOPMANAGER", "BRANCHMANAGER", "ADMIN"],
+            enum: ["WORKSHOPMANAGER", "BRANCHMANAGER", "ADMIN", "FINANCEADMIN"],
         },
         rejectionReason: {
             type: String,
@@ -54,7 +54,35 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         notes: {
             type: String,
-        }
+        },
+        merchandiserPrice: {
+            type: Number,
+        },
+        merchandiserTotalAmount: {
+            type: Number,
+        },
+        originalTotalAmount: {
+            type: Number,
+        },
+        documents: {
+            type: [String],
+            default: [],
+        },
+        rejectionNote: {
+            type: String,
+        },
+        approvalNote: {
+            type: String,
+        },
+        editHistory: [
+            {
+                editedAt: { type: Date, default: Date.now },
+                editedBy: { type: mongoose.Schema.Types.ObjectId },
+                editorRole: { type: String },
+                previousStatus: { type: String },
+                changesSummary: { type: String },
+            }
+        ]
     },
     { timestamps: true }
 );
