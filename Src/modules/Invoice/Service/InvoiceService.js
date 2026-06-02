@@ -750,7 +750,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         }
         
         // Find driver by license number
-        const driver = await Driver.findOne({ "personalInfo.licenseNumber": row.licenseNumber, isDeleted: false });
+        const driver = await Driver.findOne({ "drivingLicense.licenseNumber": row.licenseNumber, isDeleted: false });
         if (!driver) {
             errors.push(`Row ${i + 1}: Driver with license ${row.licenseNumber} not found`);
             continue;
@@ -788,6 +788,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             invoiceNumber,
             invoiceType: invoiceType,
             driver: driver._id,
+            vehicle: driver.currentVehicle,
             weekNumber: invoiceType === 'RENTAL' ? nextWeekNumber : undefined,
             weekLabel: row.weekLabel || (invoiceType === 'RENTAL' ? `Week ${nextWeekNumber}` : invoiceType),
             dueDate,
