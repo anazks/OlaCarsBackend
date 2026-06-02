@@ -4,51 +4,83 @@ const {
     createPaymentRequest,
     getPaymentRequests,
     getPaymentRequestById,
-    updatePaymentRequestStatus,
+    updateStatus,
     deletePaymentRequest,
 } = require("../Controller/PaymentRequestController");
-
-const { authenticate } = require("../../../shared/middlewares/authMiddleware");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
-const { ROLES } = require("../../../shared/constants/roles");
+const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
+const { ROLES } = require("../../../shared/constants/roles.js");
 const upload = require("../../../utils/multerConfig");
 
-// ── Routes ───────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * tags:
+ *   name: PaymentRequest
+ *   description: Payment Request Management (Country Manager → Financial Admin)
+ */
 
-// POST /api/payment-requests - Submit new payment request
+/**
+ * POST /api/payment-requests
+ * Country Manager submits a payment request to Financial Admin
+ */
 router.post(
     "/",
     authenticate,
+    authorize(ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     upload.single("supportingDocument"),
     createPaymentRequest
 );
 
-// GET /api/payment-requests - Get all payment requests (filtered by role/filters)
+/**
+ * GET /api/payment-requests
+ * Country Manager sees own requests; Financial Admin sees all
+ */
 router.get(
     "/",
     authenticate,
+    authorize(
+        ROLES.COUNTRYMANAGER,
+        ROLES.FINANCEADMIN,
+        ROLES.ADMIN,
+        ROLES.OPERATIONADMIN
+    ),
     getPaymentRequests
 );
 
-// GET /api/payment-requests/:id - Get a single payment request
+/**
+ * GET /api/payment-requests/:id
+ */
 router.get(
     "/:id",
     authenticate,
+    authorize(
+        ROLES.COUNTRYMANAGER,
+        ROLES.FINANCEADMIN,
+        ROLES.ADMIN,
+        ROLES.OPERATIONADMIN
+    ),
     getPaymentRequestById
 );
 
-// PATCH /api/payment-requests/:id/status - Update status (Finance Admin & Admin only)
+/**
+ * PATCH /api/payment-requests/:id/status
+ * Financial Admin reviews and updates status
+ */
 router.patch(
     "/:id/status",
     authenticate,
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    updatePaymentRequestStatus
+    authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
+    updateStatus
 );
 
-// DELETE /api/payment-requests/:id - Delete payment request (only creator, only INITIATED)
+/**
+ * DELETE /api/payment-requests/:id
+ * Only the creator can delete INITIATED requests
+ */
 router.delete(
     "/:id",
     authenticate,
+    authorize(ROLES.COUNTRYMANAGER, ROLES.ADMIN),
     deletePaymentRequest
 );
 

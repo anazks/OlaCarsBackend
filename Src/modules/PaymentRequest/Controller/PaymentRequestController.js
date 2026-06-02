@@ -1,42 +1,32 @@
-const { PaymentRequest } = require("../Model/PaymentRequestModel");
+const service = require("../Service/PaymentRequestService");
 const uploadLocal = require("../../../utils/uploadLocal");
 
-const roleModelMap = {
-    admin: "Admin",
-    countrymanager: "CountryManager",
-    financeadmin: "FinanceAdmin",
-    branchmanager: "BranchManager",
-    operationaladmin: "OperationalAdmin",
-};
 
-// ─── Create Payment Request ──────────────────────────────────────────────────
+/**
+ * POST /api/payment-requests
+ * Create a new payment request (Country Manager)
+ */
 const createPaymentRequest = async (req, res) => {
     try {
-        const user = req.user;
-        const userRole = (user.role || "").toLowerCase();
-        const requestedByRole = roleModelMap[userRole] || "Admin";
-
         const {
             amount,
+            currency,
             reason,
             expectedPaymentDate,
-            currency = "USD",
             additionalNotes,
-            category = "OPERATIONAL",
+            category,
             country,
             branchId,
         } = req.body;
 
-        if (!amount || amount <= 0) {
-            return res.status(400).json({ success: false, message: "Please provide a valid amount." });
-        }
-        if (!reason || !reason.trim()) {
-            return res.status(400).json({ success: false, message: "Please provide a reason." });
-        }
-        if (!expectedPaymentDate) {
-            return res.status(400).json({ success: false, message: "Please provide an expected payment date." });
+        if (!amount || !reason || !expectedPaymentDate) {
+            return res.status(400).json({
+                success: false,
+                message: "amount, reason, and expectedPaymentDate are required.",
+            });
         }
 
+        // Handle optional file upload (memory storage - use uploadLocal)
         let supportingDocument;
         if (req.file) {
             const fileUrl = uploadLocal(req.file, "payment-requests");
@@ -47,214 +37,120 @@ const createPaymentRequest = async (req, res) => {
             };
         }
 
-        const userId = user.id || user._id;
-
-        const request = await PaymentRequest.create({
-            requestedBy: userId,
-            requestedByRole,
-            country: country || user.country || "US",
-            branchId: branchId || undefined,
+        const pr = await service.createPaymentRequest({
+            requestedBy: req.user.id,
+            requestedByRole: req.user.role,
+            country: country || req.user.country,
+            branchId,
             amount: Number(amount),
             currency,
             reason,
-            expectedPaymentDate: new Date(expectedPaymentDate),
+            expectedPaymentDate,
             additionalNotes,
             category,
             supportingDocument,
-            statusHistory: [
-                {
-                    status: "INITIATED",
-                    changedBy: userId,
-                    changedByRole: requestedByRole,
-                    timestamp: new Date(),
-                    notes: "Payment request submitted.",
-                }
-            ]
         });
 
         return res.status(201).json({
             success: true,
             message: "Payment request submitted successfully.",
-            data: request,
+            data: pr,
         });
-    } catch (error) {
-        console.error("[PaymentRequest] Create error:", error);
-        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    } catch (err) {
+        console.error("[PaymentRequest] createPaymentRequest error:", err);
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// ─── Get Payment Requests ────────────────────────────────────────────────────
+/**
+ * GET /api/payment-requests
+ * List all payment requests (Financial Admin sees all; Country Manager sees own)
+ */
 const getPaymentRequests = async (req, res) => {
     try {
-        const user = req.user;
-        const userRole = (user.role || "").toLowerCase();
-        const userId = user.id || user._id;
+        const filters = { ...req.query };
 
-        const { status, country, page = 1, limit = 50 } = req.query;
-        const query = {};
-
-        // Filtering based on role
-        const isGlobalFinance = ["admin", "financeadmin"].includes(userRole);
-        if (!isGlobalFinance) {
-            query.requestedBy = userId;
+        // Country managers can only see their own requests
+        if (req.user.role === "countrymanager" || req.user.role === "CountryManager") {
+            filters.requestedBy = req.user.id;
         }
 
-        if (status) query.status = status;
-        if (country) query.country = country;
-
-        const total = await PaymentRequest.countDocuments(query);
-        const requests = await PaymentRequest.find(query)
-            .sort({ createdAt: -1 })
-            .skip((Number(page) - 1) * Number(limit))
-            .limit(Number(limit))
-            .populate("requestedBy", "fullName email")
-            .populate("branchId", "name city");
+        const result = await service.getPaymentRequests(filters);
 
         return res.status(200).json({
             success: true,
-            data: requests,
-            pagination: {
-                total,
-                page: Number(page),
-                limit: Number(limit),
-                pages: Math.ceil(total / Number(limit)),
-            }
+            ...result,
         });
-    } catch (error) {
-        console.error("[PaymentRequest] Get error:", error);
-        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    } catch (err) {
+        console.error("[PaymentRequest] getPaymentRequests error:", err);
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// ─── Get Single Payment Request by ID ────────────────────────────────────────
+/**
+ * GET /api/payment-requests/:id
+ */
 const getPaymentRequestById = async (req, res) => {
     try {
-        const user = req.user;
-        const userRole = (user.role || "").toLowerCase();
-        const userId = user.id || user._id;
-
-        const request = await PaymentRequest.findById(req.params.id)
-            .populate("requestedBy", "fullName email")
-            .populate("reviewedBy", "fullName email")
-            .populate("branchId", "name city");
-
-        if (!request) {
+        const pr = await service.getPaymentRequestById(req.params.id);
+        if (!pr) {
             return res.status(404).json({ success: false, message: "Payment request not found." });
         }
-
-        // Access check
-        const isGlobalFinance = ["admin", "financeadmin"].includes(userRole);
-        if (!isGlobalFinance && String(request.requestedBy._id) !== String(userId)) {
-            return res.status(403).json({ success: false, message: "Unauthorized access to this payment request." });
-        }
-
-        return res.status(200).json({ success: true, data: request });
-    } catch (error) {
-        console.error("[PaymentRequest] GetById error:", error);
-        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+        return res.status(200).json({ success: true, data: pr });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// ─── Update Payment Request Status ───────────────────────────────────────────
-const updatePaymentRequestStatus = async (req, res) => {
+/**
+ * PATCH /api/payment-requests/:id/status
+ * Update status (Financial Admin only)
+ */
+const updateStatus = async (req, res) => {
     try {
-        const user = req.user;
-        const userRole = (user.role || "").toLowerCase();
-        const userId = user.id || user._id;
-        const reviewerRole = roleModelMap[userRole] || "FinanceAdmin";
-
         const { status, reviewNotes } = req.body;
-
         if (!status) {
-            return res.status(400).json({ success: false, message: "Please provide a target status." });
+            return res.status(400).json({ success: false, message: "status is required." });
         }
 
-        const request = await PaymentRequest.findById(req.params.id);
-        if (!request) {
-            return res.status(404).json({ success: false, message: "Payment request not found." });
-        }
-
-        // Allowed transitions validation
-        const allowedTransitions = {
-            INITIATED: ["UNDER_REVIEW", "APPROVED", "REJECTED"],
-            UNDER_REVIEW: ["APPROVED", "REJECTED"],
-            APPROVED: ["PAID"],
-            REJECTED: [],
-            PAID: [],
-        };
-
-        const currentAllowed = allowedTransitions[request.status] || [];
-        if (!currentAllowed.includes(status)) {
-            return res.status(400).json({
-                success: false,
-                message: `Status transition from ${request.status} to ${status} is not allowed.`,
-            });
-        }
-
-        // Update fields
-        request.status = status;
-        request.reviewedBy = userId;
-        request.reviewedByRole = reviewerRole;
-        request.reviewedAt = new Date();
-        if (reviewNotes) {
-            request.reviewNotes = reviewNotes;
-        }
-
-        // Add history entry
-        request.statusHistory.push({
+        const pr = await service.updateStatus(
+            req.params.id,
             status,
-            changedBy: userId,
-            changedByRole: reviewerRole,
-            timestamp: new Date(),
-            notes: reviewNotes || `Status updated to ${status}.`,
-        });
-
-        await request.save();
-
-        // Populate and return
-        const populated = await PaymentRequest.findById(request._id)
-            .populate("requestedBy", "fullName email")
-            .populate("reviewedBy", "fullName email")
-            .populate("branchId", "name city");
+            req.user.id,
+            req.user.role,
+            reviewNotes
+        );
 
         return res.status(200).json({
             success: true,
-            message: `Payment request status updated to ${status} successfully.`,
-            data: populated,
+            message: `Payment request status updated to ${status}.`,
+            data: pr,
         });
-    } catch (error) {
-        console.error("[PaymentRequest] Update status error:", error);
-        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
-// ─── Delete Payment Request ──────────────────────────────────────────────────
+/**
+ * DELETE /api/payment-requests/:id
+ * Only INITIATED requests can be deleted, by the creator
+ */
 const deletePaymentRequest = async (req, res) => {
     try {
-        const userId = req.user.id || req.user._id;
-
-        const request = await PaymentRequest.findById(req.params.id);
-        if (!request) {
+        const pr = await service.getPaymentRequestById(req.params.id);
+        if (!pr) {
             return res.status(404).json({ success: false, message: "Payment request not found." });
         }
-
-        if (String(request.requestedBy) !== String(userId)) {
-            return res.status(403).json({ success: false, message: "Only the creator can delete this request." });
+        if (pr.status !== "INITIATED") {
+            return res.status(400).json({
+                success: false,
+                message: "Only INITIATED requests can be deleted.",
+            });
         }
-
-        if (request.status !== "INITIATED") {
-            return res.status(400).json({ success: false, message: "Only INITIATED payment requests can be deleted." });
-        }
-
-        await PaymentRequest.findByIdAndDelete(req.params.id);
-
-        return res.status(200).json({
-            success: true,
-            message: "Payment request deleted successfully.",
-        });
-    } catch (error) {
-        console.error("[PaymentRequest] Delete error:", error);
-        return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+        await service.deletePaymentRequest(req.params.id);
+        return res.status(200).json({ success: true, message: "Payment request deleted." });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
@@ -262,6 +158,6 @@ module.exports = {
     createPaymentRequest,
     getPaymentRequests,
     getPaymentRequestById,
-    updatePaymentRequestStatus,
+    updateStatus,
     deletePaymentRequest,
 };

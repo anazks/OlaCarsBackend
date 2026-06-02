@@ -6,6 +6,7 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
+const { createDefaultMerchendise } = require("./Src/bootstrap/createDefaultMerchendise");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
 const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
 const { seedBranchPermissions } = require("./Src/bootstrap/seedBranchPermissions");
@@ -21,6 +22,8 @@ const OperationStaffRouter = require("./Src/modules/OperationStaff/Routes/Operat
 const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceStaffRoutes");
 const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
 const WorkshopManagerRouter = require("./Src/modules/WorkshopManager/Routes/WorkshopManagerRoutes");
+const MerchendiseRouter = require("./Src/modules/Merchendise/Routes/MerchendiseRoutes");
+
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
 const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
@@ -118,6 +121,7 @@ app.use("/api/finance-admin", FinanceAdminRouter);
 app.use("/api/operational-admin", OperationAdminRouter);
 app.use("/api/branch-manager", BranchManagerRouter);
 app.use("/api/user", UserRouter);
+app.use("/api/merchendise", MerchendiseRouter);
 app.use("/api/operation-staff", OperationStaffRouter);
 app.use("/api/finance-staff", FinanceStaffRouter);
 app.use("/api/workshop-staff", WorkshopStaffRouter);
@@ -199,6 +203,9 @@ const startServer = async () => {
 
     await createDefaultAdmin();
     console.log("Default admin verified");
+
+    await createDefaultMerchendise();
+    console.log("Default merchandiser verified/seeded");
 
     await seedSystemSettings();
     console.log("System settings verified/seeded");
