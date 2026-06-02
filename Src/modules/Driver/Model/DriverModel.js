@@ -348,7 +348,7 @@ const driverSchema = new mongoose.Schema(
 // ─── Performance Indexes ──────────────────────────────────────────────
 driverSchema.index({ status: 1 });
 driverSchema.index({ branch: 1 });
-driverSchema.index({ "personalInfo.email": 1 }, { unique: true, sparse: true });
+driverSchema.index({ "personalInfo.email": 1 }, { sparse: true });
 driverSchema.index({ "drivingLicense.expiryDate": 1 });
 driverSchema.index({ "medicalFitness.expiryDate": 1 });
 

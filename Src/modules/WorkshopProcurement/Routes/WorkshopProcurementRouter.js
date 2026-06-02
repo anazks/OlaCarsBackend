@@ -37,7 +37,7 @@ router.get(
 router.put(
     "/:id/approve",
     authenticate,
-    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.MERCHENDISE, ROLES.ADMIN),
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCEADMIN, ROLES.MERCHENDISE, ROLES.ADMIN),
     approveRequest
 );
 

@@ -139,7 +139,13 @@ exports.update = async (id, body) => {
         await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
 
-    const updated = await CountryManager.findByIdAndUpdate(id, filtered, {
+    const updateQuery = { ...filtered };
+    if (updateQuery.status === 'ACTIVE') {
+        updateQuery.failedLoginAttempts = 0;
+        updateQuery.$unset = { lockUntil: 1 };
+    }
+
+    const updated = await CountryManager.findByIdAndUpdate(id, updateQuery, {
         new: true,
         runValidators: true,
     }).select('-passwordHash -refreshToken');
