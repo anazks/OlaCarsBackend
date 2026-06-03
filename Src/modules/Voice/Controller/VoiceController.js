@@ -175,18 +175,28 @@ exports.getLeaseSchemes = async (req, res, next) => {
     }
 };
 
+// Friendly "no account" response so the voice agent gets a clean, deterministic
+// signal instead of a 400/404 error (which ElevenLabs logs as "Tool failed").
+// Returned when the caller is not a recognised customer — the agent reads the
+// message and offers a callback rather than retrying.
+const NO_ACCOUNT_RESPONSE = {
+    success: true,
+    has_account: false,
+    message: "NO_ACCOUNT: No account is linked to this number. Do not retry this tool. Tell the caller you don't see an account on file and offer to take their details for a team callback."
+};
+
 exports.getAccountStatus = async (req, res, next) => {
     try {
         const { customerId } = req.params;
 
         if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
-            return res.status(400).json({ success: false, error: "Invalid customer ID" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
 
         const driver = await Driver.findById(customerId);
 
         if (!driver) {
-            return res.status(404).json({ success: false, error: "Customer not found" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
 
         const pendingWeeks = driver.rentTracking
@@ -204,6 +214,7 @@ exports.getAccountStatus = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
+            has_account: true,
             customer_name: driver.personalInfo?.fullName || "Cliente",
             pending_weeks: pendingWeeks,
             total_due: totalDue,
