@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const WorkshopProcurementSchema = new mongoose.Schema(
+const WriteOffSchema = new mongoose.Schema(
     {
         requestNumber: {
             type: String,
@@ -17,9 +17,27 @@ const WorkshopProcurementSchema = new mongoose.Schema(
             required: true,
             min: 1,
         },
+        unitCost: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        amountLoss: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        reason: {
+            type: String,
+            required: true,
+        },
+        documents: {
+            type: [String],
+            default: [],
+        },
         status: {
             type: String,
-            enum: ["PENDING", "APPROVED", "REJECTED", "CONVERTED_TO_PO", "PENDING_FINANCE_APPROVAL"],
+            enum: ["PENDING", "APPROVED", "REJECTED"],
             default: "PENDING",
         },
         branch: {
@@ -43,30 +61,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         approvedByRole: {
             type: String,
-            enum: ["WORKSHOPMANAGER", "BRANCHMANAGER", "ADMIN", "FINANCEADMIN"],
-        },
-        rejectionReason: {
-            type: String,
-        },
-        supplier: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Supplier",
-        },
-        notes: {
-            type: String,
-        },
-        merchandiserPrice: {
-            type: Number,
-        },
-        merchandiserTotalAmount: {
-            type: Number,
-        },
-        originalTotalAmount: {
-            type: Number,
-        },
-        documents: {
-            type: [String],
-            default: [],
+            enum: ["FINANCEADMIN", "ADMIN"],
         },
         rejectionNote: {
             type: String,
@@ -74,17 +69,8 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         approvalNote: {
             type: String,
         },
-        editHistory: [
-            {
-                editedAt: { type: Date, default: Date.now },
-                editedBy: { type: mongoose.Schema.Types.ObjectId },
-                editorRole: { type: String },
-                previousStatus: { type: String },
-                changesSummary: { type: String },
-            }
-        ]
     },
     { timestamps: true }
 );
 
-module.exports = mongoose.model("WorkshopProcurement", WorkshopProcurementSchema);
+module.exports = mongoose.model("WriteOff", WriteOffSchema);
