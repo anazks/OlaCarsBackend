@@ -56,6 +56,42 @@ exports.testOutboundCall = async (req, res) => {
     }
 };
 
+// Match a caller phone against stored driver phones regardless of formatting.
+// ElevenLabs may send "917907017504" while the driver is stored as
+// "+917907017504" (or with spaces/dashes), so exact match is unreliable. We try
+// a set of normalised candidates, then fall back to matching the trailing digits.
+const findDriverByPhone = async (callerId) => {
+    const digits = String(callerId).replace(/\D/g, "");
+    if (!digits) return null;
+
+    const candidates = new Set([
+        String(callerId).trim(),   // exactly as received
+        digits,                    // 917907017504
+        "+" + digits,              // +917907017504
+        digits.slice(-10),         // 7907017504 (local without country code)
+        "+" + digits.slice(-10)
+    ]);
+
+    let driver = await Driver.findOne({
+        "personalInfo.phone": { $in: [...candidates] },
+        isDeleted: false
+    });
+
+    // Fallback: stored number ends with the same trailing digits (covers
+    // country-code differences). Min 8 digits to avoid collisions. The \D*
+    // between digits tolerates stored separators e.g. "+507 6123-4567".
+    if (!driver && digits.length >= 8) {
+        const last8 = digits.slice(-8);
+        const pattern = last8.split("").join("\\D*") + "$";
+        driver = await Driver.findOne({
+            "personalInfo.phone": { $regex: pattern },
+            isDeleted: false
+        });
+    }
+
+    return driver;
+};
+
 exports.initiateCall = async (req, res) => {
     const { caller_id } = req.body;
     const fallback = {
@@ -72,7 +108,7 @@ exports.initiateCall = async (req, res) => {
     if (!caller_id) return res.json(fallback);
 
     try {
-        const driver = await Driver.findOne({ "personalInfo.phone": caller_id, isDeleted: false });
+        const driver = await findDriverByPhone(caller_id);
 
         if (driver) {
             return res.json({
