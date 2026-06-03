@@ -229,11 +229,22 @@ exports.getAccountStatus = async (req, res, next) => {
             return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
 
-        const driver = await Driver.findById(customerId);
+        const driver = await Driver.findById(customerId)
+            .populate("currentVehicle", "basicDetails legalDocs");
 
         if (!driver) {
             return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
+
+        // Leased vehicle so the agent can answer "which car did I lease?"
+        const v = driver.currentVehicle;
+        const leasedVehicle = v ? {
+            make: v.basicDetails?.make?.trim() || null,
+            model: v.basicDetails?.model?.trim() || null,
+            year: v.basicDetails?.year || null,
+            colour: v.basicDetails?.colour?.trim() || null,
+            plate: v.legalDocs?.registrationNumber || null
+        } : null;
 
         const pendingWeeks = driver.rentTracking
             ?.filter(week => week.status === "PENDING" || week.status === "PARTIAL")
@@ -252,6 +263,7 @@ exports.getAccountStatus = async (req, res, next) => {
             success: true,
             has_account: true,
             customer_name: driver.personalInfo?.fullName || "Cliente",
+            leased_vehicle: leasedVehicle,
             pending_weeks: pendingWeeks,
             total_due: totalDue,
             next_due_date: nextDueDate
