@@ -115,9 +115,16 @@ exports.getAvailableVehicles = async (req, res, next) => {
             branch: v.purchaseDetails?.branch?.name || "Unknown"
         }));
 
+        // Loud, unambiguous empty-state so the voice agent cannot gloss over an
+        // empty array and hallucinate vehicles. The message is an explicit
+        // instruction the LLM reads directly.
         res.status(200).json({
             success: true,
-            vehicles: formattedVehicles
+            available_count: formattedVehicles.length,
+            vehicles: formattedVehicles,
+            message: formattedVehicles.length === 0
+                ? "NO_VEHICLES_AVAILABLE: There are zero vehicles to offer. Do not invent or name any vehicle. Tell the customer none are available right now and offer to have a team member contact them."
+                : undefined
         });
     } catch (error) {
         next(error);
@@ -152,31 +159,16 @@ exports.getLeaseSchemes = async (req, res, next) => {
             };
         });
 
-        // Fallback static schemes if no active vehicles found
-        if (formattedSchemes.length === 0) {
-            formattedSchemes.push(
-                {
-                    category: "Sedan",
-                    weeklyRent: 150,
-                    durationWeeks: 52,
-                    totalCost: 7800,
-                    monthlyEquivalent: 600,
-                    maintenanceIncluded: true
-                },
-                {
-                    category: "SUV",
-                    weeklyRent: 200,
-                    durationWeeks: 52,
-                    totalCost: 10400,
-                    monthlyEquivalent: 800,
-                    maintenanceIncluded: true
-                }
-            );
-        }
-
+        // No static fallback: never quote prices that don't reflect real inventory.
+        // When there are no active vehicles, return an empty list so the agent can
+        // say promotions aren't available right now rather than reading dummy data.
         res.status(200).json({
             success: true,
-            schemes: formattedSchemes
+            scheme_count: formattedSchemes.length,
+            schemes: formattedSchemes,
+            message: formattedSchemes.length === 0
+                ? "NO_SCHEMES_AVAILABLE: There are zero lease schemes to offer. Do not invent or quote any price. Tell the customer plans are not available right now and offer to have a team member contact them."
+                : undefined
         });
     } catch (error) {
         next(error);
