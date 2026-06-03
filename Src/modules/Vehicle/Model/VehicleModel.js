@@ -65,7 +65,7 @@ const vehicleSchema = new mongoose.Schema(
             year: { type: Number },
             category: {
                 type: String,
-                enum: ["Sedan", "SUV", "Pickup", "Van", "Luxury", "Commercial"],
+                enum: ["Sedan", "SEDAN", "sedan", "SUV", "Pickup", "PICKUP", "Van", "VAN", "Luxury", "LUXURY", "Commercial", "COMMERCIAL", "MUV"],
             },
             fuelType: {
                 type: String,

@@ -744,17 +744,29 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        if (!row.licenseNumber) {
-            errors.push(`Row ${i + 1}: Missing licenseNumber`);
+        const driverNameInput = row.fullName || row.driverName || row["Full Name"] || row["Driver Name"];
+        if (!driverNameInput) {
+            errors.push(`Row ${i + 1}: Missing driver name`);
             continue;
         }
         
-        // Find driver by license number
-        const driver = await Driver.findOne({ "drivingLicense.licenseNumber": row.licenseNumber, isDeleted: false });
-        if (!driver) {
-            errors.push(`Row ${i + 1}: Driver with license ${row.licenseNumber} not found`);
+        // Find driver by full name (case-insensitive)
+        const drivers = await Driver.find({ 
+            "personalInfo.fullName": { $regex: new RegExp(`^${driverNameInput.trim()}$`, "i") }, 
+            isDeleted: false 
+        });
+
+        if (drivers.length === 0) {
+            errors.push(`Row ${i + 1}: Driver with name "${driverNameInput}" not found`);
             continue;
         }
+
+        if (drivers.length > 1) {
+            errors.push(`Row ${i + 1}: Multiple drivers found with name "${driverNameInput}" (ambiguous driver)`);
+            continue;
+        }
+
+        const driver = drivers[0];
 
         const baseAmount = Number(row.amount) || 0;
         const amountPaid = Number(row.amountPaid) || 0;

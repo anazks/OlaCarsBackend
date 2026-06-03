@@ -61,9 +61,26 @@ const getLedgerEntries = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
+        // Calculate total summary stats for matching query using find + select to leverage Mongoose's schema casting
+        const allMatching = await LedgerEntry.find(query).select("type amount");
+        let totalDebit = 0;
+        let totalCredit = 0;
+        for (const entry of allMatching) {
+            if (entry.type === "DEBIT") {
+                totalDebit += entry.amount || 0;
+            } else if (entry.type === "CREDIT") {
+                totalCredit += entry.amount || 0;
+            }
+        }
+
         return res.status(200).json({ 
             success: true, 
             data: entries,
+            summary: {
+                totalDebit,
+                totalCredit,
+                netMovement: Math.abs(totalCredit - totalDebit)
+            },
             pagination: {
                 total,
                 page,
