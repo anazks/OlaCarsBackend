@@ -101,7 +101,7 @@ exports.getDriversService = async (queryParams = {}, options = {}) => {
         }
 
         const queryOptions = {
-            searchFields: ["personalInfo.fullName", "personalInfo.email", "driverId"],
+            searchFields: ["personalInfo.fullName", "personalInfo.email", "driverId", "drivingLicense.licenseNumber", "status"],
             filterFields: ["status", "branch"],
             dateFilterField: "createdAt",
             populate: { path: "branch", select: "name code city state country" },

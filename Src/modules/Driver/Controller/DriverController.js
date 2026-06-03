@@ -476,7 +476,8 @@ const dataMigrateDrivers = async (req, res) => {
 
         for (let i = 0; i < drivers.length; i++) {
             const row = drivers[i];
-            const rowNum = i + 1;
+            // Use the client-provided originalRow or fallback to loop index (1-based)
+            const rowNum = row.originalRow || (i + 1);
 
             // Validate required fields
             if (!row.fullName || !String(row.fullName || "").trim()) {
@@ -490,18 +491,43 @@ const dataMigrateDrivers = async (req, res) => {
 
             try {
                 let vehicleId = null;
-                let isVehicleUpdated = false;
+                let isNewlyCreatedVehicle = false; // Track for rollback on driver failure
+
+                // Sanitize Excel formula errors (#REF!, #N/A, #VALUE!, etc.) from all fields
+                for (const key of Object.keys(row)) {
+                    if (typeof row[key] === "string" && /^#(REF|N\/A|VALUE|NAME|NULL|DIV\/0|NUM)!?$/i.test(row[key].trim())) {
+                        row[key] = undefined;
+                    }
+                }
+
+                // Normalize vehicleCategory to match Mongoose enum (case-insensitive mapping)
+                if (row.vehicleCategory) {
+                    const categoryMap = {
+                        "sedan": "Sedan", "suv": "SUV", "pickup": "Pickup",
+                        "van": "Van", "luxury": "Luxury", "commercial": "Commercial", "muv": "MUV"
+                    };
+                    const normalized = categoryMap[String(row.vehicleCategory).trim().toLowerCase()];
+                    if (normalized) row.vehicleCategory = normalized;
+                }
 
                 // ── 1. Vehicle Logic ──
                 let existingVehicle = null;
                 if (row.vehicleVin && String(row.vehicleVin || "").trim()) {
-                    existingVehicle = await Vehicle.findOne({ "basicDetails.vin": String(row.vehicleVin || "").trim() });
+                    const vinStr = String(row.vehicleVin || "").trim().toUpperCase();
+                    existingVehicle = await Vehicle.findOne({ "basicDetails.vin": vinStr });
                 }
                 if (!existingVehicle && row.vehicleNumber && String(row.vehicleNumber || "").trim()) {
-                    existingVehicle = await Vehicle.findOne({ "legalDocs.registrationNumber": String(row.vehicleNumber || "").trim() });
+                    const regNum = String(row.vehicleNumber || "").trim().toUpperCase();
+                    existingVehicle = await Vehicle.findOne({ 
+                        "legalDocs.registrationNumber": { $regex: new RegExp("^" + regNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") } 
+                    });
                 }
 
                 if (existingVehicle) {
+                    if (!updateExisting) {
+                        throw new Error(`Vehicle with plate/VIN '${row.vehicleNumber}' already exists. Enable 'Update existing records' to associate.`);
+                    }
+
                     const newFleetNumber = staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim();
                     const currentFleetNumber = existingVehicle.basicDetails.fleetNumber;
 
@@ -526,7 +552,6 @@ const dataMigrateDrivers = async (req, res) => {
                         await updateVehicleService(existingVehicle._id, vehicleUpdateData);
                     }
                     vehicleId = existingVehicle._id;
-                    isVehicleUpdated = true;
                 } else {
                     // Create new vehicle
                     const vehicleData = {
@@ -540,7 +565,7 @@ const dataMigrateDrivers = async (req, res) => {
                             category: row.vehicleCategory ? row.vehicleCategory.trim() : undefined,
                             fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                             colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
-                            vin: row.vehicleVin ? String(row.vehicleVin || "").trim() : undefined,
+                            vin: row.vehicleVin ? String(row.vehicleVin || "").trim().toUpperCase() : undefined,
                             fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
                         },
                         legalDocs: {
@@ -558,41 +583,64 @@ const dataMigrateDrivers = async (req, res) => {
                     };
                     const newVehicle = await addVehicleService(vehicleData);
                     vehicleId = newVehicle._id;
+                    isNewlyCreatedVehicle = true;
                 }
 
                 // ── 2. Driver Logic ──
                 let existingDriver = null;
 
-                // Create a flexible name regex to handle extra spaces and case insensitivity
-                const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
+                const isNameSimilar = (name1, name2) => {
+                    if (!name1 || !name2) return false;
+                    const tokens1 = String(name1).toLowerCase().split(/\s+/).filter(t => t.length >= 3);
+                    const tokens2 = String(name2).toLowerCase().split(/\s+/).filter(t => t.length >= 3);
+                    return tokens1.some(t => tokens2.includes(t));
+                };
 
-                // 1. Try to match by currentVehicle (strongest link)
-                if (vehicleId) {
-                    existingDriver = await Driver.findOne({ 
-                        "personalInfo.fullName": nameRegex,
-                        "currentVehicle": vehicleId
-                    });
+                // 1. Try to match by email
+                if (row.email && String(row.email || "").trim()) {
+                    const match = await Driver.findOne({ "personalInfo.email": String(row.email || "").trim().toLowerCase() });
+                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
                 }
 
-                // 2. Try to match by licenseNumber
+                // 2. Try to match by phone
+                if (!existingDriver && row.phone && String(row.phone || "").trim()) {
+                    const match = await Driver.findOne({ "personalInfo.phone": String(row.phone || "").trim() });
+                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
+                }
+
+                // 3. Try to match by licenseNumber
                 if (!existingDriver && row.licenseNumber && String(row.licenseNumber || "").trim()) {
-                    existingDriver = await Driver.findOne({ 
-                        "personalInfo.fullName": nameRegex,
-                        "drivingLicense.licenseNumber": String(row.licenseNumber || "").trim() 
-                    });
+                    const match = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber || "").trim() });
+                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
                 }
 
-                // 3. Try to match by fullName alone (last resort)
-                if (!existingDriver) {
+                // 4. Try to match by fullName alone (flexible regex)
+                if (!existingDriver && row.fullName && String(row.fullName || "").trim()) {
+                    const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
                     existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex });
                 }
 
+                let driverId;
+                let driverIdString;
+                let isUpdated = false;
+
                 if (existingDriver) {
+                    if (!updateExisting) {
+                        throw new Error(`Driver '${row.fullName}' already exists in the database. Enable 'Update existing records' to modify.`);
+                    }
+
                     // Update existing driver
                     const driverUpdateData = {};
                     if (row.fullName) driverUpdateData["personalInfo.fullName"] = String(row.fullName || "").trim();
                     if (row.email) driverUpdateData["personalInfo.email"] = String(row.email || "").trim().toLowerCase();
+                    if (row.phone) driverUpdateData["personalInfo.phone"] = String(row.phone || "").trim();
                     if (row.whatsappNumber) driverUpdateData["personalInfo.whatsappNumber"] = String(row.whatsappNumber || "").trim();
                     if (row.dateOfBirth) driverUpdateData["personalInfo.dateOfBirth"] = row.dateOfBirth;
                     if (row.nationality) driverUpdateData["personalInfo.nationality"] = String(row.nationality || "").trim();
@@ -620,24 +668,9 @@ const dataMigrateDrivers = async (req, res) => {
                         await updateDriverService(existingDriver._id, driverUpdateData);
                     }
 
-                    // Generate Rent Plan if provided
-                    if (row.weeklyRent && row.durationWeeks) {
-                        await DriverService.generateMigrationRentPlan(existingDriver._id, {
-                            weeklyRent: Number(row.weeklyRent),
-                            durationWeeks: Number(row.durationWeeks),
-                            activationDate: row.activationDate || undefined
-                        });
-                    }
-
-                    results.created.push({
-                        row: rowNum,
-                        driverId: existingDriver.driverId,
-                        driverDbId: existingDriver._id,
-                        vehicleId: vehicleId,
-                        name: row.fullName,
-                        vehicleNumber: row.vehicleNumber,
-                        updated: true
-                    });
+                    driverId = existingDriver._id;
+                    driverIdString = existingDriver.driverId;
+                    isUpdated = true;
                 } else {
                     // Create new driver
                     const driverData = {
@@ -674,39 +707,54 @@ const dataMigrateDrivers = async (req, res) => {
                         creatorRole: userRole,
                     };
                     const newDriver = await DriverService.create(driverData);
+                    driverId = newDriver._id;
+                    driverIdString = newDriver.driverId;
+                }
 
-                    console.log("[DEBUG MIGRATION] newDriver._id:", newDriver._id, "weeklyRent:", row.weeklyRent, "durationWeeks:", row.durationWeeks, "activationDate:", row.activationDate);
+                // ── 3. Establish Bidirectional Link ──
+                if (vehicleId && driverId) {
+                    await Vehicle.findByIdAndUpdate(vehicleId, { currentDriver: driverId });
+                }
 
-                    // Generate Rent Plan if provided
-                    if (row.weeklyRent && row.durationWeeks) {
-                        const rentResult = await DriverService.generateMigrationRentPlan(newDriver._id, {
-                            weeklyRent: Number(row.weeklyRent),
-                            durationWeeks: Number(row.durationWeeks),
-                            activationDate: row.activationDate || undefined
-                        });
-                        console.log("[DEBUG MIGRATION] generateMigrationRentPlan returned rentTracking length:", rentResult.rentTracking ? rentResult.rentTracking.length : 0);
-                    } else {
-                        console.log("[DEBUG MIGRATION] Skipped generateMigrationRentPlan because weeklyRent or durationWeeks is missing");
-                    }
-
-                    results.created.push({
-                        row: rowNum,
-                        driverId: newDriver.driverId,
-                        driverDbId: newDriver._id,
-                        vehicleId: vehicleId,
-                        name: row.fullName,
-                        vehicleNumber: row.vehicleNumber,
-                        updated: false
+                // ── 4. Rent Plan Logic ──
+                if (row.weeklyRent && row.durationWeeks) {
+                    await DriverService.generateMigrationRentPlan(driverId, {
+                        weeklyRent: Number(row.weeklyRent),
+                        durationWeeks: Number(row.durationWeeks),
+                        activationDate: row.activationDate || undefined
                     });
                 }
+
+                results.created.push({
+                    row: rowNum,
+                    driverId: driverIdString,
+                    driverDbId: driverId,
+                    vehicleId: vehicleId,
+                    name: row.fullName,
+                    vehicleNumber: row.vehicleNumber,
+                    updated: isUpdated
+                });
             } catch (err) {
-                if (err.message && err.message.includes("E11000") && err.message.includes("email")) {
-                    results.errors.push({ row: rowNum, message: `Email '${row.email}' is already in use by another driver in the database. Please use a unique email.` });
-                } else if (err.message && err.message.includes("E11000") && err.message.includes("phone")) {
-                    results.errors.push({ row: rowNum, message: `Phone number '${row.phone}' is already in use by another driver.` });
-                } else {
-                    results.errors.push({ row: rowNum, message: err.message });
+                // Rollback: delete orphan vehicle if it was just created but driver creation failed
+                if (isNewlyCreatedVehicle && vehicleId) {
+                    try {
+                        await Vehicle.findByIdAndDelete(vehicleId);
+                    } catch (rollbackErr) {
+                        console.error(`[Migration Rollback] Failed to delete orphan vehicle ${vehicleId}:`, rollbackErr.message);
+                    }
                 }
+
+                let errorMsg = err.message || "Unknown error occurred";
+                if (err.message && err.message.includes("E11000")) {
+                    if (err.message.includes("email")) {
+                        errorMsg = `Email '${row.email}' is already in use by another driver in the database. Please use a unique email.`;
+                    } else if (err.message.includes("phone")) {
+                        errorMsg = `Phone number '${row.phone}' is already in use by another driver.`;
+                    } else if (err.message.includes("vin")) {
+                        errorMsg = `VIN '${row.vehicleVin}' is already in use by another vehicle.`;
+                    }
+                }
+                results.errors.push({ row: rowNum, message: errorMsg });
             }
         }
 
@@ -715,10 +763,14 @@ const dataMigrateDrivers = async (req, res) => {
             await handlingStaffObj.save();
         }
 
-        const statusCode = results.created.length > 0 ? 201 : 400;
+        let statusCode = 201;
+        if (results.errors.length > 0) {
+            statusCode = results.created.length > 0 ? 207 : 400;
+        }
+
         return res.status(statusCode).json({
             success: results.created.length > 0,
-            message: `${results.created.length} driver(s) migrated, ${results.errors.length} error(s).`,
+            message: `${results.created.length} driver(s) migrated successfully, ${results.errors.length} error(s).`,
             data: results,
         });
     } catch (error) {
