@@ -39,11 +39,16 @@ const createInsurance = async (req, res) => {
         insuranceData.createdByModel = req.user.role; 
 
         // Assign country dynamically based on requester
-        const userCountry = await getUserCountry(req.user);
-        if (!userCountry) {
-            return res.status(400).json({ success: false, message: "Could not determine the country for this user." });
+        const globalRoles = [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN];
+        if (globalRoles.includes(req.user.role)) {
+            insuranceData.country = req.body.country || "Global";
+        } else {
+            const userCountry = await getUserCountry(req.user);
+            if (!userCountry) {
+                return res.status(400).json({ success: false, message: "Could not determine the country for this user." });
+            }
+            insuranceData.country = userCountry;
         }
-        insuranceData.country = userCountry;
         
         // Create the insurance record first to get its ID for the S3 key
         const newInsurance = await createInsuranceService(insuranceData);

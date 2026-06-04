@@ -438,14 +438,14 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
 
                 
                 // 5. Create a PaymentTransaction referencing the PaymentReceived record
-                // This is transactionType: "CREDIT" on the Cash/Bank Asset Account, 
-                // which LedgerService will process as: Credit Cash/Bank, Debit Accounts Receivable (1200).
+                // This is transactionType: "DEBIT" on the Cash/Bank Asset Account, 
+                // which LedgerService will process as: Debit Cash/Bank, Credit Accounts Receivable (1200).
                 const prTransactionData = {
                     accountingCode: cashBankAccount._id,
                     referenceId: prDoc ? prDoc._id : invoice.driver,
                     referenceModel: prDoc ? "PaymentReceived" : "Driver",
                     transactionCategory: "ASSET",
-                    transactionType: "CREDIT",
+                    transactionType: "DEBIT",
                     isTaxInclusive: false,
                     baseAmount: amount,
                     totalAmount: amount,
