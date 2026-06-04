@@ -18,15 +18,21 @@ const seedAccountingCodes = async () => {
 
         const codesToSeed = [
             {
-                code: "4100",
+                code: "IN0002",
                 name: "Rental Income (Sales)",
                 description: "Revenue earned from driver rentals and vehicle hire.",
                 category: "INCOME",
             },
             {
-                code: "1200",
+                code: "1100",
                 name: "Accounts Receivable",
                 description: "Outstanding payments due from drivers/customers.",
+                category: "ASSET",
+            },
+            {
+                code: "1010",
+                name: "Bank Account",
+                description: "Default bank account for receiving/making payments.",
                 category: "ASSET",
             },
             {

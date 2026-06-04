@@ -173,7 +173,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
 
                 // Find Accounts Receivable account (code 1200)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                const arAccount = await AccountingCode.findOne({ code: "1200" });
+                const arAccount = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
                 
                 if (arAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable`);
@@ -261,8 +261,8 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             return;
         }
 
-        const arAccount = await AccountingCode.findOne({ code: "1200" });
-        const salesAccount = await AccountingCode.findOne({ code: "4100" });
+        const arAccount = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
+        const salesAccount = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
 
         if (!arAccount || !salesAccount) {
             console.error(`[LedgerService] Required accounting codes (1200 or 4100) not found. Skipping invoice ledger generation.`);

@@ -85,12 +85,12 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
     const totalAmount = subtotal + taxAmount - discount;
 
-    // Build accounting entries (Initial recognition)
-    // We'll use 4010 as the primary Income account
+    const arCodeDoc = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
+    const arCode = arCodeDoc ? arCodeDoc.code : "1100";
     const accountingEntries = [
         {
             entryType: "DEBIT",
-            accountCode: "1200", // Accounts Receivable
+            accountCode: arCode, // Accounts Receivable
             accountName: "Accounts Receivable",
             amount: totalAmount,
             description: `Receivable for Workshop Bill ${wo.workOrderNumber}`,
