@@ -178,7 +178,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                 if (arAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable`);
                     
-                    // Leg 1: DEBIT Bank/Cash Account
+                    // Leg 1: DEBIT Bank/Cash Account (Asset increases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
@@ -191,7 +191,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         creatorRole: finalCreatorRole
                     });
 
-                    // Leg 2: CREDIT Accounts Receivable
+                    // Leg 2: CREDIT Accounts Receivable (Asset decreases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
@@ -263,7 +263,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
         const driverName = driverDoc ? (driverDoc.personalInfo?.fullName || driverDoc.name) : "Unknown Driver";
         const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
 
-        // Leg 1: DEBIT Accounts Receivable
+        // Leg 1: DEBIT Accounts Receivable (increases Accounts Receivable Asset)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: arAccount._id,
@@ -275,7 +275,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             creatorRole: invoice.creatorRole
         });
 
-        // Leg 2: CREDIT Rental Income (Sales)
+        // Leg 2: CREDIT Rental Income (Sales) (increases Revenue)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: salesAccount._id,

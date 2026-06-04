@@ -110,6 +110,37 @@ app.use((err, req, res, next) => {
 });
 app.use(express.urlencoded({ extended: true }));
 
+app.get("/api/proxy-download", async (req, res) => {
+  const fileUrl = req.query.url;
+  if (!fileUrl) {
+    return res.status(400).json({ error: "Missing url parameter" });
+  }
+
+  try {
+    const parsedUrl = new URL(fileUrl);
+    const allowedHost = "ola-cars-uploads-2026.s3.ap-south-1.amazonaws.com";
+    if (parsedUrl.host !== allowedHost) {
+      return res.status(403).json({ error: "Host not allowed" });
+    }
+
+    const response = await fetch(fileUrl);
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Failed to fetch file from source: ${response.statusText}` });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader("Content-Type", response.headers.get("content-type") || "application/octet-stream");
+    const filename = fileUrl.split("/").pop() || "download";
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error("Proxy download failed:", error.message);
+    res.status(500).json({ error: "Failed to download file" });
+  }
+});
+
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 console.log("[DEBUG] Mounting ReportingRouter at /api/reporting");

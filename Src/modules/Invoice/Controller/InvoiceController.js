@@ -151,3 +151,28 @@ exports.triggerWeeklyGeneration = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.downloadInvoicePdf = async (req, res) => {
+    try {
+        const { Invoice } = require("../Model/InvoiceModel");
+        const invoice = await Invoice.findById(req.params.id)
+            .populate("driver", "personalInfo driverId")
+            .populate("vehicle", "plateNumber make model basicDetails legalDocs");
+
+        if (!invoice || invoice.isDeleted) {
+            return res.status(404).json({ success: false, message: "Invoice not found" });
+        }
+
+        // Set headers to view/stream PDF directly in the browser
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Invoice-${invoice.invoiceNumber}.pdf"`
+        );
+
+        const InvoicePdfService = require("../Service/InvoicePdfService");
+        InvoicePdfService.generateInvoicePdf(invoice, res);
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
