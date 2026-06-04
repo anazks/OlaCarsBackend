@@ -15,6 +15,7 @@ const {
     dataMigrateDrivers,
     payAdditionalPayment,
     downloadContractPdf,
+    downloadStatementPdf,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -571,6 +572,14 @@ router.get(
     authenticate,
     hasSelfOrStaffPermission("DRIVER_VIEW"),
     downloadContractPdf
+);
+
+// ─── GET /api/driver/:id/statement/pdf — Download statement PDF ─────────
+router.get(
+    "/:id/statement/pdf",
+    authenticate,
+    hasSelfOrStaffPermission("DRIVER_VIEW"),
+    downloadStatementPdf
 );
 
 module.exports = router;

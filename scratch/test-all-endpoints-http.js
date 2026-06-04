@@ -51,11 +51,11 @@ async function run() {
         console.log("Connected.");
 
         // Fetch one of each
-        const creditNote = await CreditNote.findOne({});
-        const expense = await Expense.findOne({});
-        const voucher = await Voucher.findOne({});
-        const driver = await Driver.findOne({});
-        const supplier = await Supplier.findOne({});
+        const creditNote = await CreditNote.findOne({ isDeleted: { $ne: true } });
+        const expense = await Expense.findOne({ isDeleted: { $ne: true } });
+        const voucher = await Voucher.findOne({ isDeleted: { $ne: true } });
+        const driver = await Driver.findOne({ isDeleted: { $ne: true } });
+        const supplier = await Supplier.findOne({ isDeleted: { $ne: true } });
 
         console.log("Found sample documents:");
         console.log(`- Credit Note: ${creditNote ? creditNote._id : "None"}`);

@@ -785,6 +785,40 @@ const downloadContractPdf = async (req, res) => {
     }
 };
 
+/**
+ * Download a driver statement as PDF.
+ */
+const downloadStatementPdf = async (req, res) => {
+    try {
+        const driver = await getDriverByIdService(req.params.id, { includeSensitive: true });
+        if (!driver) {
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
+
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+        const CreditNote = require("../../CreditNote/Model/CreditNoteModel");
+        const StatementPdfService = require("../Service/StatementPdfService");
+
+        const [invoices, payments, creditNotes] = await Promise.all([
+            Invoice.find({ driver: req.params.id }),
+            PaymentReceived.find({ driverId: req.params.id }),
+            CreditNote.find({ driverId: req.params.id })
+        ]);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Driver_Statement_${driver.personalInfo?.fullName?.replace(/\s+/g, '_') || req.params.id}.pdf"`
+        );
+
+        StatementPdfService.generateStatementPdf(driver, invoices, payments, creditNotes, res);
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -800,4 +834,5 @@ module.exports = {
     dataMigrateDrivers,
     payAdditionalPayment,
     downloadContractPdf,
+    downloadStatementPdf,
 };
