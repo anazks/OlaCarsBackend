@@ -191,8 +191,8 @@ exports.generateInvoicePdf = (invoice, res) => {
     const taxAmt = typeof invoice.taxAmount === "number" ? invoice.taxAmount : parseFloat(invoice.taxAmount || 0);
     if (taxAmt > 0) {
         const taxLabel = (invoice.taxRate || 0) > 0
-            ? `Tax (${invoice.taxRate}%):`
-            : "Tax:";
+            ? `Tax (Incl. ${invoice.taxRate}%):`
+            : "Tax (Incl.):";
         doc.fillColor(secondaryColor)
            .text(taxLabel, totalsLabelX, tableY)
            .fillColor(primaryColor)

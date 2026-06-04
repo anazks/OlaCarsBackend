@@ -12,13 +12,6 @@ const {
 } = require("../../../utils/emailService");
 
 const startInvoiceCronJob = () => {
-    // Run on startup to catch up on any missed cron runs (especially in local dev)
-    console.log('[InvoiceCronService] Running startup invoice generation, reminders, and overdue checks...');
-    exports.generateDueInvoices()
-        .then(() => exports.checkAndSendRentReminders())
-        .then(() => exports.checkOverdueInvoices())
-        .catch(error => console.error('[InvoiceCronService] Error in startup invoice routines:', error));
-
     // Run daily at midnight
     cron.schedule('0 0 * * *', async () => {
         console.log('[InvoiceCronService] Running daily invoice generation, reminders, and overdue check...');
@@ -144,8 +137,9 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             }
 
             const amount = nextPeriod.amount;
-            const taxAmount = taxRate > 0 ? Math.round((amount * taxRate / 100) * 100) / 100 : 0;
-            const newTotalDue = Math.round((amount + taxAmount + carryOver) * 100) / 100;
+            const baseAmount = taxRate > 0 ? Math.round((amount / (1 + taxRate / 100)) * 100) / 100 : amount;
+            const taxAmount = Math.round((amount - baseAmount) * 100) / 100;
+            const newTotalDue = Math.round((amount + carryOver) * 100) / 100;
             
             const startSeq = await InvoiceService.getNextInvoiceNumberVal();
             const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
@@ -157,7 +151,7 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
                 weekNumber: nextPeriod.weekNumber,
                 weekLabel: nextPeriod.weekLabel,
                 dueDate: nextPeriod.dueDate,
-                baseAmount: amount,
+                baseAmount,
                 carryOverAmount: carryOver,
                 tax: activeTax ? activeTax._id : undefined,
                 taxRate,

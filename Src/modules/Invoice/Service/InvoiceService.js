@@ -92,8 +92,9 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
 
         const periodNum = i + 1;
         const invoiceNumber = formatInvoiceNumber(startSeq + i);
-        const taxAmount = taxRate > 0 ? Math.round((amount * taxRate / 100) * 100) / 100 : 0;
-        const totalDue = Math.round((amount + taxAmount) * 100) / 100;
+        const baseAmount = taxRate > 0 ? Math.round((amount / (1 + taxRate / 100)) * 100) / 100 : amount;
+        const taxAmount = Math.round((amount - baseAmount) * 100) / 100;
+        const totalDue = amount;
 
         invoicesData.push({
             invoiceNumber,
@@ -104,7 +105,7 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
                 ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
                 : `Month ${periodNum} - ${dueDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`,
             dueDate: dueDate,
-            baseAmount: amount,
+            baseAmount,
             carryOverAmount: 0,
             tax: activeTax ? activeTax._id : undefined,
             taxRate,
@@ -556,8 +557,9 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     }
 
     // Compute tax
-    const taxAmount = finalTaxRate > 0 ? Math.round((afterDiscount * finalTaxRate / 100) * 100) / 100 : 0;
-    const totalAmountDue = Math.round((afterDiscount + taxAmount) * 100) / 100;
+    const totalAmountDue = afterDiscount;
+    const baseAmount = finalTaxRate > 0 ? Math.round((afterDiscount / (1 + finalTaxRate / 100)) * 100) / 100 : afterDiscount;
+    const taxAmount = Math.round((afterDiscount - baseAmount) * 100) / 100;
 
     // Auto-assign weekNumber (next available for this driver)
     const existingInvoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
@@ -575,7 +577,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         weekLabel: weekLabel || `Manual Invoice - ${new Date(dueDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
         dueDate: new Date(dueDate),
         generatedAt: invoiceDate ? new Date(invoiceDate) : new Date(),
-        baseAmount: afterDiscount,
+        baseAmount,
         carryOverAmount: 0,
         tax: taxDoc ? taxDoc._id : undefined,
         taxRate: finalTaxRate,
@@ -837,11 +839,10 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         const driver = drivers[0];
 
-        const baseAmount = Number(row.amount) || 0;
+        const totalAmountDue = Number(row.amount) || 0;
+        const baseAmount = taxRate > 0 ? Math.round((totalAmountDue / (1 + taxRate / 100)) * 100) / 100 : totalAmountDue;
+        const taxAmount = Math.round((totalAmountDue - baseAmount) * 100) / 100;
         const amountPaid = Number(row.amountPaid) || 0;
-
-        const taxAmount = taxRate > 0 ? Math.round((baseAmount * taxRate / 100) * 100) / 100 : 0;
-        const totalAmountDue = Math.round((baseAmount + taxAmount) * 100) / 100;
         const balance = Math.max(0, totalAmountDue - amountPaid);
         
         let status = "PENDING";
@@ -931,12 +932,11 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
     console.log(`[InvoiceService] Recalculating tax for ${openInvoices.length} open invoices linked to tax ${taxId} with new rate ${newRate}%`);
 
     for (const invoice of openInvoices) {
-        const subtotal = invoice.subtotal || invoice.baseAmount;
-        const discountAmount = invoice.discountAmount || 0;
-        const afterDiscount = subtotal - discountAmount;
-        const newTaxAmount = newRate > 0 ? Math.round((afterDiscount * newRate / 100) * 100) / 100 : 0;
-        const newTotalDue = Math.round((afterDiscount + newTaxAmount + invoice.carryOverAmount) * 100) / 100;
-        const newBalance = Math.max(0, newTotalDue - invoice.amountPaid);
+        // Tax-inclusive: totalAmountDue stays the same, recalculate the base/tax split
+        const currentTotal = invoice.totalAmountDue;
+        const newBaseAmount = newRate > 0 ? Math.round((currentTotal / (1 + newRate / 100)) * 100) / 100 : currentTotal;
+        const newTaxAmount = Math.round((currentTotal - newBaseAmount) * 100) / 100;
+        const newBalance = Math.max(0, currentTotal - invoice.amountPaid);
         
         let newStatus = invoice.status;
         if (newStatus !== 'DRAFT') {
@@ -946,8 +946,8 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
         }
 
         invoice.taxRate = newRate;
+        invoice.baseAmount = newBaseAmount;
         invoice.taxAmount = newTaxAmount;
-        invoice.totalAmountDue = newTotalDue;
         invoice.balance = newBalance;
         invoice.status = newStatus;
 
