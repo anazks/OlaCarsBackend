@@ -137,6 +137,26 @@ async function testBulkInvoices() {
                 'Item Tax %': '16',
                 'Item Tax Amount': '32',
                 'Item Tax Type': 'Taxable'
+            },
+            // Row 3: Invoice 3 Line 1 - Status: Pending, partially paid (Total = 300, Balance = 100, so amountPaid = 200)
+            {
+                'Invoice Date': '2026-06-01',
+                'Invoice ID': 'ZOHO-ID-997',
+                'Invoice Number': 'INV-999903',
+                'Invoice Status': 'Pending',
+                'Customer ID': driver.driverId,
+                'Customer Name': driver.personalInfo.fullName,
+                'Is Inclusive Tax': 'FALSE',
+                'Due Date': '2026-06-25',
+                'SubTotal': '300',
+                'Total': '300',
+                'Balance': '100',
+                'Notes': 'Test partially paid invoice',
+                'Item Name': 'Vehicle Lease Fee',
+                'Quantity': '1',
+                'Item Price': '300',
+                'Item Total': '300',
+                'Account Code': cashAcc.code
             }
         ];
 
@@ -151,6 +171,9 @@ async function testBulkInvoices() {
         console.log('\n--- FIRST UPLOAD RESULT ---');
         console.log(JSON.stringify(result, null, 2));
 
+        if (result.successCount !== 3) {
+            throw new Error(`First upload should have created 3 invoices, but created ${result.successCount}`);
+        }
         if (result.errorCount > 0) {
             throw new Error(`First upload failed with errors: ${result.errors.join(', ')}`);
         }
@@ -169,8 +192,8 @@ async function testBulkInvoices() {
         if (secondResult.successCount !== 0) {
             throw new Error(`Second upload should have created 0 invoices, but created ${secondResult.successCount}`);
         }
-        if (secondResult.skippedCount !== 2) {
-            throw new Error(`Second upload should have returned 2 skips, but got ${secondResult.skippedCount}`);
+        if (secondResult.skippedCount !== 3) {
+            throw new Error(`Second upload should have returned 3 skips, but got ${secondResult.skippedCount}`);
         }
         if (secondResult.errorCount !== 0) {
             throw new Error(`Second upload should have returned 0 errors, but got ${secondResult.errorCount}`);
@@ -226,15 +249,52 @@ async function testBulkInvoices() {
 
         if (inv2.status !== 'PENDING') throw new Error('Invoice status is not PENDING');
 
+        // 6. Verify Invoice 3 (INV-999903) - Partially Paid, Pending status
+        console.log('\nVerifying Invoice 3 (INV-999903) details...');
+        const inv3 = await Invoice.findOne({ invoiceNumber: 'INV-999903' });
+        if (!inv3) throw new Error('INV-999903 was not created');
+        console.log(`- Status: ${inv3.status} (Expected: PENDING)`);
+        console.log(`- Base Amount: ${inv3.baseAmount} (Expected: 300)`);
+        console.log(`- Total Amount Due: ${inv3.totalAmountDue} (Expected: 300)`);
+        console.log(`- Amount Paid: ${inv3.amountPaid} (Expected: 200)`);
+        console.log(`- Balance: ${inv3.balance} (Expected: 100)`);
+
+        if (inv3.status !== 'PENDING') throw new Error('Invoice status is not PENDING');
+        if (inv3.amountPaid !== 200) throw new Error(`Incorrect amountPaid: ${inv3.amountPaid}`);
+        if (inv3.balance !== 100) throw new Error(`Incorrect balance: ${inv3.balance}`);
+
+        // Check PaymentReceived record for INV-999903
+        const pr3 = await PaymentReceived.findOne({ 'invoices.invoiceNumber': 'INV-999903' }).populate('depositedTo');
+        if (!pr3) throw new Error('PaymentReceived record was not created for INV-999903');
+        console.log(`- PaymentReceived for INV-999903 found: ${pr3.paymentNumber}`);
+        console.log(`- PaymentReceived Amount: ${pr3.amountReceived} (Expected: 200)`);
+        console.log(`- PaymentReceived Deposited To: ${pr3.depositedTo ? pr3.depositedTo.code : 'none'} (Expected: 1010)`);
+        if (pr3.amountReceived !== 200) throw new Error(`Incorrect PaymentReceived amount: ${pr3.amountReceived}`);
+
+        // Check Ledger entries for INV-999903 (Invoice Creation & Partial Payment Received)
+        console.log('\nVerifying General Ledger entries for INV-999903...');
+        const ledgerEntries3 = await LedgerEntry.find({
+            $or: [
+                { description: new RegExp('INV-999903') },
+                { description: new RegExp(pr3.paymentNumber) }
+            ]
+        }).populate('accountingCode');
+        console.log(`Found ${ledgerEntries3.length} ledger entry transactions.`);
+        for (const entry of ledgerEntries3) {
+            console.log(`  [${entry.type}] Account: ${entry.accountingCode ? entry.accountingCode.code : 'unknown'} (${entry.accountingCode ? entry.accountingCode.name : 'unknown'}), Amount: ${entry.amount}, Date: ${entry.entryDate.toISOString()}, Desc: "${entry.description}"`);
+        }
+
         // Cleanup
         console.log('\nCleaning up created test records...');
-        await Invoice.deleteMany({ invoiceNumber: { $in: ['INV-999901', 'INV-999902'] } });
-        await PaymentReceived.deleteMany({ 'invoices.invoiceNumber': { $in: ['INV-999901', 'INV-999902'] } });
+        await Invoice.deleteMany({ invoiceNumber: { $in: ['INV-999901', 'INV-999902', 'INV-999903'] } });
+        await PaymentReceived.deleteMany({ 'invoices.invoiceNumber': { $in: ['INV-999901', 'INV-999902', 'INV-999903'] } });
         await LedgerEntry.deleteMany({
             $or: [
                 { description: new RegExp('INV-999901') },
                 { description: new RegExp('INV-999902') },
-                { description: new RegExp(pr ? pr.paymentNumber : 'DUMMY_PR') }
+                { description: new RegExp('INV-999903') },
+                { description: new RegExp(pr ? pr.paymentNumber : 'DUMMY_PR') },
+                { description: new RegExp(pr3 ? pr3.paymentNumber : 'DUMMY_PR3') }
             ]
         });
         console.log('Cleanup completed successfully.');

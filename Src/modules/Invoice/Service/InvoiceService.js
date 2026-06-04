@@ -1184,9 +1184,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         const payments = [];
         let paidAt = undefined;
-        if (status === "PAID") {
+        if (status === "PAID" || amountPaid > 0) {
             payments.push({
-                amount: totalAmountDue,
+                amount: amountPaid,
                 paidAt: dueDate,
                 paymentMethod: "Bank Transfer", // User requested all payment methods to be Bank Transfer on bulk upload
                 note: "Bulk upload payment"
@@ -1230,12 +1230,12 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 if (status !== "DRAFT") {
                     await LedgerService.generateInvoiceLedgerEntries(created);
                     
-                    // For CLOSED (PAID) invoices, post corresponding payments and auto-create PaymentReceived
-                    if (status === "PAID") {
+                    // For CLOSED (PAID) or partially paid invoices, post corresponding payments and auto-create PaymentReceived
+                    if (status === "PAID" || amountPaid > 0) {
                         const accountCode = getRowVal(headerRow, ["Account Code", "accountCode"]);
                         const paymentMethod = "Bank Transfer"; // User requested all payment methods to be Bank Transfer on bulk upload
                         await exports.createLedgerEntryForBulkUpload(
-                            totalAmountDue,
+                            amountPaid,
                             paymentMethod,
                             created,
                             createdBy,
