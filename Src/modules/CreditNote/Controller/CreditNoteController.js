@@ -131,3 +131,19 @@ exports.refundCreditNote = async (req, res) => {
     }
 };
 
+exports.downloadCreditNotePdf = async (req, res) => {
+    try {
+        const doc = await CreditNoteService.getCreditNoteById(req.params.id);
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Credit Note not found" });
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="CreditNote-${doc.creditNoteNumber}.pdf"`);
+
+        const CreditNotePdfService = require("../Service/CreditNotePdfService");
+        CreditNotePdfService.generateCreditNotePdf(doc, res);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

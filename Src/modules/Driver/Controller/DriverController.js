@@ -2,6 +2,8 @@ const DriverService = require("../Service/DriverService");
 const { processDriverProgress } = require("../Service/DriverWorkflowService");
 const { getDriverByIdService, updateDriverService } = require("../Repo/DriverRepo");
 const uploadToS3 = require("../../../utils/uploadToS3");
+const ContractPdfService = require("../Service/ContractPdfService");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 
 // ─── S3 field → DB path mapping ──────────────────────────────────────
 // Maps upload field names to their dot-notation paths in the Driver schema.
@@ -935,6 +937,68 @@ const payAdditionalPayment = async (req, res) => {
     }
 };
 
+/**
+ * Download a driver contract agreement as PDF.
+ */
+const downloadContractPdf = async (req, res) => {
+    try {
+        const driver = await getDriverByIdService(req.params.id, { includeSensitive: true });
+        if (!driver) {
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
+
+        let vehicle = null;
+        if (driver.currentVehicle) {
+            vehicle = await Vehicle.findById(driver.currentVehicle);
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Driver_Contract_${driver.personalInfo?.fullName?.replace(/\s+/g, '_') || req.params.id}.pdf"`
+        );
+
+        ContractPdfService.generateContractPdf(driver, vehicle, res);
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Download a driver statement as PDF.
+ */
+const downloadStatementPdf = async (req, res) => {
+    try {
+        const driver = await getDriverByIdService(req.params.id, { includeSensitive: true });
+        if (!driver) {
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
+
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+        const CreditNote = require("../../CreditNote/Model/CreditNoteModel");
+        const StatementPdfService = require("../Service/StatementPdfService");
+
+        const [invoices, payments, creditNotes] = await Promise.all([
+            Invoice.find({ driver: req.params.id }),
+            PaymentReceived.find({ driverId: req.params.id }),
+            CreditNote.find({ driverId: req.params.id })
+        ]);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Driver_Statement_${driver.personalInfo?.fullName?.replace(/\s+/g, '_') || req.params.id}.pdf"`
+        );
+
+        StatementPdfService.generateStatementPdf(driver, invoices, payments, creditNotes, res);
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -949,4 +1013,6 @@ module.exports = {
     bulkAddDrivers,
     dataMigrateDrivers,
     payAdditionalPayment,
+    downloadContractPdf,
+    downloadStatementPdf,
 };

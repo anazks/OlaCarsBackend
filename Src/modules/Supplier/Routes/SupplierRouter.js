@@ -6,6 +6,7 @@ const {
     getSupplierById,
     updateSupplier,
     deleteSupplier,
+    downloadSupplierPdf,
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -87,6 +88,8 @@ router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SU
  *         description: List of active suppliers
  */
 router.get("/", authenticate, hasPermission("SUPPLIER_VIEW"), getSuppliers);
+
+router.get("/:id/pdf", authenticate, hasPermission("SUPPLIER_VIEW"), validate(getSupplierByIdSchema), downloadSupplierPdf);
 
 /**
  * @swagger
