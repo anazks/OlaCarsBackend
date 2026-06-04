@@ -25,9 +25,14 @@ const getLedgerEntries = async (req, res) => {
             }
         }
 
-        // Search Filter (matches description, creatorRole, or accounting code name/code)
         if (req.query.search) {
-            const searchRegex = new RegExp(req.query.search, "i");
+            let searchRegex;
+            if (req.query.exact === "true" || req.query.exact === true) {
+                const escapedSearch = req.query.search.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                searchRegex = new RegExp('\\b' + escapedSearch + '\\b', 'i');
+            } else {
+                searchRegex = new RegExp(req.query.search, "i");
+            }
             
             // Query matching accounting codes first
             const AccountingCode = mongoose.model("AccountingCode");
