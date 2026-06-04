@@ -383,8 +383,9 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
 
             const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
-            await LedgerService.autoGenerateLedgerEntry(populatedTx);
-            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+            // Skip direct ledger entry generation for the payment transaction.
+            // The auto-created PaymentReceived double-entry below handles Cash Debit and Accounts Receivable Credit.
+            console.log(`[InvoiceService] Skipping direct direct ledger entry generation for payment transaction ${newTransaction._id} to avoid double-booking.`);
 
             // Fetch driver details to get the branch
             const { Driver } = require("../../Driver/Model/DriverModel");
