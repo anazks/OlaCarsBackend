@@ -197,3 +197,28 @@ exports.deleteExpense = async (req, res, next) => {
         else res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.downloadExpensePdf = async (req, res, next) => {
+    try {
+        const doc = await Expense.findById(req.params.id)
+            .populate("expenseAccount")
+            .populate("paidThroughAccount")
+            .populate("supplier")
+            .populate("customer")
+            .populate("branch")
+            .populate("createdBy", "fullName");
+
+        if (!doc) {
+            return res.status(404).json({ success: false, message: "Expense not found" });
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="Expense-${doc.expenseNumber}.pdf"`);
+
+        const ExpensePdfService = require("../Service/ExpensePdfService");
+        ExpensePdfService.generateExpensePdf(doc, res);
+    } catch (error) {
+        if (next) next(error);
+        else res.status(500).json({ success: false, message: error.message });
+    }
+};

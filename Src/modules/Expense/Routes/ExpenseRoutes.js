@@ -22,6 +22,11 @@ router.get("/:id",
     ExpenseController.getExpenseById
 );
 
+router.get("/:id/pdf", 
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    ExpenseController.downloadExpensePdf
+);
+
 router.put("/:id", 
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
     ExpenseController.updateExpense

@@ -8,6 +8,7 @@ router.use(authenticate);
 
 router.post('/', CreditNoteController.createCreditNote);
 router.get('/', CreditNoteController.getAllCreditNotes);
+router.get('/:id/pdf', CreditNoteController.downloadCreditNotePdf);
 router.get('/:id', CreditNoteController.getCreditNoteById);
 router.put('/:id/void', CreditNoteController.voidCreditNote);
 router.put('/:id/apply', CreditNoteController.applyCreditNote);

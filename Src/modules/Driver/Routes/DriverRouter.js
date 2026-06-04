@@ -14,6 +14,7 @@ const {
     bulkAddDrivers,
     dataMigrateDrivers,
     payAdditionalPayment,
+    downloadContractPdf,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -563,5 +564,14 @@ router.post(
     hasPermission("PAYMENT_CREATE"),
     payAdditionalPayment
 );
+
+// ─── GET /api/driver/:id/contract/pdf — Download contract PDF ─────────
+router.get(
+    "/:id/contract/pdf",
+    authenticate,
+    hasSelfOrStaffPermission("DRIVER_VIEW"),
+    downloadContractPdf
+);
+
 module.exports = router;
 
