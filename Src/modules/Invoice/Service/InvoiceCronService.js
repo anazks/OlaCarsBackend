@@ -2,6 +2,8 @@ const cron = require('node-cron');
 const { Driver } = require("../../Driver/Model/DriverModel");
 const { Invoice } = require("../Model/InvoiceModel");
 const { createAlertRepo, findActiveAlertRepo } = require("../../Alert/Repo/AlertRepo");
+const InvoiceService = require("./InvoiceService");
+const Tax = require("../../Tax/Model/TaxModel");
 const {
     sendInvoiceCreatedEmail,
     sendInvoiceReminderEmail,
@@ -59,6 +61,9 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
         path: 'branch',
         populate: { path: 'branchManager' }
     });
+
+    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
+    const taxRate = activeTax ? activeTax.rate : 0;
 
     console.log(`[InvoiceCronService] Found ${activeDrivers.length} active drivers with vehicles.`);
 
@@ -139,11 +144,14 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             }
 
             const amount = nextPeriod.amount;
-            const newTotalDue = amount + carryOver;
-            const ts = Date.now();
+            const taxAmount = taxRate > 0 ? Math.round((amount * taxRate / 100) * 100) / 100 : 0;
+            const newTotalDue = Math.round((amount + taxAmount + carryOver) * 100) / 100;
+            
+            const startSeq = await InvoiceService.getNextInvoiceNumberVal();
+            const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
 
             const newInvoice = new Invoice({
-                invoiceNumber: `INV-${ts}-${nextPeriod.weekNumber}`,
+                invoiceNumber,
                 driver: driver._id,
                 vehicle: driver.currentVehicle._id || driver.currentVehicle,
                 weekNumber: nextPeriod.weekNumber,
@@ -151,6 +159,9 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
                 dueDate: nextPeriod.dueDate,
                 baseAmount: amount,
                 carryOverAmount: carryOver,
+                tax: activeTax ? activeTax._id : undefined,
+                taxRate,
+                taxAmount,
                 totalAmountDue: newTotalDue,
                 amountPaid: 0,
                 balance: newTotalDue,

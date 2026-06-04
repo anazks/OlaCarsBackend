@@ -1,4 +1,5 @@
 const voucherService = require("../Service/VoucherService");
+const VoucherPdfService = require("../Service/VoucherPdfService");
 
 /**
  * Create a new voucher.
@@ -54,6 +55,28 @@ exports.getVoucherById = async (req, res) => {
             message: "Voucher retrieved successfully",
             data: voucher
         });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+/**
+ * Download a voucher as PDF.
+ */
+exports.downloadVoucherPdf = async (req, res) => {
+    try {
+        const voucher = await voucherService.getVoucherById(req.params.id);
+        
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Voucher_${voucher.voucherNumber || req.params.id}.pdf"`
+        );
+
+        VoucherPdfService.generateVoucherPdf(voucher, res);
     } catch (error) {
         res.status(error.statusCode || 500).json({
             status: "error",
