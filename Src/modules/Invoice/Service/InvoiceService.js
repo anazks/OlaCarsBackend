@@ -11,6 +11,29 @@ const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel"
 const LedgerService = require("../../Ledger/Service/LedgerService");
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 const { Driver } = require("../../Driver/Model/DriverModel");
+const Tax = require("../../Tax/Model/TaxModel");
+
+const getNextInvoiceNumberVal = async () => {
+    const lastInvoice = await Invoice.findOne({ 
+        invoiceNumber: /^INV-\d{6}$/ 
+    }).sort({ invoiceNumber: -1 });
+
+    let nextNum = 1;
+    if (lastInvoice) {
+        const match = lastInvoice.invoiceNumber.match(/^INV-(\d{6})$/);
+        if (match) {
+            nextNum = parseInt(match[1], 10) + 1;
+        }
+    }
+    return nextNum;
+};
+
+const formatInvoiceNumber = (num) => {
+    return `INV-${String(num).padStart(6, '0')}`;
+};
+
+exports.getNextInvoiceNumberVal = getNextInvoiceNumberVal;
+exports.formatInvoiceNumber = formatInvoiceNumber;
 
 exports.getAll = async (queryParams = {}, options = {}) => {
     return await getInvoicesService(queryParams, options);
@@ -49,8 +72,11 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
         nextDueDate.setDate(1);
     }
 
+    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
+    const taxRate = activeTax ? activeTax.rate : 0;
+    const startSeq = await getNextInvoiceNumberVal();
+
     const invoicesData = [];
-    const ts = Date.now();
 
     // ONLY generate the first invoice (Week/Month 1) upon assignment
     const generateCount = 1;
@@ -65,8 +91,12 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
         }
 
         const periodNum = i + 1;
+        const invoiceNumber = formatInvoiceNumber(startSeq + i);
+        const taxAmount = taxRate > 0 ? Math.round((amount * taxRate / 100) * 100) / 100 : 0;
+        const totalDue = Math.round((amount + taxAmount) * 100) / 100;
+
         invoicesData.push({
-            invoiceNumber: `INV-${ts}-${periodNum}`,
+            invoiceNumber,
             driver: driverId,
             vehicle: vehicleId,
             weekNumber: periodNum,
@@ -76,9 +106,12 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
             dueDate: dueDate,
             baseAmount: amount,
             carryOverAmount: 0,
-            totalAmountDue: amount,
+            tax: activeTax ? activeTax._id : undefined,
+            taxRate,
+            taxAmount,
+            totalAmountDue: totalDue,
             amountPaid: 0,
-            balance: amount,
+            balance: totalDue,
             status: "PENDING",
             payments: [],
             createdBy,
@@ -477,7 +510,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const {
         driver: driverId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
         lineItems = [], discountType = 'PERCENTAGE', discountValue = 0,
-        taxRate = 0, notes
+        notes
     } = data;
 
     if (!driverId) throw new Error("Driver is required for manual invoice creation");
@@ -507,17 +540,32 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
 
     const afterDiscount = subtotal - discountAmount;
 
+    // Fetch tax and compute tax rate
+    let finalTaxRate = typeof data.taxRate === 'number' ? data.taxRate : 0;
+    let taxDoc = null;
+    if (data.tax) {
+        taxDoc = await Tax.findById(data.tax);
+        if (taxDoc) {
+            finalTaxRate = taxDoc.rate;
+        }
+    } else {
+        taxDoc = await Tax.findOne({ isActive: true, isDeleted: false });
+        if (taxDoc) {
+            finalTaxRate = taxDoc.rate;
+        }
+    }
+
     // Compute tax
-    const taxAmount = taxRate > 0 ? Math.round((afterDiscount * taxRate / 100) * 100) / 100 : 0;
+    const taxAmount = finalTaxRate > 0 ? Math.round((afterDiscount * finalTaxRate / 100) * 100) / 100 : 0;
     const totalAmountDue = Math.round((afterDiscount + taxAmount) * 100) / 100;
 
     // Auto-assign weekNumber (next available for this driver)
     const existingInvoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
     const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
 
-    // Generate manual invoice number
-    const ts = Date.now();
-    const invoiceNumber = `MAN-${ts}`;
+    // Generate sequential manual invoice number
+    const startSeq = await getNextInvoiceNumberVal();
+    const invoiceNumber = formatInvoiceNumber(startSeq);
 
     const invoiceData = {
         invoiceNumber,
@@ -527,12 +575,15 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         weekLabel: weekLabel || `Manual Invoice - ${new Date(dueDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
         dueDate: new Date(dueDate),
         generatedAt: invoiceDate ? new Date(invoiceDate) : new Date(),
-        baseAmount: totalAmountDue,
+        baseAmount: afterDiscount,
         carryOverAmount: 0,
+        tax: taxDoc ? taxDoc._id : undefined,
+        taxRate: finalTaxRate,
+        taxAmount,
         totalAmountDue,
         amountPaid: 0,
         balance: totalAmountDue,
-        status: 'PENDING',
+        status: data.status || 'PENDING',
         payments: [],
         // Manual invoice specific fields
         invoiceType: 'MANUAL',
@@ -541,20 +592,20 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         discountType,
         discountValue: Number(discountValue),
         discountAmount,
-        taxRate: Number(taxRate),
-        taxAmount,
         notes: notes || '',
         createdBy,
         creatorRole,
     };
 
     const newInvoice = await Invoice.create(invoiceData);
-    try {
-        await LedgerService.generateInvoiceLedgerEntries(newInvoice);
-    } catch (ledgerErr) {
-        console.error("[InvoiceService] Failed to generate ledger entries for manual invoice:", ledgerErr);
+    if (newInvoice.status !== 'DRAFT') {
+        try {
+            await LedgerService.generateInvoiceLedgerEntries(newInvoice);
+        } catch (ledgerErr) {
+            console.error("[InvoiceService] Failed to generate ledger entries for manual invoice:", ledgerErr);
+        }
+        await exports.applyPrepaymentsToInvoice(newInvoice._id);
     }
-    await exports.applyPrepaymentsToInvoice(newInvoice._id);
     return await Invoice.findById(newInvoice._id).populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
 };
 
@@ -624,9 +675,12 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
 
 exports.updateInvoice = async (id, data) => {
     const { Invoice } = require("../Model/InvoiceModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
     const invoice = await Invoice.findById(id);
     if (!invoice) throw new Error("Invoice not found");
     if (invoice.status === 'PAID') throw new Error("Cannot edit a fully paid invoice");
+
+    const oldStatus = invoice.status;
 
     if (data.dueDate) invoice.dueDate = new Date(data.dueDate);
     if (data.weekLabel) invoice.weekLabel = data.weekLabel;
@@ -641,8 +695,23 @@ exports.updateInvoice = async (id, data) => {
         else invoice.status = 'PENDING';
     }
 
+    if (data.status) {
+        invoice.status = data.status;
+    }
+
     const savedInvoice = await invoice.save();
     await exports.syncInvoiceToAdditionalPayments(savedInvoice);
+
+    // If invoice transitions from DRAFT to non-DRAFT, post ledger entries and apply prepayments
+    if (oldStatus === 'DRAFT' && savedInvoice.status !== 'DRAFT') {
+        try {
+            await LedgerService.generateInvoiceLedgerEntries(savedInvoice);
+        } catch (ledgerErr) {
+            console.error("[InvoiceService] Failed to generate ledger entries on draft issue:", ledgerErr);
+        }
+        await exports.applyPrepaymentsToInvoice(savedInvoice._id);
+    }
+
     return savedInvoice;
 };
 
@@ -735,10 +804,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
     const { Driver } = require("../../Driver/Model/DriverModel");
     const LedgerService = require("../../Ledger/Service/LedgerService");
     
-    const ts = Date.now();
-    let prefix = "INV";
-    if (invoiceType === "WORKSHOP") prefix = "WRK";
-    else if (invoiceType === "DEPOSIT") prefix = "DEP";
+    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
+    const taxRate = activeTax ? activeTax.rate : 0;
+    const startSeq = await exports.getNextInvoiceNumberVal();
 
     const createdInvoices = [];
     const errors = [];
@@ -771,13 +839,16 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         const baseAmount = Number(row.amount) || 0;
         const amountPaid = Number(row.amountPaid) || 0;
-        const balance = Math.max(0, baseAmount - amountPaid);
+
+        const taxAmount = taxRate > 0 ? Math.round((baseAmount * taxRate / 100) * 100) / 100 : 0;
+        const totalAmountDue = Math.round((baseAmount + taxAmount) * 100) / 100;
+        const balance = Math.max(0, totalAmountDue - amountPaid);
         
         let status = "PENDING";
-        if (balance <= 0 && baseAmount > 0) status = "PAID";
+        if (balance <= 0 && totalAmountDue > 0) status = "PAID";
         else if (amountPaid > 0) status = "PARTIAL";
 
-        const invoiceNumber = `${prefix}-${ts}-${i + 1}`;
+        const invoiceNumber = exports.formatInvoiceNumber(startSeq + i);
         const dueDate = row.dueDate ? new Date(row.dueDate) : new Date();
 
         const payments = [];
@@ -806,7 +877,10 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             weekLabel: row.weekLabel || (invoiceType === 'RENTAL' ? `Week ${nextWeekNumber}` : invoiceType),
             dueDate,
             baseAmount,
-            totalAmountDue: baseAmount,
+            tax: activeTax ? activeTax._id : undefined,
+            taxRate,
+            taxAmount,
+            totalAmountDue,
             amountPaid,
             balance,
             status,
@@ -841,5 +915,57 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         errors,
         createdInvoices: createdInvoices.map(inv => inv.invoiceNumber)
     };
+};
+
+exports.recalculateInvoicesForTax = async (taxId, newRate) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+    const openInvoices = await Invoice.find({
+        tax: taxId,
+        status: { $in: ["PENDING", "PARTIAL", "DRAFT"] },
+        isDeleted: false
+    });
+
+    console.log(`[InvoiceService] Recalculating tax for ${openInvoices.length} open invoices linked to tax ${taxId} with new rate ${newRate}%`);
+
+    for (const invoice of openInvoices) {
+        const subtotal = invoice.subtotal || invoice.baseAmount;
+        const discountAmount = invoice.discountAmount || 0;
+        const afterDiscount = subtotal - discountAmount;
+        const newTaxAmount = newRate > 0 ? Math.round((afterDiscount * newRate / 100) * 100) / 100 : 0;
+        const newTotalDue = Math.round((afterDiscount + newTaxAmount + invoice.carryOverAmount) * 100) / 100;
+        const newBalance = Math.max(0, newTotalDue - invoice.amountPaid);
+        
+        let newStatus = invoice.status;
+        if (newStatus !== 'DRAFT') {
+            if (newBalance <= 0) newStatus = 'PAID';
+            else if (invoice.amountPaid > 0) newStatus = 'PARTIAL';
+            else newStatus = 'PENDING';
+        }
+
+        invoice.taxRate = newRate;
+        invoice.taxAmount = newTaxAmount;
+        invoice.totalAmountDue = newTotalDue;
+        invoice.balance = newBalance;
+        invoice.status = newStatus;
+
+        await invoice.save();
+
+        if (newStatus !== 'DRAFT') {
+            try {
+                // Delete old ledger entries matching this invoice number
+                await LedgerEntry.deleteMany({
+                    description: new RegExp(`\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+                });
+                // Post new ledger entries with the recalculated totals
+                await LedgerService.generateInvoiceLedgerEntries(invoice);
+                console.log(`[InvoiceService] Successfully updated ledger entries for invoice ${invoice.invoiceNumber} with new total amount due ${newTotalDue}`);
+            } catch (ledgerErr) {
+                console.error(`[InvoiceService] Failed to regenerate ledger entries for invoice ${invoice.invoiceNumber} during tax recalculation:`, ledgerErr);
+            }
+        }
+    }
 };
 

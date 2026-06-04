@@ -248,8 +248,18 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
     try {
         console.log(`[LedgerService] Generating ledger entries for created invoice: ${invoice.invoiceNumber}`);
         
+        const LedgerEntry = require("../Model/LedgerEntryModel");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const { Driver } = require("../../Driver/Model/DriverModel");
+
+        // Prevent double booking/duplicate ledger entries for the same invoice
+        const existingEntries = await LedgerEntry.find({
+            description: new RegExp(`\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+        });
+        if (existingEntries.length > 0) {
+            console.log(`[LedgerService] Ledger entries for invoice ${invoice.invoiceNumber} already exist (${existingEntries.length} found). Skipping duplication.`);
+            return;
+        }
 
         const arAccount = await AccountingCode.findOne({ code: "1200" });
         const salesAccount = await AccountingCode.findOne({ code: "4100" });
@@ -268,7 +278,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             branch: branchId,
             accountingCode: arAccount._id,
             type: "DEBIT",
-            amount: invoice.baseAmount,
+            amount: invoice.totalAmountDue,
             description: `Invoice Created (Debit Accounts Receivable) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
@@ -280,7 +290,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             branch: branchId,
             accountingCode: salesAccount._id,
             type: "CREDIT",
-            amount: invoice.baseAmount,
+            amount: invoice.totalAmountDue,
             description: `Invoice Created (Credit Rental Income) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
