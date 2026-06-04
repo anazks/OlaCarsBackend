@@ -176,29 +176,29 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                 const arAccount = await AccountingCode.findOne({ code: "1200" });
                 
                 if (arAccount) {
-                    console.log(`[LedgerService] Generating double-entry for Payment Received: Credit Bank/Cash, Debit Accounts Receivable`);
+                    console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable`);
                     
-                    // Leg 1: CREDIT Bank/Cash Account
+                    // Leg 1: DEBIT Bank/Cash Account (Asset increases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
                         accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
-                        type: "CREDIT",
+                        type: "DEBIT",
                         amount: paymentTransaction.totalAmount,
-                        description: `Payment Received (Credit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        description: `Payment Received (Debit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: finalCreatorRole
                     });
 
-                    // Leg 2: DEBIT Accounts Receivable
+                    // Leg 2: CREDIT Accounts Receivable (Asset decreases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
                         accountingCode: arAccount._id,
-                        type: "DEBIT",
+                        type: "CREDIT",
                         amount: paymentTransaction.totalAmount,
-                        description: `Payment Received (Debit Accounts Receivable) - Driver: ${driverName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        description: `Payment Received (Credit Accounts Receivable) - Driver: ${driverName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: finalCreatorRole
@@ -263,25 +263,25 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
         const driverName = driverDoc ? (driverDoc.personalInfo?.fullName || driverDoc.name) : "Unknown Driver";
         const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
 
-        // Leg 1: CREDIT Accounts Receivable (decreases/increases according to user's mapping)
+        // Leg 1: DEBIT Accounts Receivable (increases Accounts Receivable Asset)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: arAccount._id,
-            type: "CREDIT",
+            type: "DEBIT",
             amount: invoice.baseAmount,
-            description: `Invoice Created (Credit Accounts Receivable) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
+            description: `Invoice Created (Debit Accounts Receivable) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
             creatorRole: invoice.creatorRole
         });
 
-        // Leg 2: DEBIT Rental Income (Sales) (decreases/increases according to user's mapping)
+        // Leg 2: CREDIT Rental Income (Sales) (increases Revenue)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: salesAccount._id,
-            type: "DEBIT",
+            type: "CREDIT",
             amount: invoice.baseAmount,
-            description: `Invoice Created (Debit Rental Income) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
+            description: `Invoice Created (Credit Rental Income) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
             creatorRole: invoice.creatorRole
