@@ -466,5 +466,5 @@ router.get(
     hasPermission("INVENTORY_VIEW"),
     getWorkshopRequirementsHandler
 );
-
 module.exports = router;
+

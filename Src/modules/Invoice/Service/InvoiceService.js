@@ -383,8 +383,9 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             console.log(`[InvoiceService] PaymentTransaction created: ${newTransaction._id}`);
 
             const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
-            await LedgerService.autoGenerateLedgerEntry(populatedTx);
-            console.log(`[InvoiceService] Ledger entry generation triggered for ${newTransaction._id}`);
+            // Skip direct ledger entry generation for the payment transaction.
+            // The auto-created PaymentReceived double-entry below handles Cash Debit and Accounts Receivable Credit.
+            console.log(`[InvoiceService] Skipping direct direct ledger entry generation for payment transaction ${newTransaction._id} to avoid double-booking.`);
 
             // Fetch driver details to get the branch
             const { Driver } = require("../../Driver/Model/DriverModel");
@@ -663,12 +664,22 @@ exports.getGenerationSettings = async () => {
 
 exports.updateGenerationSettings = async (data) => {
     const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const DriverService = require("../../Driver/Service/DriverService");
     const { generationDay } = data;
+
     await SystemSettings.findOneAndUpdate(
         { key: 'invoice_generation_day' },
         { value: generationDay, description: 'Day of the week to generate invoices (0-6)' },
         { upsert: true, new: true }
     );
+
+    // Trigger dynamic rent plan update for all drivers
+    try {
+        await DriverService.reconfigureAllPendingRentPlans(generationDay);
+    } catch (err) {
+        console.error("[InvoiceService] Failed to reconfigure pending rent plans:", err);
+    }
+
     return { success: true };
 };
 
@@ -718,3 +729,117 @@ exports.syncInvoiceToAdditionalPayments = async (invoice) => {
         console.error("[InvoiceService] Error in syncInvoiceToAdditionalPayments:", err);
     }
 };
+
+exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const { Driver } = require("../../Driver/Model/DriverModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    
+    const ts = Date.now();
+    let prefix = "INV";
+    if (invoiceType === "WORKSHOP") prefix = "WRK";
+    else if (invoiceType === "DEPOSIT") prefix = "DEP";
+
+    const createdInvoices = [];
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const driverNameInput = row.fullName || row.driverName || row["Full Name"] || row["Driver Name"];
+        if (!driverNameInput) {
+            errors.push(`Row ${i + 1}: Missing driver name`);
+            continue;
+        }
+        
+        // Find driver by full name (case-insensitive)
+        const drivers = await Driver.find({ 
+            "personalInfo.fullName": { $regex: new RegExp(`^${driverNameInput.trim()}$`, "i") }, 
+            isDeleted: false 
+        });
+
+        if (drivers.length === 0) {
+            errors.push(`Row ${i + 1}: Driver with name "${driverNameInput}" not found`);
+            continue;
+        }
+
+        if (drivers.length > 1) {
+            errors.push(`Row ${i + 1}: Multiple drivers found with name "${driverNameInput}" (ambiguous driver)`);
+            continue;
+        }
+
+        const driver = drivers[0];
+
+        const baseAmount = Number(row.amount) || 0;
+        const amountPaid = Number(row.amountPaid) || 0;
+        const balance = Math.max(0, baseAmount - amountPaid);
+        
+        let status = "PENDING";
+        if (balance <= 0 && baseAmount > 0) status = "PAID";
+        else if (amountPaid > 0) status = "PARTIAL";
+
+        const invoiceNumber = `${prefix}-${ts}-${i + 1}`;
+        const dueDate = row.dueDate ? new Date(row.dueDate) : new Date();
+
+        const payments = [];
+        let paidAt = undefined;
+        if (amountPaid > 0) {
+            payments.push({
+                amount: amountPaid,
+                paidAt: new Date(),
+                paymentMethod: "Other", 
+                note: row.notes || "Bulk upload initial payment"
+            });
+            if (status === "PAID") {
+                paidAt = new Date();
+            }
+        }
+
+        const existingInvoices = await Invoice.find({ driver: driver._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+        const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+
+        const newInvoiceData = {
+            invoiceNumber,
+            invoiceType: invoiceType,
+            driver: driver._id,
+            vehicle: driver.currentVehicle,
+            weekNumber: invoiceType === 'RENTAL' ? nextWeekNumber : undefined,
+            weekLabel: row.weekLabel || (invoiceType === 'RENTAL' ? `Week ${nextWeekNumber}` : invoiceType),
+            dueDate,
+            baseAmount,
+            totalAmountDue: baseAmount,
+            amountPaid,
+            balance,
+            status,
+            paidAt,
+            payments,
+            notes: row.notes || row.description || '',
+            createdBy,
+            creatorRole
+        };
+
+        try {
+            const created = await Invoice.create(newInvoiceData);
+            createdInvoices.push(created);
+            
+            // Sync Ledger
+            try {
+                await LedgerService.generateInvoiceLedgerEntries(created);
+                if (amountPaid > 0) {
+                    await exports.createLedgerEntry(amountPaid, "Other", created, createdBy, creatorRole, "Bulk upload payment");
+                }
+            } catch (ledgerErr) {
+                console.error(`[InvoiceService] Failed ledger generation for bulk invoice ${invoiceNumber}:`, ledgerErr);
+            }
+        } catch (err) {
+            errors.push(`Row ${i + 1}: Failed to create invoice - ${err.message}`);
+        }
+    }
+
+    return {
+        successCount: createdInvoices.length,
+        errorCount: errors.length,
+        errors,
+        createdInvoices: createdInvoices.map(inv => inv.invoiceNumber)
+    };
+};
+

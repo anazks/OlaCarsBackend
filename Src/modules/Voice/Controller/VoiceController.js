@@ -6,6 +6,92 @@ const PreBooking = require("../../AI/Model/PreBookingModel");
 const mongoose = require("mongoose");
 const AppError = require("../../../shared/utils/AppError");
 
+// LOCAL TEST ONLY — triggers a single outbound call without cron or DB query
+exports.testOutboundCall = async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ success: false, error: "Not available in production" });
+    }
+
+    const { phone_number, customer_name, amount_due, due_date, days_remaining } = req.body;
+
+    if (!phone_number) {
+        return res.status(400).json({ success: false, error: "phone_number is required" });
+    }
+
+    try {
+        const response = await fetch("https://api.elevenlabs.io/v1/convai/batch-calling/submit", {
+            method: "POST",
+            headers: {
+                "xi-api-key": process.env.ELEVENLABS_API_KEY,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                agent_id: process.env.OUTBOUND_AGENT_ID,
+                call_name: `Test Call ${new Date().toISOString()}`,
+                scheduled_time_unix: Math.floor(Date.now() / 1000),
+                agent_phone_number_id: process.env.ELEVENLABS_PHONE_NUMBER_ID,
+                recipients: [{
+                    phone_number,
+                    conversation_initiation_client_data: {
+                        dynamic_variables: {
+                            customer_name: customer_name || "Test User",
+                            amount_due: amount_due || "150",
+                            due_date: due_date || "22 de mayo",
+                            days_remaining: days_remaining || "0"
+                        }
+                    }
+                }]
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            return res.status(502).json({ success: false, elevenlabs_error: data });
+        }
+
+        res.json({ success: true, elevenlabs_response: data });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// Match a caller phone against stored driver phones regardless of formatting.
+// ElevenLabs may send "917907017504" while the driver is stored as
+// "+917907017504" (or with spaces/dashes), so exact match is unreliable. We try
+// a set of normalised candidates, then fall back to matching the trailing digits.
+const findDriverByPhone = async (callerId) => {
+    const digits = String(callerId).replace(/\D/g, "");
+    if (!digits) return null;
+
+    const candidates = new Set([
+        String(callerId).trim(),   // exactly as received
+        digits,                    // 917907017504
+        "+" + digits,              // +917907017504
+        digits.slice(-10),         // 7907017504 (local without country code)
+        "+" + digits.slice(-10)
+    ]);
+
+    let driver = await Driver.findOne({
+        "personalInfo.phone": { $in: [...candidates] },
+        isDeleted: false
+    });
+
+    // Fallback: stored number ends with the same trailing digits (covers
+    // country-code differences). Min 8 digits to avoid collisions. The \D*
+    // between digits tolerates stored separators e.g. "+507 6123-4567".
+    if (!driver && digits.length >= 8) {
+        const last8 = digits.slice(-8);
+        const pattern = last8.split("").join("\\D*") + "$";
+        driver = await Driver.findOne({
+            "personalInfo.phone": { $regex: pattern },
+            isDeleted: false
+        });
+    }
+
+    return driver;
+};
+
 exports.initiateCall = async (req, res) => {
     const { caller_id } = req.body;
     const fallback = {
@@ -22,7 +108,7 @@ exports.initiateCall = async (req, res) => {
     if (!caller_id) return res.json(fallback);
 
     try {
-        const driver = await Driver.findOne({ "personalInfo.phone": caller_id, isDeleted: false });
+        const driver = await findDriverByPhone(caller_id);
 
         if (driver) {
             return res.json({
@@ -65,9 +151,16 @@ exports.getAvailableVehicles = async (req, res, next) => {
             branch: v.purchaseDetails?.branch?.name || "Unknown"
         }));
 
+        // Loud, unambiguous empty-state so the voice agent cannot gloss over an
+        // empty array and hallucinate vehicles. The message is an explicit
+        // instruction the LLM reads directly.
         res.status(200).json({
             success: true,
-            vehicles: formattedVehicles
+            available_count: formattedVehicles.length,
+            vehicles: formattedVehicles,
+            message: formattedVehicles.length === 0
+                ? "NO_VEHICLES_AVAILABLE: There are zero vehicles to offer. Do not invent or name any vehicle. Tell the customer none are available right now and offer to have a team member contact them."
+                : undefined
         });
     } catch (error) {
         next(error);
@@ -102,35 +195,30 @@ exports.getLeaseSchemes = async (req, res, next) => {
             };
         });
 
-        // Fallback static schemes if no active vehicles found
-        if (formattedSchemes.length === 0) {
-            formattedSchemes.push(
-                {
-                    category: "Sedan",
-                    weeklyRent: 150,
-                    durationWeeks: 52,
-                    totalCost: 7800,
-                    monthlyEquivalent: 600,
-                    maintenanceIncluded: true
-                },
-                {
-                    category: "SUV",
-                    weeklyRent: 200,
-                    durationWeeks: 52,
-                    totalCost: 10400,
-                    monthlyEquivalent: 800,
-                    maintenanceIncluded: true
-                }
-            );
-        }
-
+        // No static fallback: never quote prices that don't reflect real inventory.
+        // When there are no active vehicles, return an empty list so the agent can
+        // say promotions aren't available right now rather than reading dummy data.
         res.status(200).json({
             success: true,
-            schemes: formattedSchemes
+            scheme_count: formattedSchemes.length,
+            schemes: formattedSchemes,
+            message: formattedSchemes.length === 0
+                ? "NO_SCHEMES_AVAILABLE: There are zero lease schemes to offer. Do not invent or quote any price. Tell the customer plans are not available right now and offer to have a team member contact them."
+                : undefined
         });
     } catch (error) {
         next(error);
     }
+};
+
+// Friendly "no account" response so the voice agent gets a clean, deterministic
+// signal instead of a 400/404 error (which ElevenLabs logs as "Tool failed").
+// Returned when the caller is not a recognised customer — the agent reads the
+// message and offers a callback rather than retrying.
+const NO_ACCOUNT_RESPONSE = {
+    success: true,
+    has_account: false,
+    message: "NO_ACCOUNT: No account is linked to this number. Do not retry this tool. Tell the caller you don't see an account on file and offer to take their details for a team callback."
 };
 
 exports.getAccountStatus = async (req, res, next) => {
@@ -138,14 +226,25 @@ exports.getAccountStatus = async (req, res, next) => {
         const { customerId } = req.params;
 
         if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
-            return res.status(400).json({ success: false, error: "Invalid customer ID" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
 
-        const driver = await Driver.findById(customerId);
+        const driver = await Driver.findById(customerId)
+            .populate("currentVehicle", "basicDetails legalDocs");
 
         if (!driver) {
-            return res.status(404).json({ success: false, error: "Customer not found" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
+
+        // Leased vehicle so the agent can answer "which car did I lease?"
+        const v = driver.currentVehicle;
+        const leasedVehicle = v ? {
+            make: v.basicDetails?.make?.trim() || null,
+            model: v.basicDetails?.model?.trim() || null,
+            year: v.basicDetails?.year || null,
+            colour: v.basicDetails?.colour?.trim() || null,
+            plate: v.legalDocs?.registrationNumber || null
+        } : null;
 
         const pendingWeeks = driver.rentTracking
             ?.filter(week => week.status === "PENDING" || week.status === "PARTIAL")
@@ -162,7 +261,9 @@ exports.getAccountStatus = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
+            has_account: true,
             customer_name: driver.personalInfo?.fullName || "Cliente",
+            leased_vehicle: leasedVehicle,
             pending_weeks: pendingWeeks,
             total_due: totalDue,
             next_due_date: nextDueDate

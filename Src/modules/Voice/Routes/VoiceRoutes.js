@@ -10,14 +10,21 @@ const {
     bookVehicle,
     logCall,
     getFollowUps,
-    markFollowUpDone
+    markFollowUpDone,
+    testOutboundCall
 } = require('../Controller/VoiceController');
+
+// Local test only — no auth, blocked in production by the controller
+router.post('/test-outbound', testOutboundCall);
 
 router.use(voiceAgentAuth);
 
 router.post('/initiate', initiateCall);
 router.get('/vehicles/available', getAvailableVehicles);
 router.get('/lease-schemes', getLeaseSchemes);
+// Both paths hit the same handler so an empty customerId (".../account-status/")
+// returns the friendly NO_ACCOUNT response instead of a generic 404.
+router.get('/account-status', getAccountStatus);
 router.get('/account-status/:customerId', getAccountStatus);
 router.post('/leads', createLead);
 router.post('/book-vehicle', bookVehicle);

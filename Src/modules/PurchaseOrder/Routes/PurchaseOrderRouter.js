@@ -8,6 +8,8 @@ const {
     editPurchaseOrder,
     uploadPurchaseOrderItemImages,
     getEligiblePurchaseOrdersForBilling,
+    uploadPODocument,
+    auditPurchaseOrder,
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -737,6 +739,22 @@ router.post(
     validate(uploadItemImagesSchema),
     upload.array("images", 8),
     uploadPurchaseOrderItemImages
+);
+
+// ─── POST /api/purchase-order/upload-document — Upload Document ───
+router.post(
+    "/upload-document",
+    authenticate,
+    upload.single("document"),
+    uploadPODocument
+);
+
+// ─── PUT /api/purchase-order/:id/audit — Submit PO Audit ───
+router.put(
+    "/:id/audit",
+    authenticate,
+    hasPermission("PURCHASE_ORDER_EDIT"),
+    auditPurchaseOrder
 );
 
 module.exports = router;
