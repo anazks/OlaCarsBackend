@@ -11,7 +11,8 @@ const {
     updateVehicleLeaseSettings,
     updateMaintenanceSettings,
     updateVehicle,
-    getVehiclesDueForService
+    getVehiclesDueForService,
+    bulkAddVehicles
 } = require("../Controller/VehicleController.js");
 const upload = require("../../../utils/multerConfig.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
@@ -143,6 +144,14 @@ router.post(
     hasPermission("VEHICLE_CREATE"),
     validate(addVehicleSchema),
     addVehicle
+);
+
+router.post(
+    "/bulk",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.WORKSHOPMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF),
+    hasPermission("VEHICLE_CREATE"),
+    bulkAddVehicles
 );
 
 /**

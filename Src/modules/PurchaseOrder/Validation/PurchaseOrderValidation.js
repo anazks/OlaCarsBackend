@@ -27,8 +27,10 @@ const approvePurchaseOrderSchema = {
         id: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
     }),
     body: Joi.object({
-        status: Joi.string().trim().valid("APPROVED", "REJECTED", "MANAGER_APPROVED").required(),
+        status: Joi.string().trim().valid("APPROVED", "REJECTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL").required(),
         supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
+        rejectionNote: Joi.string().trim().allow("", null),
+        rejectionReason: Joi.string().trim().allow("", null),
     }),
 };
 

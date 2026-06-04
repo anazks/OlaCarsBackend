@@ -6,6 +6,7 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
+const { createDefaultMerchendise } = require("./Src/bootstrap/createDefaultMerchendise");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
 const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
 const { seedBranchPermissions } = require("./Src/bootstrap/seedBranchPermissions");
@@ -21,6 +22,8 @@ const OperationStaffRouter = require("./Src/modules/OperationStaff/Routes/Operat
 const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceStaffRoutes");
 const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
 const WorkshopManagerRouter = require("./Src/modules/WorkshopManager/Routes/WorkshopManagerRoutes");
+const MerchendiseRouter = require("./Src/modules/Merchendise/Routes/MerchendiseRoutes");
+
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
 const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
@@ -32,6 +35,7 @@ const VoucherRouter = require("./Src/modules/Ledger/Routes/VoucherRoutes");
 const DriverRouter = require("./Src/modules/Driver/Routes/DriverRouter");
 const WorkOrderRouter = require("./Src/modules/WorkOrder/Routes/WorkOrderRouter");
 const InventoryRouter = require("./Src/modules/Inventory/Routes/InventoryRouter");
+const WriteOffRouter = require("./Src/modules/Inventory/Routes/WriteOffRouter");
 const ServiceBillRouter = require("./Src/modules/ServiceBill/Routes/ServiceBillRouter");
 const InsuranceClaimRouter = require("./Src/modules/InsuranceClaim/Routes/InsuranceClaimRouter");
 const InsuranceRouter = require("./Src/modules/Insurance/Routes/InsuranceRoutes");
@@ -49,12 +53,15 @@ const SalaryRouter = require("./Src/modules/Salary/Routes/SalaryRoutes");
 const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountRoutes");
 const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
 const WorkshopProcurementRouter = require("./Src/modules/WorkshopProcurement/Routes/WorkshopProcurementRouter");
+const ScrapRouter = require("./Src/modules/Scrap/Routes/ScrapRoutes");
 const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
 const { startInvoiceCronJob } = require("./Src/modules/Invoice/Service/InvoiceCronService");
+const { initOutboundCallScheduler } = require("./Src/modules/Voice/Scheduler/OutboundCallScheduler");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
+const PaymentRequestRouter = require("./Src/modules/PaymentRequest/Routes/PaymentRequestRouter");
 const CustomerRouter = require("./Src/modules/Customer/Routes/CustomerRoutes");
 const QuoteRouter = require("./Src/modules/Quote/Routes/QuoteRoutes");
 const SalesOrderRouter = require("./Src/modules/SalesOrder/Routes/SalesOrderRoutes");
@@ -139,6 +146,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 console.log("[DEBUG] Mounting ReportingRouter at /api/reporting");
 app.use("/api/reporting", ReportingRouter);
 app.use("/api/workshop-procurement", WorkshopProcurementRouter);
+app.use("/api/scrap", ScrapRouter);
 
 app.use("/api/admin", AdminRouter);
 app.use("/api/branch", BranchRouter);
@@ -147,6 +155,7 @@ app.use("/api/finance-admin", FinanceAdminRouter);
 app.use("/api/operational-admin", OperationAdminRouter);
 app.use("/api/branch-manager", BranchManagerRouter);
 app.use("/api/user", UserRouter);
+app.use("/api/merchendise", MerchendiseRouter);
 app.use("/api/operation-staff", OperationStaffRouter);
 app.use("/api/finance-staff", FinanceStaffRouter);
 app.use("/api/workshop-staff", WorkshopStaffRouter);
@@ -162,6 +171,7 @@ app.use("/api/vouchers", VoucherRouter);
 app.use("/api/driver", DriverRouter);
 app.use("/api/work-orders", WorkOrderRouter);
 app.use("/api/inventory", InventoryRouter);
+app.use("/api/write-offs", WriteOffRouter);
 app.use("/api/service-bills", ServiceBillRouter);
 app.use("/api/insurance-claims", InsuranceClaimRouter);
 app.use("/api/insurance", InsuranceRouter);
@@ -176,6 +186,7 @@ app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
+app.use("/api/payment-requests", PaymentRequestRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
@@ -228,6 +239,9 @@ const startServer = async () => {
     await createDefaultAdmin();
     console.log("Default admin verified");
 
+    await createDefaultMerchendise();
+    console.log("Default merchandiser verified/seeded");
+
     await seedSystemSettings();
     console.log("System settings verified/seeded");
 
@@ -243,7 +257,8 @@ const startServer = async () => {
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();
       startInvoiceCronJob();
-      console.log("Internal cron schedulers (Alerts, Invoices) started");
+      initOutboundCallScheduler();
+      console.log("Internal cron schedulers (Alerts, Invoices, Outbound Calls) started");
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }

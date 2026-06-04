@@ -146,13 +146,17 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod } = req.query;
-        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod });
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId } = req.query;
+        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId });
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const query = {};
         if (paymentMethod && paymentMethod !== 'ALL') {
             query.paymentMethod = paymentMethod;
+        }
+
+        if (driverId) {
+            query.driverId = driverId;
         }
 
         if (search) {
@@ -202,6 +206,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
 
 exports.getPaymentReceivedById = async (req, res) => {
     try {
