@@ -140,7 +140,7 @@ async function testBulkInvoices() {
             }
         ];
 
-        console.log('Running bulkUploadInvoices...');
+        console.log('Running bulkUploadInvoices (First run)...');
         const result = await InvoiceService.bulkUploadInvoices(
             mockRows,
             'MANUAL',
@@ -148,12 +148,34 @@ async function testBulkInvoices() {
             'ADMIN'
         );
 
-        console.log('\n--- UPLOAD RESULT ---');
+        console.log('\n--- FIRST UPLOAD RESULT ---');
         console.log(JSON.stringify(result, null, 2));
 
         if (result.errorCount > 0) {
-            throw new Error(`Upload failed with errors: ${result.errors.join(', ')}`);
+            throw new Error(`First upload failed with errors: ${result.errors.join(', ')}`);
         }
+
+        console.log('\nRunning bulkUploadInvoices (Second run - testing skip duplicates)...');
+        const secondResult = await InvoiceService.bulkUploadInvoices(
+            mockRows,
+            'MANUAL',
+            new mongoose.Types.ObjectId(),
+            'ADMIN'
+        );
+
+        console.log('\n--- SECOND UPLOAD RESULT ---');
+        console.log(JSON.stringify(secondResult, null, 2));
+
+        if (secondResult.successCount !== 0) {
+            throw new Error(`Second upload should have created 0 invoices, but created ${secondResult.successCount}`);
+        }
+        if (secondResult.skippedCount !== 2) {
+            throw new Error(`Second upload should have returned 2 skips, but got ${secondResult.skippedCount}`);
+        }
+        if (secondResult.errorCount !== 0) {
+            throw new Error(`Second upload should have returned 0 errors, but got ${secondResult.errorCount}`);
+        }
+        console.log('Successfully verified that duplicate invoices were skipped!');
 
         // 4. Verify Invoice 1 (INV-999901) - Closed/PAID
         console.log('\nVerifying Invoice 1 (INV-999901) details...');
