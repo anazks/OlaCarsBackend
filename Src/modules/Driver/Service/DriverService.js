@@ -188,8 +188,8 @@ exports.payRent = async (id, paymentData) => {
     // Create Ledger & Payment Transaction
     try {
         console.log(`[DriverService] Starting ledger generation for driver ${id}`);
-            const accCode = await AccountingCode.findOne({ code: "4100" });
-            console.log(`[DriverService] AccountingCode 4100 found: ${!!accCode}`);
+            const accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
+            console.log(`[DriverService] AccountingCode found: ${accCode ? accCode.code : 'none'}`);
             if (accCode) {
                 const driverName = driver.personalInfo?.fullName || "Unknown Driver";
                 console.log(`[DriverService] Driver Name: ${driverName}`);
