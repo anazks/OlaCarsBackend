@@ -167,7 +167,7 @@ exports.generateInvoicePdf = (invoice, res) => {
     // ─── Financial Calculations / Summary Box ──────────────────────
     const totalsLabelX = rightColX + 10;
     const totalsValX = rightColX + 110;
-    const sub = typeof invoice.subtotal === "number" ? invoice.subtotal : invoice.totalAmountDue;
+    const sub = typeof invoice.subtotal === "number" && invoice.subtotal > 0 ? invoice.subtotal : invoice.baseAmount;
 
     doc.fontSize(9).fillColor(secondaryColor);
     doc.text("Subtotal:", totalsLabelX, tableY)
@@ -176,19 +176,36 @@ exports.generateInvoicePdf = (invoice, res) => {
 
     tableY += 14;
 
-    if (typeof invoice.discountAmount === "number" && invoice.discountAmount > 0) {
+    const discountAmt = typeof invoice.discountAmount === "number" ? invoice.discountAmount : parseFloat(invoice.discountAmount || 0);
+    if (discountAmt > 0) {
+        const discountLabel = invoice.discountType === "PERCENTAGE" && (invoice.discountValue || 0) > 0
+            ? `Discount (${invoice.discountValue}%):`
+            : "Discount:";
         doc.fillColor(secondaryColor)
-           .text("Discount:", totalsLabelX, tableY)
+           .text(discountLabel, totalsLabelX, tableY)
            .fillColor(primaryColor)
-           .text(`-$${formatCurrency(invoice.discountAmount)}`, totalsValX, tableY, { align: "right", width: 85 });
+           .text(`-$${formatCurrency(discountAmt)}`, totalsValX, tableY, { align: "right", width: 85 });
         tableY += 14;
     }
 
-    if (typeof invoice.taxAmount === "number" && invoice.taxAmount > 0) {
+    const taxAmt = typeof invoice.taxAmount === "number" ? invoice.taxAmount : parseFloat(invoice.taxAmount || 0);
+    if (taxAmt > 0) {
+        const taxLabel = (invoice.taxRate || 0) > 0
+            ? `Tax (${invoice.taxRate}%):`
+            : "Tax:";
         doc.fillColor(secondaryColor)
-           .text("Tax:", totalsLabelX, tableY)
+           .text(taxLabel, totalsLabelX, tableY)
            .fillColor(primaryColor)
-           .text(`+$${formatCurrency(invoice.taxAmount)}`, totalsValX, tableY, { align: "right", width: 85 });
+           .text(`+$${formatCurrency(taxAmt)}`, totalsValX, tableY, { align: "right", width: 85 });
+        tableY += 14;
+    }
+
+    const carryAmt = typeof invoice.carryOverAmount === "number" ? invoice.carryOverAmount : parseFloat(invoice.carryOverAmount || 0);
+    if (carryAmt > 0) {
+        doc.fillColor(secondaryColor)
+           .text("Carry Over:", totalsLabelX, tableY)
+           .fillColor(primaryColor)
+           .text(`+$${formatCurrency(carryAmt)}`, totalsValX, tableY, { align: "right", width: 85 });
         tableY += 14;
     }
 
