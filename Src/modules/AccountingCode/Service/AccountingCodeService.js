@@ -3,7 +3,7 @@ const filterBody = require('../../../shared/utils/filterBody.js');
 const AppError = require('../../../shared/utils/AppError.js');
 
 const ALLOWED_CREATE_FIELDS = ['code', 'name', 'description', 'category', 'isActive'];
-const ALLOWED_UPDATE_FIELDS = ['name', 'description', 'category', 'isActive'];
+const ALLOWED_UPDATE_FIELDS = ['code', 'name', 'description', 'category', 'isActive'];
 
 exports.create = async (data) => {
     const filtered = filterBody(data, ...ALLOWED_CREATE_FIELDS);
@@ -28,6 +28,8 @@ exports.update = async (id, body) => {
     if (Object.keys(filtered).length === 0) {
         throw new AppError('No valid fields to update', 400);
     }
+    const fs = require('fs');
+    fs.appendFileSync('scratch/debug.txt', `[updateService] filtered: ${JSON.stringify(filtered)}\n`);
 
     const updated = await AccountingCode.findByIdAndUpdate(id, filtered, {
         new: true,

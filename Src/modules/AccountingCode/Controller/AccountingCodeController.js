@@ -35,9 +35,12 @@ const getAccountingCodeById = async (req, res) => {
     }
 };
 
+const fs = require('fs');
 const updateAccountingCode = async (req, res) => {
     try {
+        fs.appendFileSync('scratch/debug.txt', `[updateAccountingCode] req.body: ${JSON.stringify(req.body)}\n`);
         const updatedCode = await AccountingCodeService.update(req.params.id, req.body);
+        fs.appendFileSync('scratch/debug.txt', `[updateAccountingCode] updatedCode: ${JSON.stringify(updatedCode)}\n`);
         return res.status(200).json({ success: true, data: updatedCode });
     } catch (error) {
         const statusCode = error.statusCode || 500;

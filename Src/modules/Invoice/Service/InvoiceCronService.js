@@ -10,6 +10,13 @@ const {
 } = require("../../../utils/emailService");
 
 const startInvoiceCronJob = () => {
+    // Run on startup to catch up on any missed cron runs (especially in local dev)
+    console.log('[InvoiceCronService] Running startup invoice generation, reminders, and overdue checks...');
+    exports.generateDueInvoices()
+        .then(() => exports.checkAndSendRentReminders())
+        .then(() => exports.checkOverdueInvoices())
+        .catch(error => console.error('[InvoiceCronService] Error in startup invoice routines:', error));
+
     // Run daily at midnight
     cron.schedule('0 0 * * *', async () => {
         console.log('[InvoiceCronService] Running daily invoice generation, reminders, and overdue check...');

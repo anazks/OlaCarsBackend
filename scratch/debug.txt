@@ -1,0 +1,9 @@
+[updateAccountingCode] req.body: {"code":"100099","name":"Cash","category":"ASSET"}
+[updateService] filtered: {"code":"100099","name":"Cash","category":"ASSET"}
+[updateAccountingCode] updatedCode: {"_id":"69b8e32c325476fb4f29c19b","code":"100099","name":"Cash","category":"ASSET","isActive":true,"createdBy":"69a1465c524648c4d0e490ff","creatorRole":"ADMIN","isDeleted":false,"createdAt":"2026-03-17T05:14:20.171Z","updatedAt":"2026-06-04T10:09:50.620Z","__v":0}
+[updateAccountingCode] req.body: {"code":"1000","name":"Cash","category":"ASSET"}
+[updateService] filtered: {"code":"1000","name":"Cash","category":"ASSET"}
+[updateAccountingCode] updatedCode: {"_id":"69b8e32c325476fb4f29c19b","code":"1000","name":"Cash","category":"ASSET","isActive":true,"createdBy":"69a1465c524648c4d0e490ff","creatorRole":"ADMIN","isDeleted":false,"createdAt":"2026-03-17T05:14:20.171Z","updatedAt":"2026-06-04T10:09:50.831Z","__v":0}
+[updateAccountingCode] req.body: {"code":"IN0002","name":"Vehicle Rental Income","category":"INCOME"}
+[updateService] filtered: {"code":"IN0002","name":"Vehicle Rental Income","category":"INCOME"}
+[updateAccountingCode] updatedCode: {"_id":"69ba2d9a14667588d5bcc4ea","code":"IN0002","name":"Vehicle Rental Income","category":"INCOME","isActive":true,"createdBy":"69a1465c524648c4d0e490ff","creatorRole":"ADMIN","isDeleted":false,"createdAt":"2026-03-18T04:44:10.400Z","updatedAt":"2026-06-04T10:19:39.171Z","__v":0}
