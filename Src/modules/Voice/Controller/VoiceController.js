@@ -56,6 +56,42 @@ exports.testOutboundCall = async (req, res) => {
     }
 };
 
+// Match a caller phone against stored driver phones regardless of formatting.
+// ElevenLabs may send "917907017504" while the driver is stored as
+// "+917907017504" (or with spaces/dashes), so exact match is unreliable. We try
+// a set of normalised candidates, then fall back to matching the trailing digits.
+const findDriverByPhone = async (callerId) => {
+    const digits = String(callerId).replace(/\D/g, "");
+    if (!digits) return null;
+
+    const candidates = new Set([
+        String(callerId).trim(),   // exactly as received
+        digits,                    // 917907017504
+        "+" + digits,              // +917907017504
+        digits.slice(-10),         // 7907017504 (local without country code)
+        "+" + digits.slice(-10)
+    ]);
+
+    let driver = await Driver.findOne({
+        "personalInfo.phone": { $in: [...candidates] },
+        isDeleted: false
+    });
+
+    // Fallback: stored number ends with the same trailing digits (covers
+    // country-code differences). Min 8 digits to avoid collisions. The \D*
+    // between digits tolerates stored separators e.g. "+507 6123-4567".
+    if (!driver && digits.length >= 8) {
+        const last8 = digits.slice(-8);
+        const pattern = last8.split("").join("\\D*") + "$";
+        driver = await Driver.findOne({
+            "personalInfo.phone": { $regex: pattern },
+            isDeleted: false
+        });
+    }
+
+    return driver;
+};
+
 exports.initiateCall = async (req, res) => {
     const { caller_id } = req.body;
     const fallback = {
@@ -72,7 +108,7 @@ exports.initiateCall = async (req, res) => {
     if (!caller_id) return res.json(fallback);
 
     try {
-        const driver = await Driver.findOne({ "personalInfo.phone": caller_id, isDeleted: false });
+        const driver = await findDriverByPhone(caller_id);
 
         if (driver) {
             return res.json({
@@ -175,19 +211,40 @@ exports.getLeaseSchemes = async (req, res, next) => {
     }
 };
 
+// Friendly "no account" response so the voice agent gets a clean, deterministic
+// signal instead of a 400/404 error (which ElevenLabs logs as "Tool failed").
+// Returned when the caller is not a recognised customer — the agent reads the
+// message and offers a callback rather than retrying.
+const NO_ACCOUNT_RESPONSE = {
+    success: true,
+    has_account: false,
+    message: "NO_ACCOUNT: No account is linked to this number. Do not retry this tool. Tell the caller you don't see an account on file and offer to take their details for a team callback."
+};
+
 exports.getAccountStatus = async (req, res, next) => {
     try {
         const { customerId } = req.params;
 
         if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
-            return res.status(400).json({ success: false, error: "Invalid customer ID" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
 
-        const driver = await Driver.findById(customerId);
+        const driver = await Driver.findById(customerId)
+            .populate("currentVehicle", "basicDetails legalDocs");
 
         if (!driver) {
-            return res.status(404).json({ success: false, error: "Customer not found" });
+            return res.status(200).json(NO_ACCOUNT_RESPONSE);
         }
+
+        // Leased vehicle so the agent can answer "which car did I lease?"
+        const v = driver.currentVehicle;
+        const leasedVehicle = v ? {
+            make: v.basicDetails?.make?.trim() || null,
+            model: v.basicDetails?.model?.trim() || null,
+            year: v.basicDetails?.year || null,
+            colour: v.basicDetails?.colour?.trim() || null,
+            plate: v.legalDocs?.registrationNumber || null
+        } : null;
 
         const pendingWeeks = driver.rentTracking
             ?.filter(week => week.status === "PENDING" || week.status === "PARTIAL")
@@ -204,7 +261,9 @@ exports.getAccountStatus = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
+            has_account: true,
             customer_name: driver.personalInfo?.fullName || "Cliente",
+            leased_vehicle: leasedVehicle,
             pending_weeks: pendingWeeks,
             total_due: totalDue,
             next_due_date: nextDueDate
