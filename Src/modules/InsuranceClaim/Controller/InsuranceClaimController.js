@@ -23,8 +23,8 @@ const createClaimHandler = async (req, res) => {
 
 const getClaimsHandler = async (req, res) => {
     try {
-        const claims = await getClaims(req.query);
-        return res.status(200).json({ success: true, data: claims });
+        const { claims, pagination } = await getClaims(req.query);
+        return res.status(200).json({ success: true, data: claims, pagination });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
