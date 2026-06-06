@@ -41,7 +41,10 @@ const inventoryPartSchema = new mongoose.Schema(
         supplierPartNumber: { type: String },
         leadTimeDays: { type: Number, default: 7 },
 
-        salesAccount: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode", required: false },
+        // Accounting codes
+        purchaseAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
+        incomeAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
+        taxId: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
 
         // Tracking
         lastRestockedAt: { type: Date },

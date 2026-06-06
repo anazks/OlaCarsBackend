@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopManager = require("../Model/WorkshopManagerModel.js");
+const Workshop = require("../../Workshop/Model/WorkshopModel.js");
 const { jwtConfig } = require("../../../config/jwtConfig.js");
 const filterBody = require("../../../shared/utils/filterBody.js");
 const validatePassword = require("../../../shared/utils/passwordValidator.js");
@@ -12,7 +13,7 @@ const ALLOWED_UPDATE_FIELDS = [
   "email",
   "phone",
   "status",
-  "branchId",
+  "workshopId",
   "permissions",
   "password",
 ];
@@ -46,7 +47,12 @@ exports.login = async (email, password) => {
   manager.lastLoginAt = new Date();
 
   const accessToken = jwt.sign(
-    { id: manager._id, role: "WORKSHOPMANAGER", branchId: manager.branchId },
+    {
+      id: manager._id,
+      role: "WORKSHOPMANAGER",
+      workshopId: manager.workshopId,
+      branchId: manager.branchId,
+    },
     process.env.JWT_SECRET,
     { expiresIn: jwtConfig.accessTokenExpiry },
   );
@@ -71,12 +77,18 @@ exports.create = async (data) => {
   validatePassword(data.password);
   const hashedPassword = await bcrypt.hash(data.password, 12);
 
+  const workshop = await Workshop.findById(data.workshopId);
+  if (!workshop) {
+    throw new AppError("Workshop not found", 404);
+  }
+
   const newManager = await WorkshopManager.create({
     fullName: data.fullName,
     email: data.email,
     phone: data.phone,
     passwordHash: hashedPassword,
-    branchId: data.branchId,
+    workshopId: data.workshopId,
+    branchId: workshop.branchId,
     status: data.status,
     createdBy: data.createdBy,
     creatorRole: data.creatorRole,
@@ -90,6 +102,14 @@ exports.create = async (data) => {
 
 exports.update = async (id, body) => {
   const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
+  if (filtered.workshopId) {
+    const workshop = await Workshop.findById(filtered.workshopId);
+    if (!workshop) {
+      throw new AppError("Workshop not found", 404);
+    }
+    filtered.branchId = workshop.branchId;
+  }
+
   if (Object.keys(filtered).length === 0) {
     throw new AppError("No valid fields to update", 400);
   }
@@ -175,7 +195,12 @@ exports.loginService = async (email, password) => {
   manager.lastLoginAt = new Date();
 
   const accessToken = jwt.sign(
-    { id: manager._id, role: "WORKSHOPMANAGER", branchId: manager.branchId },
+    {
+      id: manager._id,
+      role: "WORKSHOPMANAGER",
+      workshopId: manager.workshopId,
+      branchId: manager.branchId,
+    },
     process.env.JWT_SECRET,
     { expiresIn: jwtConfig.accessTokenExpiry },
   );
@@ -199,6 +224,11 @@ exports.loginService = async (email, password) => {
 exports.createWorkshopManagerService = async (data) => {
   validatePassword(data.password);
 
+  const workshop = await Workshop.findById(data.workshopId);
+  if (!workshop) {
+    throw new AppError("Workshop not found", 404);
+  }
+
   let finalPermissions = data.permissions || [];
   if (finalPermissions.length === 0) {
     const RoleTemplate = require("../../AccessControl/Model/RoleTemplate");
@@ -214,7 +244,11 @@ exports.createWorkshopManagerService = async (data) => {
     finalPermissions,
   );
 
-  const payload = { ...data, permissions: finalPermissions };
+  const payload = {
+    ...data,
+    permissions: finalPermissions,
+    branchId: workshop.branchId,
+  };
   return await addWorkshopManagerRepo(payload);
 };
 
@@ -315,7 +349,12 @@ exports.refreshSessionService = async (token) => {
     }
 
     const accessToken = jwt.sign(
-      { id: manager._id, role: "WORKSHOPMANAGER", branchId: manager.branchId },
+      {
+        id: manager._id,
+        role: "WORKSHOPMANAGER",
+        workshopId: manager.workshopId,
+        branchId: manager.branchId,
+      },
       process.env.JWT_SECRET,
       { expiresIn: jwtConfig.accessTokenExpiry },
     );

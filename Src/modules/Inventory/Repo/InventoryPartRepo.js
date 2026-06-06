@@ -1,4 +1,6 @@
 const { InventoryPart } = require("../Model/InventoryPartModel");
+const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+const Tax = require("../../Tax/Model/TaxModel");
 
 /**
  * Helper to flatten nested objects into dot-notation for $set.
@@ -23,6 +25,18 @@ const flattenForSet = (obj, parentKey = "") => {
  */
 exports.createPart = async (data) => {
     try {
+        if (!data.purchaseAccountId) {
+            const purchaseAcc = await AccountingCode.findOne({ code: "CGS0001" });
+            if (purchaseAcc) data.purchaseAccountId = purchaseAcc._id;
+        }
+        if (!data.incomeAccountId) {
+            const incomeAcc = await AccountingCode.findOne({ code: "IN0008" });
+            if (incomeAcc) data.incomeAccountId = incomeAcc._id;
+        }
+        if (!data.taxId) {
+            const defaultTax = await Tax.findOne({ name: "ITBMS" });
+            if (defaultTax) data.taxId = defaultTax._id;
+        }
         const part = await InventoryPart.create(data);
         return part.toObject();
     } catch (error) {
@@ -33,13 +47,27 @@ exports.createPart = async (data) => {
     }
 };
 
-/**
- * Create multiple inventory parts in bulk.
- * Uses unordered insertMany to allow valid documents to pass even if some fail (e.g., duplicate keys).
- */
 exports.bulkCreateParts = async (partsData) => {
     try {
-        const result = await InventoryPart.insertMany(partsData, { ordered: false });
+        const purchaseAcc = await AccountingCode.findOne({ code: "CGS0001" });
+        const incomeAcc = await AccountingCode.findOne({ code: "IN0008" });
+        const defaultTax = await Tax.findOne({ name: "ITBMS" });
+
+        const enriched = partsData.map(part => {
+            const copy = { ...part };
+            if (!copy.purchaseAccountId && purchaseAcc) {
+                copy.purchaseAccountId = purchaseAcc._id;
+            }
+            if (!copy.incomeAccountId && incomeAcc) {
+                copy.incomeAccountId = incomeAcc._id;
+            }
+            if (!copy.taxId && defaultTax) {
+                copy.taxId = defaultTax._id;
+            }
+            return copy;
+        });
+
+        const result = await InventoryPart.insertMany(enriched, { ordered: false });
         return { successCount: result.length, parts: result };
     } catch (error) {
         // If ordered is false, mongoose throws a BulkWriteError that contains insertedDocs
@@ -77,6 +105,9 @@ exports.getParts = async (filters = {}) => {
         return await InventoryPart.find(query)
             .populate("branchId", "name")
             .populate("supplierId", "name")
+            .populate("purchaseAccountId", "code name")
+            .populate("incomeAccountId", "code name")
+            .populate("taxId", "name rate")
             .sort({ partName: 1 });
     } catch (error) {
         throw error;
@@ -90,7 +121,10 @@ exports.getPartById = async (id) => {
     try {
         return await InventoryPart.findById(id)
             .populate("branchId", "name")
-            .populate("supplierId", "name");
+            .populate("supplierId", "name")
+            .populate("purchaseAccountId", "code name")
+            .populate("incomeAccountId", "code name")
+            .populate("taxId", "name rate");
     } catch (error) {
         throw error;
     }
