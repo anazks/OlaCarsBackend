@@ -19,8 +19,10 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         throw new Error("No driver data provided");
     }
 
+    // A4 Landscape: 842 x 595
     const doc = new PDFDocument({ 
         size: "A4", 
+        layout: "landscape",
         margin: 40,
         info: {
             Title: `Statement of Account - ${driver.personalInfo?.fullName || "Driver"}`,
@@ -35,11 +37,11 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
     const primaryColor = "#111827"; // Dark slate
     const secondaryColor = "#4B5563"; // Dim grey
     const borderMain = "#E5E7EB"; // Separator lines
-    const stripeBg = "#F9FAFB"; // Alternating row color
+    const stripeBg = "#F9FAFB"; // Zebra stripe background
     const accentColor = "#4F46E5"; // Indigo accent
 
     const leftMargin = 40;
-    const rightMargin = 555;
+    const rightMargin = 802;
     const printableWidth = rightMargin - leftMargin;
 
     // Helper to draw Header & Metadata on the first page
@@ -57,7 +59,7 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         doc.fontSize(14)
            .fillColor(primaryColor)
            .font("Helvetica-Bold")
-           .text("STATEMENT OF ACCOUNT", 300, 40, { align: "right", width: 255 });
+           .text("STATEMENT OF ACCOUNT", 500, 40, { align: "right", width: 302 });
 
         doc.moveTo(leftMargin, 75)
            .lineTo(rightMargin, 75)
@@ -67,7 +69,7 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         // Customer & Summary Information Grid
         let metaY = 90;
         doc.fontSize(8.5).fillColor(secondaryColor).font("Helvetica-Bold").text("CUSTOMER DETAILS:", leftMargin, metaY);
-        doc.text("STATEMENT SUMMARY:", 330, metaY);
+        doc.text("STATEMENT SUMMARY:", 450, metaY);
 
         metaY += 12;
         doc.fontSize(9).fillColor(primaryColor).font("Helvetica");
@@ -86,10 +88,10 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         const prepaymentBalance = Math.max(0, totalPaymentsReceived - totalApplied);
         const outstandingBalance = invoices.reduce((sum, inv) => sum + (inv.balance || 0), 0);
 
-        doc.text(`Statement Date: ${formatDate(new Date())}`, 330, metaY)
-           .text(`Account Status: ${driver.status || "N/A"}`, 330, metaY + 13)
-           .text(`Outstanding Balance: $${formatCurrency(outstandingBalance)}`, 330, metaY + 26, { bold: true })
-           .text(`Prepayment Credit: $${formatCurrency(prepaymentBalance)}`, 330, metaY + 39);
+        doc.text(`Statement Date: ${formatDate(new Date())}`, 450, metaY)
+           .text(`Account Status: ${driver.status || "N/A"}`, 450, metaY + 13)
+           .text(`Outstanding Balance: $${formatCurrency(outstandingBalance)}`, 450, metaY + 26, { bold: true })
+           .text(`Prepayment Credit: $${formatCurrency(prepaymentBalance)}`, 450, metaY + 39);
 
         let finalY = metaY + 55;
         doc.moveTo(leftMargin, finalY)
@@ -100,21 +102,20 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         return finalY + 15;
     };
 
-    // Helper to draw Table Headers
+    // Helper to draw Table Headers (With 10pt safety gaps between columns)
     const drawTableHeaders = (y) => {
         doc.fillColor(primaryColor)
            .fontSize(8.5)
            .font("Helvetica-Bold");
 
-        // Column widths: Date: 60, Type: 65, Ref: 75, Details: 130, Debit: 55, Credit: 55, Balance: 60, Status: 50
-        doc.text("Date", leftMargin, y, { width: 60 })
-           .text("Type", leftMargin + 60, y, { width: 65 })
-           .text("Ref Number", leftMargin + 125, y, { width: 75 })
-           .text("Details / Description", leftMargin + 200, y, { width: 130 })
-           .text("Debit ($)", leftMargin + 330, y, { width: 55, align: "right" })
-           .text("Credit ($)", leftMargin + 385, y, { width: 55, align: "right" })
-           .text("Balance ($)", leftMargin + 440, y, { width: 60, align: "right" })
-           .text("Status", leftMargin + 500, y, { width: 50, align: "center" });
+        doc.text("Date", 40, y, { width: 55 })
+           .text("Type", 105, y, { width: 65 })
+           .text("Ref Number", 180, y, { width: 75 })
+           .text("Details / Description", 265, y, { width: 230 })
+           .text("Debit ($)", 505, y, { width: 60, align: "right" })
+           .text("Credit ($)", 575, y, { width: 60, align: "right" })
+           .text("Balance ($)", 645, y, { width: 60, align: "right" })
+           .text("Status", 715, y, { width: 87, align: "center" });
 
         doc.moveTo(leftMargin, y + 15)
            .lineTo(rightMargin, y + 15)
@@ -182,8 +183,8 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
     txList.forEach((tx) => {
         runningBalance += tx.debit - tx.credit;
 
-        // Page break check (A4 is 842pt high, we break at 780pt)
-        if (currentY > 760) {
+        // Page break check (A4 Landscape is 595pt high, we break at 515pt)
+        if (currentY > 515) {
             doc.addPage();
             currentY = drawTableHeaders(50);
         }
@@ -205,15 +206,15 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         const creditStr = tx.credit > 0 ? formatCurrency(tx.credit) : "—";
         const balanceStr = formatCurrency(runningBalance);
 
-        doc.text(dateStr, leftMargin, currentY, { width: 60, ellipsis: true })
-           .text(tx.type, leftMargin + 60, currentY, { width: 65, ellipsis: true })
-           .text(tx.refNumber, leftMargin + 125, currentY, { width: 75, ellipsis: true })
-           .text(tx.description, leftMargin + 200, currentY, { width: 130, ellipsis: true })
-           .text(debitStr, leftMargin + 330, currentY, { width: 55, align: "right" })
-           .text(creditStr, leftMargin + 385, currentY, { width: 55, align: "right" })
-           .text(balanceStr, leftMargin + 440, currentY, { width: 60, align: "right" })
+        doc.text(dateStr, 40, currentY, { width: 55, ellipsis: true })
+           .text(tx.type, 105, currentY, { width: 65, ellipsis: true })
+           .text(tx.refNumber, 180, currentY, { width: 75, ellipsis: true })
+           .text(tx.description, 265, currentY, { width: 230, ellipsis: true })
+           .text(debitStr, 505, currentY, { width: 60, align: "right" })
+           .text(creditStr, 575, currentY, { width: 60, align: "right" })
+           .text(balanceStr, 645, currentY, { width: 60, align: "right" })
            .fillColor(tx.status === "PAID" || tx.status === "COMPLETED" ? "#10B981" : tx.status === "OVERDUE" ? "#EF4444" : primaryColor)
-           .text(tx.status, leftMargin + 500, currentY, { width: 50, align: "center", ellipsis: true });
+           .text(tx.status, 715, currentY, { width: 87, align: "center", ellipsis: true });
 
         // Add subtle bottom border for each row
         doc.moveTo(leftMargin, currentY + 13)
@@ -226,8 +227,8 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         isStripe = !isStripe;
     });
 
-    // End of Document footer
-    if (currentY > 740) {
+    // End of Document footer (break if height is tight)
+    if (currentY > 490) {
         doc.addPage();
         currentY = 50;
     }

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { getCollectionsOverview, getCollectionsList } = require("../Controller/CollectionController");
+const { getCollectionsOverview, getCollectionsList, exportCollectionsPdf } = require("../Controller/CollectionController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
@@ -184,6 +184,21 @@ router.get(
         ROLES.OPERATIONSTAFF
     ),
     getCollectionsList
+);
+
+router.get(
+    "/export/pdf",
+    authenticate,
+    authorize(
+        ROLES.ADMIN,
+        ROLES.FINANCEADMIN,
+        ROLES.OPERATIONADMIN,
+        ROLES.COUNTRYMANAGER,
+        ROLES.BRANCHMANAGER,
+        ROLES.FINANCESTAFF,
+        ROLES.OPERATIONSTAFF
+    ),
+    exportCollectionsPdf
 );
 
 module.exports = router;
