@@ -964,6 +964,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
     const createdInvoices = [];
     const errors = [];
+    const skipped = [];
 
     // Helper to get normalized value from row with whitespace & case-insensitive matching
     const getRowVal = (r, possibleKeys) => {
@@ -1056,7 +1057,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             continue;
         }
 
-        // Validate invoice duplicates - overwrite/replace if duplicate exists (user specified no need to block on invoice number validation)
+        // Validate invoice duplicates - skip if duplicate exists
         const invNo = (getRowVal(headerRow, ["Invoice Number", "invoiceNumber"]) || "").toString().trim();
         const invoiceNumber = invNo || exports.formatInvoiceNumber(startSeq + invoiceIndex);
         invoiceIndex++;
@@ -1064,16 +1065,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         if (invNo) {
             const existingInv = await Invoice.findOne({ invoiceNumber, isDeleted: false });
             if (existingInv) {
-                console.log(`[InvoiceService] Overwriting duplicate invoice ${invoiceNumber} by deleting the old one.`);
-                await Invoice.deleteOne({ _id: existingInv._id });
-                
-                // Clean up corresponding ledger entries
-                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-                await LedgerEntry.deleteMany({ referenceId: existingInv._id });
-                
-                // Clean up corresponding PaymentReceived document if any
-                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
-                await PaymentReceived.deleteMany({ "invoices.invoiceId": existingInv._id });
+                console.log(`[InvoiceService] Invoice ${invoiceNumber} already exists. Skipping upload.`);
+                skipped.push(`Invoice group "${key}" (Row ${origIdx}): Invoice number "${invoiceNumber}" already exists. Skipping upload.`);
+                continue;
             }
         }
 
@@ -1190,9 +1184,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         const payments = [];
         let paidAt = undefined;
-        if (status === "PAID") {
+        if (status === "PAID" || amountPaid > 0) {
             payments.push({
-                amount: totalAmountDue,
+                amount: amountPaid,
                 paidAt: dueDate,
                 paymentMethod: "Bank Transfer", // User requested all payment methods to be Bank Transfer on bulk upload
                 note: "Bulk upload payment"
@@ -1236,12 +1230,12 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 if (status !== "DRAFT") {
                     await LedgerService.generateInvoiceLedgerEntries(created);
                     
-                    // For CLOSED (PAID) invoices, post corresponding payments and auto-create PaymentReceived
-                    if (status === "PAID") {
+                    // For CLOSED (PAID) or partially paid invoices, post corresponding payments and auto-create PaymentReceived
+                    if (status === "PAID" || amountPaid > 0) {
                         const accountCode = getRowVal(headerRow, ["Account Code", "accountCode"]);
                         const paymentMethod = "Bank Transfer"; // User requested all payment methods to be Bank Transfer on bulk upload
                         await exports.createLedgerEntryForBulkUpload(
-                            totalAmountDue,
+                            amountPaid,
                             paymentMethod,
                             created,
                             createdBy,
@@ -1262,7 +1256,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
     return {
         successCount: createdInvoices.length,
         errorCount: errors.length,
+        skippedCount: skipped.length,
         errors,
+        skipped,
         createdInvoices: createdInvoices.map(inv => inv.invoiceNumber)
     };
 };

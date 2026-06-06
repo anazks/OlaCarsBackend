@@ -53,8 +53,16 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const totalCount = await Invoice.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
 
-    // Dynamic sort: if workshop, sort by createdAt
-    const sortOpt = options.defaultSort || (queryParams.invoiceType === 'WORKSHOP' ? { createdAt: -1 } : { weekNumber: 1 });
+    // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to workshop/weekNumber sorting
+    let sortOpt = options.defaultSort;
+    if (!sortOpt) {
+        if (queryParams.sortBy) {
+            const order = queryParams.sortOrder === 'desc' ? -1 : 1;
+            sortOpt = { [queryParams.sortBy]: order };
+        } else {
+            sortOpt = queryParams.invoiceType === 'WORKSHOP' ? { createdAt: -1 } : { weekNumber: 1 };
+        }
+    }
 
     require("../../Driver/Model/DriverModel");
     require("../../Vehicle/Model/VehicleModel");
