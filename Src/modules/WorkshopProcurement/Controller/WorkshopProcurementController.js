@@ -115,7 +115,7 @@ exports.auditProcurementRequest = async (req, res) => {
         const previousStatus = request.status;
         request.merchandiserPrice = Number(merchandiserPrice);
         request.merchandiserTotalAmount = Number(merchandiserPrice) * request.quantity;
-        
+
         if (documents && Array.isArray(documents)) {
             request.documents = documents;
         }
@@ -170,7 +170,8 @@ exports.financeApproveRequest = async (req, res) => {
         }
 
         const previousStatus = request.status;
-        request.status = status;
+        const targetStatus = status === "APPROVED" ? "COST_APPROVED" : "REJECTED";
+        request.status = targetStatus;
         request.approvedBy = approverId;
         request.approvedByRole = approverRole;
 
@@ -189,7 +190,7 @@ exports.financeApproveRequest = async (req, res) => {
             } else {
                 request.originalTotalAmount = 0;
             }
-            historyRecord.changesSummary = `Finance approved merchandiser pricing. Total amount updated to proposed $${request.merchandiserTotalAmount}.`;
+            historyRecord.changesSummary = `Finance approved merchandiser pricing. Total amount updated to proposed $${request.merchandiserTotalAmount}. Status changed to COST_APPROVED.`;
         } else if (status === "REJECTED") {
             request.rejectionNote = note || "";
             historyRecord.changesSummary = `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"`;
@@ -202,7 +203,158 @@ exports.financeApproveRequest = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: `Workshop Procurement Request successfully ${status.toLowerCase()}d.`,
+            message: `Workshop Procurement Request successfully ${targetStatus.toLowerCase() === 'cost_approved' ? 'approved' : 'rejected'}.`,
+            data: request
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.shipRequest = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const approverRole = req.user.role;
+        const approverId = req.user.id;
+
+        const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
+        const request = await WorkshopProcurement.findById(id);
+        if (!request) {
+            return res.status(404).json({ success: false, message: "Procurement Request not found." });
+        }
+
+        if (request.status !== "COST_APPROVED") {
+            return res.status(400).json({ success: false, message: "Request status must be COST_APPROVED to ship." });
+        }
+
+        const previousStatus = request.status;
+        request.status = "IN_TRANSIT";
+
+        const historyRecord = {
+            editedAt: new Date(),
+            editedBy: approverId,
+            editorRole: approverRole,
+            previousStatus: previousStatus,
+            changesSummary: "Merchandiser shipped procurement request. Status changed to IN_TRANSIT."
+        };
+
+        if (!request.editHistory) request.editHistory = [];
+        request.editHistory.push(historyRecord);
+
+        await request.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Workshop Procurement Request successfully shipped.",
+            data: request
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.receiveRequest = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const approverRole = req.user.role;
+        const approverId = req.user.id;
+
+        const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
+        const request = await WorkshopProcurement.findById(id);
+        if (!request) {
+            return res.status(404).json({ success: false, message: "Procurement Request not found." });
+        }
+
+        if (request.status !== "IN_TRANSIT") {
+            return res.status(400).json({ success: false, message: "Request status must be IN_TRANSIT to receive." });
+        }
+
+        const previousStatus = request.status;
+        request.status = "RECEIVED";
+
+        const historyRecord = {
+            editedAt: new Date(),
+            editedBy: approverId,
+            editorRole: approverRole,
+            previousStatus: previousStatus,
+            changesSummary: "Workshop staff marked request as RECEIVED."
+        };
+
+        if (!request.editHistory) request.editHistory = [];
+        request.editHistory.push(historyRecord);
+
+        await request.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Workshop Procurement Request successfully received.",
+            data: request
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.addInventoryToStock = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { receivedQuantity } = req.body;
+        const approverRole = req.user.role;
+        const approverId = req.user.id;
+
+        if (receivedQuantity === undefined || receivedQuantity < 0) {
+            return res.status(400).json({ success: false, message: "Valid receivedQuantity is required." });
+        }
+
+        const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
+        const request = await WorkshopProcurement.findById(id).populate("part");
+        if (!request) {
+            return res.status(404).json({ success: false, message: "Procurement Request not found." });
+        }
+
+        if (request.status !== "RECEIVED") {
+            return res.status(400).json({ success: false, message: "Request status must be RECEIVED to add inventory." });
+        }
+
+        if (request.inventoryAdded) {
+            return res.status(400).json({ success: false, message: "Inventory has already been updated for this request." });
+        }
+
+        // 1. Update stock levels using receiveStock from InventoryService
+        const { receiveStock } = require("../../Inventory/Service/InventoryService.js");
+        await receiveStock(request.part._id, receivedQuantity, { id: approverId, role: approverRole });
+
+        // 2. Calculate deficit quantities and amounts
+        const requestedQuantity = request.quantity || 0;
+        const deficitQuantity = Math.max(0, requestedQuantity - receivedQuantity);
+
+        // Cost calculations: prioritise merchandiserPrice over part.unitCost
+        const pricePerUnit = request.merchandiserPrice || (request.part && request.part.unitCost) || 0;
+        const deficitAmount = deficitQuantity * pricePerUnit;
+
+        // 3. Update request with receipt details
+        request.receivedQuantity = receivedQuantity;
+        request.deficitQuantity = deficitQuantity;
+        request.deficitAmount = deficitAmount;
+        request.inventoryAdded = true;
+
+        const previousStatus = request.status;
+        const historyRecord = {
+            editedAt: new Date(),
+            editedBy: approverId,
+            editorRole: approverRole,
+            previousStatus: previousStatus,
+            changesSummary: `Stock added to inventory. Received: ${receivedQuantity}, Deficit Qty: ${deficitQuantity}, Deficit Cost: $${deficitAmount.toFixed(2)}.`
+        };
+
+        if (!request.editHistory) request.editHistory = [];
+        request.editHistory.push(historyRecord);
+
+        await request.save();
+
+        res.status(200).json({
+            success: true,
+            message: "Inventory successfully updated and deficit recorded.",
             data: request
         });
     } catch (error) {

@@ -7,7 +7,10 @@ const {
     approveRequest,
     getRequestById,
     auditProcurementRequest,
-    financeApproveRequest
+    financeApproveRequest,
+    shipRequest,
+    receiveRequest,
+    addInventoryToStock
 } = require("../Controller/WorkshopProcurementController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -53,6 +56,27 @@ router.put(
     authenticate,
     authorize(ROLES.FINANCEADMIN, ROLES.ADMIN),
     financeApproveRequest
+);
+
+router.put(
+    "/:id/ship",
+    authenticate,
+    authorize(ROLES.MERCHENDISE, ROLES.ADMIN),
+    shipRequest
+);
+
+router.put(
+    "/:id/receive",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER, ROLES.ADMIN),
+    receiveRequest
+);
+
+router.put(
+    "/:id/add-inventory",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER, ROLES.ADMIN),
+    addInventoryToStock
 );
 
 module.exports = router;
