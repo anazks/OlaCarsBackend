@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopStaff = require("../Model/WorkshopStaffModel.js");
-const { jwtConfig  } = require("../../../config/jwtConfig.js");
+const { jwtConfig } = require("../../../config/jwtConfig.js");
 
 /**
  * Adds a new Workshop Staff member.
@@ -9,20 +9,20 @@ const { jwtConfig  } = require("../../../config/jwtConfig.js");
  * @returns {Promise<Object>} Added staff document.
  */
 exports.addWorkshopStaffService = async (data) => {
-    try {
-        const hashedPassword = await bcrypt.hash(data.password, 12);
-        const newStaff = await WorkshopStaff.create({
-            ...data,
-            passwordHash: hashedPassword,
-        });
+  try {
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+    const newStaff = await WorkshopStaff.create({
+      ...data,
+      passwordHash: hashedPassword,
+    });
 
-        const staffObj = newStaff.toObject();
-        delete staffObj.passwordHash;
+    const staffObj = newStaff.toObject();
+    delete staffObj.passwordHash;
 
-        return staffObj;
-    } catch (error) {
-        throw error;
-    }
+    return staffObj;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -31,12 +31,12 @@ exports.addWorkshopStaffService = async (data) => {
  * @returns {Promise<Object>} Updated staff document.
  */
 exports.editWorkshopStaffService = async (data) => {
-    try {
-        const { id, ...updateData } = data;
-        return await WorkshopStaff.findByIdAndUpdate(id, updateData, { new: true });
-    } catch (error) {
-        throw error;
-    }
+  try {
+    const { id, ...updateData } = data;
+    return await WorkshopStaff.findByIdAndUpdate(id, updateData, { new: true });
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -45,11 +45,11 @@ exports.editWorkshopStaffService = async (data) => {
  * @returns {Promise<void>}
  */
 exports.deleteWorkshopStaffService = async (id) => {
-    try {
-        await WorkshopStaff.findByIdAndUpdate(id, { isDeleted: true });
-    } catch (error) {
-        throw error;
-    }
+  try {
+    await WorkshopStaff.findByIdAndUpdate(id, { isDeleted: true });
+  } catch (error) {
+    throw error;
+  }
 };
 
 const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
@@ -61,18 +61,18 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
  * @returns {Promise<Object>} Paginated result
  */
 exports.getWorkshopStaffService = async (queryParams = {}, options = {}) => {
-    try {
-        const queryOptions = {
-            searchFields: ["fullName", "email"],
-            filterFields: ["status", "branchId"],
-            dateFilterField: "createdAt",
-            ...options
-        };
+  try {
+    const queryOptions = {
+      searchFields: ["fullName", "email"],
+      filterFields: ["status", "branchId", "workshopId"],
+      dateFilterField: "createdAt",
+      ...options,
+    };
 
-        return await applyQueryFeatures(WorkshopStaff, queryParams, queryOptions);
-    } catch (error) {
-        throw error;
-    }
+    return await applyQueryFeatures(WorkshopStaff, queryParams, queryOptions);
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -81,11 +81,11 @@ exports.getWorkshopStaffService = async (queryParams = {}, options = {}) => {
  * @returns {Promise<Object>}
  */
 exports.getWorkshopStaffByIdService = async (id) => {
-    try {
-        return await WorkshopStaff.findOne({ _id: id, isDeleted: false });
-    } catch (error) {
-        throw error;
-    }
+  try {
+    return await WorkshopStaff.findOne({ _id: id, isDeleted: false });
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -95,28 +95,28 @@ exports.getWorkshopStaffByIdService = async (id) => {
  * @returns {Promise<Object>} Tokens.
  */
 exports.loginWorkshopStaff = async (email, password) => {
-    const staff = await WorkshopStaff.findOne({ email, isDeleted: false });
-    if (!staff) throw new Error("Invalid credentials");
+  const staff = await WorkshopStaff.findOne({ email, isDeleted: false });
+  if (!staff) throw new Error("Invalid credentials");
 
-    const isMatch = await bcrypt.compare(password, staff.passwordHash);
-    if (!isMatch) throw new Error("Invalid credentials");
-    if (staff.status !== "ACTIVE") throw new Error("Account not active");
+  const isMatch = await bcrypt.compare(password, staff.passwordHash);
+  if (!isMatch) throw new Error("Invalid credentials");
+  if (staff.status !== "ACTIVE") throw new Error("Account not active");
 
-    const accessToken = jwt.sign(
-        { id: staff._id, role: staff.role, branchId: staff.branchId },
-        process.env.JWT_SECRET,
-        { expiresIn: jwtConfig.accessTokenExpiry }
-    );
+  const accessToken = jwt.sign(
+    { id: staff._id, role: staff.role, branchId: staff.branchId },
+    process.env.JWT_SECRET,
+    { expiresIn: jwtConfig.accessTokenExpiry },
+  );
 
-    const refreshToken = jwt.sign(
-        { id: staff._id },
-        process.env.JWT_REFRESH_SECRET,
-        { expiresIn: jwtConfig.refreshTokenExpiry }
-    );
+  const refreshToken = jwt.sign(
+    { id: staff._id },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: jwtConfig.refreshTokenExpiry },
+  );
 
-    staff.refreshToken = refreshToken;
-    staff.lastLoginAt = new Date();
-    await staff.save();
+  staff.refreshToken = refreshToken;
+  staff.lastLoginAt = new Date();
+  await staff.save();
 
-    return { accessToken, refreshToken };
+  return { accessToken, refreshToken };
 };
