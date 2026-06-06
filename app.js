@@ -6,10 +6,16 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./Src/config/swagger.config");
 const connectDB = require("./Src/config/dbConfig");
 const { createDefaultAdmin } = require("./Src/bootstrap/createDefaultAdmin");
-const { createDefaultMerchendise } = require("./Src/bootstrap/createDefaultMerchendise");
+const {
+  createDefaultMerchendise,
+} = require("./Src/bootstrap/createDefaultMerchendise");
 const { seedSystemSettings } = require("./Src/bootstrap/seedSystemSettings");
-const { seedFinancePermissions } = require("./Src/bootstrap/seedFinancePermissions");
-const { seedBranchPermissions } = require("./Src/bootstrap/seedBranchPermissions");
+const {
+  seedFinancePermissions,
+} = require("./Src/bootstrap/seedFinancePermissions");
+const {
+  seedBranchPermissions,
+} = require("./Src/bootstrap/seedBranchPermissions");
 const { seedAccountingCodes } = require("./Src/bootstrap/seedAccountingCodes");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
@@ -22,6 +28,7 @@ const OperationStaffRouter = require("./Src/modules/OperationStaff/Routes/Operat
 const FinanceStaffRouter = require("./Src/modules/FinanceStaff/Routes/FinanceStaffRoutes");
 const WorkshopStaffRouter = require("./Src/modules/WorkshopStaff/Routes/WorkshopStaffRoutes");
 const WorkshopManagerRouter = require("./Src/modules/WorkshopManager/Routes/WorkshopManagerRoutes");
+const WorkshopRouter = require("./Src/modules/Workshop/Routes/WorkshopRoutes");
 const MerchendiseRouter = require("./Src/modules/Merchendise/Routes/MerchendiseRoutes");
 
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
@@ -54,9 +61,15 @@ const BankAccountRouter = require("./Src/modules/BankAccount/Routes/BankAccountR
 const VoiceRoutes = require("./Src/modules/Voice/Routes/VoiceRoutes");
 const WorkshopProcurementRouter = require("./Src/modules/WorkshopProcurement/Routes/WorkshopProcurementRouter");
 const ScrapRouter = require("./Src/modules/Scrap/Routes/ScrapRoutes");
-const { initAlertScheduler } = require("./Src/modules/Alert/Service/AlertScheduler");
-const { startInvoiceCronJob } = require("./Src/modules/Invoice/Service/InvoiceCronService");
-const { initOutboundCallScheduler } = require("./Src/modules/Voice/Scheduler/OutboundCallScheduler");
+const {
+  initAlertScheduler,
+} = require("./Src/modules/Alert/Service/AlertScheduler");
+const {
+  startInvoiceCronJob,
+} = require("./Src/modules/Invoice/Service/InvoiceCronService");
+const {
+  initOutboundCallScheduler,
+} = require("./Src/modules/Voice/Scheduler/OutboundCallScheduler");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
@@ -81,19 +94,27 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://cdnjs.cloudflare.com",
+        ],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
         imgSrc: ["'self'", "data:", "https://cdnjs.cloudflare.com"],
         connectSrc: ["'self'"],
       },
     },
-  })
+  }),
 ); // Security headers with Swagger support
 app.use(cors({ origin: "*" })); // Adjust in production
-app.use("/uploads", (req, res, next) => {
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  next();
-}, express.static(require("path").join(__dirname, "uploads")));
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(require("path").join(__dirname, "uploads")),
+);
 app.use(express.json({ limit: "100mb" }));
 app.use((req, res, next) => {
   console.log(`[REQUEST] ${req.method} ${req.url}`);
@@ -103,7 +124,8 @@ app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return res.status(400).json({
       success: false,
-      message: "Invalid JSON format. Please check your request body for syntax errors (e.g., trailing commas).",
+      message:
+        "Invalid JSON format. Please check your request body for syntax errors (e.g., trailing commas).",
     });
   }
   next(err);
@@ -125,13 +147,20 @@ app.get("/api/proxy-download", async (req, res) => {
 
     const response = await fetch(fileUrl);
     if (!response.ok) {
-      return res.status(response.status).json({ error: `Failed to fetch file from source: ${response.statusText}` });
+      return res
+        .status(response.status)
+        .json({
+          error: `Failed to fetch file from source: ${response.statusText}`,
+        });
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    res.setHeader("Content-Type", response.headers.get("content-type") || "application/octet-stream");
+    res.setHeader(
+      "Content-Type",
+      response.headers.get("content-type") || "application/octet-stream",
+    );
     const filename = fileUrl.split("/").pop() || "download";
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(buffer);
@@ -160,6 +189,7 @@ app.use("/api/operation-staff", OperationStaffRouter);
 app.use("/api/finance-staff", FinanceStaffRouter);
 app.use("/api/workshop-staff", WorkshopStaffRouter);
 app.use("/api/workshop-manager", WorkshopManagerRouter);
+app.use("/api/workshop", WorkshopRouter);
 app.use("/api/purchase-order", PurchaseOrderRouter);
 app.use("/api/vehicle", VehicleRouter);
 app.use("/api/supplier", SupplierRouter);
@@ -227,9 +257,14 @@ const startServer = async () => {
 
     // Drop deprecated policyNumber index if it exists
     try {
-      const collections = await mongoose.connection.db.listCollections({ name: 'insurances' }).toArray();
+      const collections = await mongoose.connection.db
+        .listCollections({ name: "insurances" })
+        .toArray();
       if (collections.length > 0) {
-        await mongoose.connection.db.collection('insurances').dropIndex('policyNumber_1').catch(() => { });
+        await mongoose.connection.db
+          .collection("insurances")
+          .dropIndex("policyNumber_1")
+          .catch(() => {});
         console.log("Verified/Dropped deprecated policyNumber index");
       }
     } catch (e) {
@@ -258,7 +293,9 @@ const startServer = async () => {
       initAlertScheduler();
       startInvoiceCronJob();
       initOutboundCallScheduler();
-      console.log("Internal cron schedulers (Alerts, Invoices, Outbound Calls) started");
+      console.log(
+        "Internal cron schedulers (Alerts, Invoices, Outbound Calls) started",
+      );
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }
@@ -266,7 +303,6 @@ const startServer = async () => {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
-
   } catch (error) {
     console.error("Startup failed:", error.message);
     process.exit(1); // stop app if DB fails

@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopStaff = require("../Model/WorkshopStaffModel.js");
+const Workshop = require("../../Workshop/Model/WorkshopModel.js");
 const { jwtConfig } = require("../../../config/jwtConfig.js");
 const filterBody = require("../../../shared/utils/filterBody.js");
 const validatePassword = require("../../../shared/utils/passwordValidator.js");
@@ -12,7 +13,7 @@ const ALLOWED_UPDATE_FIELDS = [
   "email",
   "phone",
   "status",
-  "branchId",
+  "workshopId",
   "permissions",
   "password",
 ];
@@ -45,7 +46,12 @@ exports.login = async (email, password) => {
   staff.lastLoginAt = new Date();
 
   const accessToken = jwt.sign(
-    { id: staff._id, role: "WORKSHOPSTAFF", branchId: staff.branchId },
+    {
+      id: staff._id,
+      role: "WORKSHOPSTAFF",
+      workshopId: staff.workshopId,
+      branchId: staff.branchId,
+    },
     process.env.JWT_SECRET,
     { expiresIn: jwtConfig.accessTokenExpiry },
   );
@@ -70,6 +76,11 @@ exports.create = async (data) => {
   validatePassword(data.password);
   const hashedPassword = await bcrypt.hash(data.password, 12);
 
+  const workshop = await Workshop.findById(data.workshopId);
+  if (!workshop) {
+    throw new AppError("Workshop not found", 404);
+  }
+
   let finalPermissions = data.permissions || [];
   if (finalPermissions.length === 0) {
     const RoleTemplate = require("../../AccessControl/Model/RoleTemplate");
@@ -88,7 +99,8 @@ exports.create = async (data) => {
     email: data.email,
     phone: data.phone,
     passwordHash: hashedPassword,
-    branchId: data.branchId,
+    workshopId: data.workshopId,
+    branchId: workshop.branchId,
     status: data.status,
     permissions: finalPermissions,
     createdBy: data.createdBy,
@@ -107,6 +119,13 @@ exports.update = async (id, body) => {
     validatePassword(filtered.password);
     filtered.passwordHash = await bcrypt.hash(filtered.password, 12);
     delete filtered.password;
+  }
+  if (filtered.workshopId) {
+    const workshop = await Workshop.findById(filtered.workshopId);
+    if (!workshop) {
+      throw new AppError("Workshop not found", 404);
+    }
+    filtered.branchId = workshop.branchId;
   }
   if (Object.keys(filtered).length === 0) {
     throw new AppError("No valid fields to update", 400);
@@ -198,7 +217,12 @@ exports.refreshSession = async (token) => {
     }
 
     const accessToken = jwt.sign(
-      { id: staff._id, role: "WORKSHOPSTAFF", branchId: staff.branchId },
+      {
+        id: staff._id,
+        role: "WORKSHOPSTAFF",
+        workshopId: staff.workshopId,
+        branchId: staff.branchId,
+      },
       process.env.JWT_SECRET,
       { expiresIn: jwtConfig.accessTokenExpiry },
     );
