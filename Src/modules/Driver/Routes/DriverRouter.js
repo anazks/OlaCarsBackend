@@ -14,6 +14,8 @@ const {
     bulkAddDrivers,
     dataMigrateDrivers,
     payAdditionalPayment,
+    downloadContractPdf,
+    downloadStatementPdf,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -135,7 +137,7 @@ const hasSelfOrStaffPermission = (permission) => {
 router.post(
     "/",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     addDriver
 );
@@ -193,7 +195,7 @@ router.post(
 router.post(
     "/bulk",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     bulkAddDrivers
 );
@@ -242,7 +244,7 @@ router.post(
 router.post(
     "/data-migration",
     authenticate,
-    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN),
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
     hasPermission("DRIVER_CREATE"),
     dataMigrateDrivers
 );
@@ -563,5 +565,22 @@ router.post(
     hasPermission("PAYMENT_CREATE"),
     payAdditionalPayment
 );
+
+// ─── GET /api/driver/:id/contract/pdf — Download contract PDF ─────────
+router.get(
+    "/:id/contract/pdf",
+    authenticate,
+    hasSelfOrStaffPermission("DRIVER_VIEW"),
+    downloadContractPdf
+);
+
+// ─── GET /api/driver/:id/statement/pdf — Download statement PDF ─────────
+router.get(
+    "/:id/statement/pdf",
+    authenticate,
+    hasSelfOrStaffPermission("DRIVER_VIEW"),
+    downloadStatementPdf
+);
+
 module.exports = router;
 

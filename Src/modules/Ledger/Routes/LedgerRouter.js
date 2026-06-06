@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getLedgerEntries } = require("../Controller/LedgerController");
+const { getLedgerEntries, getLedgerEntryById } = require("../Controller/LedgerController");
 const ManualJournalController = require("../Controller/ManualJournalController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -29,6 +29,7 @@ const MANAGE_ROLES = [
 
 // Ledger Entries
 router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntries);
+router.get("/:id", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntryById);
 
 // Manual Journals
 router.post("/journals", authenticate, authorize(...MANAGE_ROLES), hasPermission("JOURNAL_CREATE"), ManualJournalController.createJournal);

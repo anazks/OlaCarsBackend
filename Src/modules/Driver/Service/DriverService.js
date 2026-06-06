@@ -188,8 +188,8 @@ exports.payRent = async (id, paymentData) => {
     // Create Ledger & Payment Transaction
     try {
         console.log(`[DriverService] Starting ledger generation for driver ${id}`);
-            const accCode = await AccountingCode.findOne({ code: "4100" });
-            console.log(`[DriverService] AccountingCode 4100 found: ${!!accCode}`);
+            const accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
+            console.log(`[DriverService] AccountingCode found: ${accCode ? accCode.code : 'none'}`);
             if (accCode) {
                 const driverName = driver.personalInfo?.fullName || "Unknown Driver";
                 console.log(`[DriverService] Driver Name: ${driverName}`);
@@ -399,11 +399,14 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
     let nextDueDate = new Date(assignmentDate);
 
     if (isWeekly) {
-        // Set to the first Wednesday after assignment
-        // day 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+        const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+        const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+        const targetDay = setting && setting.value !== undefined ? Number(setting.value) : 3;
+
+        // Set to the first configured target day after assignment
         const currentDay = nextDueDate.getDay();
-        const daysUntilWed = (3 - currentDay + 7) % 7;
-        const offset = daysUntilWed === 0 ? 7 : daysUntilWed; // If today is Wed, next Wed is 7 days away
+        const daysUntilTarget = (targetDay - currentDay + 7) % 7;
+        const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
         nextDueDate.setDate(nextDueDate.getDate() + offset);
     } else {
         // Monthly: 1st of the month after assignment
@@ -457,4 +460,128 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
     );
 
     return updatedDriver;
+};
+
+/**
+ * Generate a rent plan for bulk migration.
+ * Iterates through the duration starting from activationDate, but only saves
+ * the installments that have due dates >= today. 
+ * Does NOT generate past invoices (these will be done via a separate upload).
+ */
+exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate }, session = null) => {
+    const installments = [];
+    
+    // Fallback to today if activationDate is not provided
+    const parsedActivationDate = activationDate ? new Date(activationDate) : new Date();
+    parsedActivationDate.setHours(0, 0, 0, 0);
+
+    let nextDueDate = new Date(parsedActivationDate);
+
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+    const targetDay = setting && setting.value !== undefined ? Number(setting.value) : 3;
+
+    // Set to the first configured target day after activationDate
+    const currentDay = nextDueDate.getDay();
+    const daysUntilTarget = (targetDay - currentDay + 7) % 7;
+    const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
+    nextDueDate.setDate(nextDueDate.getDate() + offset);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < durationWeeks; i++) {
+        const dueDate = new Date(nextDueDate);
+        dueDate.setDate(nextDueDate.getDate() + (i * 7));
+        
+        const periodNum = i + 1;
+
+        // Skip installments before today
+        if (dueDate < today) {
+            continue;
+        }
+
+        installments.push({
+            weekNumber: periodNum,
+            weekLabel: `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`,
+            dueDate: dueDate,
+            amount: weeklyRent,
+            carryOver: 0,
+            totalDue: weeklyRent,
+            amountPaid: 0,
+            balance: weeklyRent,
+            status: "PENDING",
+            payments: [],
+        });
+    }
+
+    const updatedDriver = await updateDriverService(driverId, {
+        $set: { rentTracking: installments }
+    }, session);
+
+    return updatedDriver;
+};
+
+/**
+ * Reconfigure all pending rent plan installments across all drivers based on a new generation day.
+ * Triggered automatically when the Invoice Generation Day is updated in settings.
+ */
+exports.reconfigureAllPendingRentPlans = async (newGenerationDay) => {
+    const { Driver } = require("../Model/DriverModel");
+    const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+    console.log(`[DriverService] Reconfiguring all pending rent plans to day ${newGenerationDay}`);
+
+    const targetDay = Number(newGenerationDay);
+    if (isNaN(targetDay) || targetDay < 0 || targetDay > 6) {
+        throw new Error("Invalid generation day provided for reconfiguration.");
+    }
+
+    const drivers = await Driver.find({ 
+        rentTracking: { $exists: true, $not: { $size: 0 } }
+    });
+
+    let updatedCount = 0;
+
+    for (const driver of drivers) {
+        let rentTrackingUpdated = false;
+
+        // Base date depends on activationDate or creation date
+        const parsedActivationDate = driver.activationDate ? new Date(driver.activationDate) : new Date(driver.createdAt);
+        parsedActivationDate.setHours(0, 0, 0, 0);
+
+        let baseDate = new Date(parsedActivationDate);
+        const currentDay = baseDate.getDay();
+        const daysUntilTarget = (targetDay - currentDay + 7) % 7;
+        const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
+        baseDate.setDate(baseDate.getDate() + offset);
+
+        // Find the last generated invoice weekNumber for this driver
+        const lastInvoice = await Invoice.findOne({ driver: driver._id, isDeleted: false })
+            .sort({ weekNumber: -1 });
+        const maxGeneratedWeek = lastInvoice ? lastInvoice.weekNumber : 0;
+
+        // Iterate through tracking and update PENDING ones that haven't been invoiced
+        for (const installment of driver.rentTracking) {
+            const weekNum = installment.weekNumber;
+            if (installment.status === 'PENDING' && weekNum > maxGeneratedWeek) {
+                
+                const newDueDate = new Date(baseDate);
+                newDueDate.setDate(baseDate.getDate() + (weekNum - 1) * 7);
+
+                if (installment.dueDate?.getTime() !== newDueDate.getTime()) {
+                    installment.dueDate = newDueDate;
+                    installment.weekLabel = `Week ${weekNum} - ${newDueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
+                    rentTrackingUpdated = true;
+                }
+            }
+        }
+
+        if (rentTrackingUpdated) {
+            await driver.save();
+            updatedCount++;
+        }
+    }
+
+    console.log(`[DriverService] Reconfigured rent plans for ${updatedCount} drivers.`);
+    return updatedCount;
 };

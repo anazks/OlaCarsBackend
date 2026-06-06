@@ -10,6 +10,7 @@ const getLedgerEntries = async (req, res) => {
         if (req.query.type) query.type = req.query.type; 
         if (req.query.manualJournal) query.manualJournal = req.query.manualJournal;
         if (req.query.voucher) query.voucher = req.query.voucher;
+        if (req.query.transaction) query.transaction = req.query.transaction;
 
         // Optional Branch Filter
         if (req.query.branch) query.branch = req.query.branch;
@@ -24,9 +25,14 @@ const getLedgerEntries = async (req, res) => {
             }
         }
 
-        // Search Filter (matches description, creatorRole, or accounting code name/code)
         if (req.query.search) {
-            const searchRegex = new RegExp(req.query.search, "i");
+            let searchRegex;
+            if (req.query.exact === "true" || req.query.exact === true) {
+                const escapedSearch = req.query.search.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                searchRegex = new RegExp('\\b' + escapedSearch + '\\b', 'i');
+            } else {
+                searchRegex = new RegExp(req.query.search, "i");
+            }
             
             // Query matching accounting codes first
             const AccountingCode = mongoose.model("AccountingCode");
@@ -60,9 +66,26 @@ const getLedgerEntries = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
+        // Calculate total summary stats for matching query using find + select to leverage Mongoose's schema casting
+        const allMatching = await LedgerEntry.find(query).select("type amount");
+        let totalDebit = 0;
+        let totalCredit = 0;
+        for (const entry of allMatching) {
+            if (entry.type === "DEBIT") {
+                totalDebit += entry.amount || 0;
+            } else if (entry.type === "CREDIT") {
+                totalCredit += entry.amount || 0;
+            }
+        }
+
         return res.status(200).json({ 
             success: true, 
             data: entries,
+            summary: {
+                totalDebit,
+                totalCredit,
+                netMovement: Math.abs(totalCredit - totalDebit)
+            },
             pagination: {
                 total,
                 page,
@@ -75,6 +98,27 @@ const getLedgerEntries = async (req, res) => {
     }
 };
 
+const getLedgerEntryById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const entry = await LedgerEntry.findById(id)
+            .populate("transaction")
+            .populate("manualJournal")
+            .populate("voucher")
+            .populate("accountingCode", "code name category")
+            .populate("createdBy", "name email");
+
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        return res.status(200).json({ success: true, data: entry });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
+    getLedgerEntryById,
 };

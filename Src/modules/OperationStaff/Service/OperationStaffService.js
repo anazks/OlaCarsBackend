@@ -50,7 +50,7 @@ exports.login = async (email, password) => {
     );
 
     const refreshToken = jwt.sign(
-        { id: staff._id },
+        { id: staff._id, nonce: Math.random().toString() },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: jwtConfig.refreshTokenExpiry }
     );
@@ -109,7 +109,13 @@ exports.update = async (id, body) => {
         await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
 
-    const updated = await OperationStaff.findByIdAndUpdate(id, filtered, {
+    const updateQuery = { ...filtered };
+    if (updateQuery.status === 'ACTIVE') {
+        updateQuery.failedLoginAttempts = 0;
+        updateQuery.$unset = { lockUntil: 1 };
+    }
+
+    const updated = await OperationStaff.findByIdAndUpdate(id, updateQuery, {
         new: true,
         runValidators: true,
     }).select('-passwordHash -refreshToken');
@@ -170,8 +176,14 @@ exports.getAll = async (queryParams = {}) => {
 exports.getById = async (id) => {
     return await OperationStaff.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
 };
+const { isTokenBlacklisted, blacklistToken } = require('../../../shared/utils/blacklistHelper.js');
+
 exports.refreshSession = async (token) => {
     try {
+        if (await isTokenBlacklisted(token)) {
+            throw new AppError('Token is blacklisted', 401);
+        }
+
         const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
         const staff = await OperationStaff.findById(decoded.id);
 
@@ -186,10 +198,12 @@ exports.refreshSession = async (token) => {
         );
 
         const newRefreshToken = jwt.sign(
-            { id: staff._id },
+            { id: staff._id, nonce: Math.random().toString() },
             process.env.JWT_REFRESH_SECRET,
             { expiresIn: jwtConfig.refreshTokenExpiry }
         );
+
+        await blacklistToken(token);
 
         staff.refreshToken = newRefreshToken;
         await staff.save();

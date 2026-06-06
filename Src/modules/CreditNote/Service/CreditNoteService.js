@@ -45,7 +45,7 @@ const createCreditNote = async (data, actor) => {
         // Search for code 4200 (seeded earlier). Fallback to 4100.
         let accCode = await AccountingCode.findOne({ code: "4200" });
         if (!accCode) {
-            accCode = await AccountingCode.findOne({ code: "4100" });
+            accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
         }
 
         if (accCode) {
@@ -342,7 +342,7 @@ const refundCreditNote = async (id, actor) => {
     try {
         let accCode = await AccountingCode.findOne({ code: "4200" });
         if (!accCode) {
-            accCode = await AccountingCode.findOne({ code: "4100" });
+            accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
         }
 
         if (accCode) {

@@ -74,7 +74,7 @@ const invoiceSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ["PENDING", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"],
+        enum: ["DRAFT", "PENDING", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"],
         default: "PENDING"
     },
     paidAt: {
@@ -97,6 +97,7 @@ const invoiceSchema = new mongoose.Schema({
     discountAmount: { type: Number, default: 0 },
     taxRate: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },
+    tax: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
     notes: { type: String },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,

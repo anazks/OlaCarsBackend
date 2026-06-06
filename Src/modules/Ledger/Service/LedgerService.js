@@ -173,32 +173,32 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
 
                 // Find Accounts Receivable account (code 1200)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                const arAccount = await AccountingCode.findOne({ code: "1200" });
+                const arAccount = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
                 
                 if (arAccount) {
-                    console.log(`[LedgerService] Generating double-entry for Payment Received: Credit Bank/Cash, Debit Accounts Receivable`);
+                    console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable`);
                     
-                    // Leg 1: CREDIT Bank/Cash Account
+                    // Leg 1: DEBIT Bank/Cash Account (Asset increases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
                         accountingCode: paymentTransaction.accountingCode._id || paymentTransaction.accountingCode,
-                        type: "CREDIT",
+                        type: "DEBIT",
                         amount: paymentTransaction.totalAmount,
-                        description: `Payment Received (Credit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        description: `Payment Received (Debit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: finalCreatorRole
                     });
 
-                    // Leg 2: DEBIT Accounts Receivable
+                    // Leg 2: CREDIT Accounts Receivable (Asset decreases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
                         branch: finalBranch,
                         accountingCode: arAccount._id,
-                        type: "DEBIT",
+                        type: "CREDIT",
                         amount: paymentTransaction.totalAmount,
-                        description: `Payment Received (Debit Accounts Receivable) - Driver: ${driverName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
+                        description: `Payment Received (Credit Accounts Receivable) - Driver: ${driverName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: finalCreatorRole
@@ -248,11 +248,21 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
     try {
         console.log(`[LedgerService] Generating ledger entries for created invoice: ${invoice.invoiceNumber}`);
         
+        const LedgerEntry = require("../Model/LedgerEntryModel");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const { Driver } = require("../../Driver/Model/DriverModel");
 
-        const arAccount = await AccountingCode.findOne({ code: "1200" });
-        const salesAccount = await AccountingCode.findOne({ code: "4100" });
+        // Prevent double booking/duplicate ledger entries for the same invoice
+        const existingEntries = await LedgerEntry.find({
+            description: new RegExp(`\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+        });
+        if (existingEntries.length > 0) {
+            console.log(`[LedgerService] Ledger entries for invoice ${invoice.invoiceNumber} already exist (${existingEntries.length} found). Skipping duplication.`);
+            return;
+        }
+
+        const arAccount = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
+        const salesAccount = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
 
         if (!arAccount || !salesAccount) {
             console.error(`[LedgerService] Required accounting codes (1200 or 4100) not found. Skipping invoice ledger generation.`);
@@ -263,25 +273,25 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
         const driverName = driverDoc ? (driverDoc.personalInfo?.fullName || driverDoc.name) : "Unknown Driver";
         const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
 
-        // Leg 1: CREDIT Accounts Receivable (decreases/increases according to user's mapping)
+        // Leg 1: DEBIT Accounts Receivable (increases Accounts Receivable Asset)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: arAccount._id,
-            type: "CREDIT",
-            amount: invoice.baseAmount,
-            description: `Invoice Created (Credit Accounts Receivable) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
+            type: "DEBIT",
+            amount: invoice.totalAmountDue,
+            description: `Invoice Created (Debit Accounts Receivable) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
             creatorRole: invoice.creatorRole
         });
 
-        // Leg 2: DEBIT Rental Income (Sales) (decreases/increases according to user's mapping)
+        // Leg 2: CREDIT Rental Income (Sales) (increases Revenue)
         await addLedgerEntryService({
             branch: branchId,
             accountingCode: salesAccount._id,
-            type: "DEBIT",
-            amount: invoice.baseAmount,
-            description: `Invoice Created (Debit Rental Income) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
+            type: "CREDIT",
+            amount: invoice.totalAmountDue,
+            description: `Invoice Created (Credit Rental Income) - Driver: ${driverName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
             creatorRole: invoice.creatorRole

@@ -164,7 +164,7 @@ const createManualClaim = async (vehicleId, incidentData, user) => {
 
     const { getVehiclePoliciesByVehicleIdService } = require("../../Insurance/Repo/VehiclePolicyRepo");
     const policies = await getVehiclePoliciesByVehicleIdService(vehicle._id);
-    const activePolicy = policies.length > 0 ? policies[0] : null;
+    const activePolicy = policies.find(p => p.status === "ACTIVE") || (policies.length > 0 ? policies[0] : null);
     const insurance = activePolicy ? activePolicy.insurance : {};
 
     const claimData = {

@@ -6,6 +6,7 @@ const {
     getAccountingCodeById,
     updateAccountingCode,
     deleteAccountingCode,
+    bulkUpsertAccountingCodes,
 } = require("../Controller/AccountingCodeController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -59,6 +60,8 @@ const AUTHORIZED_ROLES = [
  *         description: Accounting Code created successfully
  */
 router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("ACCOUNTING_CODE_CREATE"), addAccountingCode);
+
+router.post("/bulk", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("ACCOUNTING_CODE_CREATE"), bulkUpsertAccountingCodes);
 
 /**
  * @swagger

@@ -1,62 +1,44 @@
 const AccountingCode = require("../modules/AccountingCode/Model/AccountingCodeModel");
 const Admin = require("../modules/Admin/model/adminModel");
+const { mapAccountTypeToCategory } = require("../modules/AccountingCode/Service/AccountingCodeService");
 
 /**
  * Automatically seeds the critical accounting codes (like 4100 for Sales)
  * required for ledger and payment records generation.
+ * Also runs an automatic healing migration to correct legacy category data.
  */
 const seedAccountingCodes = async () => {
     try {
         console.log("[SEEDER] Checking essential Accounting Codes...");
 
-        // Find default admin to assign as creator
-        const systemAdmin = await Admin.findOne({ role: "ADMIN" });
-        if (!systemAdmin) {
-            console.error("[SEEDER] Cannot seed accounting codes: No System Admin found.");
-            return;
+        // Migration: Healing existing records that have detailed categories saved in the category field
+        console.log("[MIGRATION] Checking for any legacy detailed categories in database...");
+        const allCodesInDb = await AccountingCode.find({});
+        for (const codeDoc of allCodesInDb) {
+            let needsUpdate = false;
+            // Check if category is not one of core uppercase values
+            if (codeDoc.category && !["INCOME", "EXPENSE", "LIABILITY", "ASSET", "EQUITY"].includes(codeDoc.category)) {
+                const legacyVal = codeDoc.category;
+                const resolvedCategory = mapAccountTypeToCategory(legacyVal);
+                
+                codeDoc.category = resolvedCategory;
+                // If accountType is not defined, set it to the legacy detailed category value
+                if (!codeDoc.accountType) {
+                    codeDoc.accountType = legacyVal;
+                }
+                needsUpdate = true;
+            }
+            if (needsUpdate) {
+                await codeDoc.save();
+                console.log(`[MIGRATION] Healed legacy account code ${codeDoc.code}: mapped category to "${codeDoc.category}" and set accountType to "${codeDoc.accountType}"`);
+            }
         }
 
-        const codesToSeed = [
-            {
-                code: "4100",
-                name: "Rental Income (Sales)",
-                description: "Revenue earned from driver rentals and vehicle hire.",
-                category: "INCOME",
-            },
-            {
-                code: "1200",
-                name: "Accounts Receivable",
-                description: "Outstanding payments due from drivers/customers.",
-                category: "ASSET",
-            },
-            {
-                code: "4200",
-                name: "Sales Allowances & Discounts (Credit Notes)",
-                description: "Adjustments, credits and refunds issued against customer bills.",
-                category: "INCOME",
-            }
-        ];
-
-        for (const rawCode of codesToSeed) {
-            const existing = await AccountingCode.findOne({ code: rawCode.code });
-            if (!existing) {
-                await AccountingCode.create({
-                    ...rawCode,
-                    createdBy: systemAdmin._id,
-                    creatorRole: "ADMIN",
-                    isActive: true,
-                    isDeleted: false
-                });
-                console.log(`[SEEDER] Created essential Accounting Code: ${rawCode.code} - ${rawCode.name}`);
-            } else {
-                // Ensure it is active and not soft-deleted
-                if (!existing.isActive || existing.isDeleted) {
-                    existing.isActive = true;
-                    existing.isDeleted = false;
-                    await existing.save();
-                    console.log(`[SEEDER] Activated/Healed existing Accounting Code: ${rawCode.code}`);
-                }
-            }
+        // Find default admin to assign as creator (kept for consistency or future use if needed, but not seeding anymore)
+        const systemAdmin = await Admin.findOne({ role: "ADMIN" });
+        if (!systemAdmin) {
+            console.log("[SEEDER] No System Admin found. Skipping seeder operations.");
+            return;
         }
     } catch (error) {
         console.error("[SEEDER] Accounting Code seeding failed:", error.message);

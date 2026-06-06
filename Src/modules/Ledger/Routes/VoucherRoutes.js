@@ -21,6 +21,9 @@ router.route("/")
     .post(voucherController.createVoucher)
     .get(voucherController.getAllVouchers);
 
+router.route("/:id/pdf")
+    .get(voucherController.downloadVoucherPdf);
+
 router.route("/:id")
     .get(voucherController.getVoucherById);
 

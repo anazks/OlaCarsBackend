@@ -1,4 +1,5 @@
 const SupplierService = require('../Service/SupplierService.js');
+const SupplierPdfService = require('../Service/SupplierPdfService.js');
 
 const addSupplier = async (req, res) => {
     try {
@@ -62,10 +63,31 @@ const deleteSupplier = async (req, res) => {
     }
 };
 
+const downloadSupplierPdf = async (req, res) => {
+    try {
+        const supplier = await SupplierService.getById(req.params.id);
+        if (!supplier) {
+            return res.status(404).json({ success: false, message: "Supplier not found" });
+        }
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Supplier_${supplier.name?.replace(/\s+/g, '_') || req.params.id}.pdf"`
+        );
+
+        SupplierPdfService.generateSupplierPdf(supplier, res);
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addSupplier,
     getSuppliers,
     getSupplierById,
     updateSupplier,
     deleteSupplier,
+    downloadSupplierPdf,
 };

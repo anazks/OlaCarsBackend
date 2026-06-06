@@ -18,6 +18,7 @@ const roleTemplateSchema = new mongoose.Schema(
         "FINANCESTAFF",
         "WORKSHOPMANAGER",
         "WORKSHOPSTAFF",
+        "MERCHENDISE",
       ],
     },
     permissions: [

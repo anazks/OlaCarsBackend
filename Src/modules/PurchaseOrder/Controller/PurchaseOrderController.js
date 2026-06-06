@@ -9,6 +9,7 @@ const { ROLES } = require("../../../shared/constants/roles.js");
 const Branch = require("../../Branch/Model/BranchModel.js");
 const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
 const uploadToS3 = require("../../../utils/uploadToS3");
+const uploadLocal = require("../../../utils/uploadLocal");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -236,16 +237,18 @@ const getPurchaseOrderById = async (req, res) => {
  *  5. POs over $1000 → Admin only
  *  6. Cannot self-approve
  */
+
 const approvePurchaseOrder = async (req, res) => {
     try {
         const poId = req.params.id;
-        const { status, supplier } = req.body;
+        const { status, supplier, rejectionNote, rejectionReason } = req.body;
+        const note = rejectionNote || rejectionReason || "";
         const approverRole = req.user.role;
         const approverId = req.user.id;
 
         // Validate status
-        if (!["APPROVED", "REJECTED", "MANAGER_APPROVED"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED, REJECTED, or MANAGER_APPROVED." });
+        if (!["APPROVED", "REJECTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED, REJECTED, MANAGER_APPROVED, or PENDING_FINANCE_APPROVAL." });
         }
 
         const currentPO = await getPurchaseOrderByIdService(poId);
@@ -253,39 +256,52 @@ const approvePurchaseOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: "Purchase Order not found." });
         }
 
-        if (!["WAITING", "REQUESTED", "MANAGER_APPROVED"].includes(currentPO.status)) {
+        if (!["WAITING", "REQUESTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL"].includes(currentPO.status)) {
             return res.status(400).json({ success: false, message: "Purchase order is already processed." });
         }
 
-        // Rule 6: No self-approval
+        // Rule 6: No self-approval (Always enforced)
         if (currentPO.createdBy._id.toString() === approverId) {
             return res.status(403).json({ success: false, message: "You cannot approve your own Purchase Order." });
         }
 
-        // Rule 1: Hierarchical check — approver level must be > creator level
-        const creatorLevel = ROLE_LEVEL[currentPO.creatorRole] || 0;
-        const approverLevel = ROLE_LEVEL[approverRole] || 0;
+        const isFinanceApproval = currentPO.status === "PENDING_FINANCE_APPROVAL";
 
-        if (approverLevel <= creatorLevel) {
-            return res.status(403).json({
-                success: false,
-                message: `Role "${approverRole}" (Level ${approverLevel}) cannot approve POs created by "${currentPO.creatorRole}" (Level ${creatorLevel}). Approver must be a higher level.`,
-            });
-        }
+        if (!isFinanceApproval) {
+            // Rule 1: Hierarchical check — approver level must be > creator level
+            const creatorLevel = ROLE_LEVEL[currentPO.creatorRole] || 0;
+            const approverLevel = ROLE_LEVEL[approverRole] || 0;
 
-        // Rule 5: Dynamic threshold check (Default $1000)
-        const threshold = (await getSetting("poApprovalThreshold")) || 1000;
-        if (currentPO.totalAmount > threshold && approverRole !== ROLES.ADMIN) {
-            return res.status(403).json({
-                success: false,
-                message: `Purchase Orders over ${threshold} can only be approved by ADMIN. This PO total: $${currentPO.totalAmount}.`,
-            });
+            if (approverLevel <= creatorLevel) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Role "${approverRole}" (Level ${approverLevel}) cannot approve POs created by "${currentPO.creatorRole}" (Level ${creatorLevel}). Approver must be a higher level.`,
+                });
+            }
+
+            // Rule 5: Dynamic threshold check (Default $1000) using proposed amount if available
+            const threshold = (await getSetting("poApprovalThreshold")) || 1000;
+            const activeAmount = currentPO.merchandiserTotalAmount !== undefined && currentPO.merchandiserTotalAmount !== null ? currentPO.merchandiserTotalAmount : currentPO.totalAmount;
+            if (activeAmount > threshold && approverRole !== ROLES.ADMIN) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Purchase Orders over ${threshold} can only be approved by ADMIN. This PO total: $${activeAmount}.`,
+                });
+            }
+        } else {
+            // For PENDING_FINANCE_APPROVAL, only ADMIN or FINANCEADMIN can approve/reject
+            if (approverRole !== ROLES.ADMIN && approverRole !== ROLES.FINANCEADMIN) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only Admin and Financial Admin can approve or reject the Proposed Merchandiser Amount.",
+                });
+            }
         }
 
         // Rules 2 & 3: Branch / Country scoping
         const poBranchId = currentPO.branch._id ? currentPO.branch._id.toString() : currentPO.branch.toString();
 
-        if (approverRole === ROLES.BRANCHMANAGER) {
+        if (!isFinanceApproval && approverRole === ROLES.BRANCHMANAGER) {
             // Rule 2: BM can only approve POs from their branch
             if (req.user.branchId.toString() !== poBranchId) {
                 return res.status(403).json({
@@ -293,7 +309,7 @@ const approvePurchaseOrder = async (req, res) => {
                     message: "You can only approve Purchase Orders from your own branch.",
                 });
             }
-        } else if (approverRole === ROLES.COUNTRYMANAGER) {
+        } else if (!isFinanceApproval && approverRole === ROLES.COUNTRYMANAGER) {
             // Rule 3: CM can only approve POs from branches in their country
             const poBranch = await Branch.findById(poBranchId).select("country");
             if (!poBranch || poBranch.country !== req.user.country) {
@@ -303,11 +319,137 @@ const approvePurchaseOrder = async (req, res) => {
                 });
             }
         }
-        // Admin, OperationAdmin, FinanceAdmin → no scoping restriction
 
-        // All checks passed — update status
-        const updatedPO = await updatePurchaseOrderStatusService(poId, status, approverId, approverRole, { supplier });
-        return res.status(200).json({ success: true, data: updatedPO });
+        // All checks passed — update status, prices, total amount, and edit history
+        const previousStatus = currentPO.status;
+        currentPO.status = status;
+        currentPO.approvedBy = approverId;
+        currentPO.approverRole = approverRole;
+        if (supplier) {
+            currentPO.supplier = supplier;
+        }
+
+        const historyRecord = {
+            editedAt: new Date(),
+            editedBy: approverId,
+            editorRole: approverRole,
+            previousStatus: previousStatus,
+            changesSummary: ""
+        };
+
+        if (status === "APPROVED") {
+            currentPO.approvalNote = note;
+            if (currentPO.merchandiserTotalAmount !== undefined && currentPO.merchandiserTotalAmount !== null) {
+                currentPO.originalTotalAmount = currentPO.totalAmount;
+                currentPO.totalAmount = currentPO.merchandiserTotalAmount;
+                historyRecord.changesSummary = `Approved merchandiser pricing. Total amount updated from original $${currentPO.originalTotalAmount} to proposed $${currentPO.totalAmount}.`;
+            } else {
+                historyRecord.changesSummary = `Approved Purchase Order.`;
+            }
+
+            currentPO.items = currentPO.items.map(item => {
+                if (item.merchandiserPrice !== undefined && item.merchandiserPrice !== null) {
+                    item.unitPrice = item.merchandiserPrice;
+                }
+                return item;
+            });
+        } else if (status === "REJECTED") {
+            currentPO.rejectionNote = note;
+            historyRecord.changesSummary = `Rejected merchandiser proposed pricing. Note: "${note || 'No note provided'}"`;
+        } else {
+            historyRecord.changesSummary = `Status updated to ${status}.`;
+        }
+
+        currentPO.editHistory.push(historyRecord);
+        await currentPO.save();
+
+        return res.status(200).json({ success: true, data: currentPO });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const uploadPODocument = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No document provided for upload." });
+        }
+
+        let uploadedUrl;
+        try {
+            // Try S3 first
+            uploadedUrl = await uploadToS3(req.file, "purchase-orders/documents");
+        } catch (s3Error) {
+            console.log("[Upload] S3 upload failed or not configured, falling back to local storage:", s3Error.message);
+            uploadedUrl = uploadLocal(req.file, "purchase-orders/documents");
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Document uploaded successfully.",
+            data: {
+                url: uploadedUrl,
+                originalName: req.file.originalname
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const auditPurchaseOrder = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { items, documents } = req.body;
+
+        if (!items || !Array.isArray(items)) {
+            return res.status(400).json({ success: false, message: "Items array is required for audit." });
+        }
+
+        const po = await getPurchaseOrderByIdService(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found." });
+        }
+
+        // Update each item's merchandiserPrice
+        let merchandiserTotalAmount = 0;
+        const updatedItems = po.items.map(item => {
+            const auditItem = items.find(i => i.id === item._id.toString() || i.itemName === item.itemName);
+            if (auditItem && auditItem.supplierUnitPrice !== undefined) {
+                item.merchandiserPrice = Number(auditItem.supplierUnitPrice);
+            } else if (item.merchandiserPrice === undefined || item.merchandiserPrice === null) {
+                item.merchandiserPrice = item.unitPrice;
+            }
+            merchandiserTotalAmount += item.quantity * (item.merchandiserPrice || item.unitPrice);
+            return item;
+        });
+
+        po.items = updatedItems;
+        po.merchandiserTotalAmount = merchandiserTotalAmount;
+        if (documents && Array.isArray(documents)) {
+            po.documents = documents;
+        }
+
+        // Set status to PENDING_FINANCE_APPROVAL
+        const previousStatus = po.status;
+        po.status = "PENDING_FINANCE_APPROVAL";
+
+        // Add history record
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            previousStatus: previousStatus,
+            changesSummary: `Merchandiser completed PO audit. Proposed amount: ${merchandiserTotalAmount}. Documents uploaded: ${(documents || []).length}.`
+        });
+
+        await po.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Purchase Order audited and submitted for approval successfully.",
+            data: po
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -545,4 +687,6 @@ module.exports = {
     editPurchaseOrder,
     uploadPurchaseOrderItemImages,
     getEligiblePurchaseOrdersForBilling,
+    uploadPODocument,
+    auditPurchaseOrder,
 };

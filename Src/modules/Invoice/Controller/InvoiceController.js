@@ -59,6 +59,24 @@ exports.createManualInvoice = async (req, res) => {
     }
 };
 
+exports.bulkUploadInvoices = async (req, res) => {
+    try {
+        const { rows, invoiceType } = req.body;
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+            return res.status(400).json({ success: false, message: "No data rows provided for bulk upload." });
+        }
+        if (!invoiceType) {
+            return res.status(400).json({ success: false, message: "Invoice type is required." });
+        }
+        const createdBy = req.user.id || req.user._id;
+        const creatorRole = req.user.role;
+        const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole);
+        return res.status(201).json({ success: true, message: "Bulk upload completed", data: result });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+};
+
 exports.payInvoice = async (req, res) => {
     try {
         const paymentData = {
@@ -129,6 +147,31 @@ exports.triggerWeeklyGeneration = async (req, res) => {
             message: `Invoice generation complete. Created ${result.generatedCount} invoices.`,
             data: result 
         });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.downloadInvoicePdf = async (req, res) => {
+    try {
+        const { Invoice } = require("../Model/InvoiceModel");
+        const invoice = await Invoice.findById(req.params.id)
+            .populate("driver", "personalInfo driverId")
+            .populate("vehicle", "plateNumber make model basicDetails legalDocs");
+
+        if (!invoice || invoice.isDeleted) {
+            return res.status(404).json({ success: false, message: "Invoice not found" });
+        }
+
+        // Set headers to view/stream PDF directly in the browser
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Invoice-${invoice.invoiceNumber}.pdf"`
+        );
+
+        const InvoicePdfService = require("../Service/InvoicePdfService");
+        InvoicePdfService.generateInvoicePdf(invoice, res);
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

@@ -29,12 +29,26 @@ exports.update = async (id, body) => {
         throw new AppError('No valid fields to update', 400);
     }
 
+    const oldTax = await Tax.findOne({ _id: id, isDeleted: false });
+    if (!oldTax) throw new AppError('Tax not found', 404);
+
     const updated = await Tax.findByIdAndUpdate(id, filtered, {
         new: true,
         runValidators: true,
     });
 
     if (!updated) throw new AppError('Tax not found', 404);
+
+    // If the rate has changed, trigger invoice tax recalculation for open invoices
+    if (filtered.rate !== undefined && filtered.rate !== oldTax.rate) {
+        try {
+            const InvoiceService = require('../../Invoice/Service/InvoiceService');
+            await InvoiceService.recalculateInvoicesForTax(updated._id, updated.rate);
+        } catch (recalcErr) {
+            console.error('[TaxService] Failed to recalculate invoices for updated tax:', recalcErr);
+        }
+    }
+
     return updated;
 };
 

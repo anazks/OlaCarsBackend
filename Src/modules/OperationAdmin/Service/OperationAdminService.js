@@ -7,6 +7,8 @@ const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const AppError = require('../../../shared/utils/AppError.js');
 const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
 
+const { isTokenBlacklisted, blacklistToken } = require('../../../shared/utils/blacklistHelper.js');
+
 const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'status', 'twoFactorEnabled', 'permissions'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
@@ -48,7 +50,7 @@ exports.login = async (email, password) => {
     );
 
     const refreshToken = jwt.sign(
-        { id: admin._id },
+        { id: admin._id, nonce: Math.random().toString() },
         process.env.JWT_REFRESH_SECRET,
         { expiresIn: jwtConfig.refreshTokenExpiry }
     );
@@ -64,6 +66,10 @@ exports.login = async (email, password) => {
 };
 
 exports.refreshAccessToken = async (token) => {
+    if (await isTokenBlacklisted(token)) {
+        throw new AppError('Token is blacklisted', 401);
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     const admin = await OperationalAdmin.findById(decoded.id);
 
@@ -77,7 +83,18 @@ exports.refreshAccessToken = async (token) => {
         { expiresIn: jwtConfig.accessTokenExpiry }
     );
 
-    return { accessToken: newAccessToken };
+    const newRefreshToken = jwt.sign(
+        { id: admin._id, nonce: Math.random().toString() },
+        process.env.JWT_REFRESH_SECRET,
+        { expiresIn: jwtConfig.refreshTokenExpiry }
+    );
+
+    await blacklistToken(token);
+
+    admin.refreshToken = newRefreshToken;
+    await admin.save();
+
+    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
 };
 
 exports.create = async (data) => {
@@ -120,7 +137,13 @@ exports.update = async (id, body) => {
         await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
     }
 
-    const updated = await OperationalAdmin.findByIdAndUpdate(id, filtered, {
+    const updateQuery = { ...filtered };
+    if (updateQuery.status === 'ACTIVE') {
+        updateQuery.failedLoginAttempts = 0;
+        updateQuery.$unset = { lockUntil: 1 };
+    }
+
+    const updated = await OperationalAdmin.findByIdAndUpdate(id, updateQuery, {
         new: true,
         runValidators: true,
     }).select('-passwordHash -refreshToken');
