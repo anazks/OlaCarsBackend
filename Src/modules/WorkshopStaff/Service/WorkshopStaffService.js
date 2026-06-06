@@ -1,193 +1,227 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const WorkshopStaff = require('../Model/WorkshopStaffModel.js');
-const { jwtConfig } = require('../../../config/jwtConfig.js');
-const filterBody = require('../../../shared/utils/filterBody.js');
-const validatePassword = require('../../../shared/utils/passwordValidator.js');
-const AppError = require('../../../shared/utils/AppError.js');
-const validateDelegatedPermissions = require('../../../shared/utils/delegationValidator.js');
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const WorkshopStaff = require("../Model/WorkshopStaffModel.js");
+const { jwtConfig } = require("../../../config/jwtConfig.js");
+const filterBody = require("../../../shared/utils/filterBody.js");
+const validatePassword = require("../../../shared/utils/passwordValidator.js");
+const AppError = require("../../../shared/utils/AppError.js");
+const validateDelegatedPermissions = require("../../../shared/utils/delegationValidator.js");
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'branchId', 'permissions'];
+const ALLOWED_UPDATE_FIELDS = [
+  "fullName",
+  "email",
+  "phone",
+  "status",
+  "branchId",
+  "permissions",
+  "password",
+];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
 exports.login = async (email, password) => {
-    const staff = await WorkshopStaff.findOne({ email, isDeleted: false });
-    if (!staff) throw new AppError('Invalid credentials', 401);
+  const staff = await WorkshopStaff.findOne({ email, isDeleted: false });
+  if (!staff) throw new AppError("Invalid credentials", 401);
 
-    if (staff.lockUntil && staff.lockUntil > Date.now()) {
-        throw new AppError('Account is locked. Try again later.', 423);
+  if (staff.lockUntil && staff.lockUntil > Date.now()) {
+    throw new AppError("Account is locked. Try again later.", 423);
+  }
+
+  if (staff.status !== "ACTIVE") throw new AppError("Account not active", 403);
+
+  const isMatch = await bcrypt.compare(password, staff.passwordHash);
+  if (!isMatch) {
+    staff.failedLoginAttempts = (staff.failedLoginAttempts || 0) + 1;
+    if (staff.failedLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
+      staff.lockUntil = new Date(Date.now() + LOCK_TIME_MS);
+      staff.status = "LOCKED";
     }
-
-    if (staff.status !== 'ACTIVE') throw new AppError('Account not active', 403);
-
-    const isMatch = await bcrypt.compare(password, staff.passwordHash);
-    if (!isMatch) {
-        staff.failedLoginAttempts = (staff.failedLoginAttempts || 0) + 1;
-        if (staff.failedLoginAttempts >= MAX_LOGIN_ATTEMPTS) {
-            staff.lockUntil = new Date(Date.now() + LOCK_TIME_MS);
-            staff.status = 'LOCKED';
-        }
-        await staff.save();
-        throw new AppError('Invalid credentials', 401);
-    }
-
-    staff.failedLoginAttempts = 0;
-    staff.lockUntil = undefined;
-    staff.lastLoginAt = new Date();
-
-    const accessToken = jwt.sign(
-        { id: staff._id, role: 'WORKSHOPSTAFF', branchId: staff.branchId },
-        process.env.JWT_SECRET,
-        { expiresIn: jwtConfig.accessTokenExpiry }
-    );
-
-    const refreshToken = jwt.sign(
-        { id: staff._id, nonce: Math.random().toString() },
-        process.env.JWT_REFRESH_SECRET,
-        { expiresIn: jwtConfig.refreshTokenExpiry }
-    );
-
-    staff.refreshToken = refreshToken;
     await staff.save();
+    throw new AppError("Invalid credentials", 401);
+  }
 
-    const staffObj = staff.toObject();
-    delete staffObj.passwordHash;
-    delete staffObj.refreshToken;
+  staff.failedLoginAttempts = 0;
+  staff.lockUntil = undefined;
+  staff.lastLoginAt = new Date();
 
-    return { accessToken, refreshToken, user: staffObj };
+  const accessToken = jwt.sign(
+    { id: staff._id, role: "WORKSHOPSTAFF", branchId: staff.branchId },
+    process.env.JWT_SECRET,
+    { expiresIn: jwtConfig.accessTokenExpiry },
+  );
+
+  const refreshToken = jwt.sign(
+    { id: staff._id, nonce: Math.random().toString() },
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: jwtConfig.refreshTokenExpiry },
+  );
+
+  staff.refreshToken = refreshToken;
+  await staff.save();
+
+  const staffObj = staff.toObject();
+  delete staffObj.passwordHash;
+  delete staffObj.refreshToken;
+
+  return { accessToken, refreshToken, user: staffObj };
 };
 
 exports.create = async (data) => {
-    validatePassword(data.password);
-    const hashedPassword = await bcrypt.hash(data.password, 12);
+  validatePassword(data.password);
+  const hashedPassword = await bcrypt.hash(data.password, 12);
 
-    let finalPermissions = data.permissions || [];
-    if (finalPermissions.length === 0) {
-       const RoleTemplate = require('../../AccessControl/Model/RoleTemplate');
-       const template = await RoleTemplate.findOne({ roleName: 'WORKSHOPSTAFF' });
-       if (template) finalPermissions = template.permissions;
-    }
-    
-    await validateDelegatedPermissions(data.createdBy, data.creatorRole, finalPermissions);
+  let finalPermissions = data.permissions || [];
+  if (finalPermissions.length === 0) {
+    const RoleTemplate = require("../../AccessControl/Model/RoleTemplate");
+    const template = await RoleTemplate.findOne({ roleName: "WORKSHOPSTAFF" });
+    if (template) finalPermissions = template.permissions;
+  }
 
-    const newStaff = await WorkshopStaff.create({
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
-        passwordHash: hashedPassword,
-        branchId: data.branchId,
-        status: data.status,
-        permissions: finalPermissions,
-        createdBy: data.createdBy,
-        creatorRole: data.creatorRole,
-    });
+  await validateDelegatedPermissions(
+    data.createdBy,
+    data.creatorRole,
+    finalPermissions,
+  );
 
-    const staffObj = newStaff.toObject();
-    delete staffObj.passwordHash;
-    delete staffObj.refreshToken;
-    return staffObj;
+  const newStaff = await WorkshopStaff.create({
+    fullName: data.fullName,
+    email: data.email,
+    phone: data.phone,
+    passwordHash: hashedPassword,
+    branchId: data.branchId,
+    status: data.status,
+    permissions: finalPermissions,
+    createdBy: data.createdBy,
+    creatorRole: data.creatorRole,
+  });
+
+  const staffObj = newStaff.toObject();
+  delete staffObj.passwordHash;
+  delete staffObj.refreshToken;
+  return staffObj;
 };
 
 exports.update = async (id, body) => {
-    const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
-    if (Object.keys(filtered).length === 0) {
-        throw new AppError('No valid fields to update', 400);
-    }
+  const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
+  if (filtered.password) {
+    validatePassword(filtered.password);
+    filtered.passwordHash = await bcrypt.hash(filtered.password, 12);
+    delete filtered.password;
+  }
+  if (Object.keys(filtered).length === 0) {
+    throw new AppError("No valid fields to update", 400);
+  }
 
-    if (filtered.permissions) {
-        await validateDelegatedPermissions(body.modifierId, body.modifierRole, filtered.permissions);
-    }
+  if (filtered.permissions) {
+    await validateDelegatedPermissions(
+      body.modifierId,
+      body.modifierRole,
+      filtered.permissions,
+    );
+  }
 
-    const updateQuery = { ...filtered };
-    if (updateQuery.status === 'ACTIVE') {
-        updateQuery.failedLoginAttempts = 0;
-        updateQuery.$unset = { lockUntil: 1 };
-    }
+  const updateQuery = { ...filtered };
+  if (updateQuery.status === "ACTIVE") {
+    updateQuery.failedLoginAttempts = 0;
+    updateQuery.$unset = { lockUntil: 1 };
+  }
 
-    const updated = await WorkshopStaff.findByIdAndUpdate(id, updateQuery, {
-        new: true,
-        runValidators: true,
-    }).select('-passwordHash -refreshToken');
+  const updated = await WorkshopStaff.findByIdAndUpdate(id, updateQuery, {
+    new: true,
+    runValidators: true,
+  }).select("-passwordHash -refreshToken");
 
-    if (!updated) throw new AppError('Workshop Staff not found', 404);
-    return updated;
+  if (!updated) throw new AppError("Workshop Staff not found", 404);
+  return updated;
 };
 
 exports.changePassword = async (id, currentPassword, newPassword) => {
-    const staff = await WorkshopStaff.findById(id);
-    if (!staff) throw new AppError('Workshop Staff not found', 404);
+  const staff = await WorkshopStaff.findById(id);
+  if (!staff) throw new AppError("Workshop Staff not found", 404);
 
-    const isMatch = await bcrypt.compare(currentPassword, staff.passwordHash);
-    if (!isMatch) throw new AppError('Current password is incorrect', 401);
+  const isMatch = await bcrypt.compare(currentPassword, staff.passwordHash);
+  if (!isMatch) throw new AppError("Current password is incorrect", 401);
 
-    validatePassword(newPassword);
+  validatePassword(newPassword);
 
-    staff.passwordHash = await bcrypt.hash(newPassword, 12);
-    staff.passwordChangedAt = new Date();
-    staff.failedLoginAttempts = 0;
-    staff.lockUntil = undefined;
-    await staff.save();
+  staff.passwordHash = await bcrypt.hash(newPassword, 12);
+  staff.passwordChangedAt = new Date();
+  staff.status = "ACTIVE";
+  staff.failedLoginAttempts = 0;
+  staff.lockUntil = undefined;
+  await staff.save();
 
-    return { message: 'Password changed successfully' };
+  return { message: "Password changed successfully" };
 };
 
 exports.remove = async (id) => {
-    const result = await WorkshopStaff.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
-    if (!result) throw new AppError('Workshop Staff not found', 404);
+  const result = await WorkshopStaff.findByIdAndUpdate(
+    id,
+    { isDeleted: true },
+    { new: true },
+  );
+  if (!result) throw new AppError("Workshop Staff not found", 404);
 };
 
-const { getWorkshopStaffService } = require('../Repo/WorkshopStaffRepo.js');
+const { getWorkshopStaffService } = require("../Repo/WorkshopStaffRepo.js");
 
 exports.getAll = async (queryParams = {}, options = {}) => {
-    return await getWorkshopStaffService(queryParams, {
-        baseQuery: { isDeleted: false },
-        select: '-passwordHash -refreshToken',
-        defaultSort: { createdAt: -1 },
-        ...options
-    });
+  return await getWorkshopStaffService(queryParams, {
+    baseQuery: { isDeleted: false },
+    select: "-passwordHash -refreshToken",
+    defaultSort: { createdAt: -1 },
+    ...options,
+  });
 };
 
 exports.getById = async (id) => {
-    return await WorkshopStaff.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
+  return await WorkshopStaff.findOne({ _id: id, isDeleted: false }).select(
+    "-passwordHash -refreshToken",
+  );
 };
-const { isTokenBlacklisted, blacklistToken } = require('../../../shared/utils/blacklistHelper.js');
+const {
+  isTokenBlacklisted,
+  blacklistToken,
+} = require("../../../shared/utils/blacklistHelper.js");
 
 exports.refreshSession = async (token) => {
-    try {
-        if (await isTokenBlacklisted(token)) {
-            throw new AppError('Token is blacklisted', 401);
-        }
-
-        const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-        const staff = await WorkshopStaff.findById(decoded.id);
-
-        if (!staff || staff.refreshToken !== token) {
-            throw new AppError('Invalid refresh token', 401);
-        }
-
-        const accessToken = jwt.sign(
-            { id: staff._id, role: 'WORKSHOPSTAFF', branchId: staff.branchId },
-            process.env.JWT_SECRET,
-            { expiresIn: jwtConfig.accessTokenExpiry }
-        );
-
-        const newRefreshToken = jwt.sign(
-            { id: staff._id, nonce: Math.random().toString() },
-            process.env.JWT_REFRESH_SECRET,
-            { expiresIn: jwtConfig.refreshTokenExpiry }
-        );
-
-        await blacklistToken(token);
-
-        staff.refreshToken = newRefreshToken;
-        await staff.save();
-
-        return { accessToken, refreshToken: newRefreshToken };
-    } catch (error) {
-        if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-            throw new AppError('Invalid or expired refresh token', 401);
-        }
-        throw error;
+  try {
+    if (await isTokenBlacklisted(token)) {
+      throw new AppError("Token is blacklisted", 401);
     }
+
+    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+    const staff = await WorkshopStaff.findById(decoded.id);
+
+    if (!staff || staff.refreshToken !== token) {
+      throw new AppError("Invalid refresh token", 401);
+    }
+
+    const accessToken = jwt.sign(
+      { id: staff._id, role: "WORKSHOPSTAFF", branchId: staff.branchId },
+      process.env.JWT_SECRET,
+      { expiresIn: jwtConfig.accessTokenExpiry },
+    );
+
+    const newRefreshToken = jwt.sign(
+      { id: staff._id, nonce: Math.random().toString() },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: jwtConfig.refreshTokenExpiry },
+    );
+
+    await blacklistToken(token);
+
+    staff.refreshToken = newRefreshToken;
+    await staff.save();
+
+    return { accessToken, refreshToken: newRefreshToken };
+  } catch (error) {
+    if (
+      error.name === "JsonWebTokenError" ||
+      error.name === "TokenExpiredError"
+    ) {
+      throw new AppError("Invalid or expired refresh token", 401);
+    }
+    throw error;
+  }
 };

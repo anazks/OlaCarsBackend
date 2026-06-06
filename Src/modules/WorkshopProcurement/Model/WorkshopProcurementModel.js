@@ -19,7 +19,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING", "PENDING_FINANCE_APPROVAL", "APPROVED", "REJECTED", "CONVERTED_TO_PO"],
+            enum: ["PENDING", "PENDING_FINANCE_APPROVAL", "APPROVED", "COST_APPROVED", "IN_TRANSIT", "RECEIVED", "REJECTED", "CONVERTED_TO_PO"],
             default: "PENDING",
         },
         branch: {
@@ -73,6 +73,19 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         approvalNote: {
             type: String,
+        },
+        receivedQuantity: {
+            type: Number,
+        },
+        deficitQuantity: {
+            type: Number,
+        },
+        deficitAmount: {
+            type: Number,
+        },
+        inventoryAdded: {
+            type: Boolean,
+            default: false,
         },
         editHistory: [
             {
