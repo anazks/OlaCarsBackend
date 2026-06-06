@@ -30,16 +30,60 @@ exports.createClaim = async (data) => {
 
 exports.getClaims = async (filters = {}) => {
     const query = {};
-    if (filters.status) query.status = filters.status;
+    
+    // Status translation
+    if (filters.status) {
+        const statusLower = filters.status.toLowerCase();
+        if (statusLower === "active") {
+            query.status = { $ne: "CLOSED" };
+        } else if (statusLower === "closed") {
+            query.status = "CLOSED";
+        } else if (statusLower !== "all") {
+            query.status = filters.status.toUpperCase();
+        }
+    }
+    
     if (filters.branchId) query.branchId = filters.branchId;
     if (filters.vehicleId) query.vehicleId = filters.vehicleId;
     if (filters.workOrderId) query.workOrderId = filters.workOrderId;
 
-    return await InsuranceClaim.find(query)
+    // Text Search
+    if (filters.search) {
+        const trimmedSearch = filters.search.trim();
+        const escapedSearch = trimmedSearch.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const searchRegex = new RegExp(escapedSearch, "i");
+        query.$or = [
+            { claimNumber: searchRegex },
+            { policyNumber: searchRegex },
+            { incidentDescription: searchRegex }
+        ];
+    }
+
+    // Pagination
+    const page = parseInt(filters.page) || 1;
+    const limit = parseInt(filters.limit) || 15;
+    const skip = (page - 1) * limit;
+
+    const total = await InsuranceClaim.countDocuments(query);
+    const pages = Math.ceil(total / limit);
+
+    const data = await InsuranceClaim.find(query)
         .populate("workOrderId", "workOrderNumber status")
         .populate("vehicleId", "basicDetails.make basicDetails.model basicDetails.vin")
         .populate("branchId", "name")
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+
+    return {
+        claims: data,
+        pagination: {
+            total,
+            page,
+            limit,
+            pages
+        }
+    };
 };
 
 exports.getClaimById = async (id) => {

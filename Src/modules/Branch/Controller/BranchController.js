@@ -1,4 +1,5 @@
 const BranchService = require('../Service/BranchService.js');
+const BranchPdfService = require('../Service/BranchPdfService.js');
 
 const addBranch = async (req, res) => {
     try {
@@ -97,6 +98,26 @@ const getPublicBranchList = async (req, res) => {
     }
 };
 
+const exportBranchPdf = async (req, res) => {
+    try {
+        const filters = {
+            startDate: req.query.startDate,
+            endDate: req.query.endDate
+        };
+        const branchDetails = await BranchService.getExtendedDetails(req.params.id, filters);
+        if (!branchDetails) return res.status(404).json({ success: false, message: 'Branch not found' });
+
+        res.setHeader("Content-Type", "application/pdf");
+        const dateStr = new Date().toISOString().split('T')[0];
+        const branchCode = branchDetails.branch?.code ? branchDetails.branch.code.toLowerCase() : "branch";
+        res.setHeader("Content-Disposition", `inline; filename="branch_${branchCode}_report_${dateStr}.pdf"`);
+
+        BranchPdfService.generateBranchPdf(branchDetails, filters, res);
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addBranch,
     editBranch,
@@ -104,5 +125,6 @@ module.exports = {
     getBranches,
     getBranchById,
     getBranchExtendedDetails,
-    getPublicBranchList
+    getPublicBranchList,
+    exportBranchPdf
 };

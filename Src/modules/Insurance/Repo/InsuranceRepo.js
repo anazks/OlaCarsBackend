@@ -1,4 +1,6 @@
 const Insurance = require("../Model/InsuranceModel");
+const Supplier = require("../../Supplier/Model/SupplierModel");
+
 
 /**
  * Creates a new Insurance record.
@@ -24,15 +26,54 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
  */
 exports.getAllInsurancesService = async (queryParams = {}, options = {}) => {
     try {
+        let baseQuery = options.baseQuery ? { ...options.baseQuery } : {};
+
+        // Prevent client query params from overriding country restriction
+        if (baseQuery.country) {
+            delete queryParams.country;
+        }
+
+        // Handle search (by policyNumber or supplier name)
+        if (queryParams.search) {
+            const searchTerm = queryParams.search.trim();
+            if (searchTerm) {
+                // Find matching suppliers
+                const matchingSuppliers = await Supplier.find({
+                    name: { $regex: searchTerm, $options: "i" },
+                    isDeleted: false
+                }).select("_id");
+
+                const supplierIds = matchingSuppliers.map(s => s._id);
+
+                const searchConditions = [
+                    { policyNumber: { $regex: searchTerm, $options: "i" } }
+                ];
+
+                if (supplierIds.length > 0) {
+                    searchConditions.push({ supplier: { $in: supplierIds } });
+                }
+
+                if (baseQuery.$and) {
+                    baseQuery.$and.push({ $or: searchConditions });
+                } else if (baseQuery.$or) {
+                    baseQuery = { $and: [baseQuery, { $or: searchConditions }] };
+                } else {
+                    baseQuery.$or = searchConditions;
+                }
+            }
+            // Delete search query parameter so generic applyQueryFeatures doesn't process it on searchFields again
+            delete queryParams.search;
+        }
+
         const queryOptions = {
-            searchFields: ["policyNumber"],
+            searchFields: [],
             filterFields: ["status", "policyType", "coverageType", "country"],
             dateFilterField: "createdAt",
             populate: [
-
                 { path: "supplier", select: "name email phone" }
             ],
-            ...options
+            ...options,
+            baseQuery
         };
 
         return await applyQueryFeatures(Insurance, queryParams, queryOptions);

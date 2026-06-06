@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { addBranch, editBranch, deleteBranch, getBranches, getBranchById, getBranchExtendedDetails, getPublicBranchList } = require("../Controller/BranchController.js");
+const { addBranch, editBranch, deleteBranch, getBranches, getBranchById, getBranchExtendedDetails, getPublicBranchList, exportBranchPdf } = require("../Controller/BranchController.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware.js");
@@ -163,6 +163,14 @@ router.get(
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
   hasPermission("BRANCH_VIEW"),
   getBranchExtendedDetails
+);
+
+router.get(
+  "/:id/export/pdf",
+  authenticate,
+  authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER),
+  hasPermission("BRANCH_VIEW"),
+  exportBranchPdf
 );
 
 /**
