@@ -23,6 +23,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const query = { ...baseQuery };
 
     if (queryParams.driver) query.driver = queryParams.driver;
+    if (queryParams.customer) query.customer = queryParams.customer;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
     if (queryParams.status && queryParams.status !== 'ALL') query.status = queryParams.status;
     if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
@@ -66,16 +67,23 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
     require("../../Driver/Model/DriverModel");
     require("../../Vehicle/Model/VehicleModel");
+    require("../../Customer/Model/CustomerModel");
 
     const data = await Invoice.find(query)
         .populate({
+            path: "customer",
+            select: "name customerId email phone branch status",
+            populate: { path: "branch", select: "name city country" }
+        })
+        .populate({
             path: "driver",
-            select: "personalInfo.fullName personalInfo.email personalInfo.phone",
-            model: "Driver"
+            select: "personalInfo.fullName personalInfo.email personalInfo.phone driverId branch",
+            model: "Driver",
+            populate: { path: "branch", select: "name country" }
         })
         .populate({
             path: "vehicle",
-            select: "basicDetails.make basicDetails.model basicDetails.vin legalDocs.registrationNumber",
+            select: "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber",
             model: "Vehicle"
         })
         .populate("serviceBill", "billNumber")

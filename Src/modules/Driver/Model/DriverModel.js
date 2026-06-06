@@ -43,6 +43,7 @@ const DRIVER_STATUSES = [
     "ACTIVE",                 // Fully onboarded and operational
     "SUSPENDED",              // Temporarily disabled (doc expiry, breach, etc.)
     "REJECTED",               // Application declined (poor credit, fraud, etc.)
+    "INACTIVE",               // Explicitly marked as inactive
 ];
 
 // ─── Sub-schemas ──────────────────────────────────────────────────────

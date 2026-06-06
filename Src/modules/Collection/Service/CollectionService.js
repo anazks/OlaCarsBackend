@@ -140,9 +140,9 @@ const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false
         invoiceMatch.dueDate = dateFilter; // Target by Due Date
     }
 
-    const driverSearchCondition = { isDeleted: false };
+    const customerSearchCondition = { isDeleted: false };
     if (branchIds) {
-        driverSearchCondition.branch = { $in: branchIds };
+        customerSearchCondition.branch = { $in: branchIds };
     }
 
     const vehicleSearchCondition = { isDeleted: false };
@@ -153,13 +153,17 @@ const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false
     // Fetch invoices with match criteria
     const invoices = await Invoice.find(invoiceMatch)
         .populate({
-            path: "driver",
-            select: "personalInfo branch",
+            path: "customer",
+            select: "name branch customerId",
             populate: {
                 path: "branch",
                 select: "name country"
             },
-            match: Object.keys(driverSearchCondition).length > 1 || branchIds ? driverSearchCondition : {}
+            match: Object.keys(customerSearchCondition).length > 1 || branchIds ? customerSearchCondition : {}
+        })
+        .populate({
+            path: "driver",
+            select: "personalInfo branch"
         })
         .populate({
             path: "vehicle",
@@ -170,7 +174,7 @@ const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false
 
     // Post-filter based on populated results to secure constraints
     return invoices.filter(inv => {
-        if (!inv.driver) return false; // Removed if doesn't match branch bounds
+        if (!inv.customer) return false; // Removed if doesn't match branch bounds
         if (fleetNumbers && (!inv.vehicle || !inv.vehicle.basicDetails?.fleetNumber)) return false; // Enforce fleet limit if staff restricted
         return true;
     });
@@ -255,8 +259,10 @@ exports.getOverview = async (user, queryFilters) => {
         .map(inv => ({
             id: inv._id,
             invoiceNumber: inv.invoiceNumber,
+            customerId: inv.customer?._id,
+            customerName: inv.customer?.name || "Unknown",
             driverId: inv.driver?._id,
-            driverName: inv.driver?.personalInfo?.fullName || "Unknown",
+            driverName: inv.driver?.personalInfo?.fullName || "N/A",
             vehicleId: inv.vehicle?._id,
             fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
             dueDate: inv.dueDate,
@@ -274,8 +280,10 @@ exports.getOverview = async (user, queryFilters) => {
         .map(inv => ({
             id: inv._id,
             invoiceNumber: inv.invoiceNumber,
+            customerId: inv.customer?._id,
+            customerName: inv.customer?.name || "Unknown",
             driverId: inv.driver?._id,
-            driverName: inv.driver?.personalInfo?.fullName || "Unknown",
+            driverName: inv.driver?.personalInfo?.fullName || "N/A",
             vehicleId: inv.vehicle?._id,
             fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
             dueDate: inv.dueDate,
@@ -336,6 +344,8 @@ exports.getList = async (user, queryFilters) => {
         const lowSearch = search.toLowerCase();
         filtered = filtered.filter(i => 
             i.invoiceNumber?.toLowerCase().includes(lowSearch) ||
+            i.customer?.name?.toLowerCase().includes(lowSearch) ||
+            i.customer?.customerId?.toLowerCase().includes(lowSearch) ||
             i.driver?.personalInfo?.fullName?.toLowerCase().includes(lowSearch) ||
             i.vehicle?.basicDetails?.fleetNumber?.toLowerCase().includes(lowSearch) ||
             i.vehicle?.legalDocs?.registrationNumber?.toLowerCase().includes(lowSearch)
@@ -360,13 +370,15 @@ exports.getList = async (user, queryFilters) => {
     const items = paginated.map(inv => ({
         id: inv._id,
         invoiceNumber: inv.invoiceNumber,
+        customerId: inv.customer?._id,
+        customerName: inv.customer?.name || "N/A",
         driverId: inv.driver?._id,
         driverName: inv.driver?.personalInfo?.fullName || "N/A",
         vehicleId: inv.vehicle?._id,
         vehicleNumber: inv.vehicle?.legalDocs?.registrationNumber || "N/A",
         fleetNumber: inv.vehicle?.basicDetails?.fleetNumber || "N/A",
-        branch: inv.driver?.branch?.name || "N/A",
-        country: inv.driver?.branch?.country || "N/A",
+        branch: inv.customer?.branch?.name || "N/A",
+        country: inv.customer?.branch?.country || "N/A",
         dueDate: inv.dueDate,
         totalAmountDue: inv.totalAmountDue,
         amountPaid: inv.amountPaid,

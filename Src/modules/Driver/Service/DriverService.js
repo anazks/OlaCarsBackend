@@ -6,12 +6,13 @@ const {
     updateDriverService,
     deleteDriverService,
 } = require("../Repo/DriverRepo");
-const { getNextDriverId } = require("../../SystemSettings/Model/CounterModel");
+const { getNextDriverId, getNextCustomerId } = require("../../SystemSettings/Model/CounterModel");
 const LedgerService = require("../../Ledger/Service/LedgerService");
 const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 const InvoiceService = require("../../Invoice/Service/InvoiceService");
+const Customer = require("../../Customer/Model/CustomerModel");
 
 // ─── Fields that CANNOT be set via the edit endpoint ──────────────────
 const BLOCKED_FIELDS = [
@@ -37,7 +38,30 @@ exports.create = async (data) => {
         timestamp: new Date(),
         notes: data.status === "ACTIVE" ? "Driver migrated from legacy system." : "Driver application initiated.",
     }];
-    return await addDriverService(data);
+    const driver = await addDriverService(data);
+
+    // Auto-create Customer profile and link it
+    try {
+        const customerId = await getNextCustomerId();
+        const customerData = {
+            customerId,
+            driver: driver._id,
+            name: driver.personalInfo?.fullName,
+            email: driver.personalInfo?.email,
+            phone: driver.personalInfo?.phone,
+            whatsappNumber: driver.personalInfo?.whatsappNumber,
+            branch: driver.branch || data.branch,
+            status: (driver.status === 'SUSPENDED' || driver.status === 'REJECTED' || driver.status === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE',
+            createdBy: driver.createdBy,
+            creatorRole: driver.creatorRole
+        };
+        const newCustomer = await Customer.create(customerData);
+        console.log(`[DriverService] Auto-created Customer profile ${newCustomer.customerId} for Driver ${driver.driverId}`);
+    } catch (custErr) {
+        console.error(`[DriverService] Failed to auto-create Customer profile for Driver ${driver.driverId}:`, custErr);
+    }
+
+    return driver;
 };
 
 exports.getAll = async (queryParams = {}, options = {}) => {
