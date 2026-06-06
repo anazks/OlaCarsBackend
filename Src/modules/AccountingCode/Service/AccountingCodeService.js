@@ -85,11 +85,21 @@ exports.create = async (data) => {
     return newCode.toObject();
 };
 
-exports.getAll = async (query = {}) => {
-    const filters = { isDeleted: false, ...query };
-    return await AccountingCode.find(filters)
-        .populate('createdBy', 'name email')
-        .populate('parentAccount', 'code name');
+const { applyQueryFeatures } = require('../../../shared/utils/queryHelper');
+
+exports.getAll = async (queryParams = {}) => {
+    const queryOptions = {
+        searchFields: ['code', 'name', 'accountNumber', 'cuentaEspanol', 'description'],
+        filterFields: ['category', 'isActive', 'accountType', 'accountStatus'],
+        dateFilterField: 'createdAt',
+        populate: [
+            { path: 'createdBy', select: 'name email' },
+            { path: 'parentAccount', select: 'code name' }
+        ],
+        baseQuery: { isDeleted: false },
+        defaultSort: { code: 1 }
+    };
+    return await applyQueryFeatures(AccountingCode, queryParams, queryOptions);
 };
 
 exports.getById = async (id) => {

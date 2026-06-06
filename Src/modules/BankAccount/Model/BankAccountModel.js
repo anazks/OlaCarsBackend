@@ -52,6 +52,30 @@ const bankAccountSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        accountType: {
+            type: String,
+            enum: ["Bank", "Credit Card"],
+            default: "Bank",
+        },
+        accountName: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        accountCode: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        description: {
+            type: String,
+            trim: true,
+        },
+        accountingCode: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "AccountingCode",
+            default: null,
+        },
     },
     { timestamps: true }
 );

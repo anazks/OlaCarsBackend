@@ -14,9 +14,20 @@ exports.create = async (data) => {
     return newTax.toObject();
 };
 
-exports.getAll = async (query = {}) => {
-    const filters = { isDeleted: false, ...query };
-    return await Tax.find(filters).populate('createdBy', 'name email');
+const { applyQueryFeatures } = require('../../../shared/utils/queryHelper');
+
+exports.getAll = async (queryParams = {}) => {
+    const queryOptions = {
+        searchFields: ['name', 'description'],
+        filterFields: ['isActive', 'category'],
+        dateFilterField: 'createdAt',
+        populate: [
+            { path: 'createdBy', select: 'name email' }
+        ],
+        baseQuery: { isDeleted: false },
+        defaultSort: { createdAt: -1 }
+    };
+    return await applyQueryFeatures(Tax, queryParams, queryOptions);
 };
 
 exports.getById = async (id) => {
