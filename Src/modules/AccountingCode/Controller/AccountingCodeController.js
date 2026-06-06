@@ -58,10 +58,38 @@ const deleteAccountingCode = async (req, res) => {
     }
 };
 
+const bulkUpsertAccountingCodes = async (req, res) => {
+    try {
+        const { codes } = req.body;
+        if (!Array.isArray(codes) || codes.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'codes' array." });
+        }
+
+        if (codes.length > 1000) {
+            return res.status(400).json({ success: false, message: "Maximum 1000 codes per bulk upload." });
+        }
+
+        const createdBy = req.user.id;
+        const creatorRole = req.user.role;
+
+        const results = await AccountingCodeService.bulkUpsert(codes, createdBy, creatorRole);
+
+        const statusCode = (results.created.length > 0 || results.updated.length > 0) ? 201 : 400;
+        return res.status(statusCode).json({
+            success: results.created.length > 0 || results.updated.length > 0,
+            message: `${results.created.length} code(s) created, ${results.updated.length} code(s) updated, ${results.errors.length} error(s).`,
+            data: results
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addAccountingCode,
     getAccountingCodes,
     getAccountingCodeById,
     updateAccountingCode,
     deleteAccountingCode,
+    bulkUpsertAccountingCodes,
 };

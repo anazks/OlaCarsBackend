@@ -21,7 +21,54 @@ const accountingCodeSchema = new mongoose.Schema(
         category: {
             type: String,
             required: true,
-            enum: ["INCOME", "EXPENSE", "LIABILITY", "ASSET", "EQUITY"],
+            enum: [
+                "Income", "Expense", "Cash", "Accounts Receivable", "Fixed Asset",
+                "Other Current Asset", "Accounts Payable", "Other Current Liability", "Equity",
+                "Other Expense", "Other Liability", "Stock", "Cost Of Goods Sold", "Output Tax",
+                "Input Tax", "Bank", "Non Current Liability", "Other Income", "Other Asset",
+                "INCOME", "EXPENSE", "LIABILITY", "ASSET", "EQUITY",
+                "ncome", "non current liab"
+            ],
+        },
+        accountType: {
+            type: String,
+            trim: true,
+        },
+        mileageRate: {
+            type: Number,
+            default: 0,
+        },
+        mileageUnit: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        isMileage: {
+            type: Boolean,
+            default: false,
+        },
+        accountNumber: {
+            type: String,
+            trim: true,
+        },
+        accountStatus: {
+            type: String,
+            trim: true,
+            default: "Active",
+        },
+        currency: {
+            type: String,
+            trim: true,
+            default: "USD",
+        },
+        parentAccount: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "AccountingCode",
+            default: null,
+        },
+        cuentaEspanol: {
+            type: String,
+            trim: true,
         },
         isActive: {
             type: Boolean,
@@ -47,6 +94,7 @@ const accountingCodeSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+
 
 // Search indexes
 accountingCodeSchema.index({ code: 1, isActive: 1, isDeleted: 1 });
