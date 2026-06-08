@@ -13,7 +13,9 @@ const ALLOWED_CREATE_FIELDS = [
     'taxInfo',
     'voucher',
     'createdBy',
-    'creatorRole'
+    'creatorRole',
+    'contact',
+    'transactionType'
 ];
 
 /**
