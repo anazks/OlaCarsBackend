@@ -175,26 +175,19 @@ exports.financeApproveRequest = async (req, res) => {
         request.approvedBy = approverId;
         request.approvedByRole = approverRole;
 
+        if (status === "REJECTED") {
+            request.rejectionReason = note || "";
+        }
+
         const historyRecord = {
             editedAt: new Date(),
             editedBy: approverId,
             editorRole: approverRole,
             previousStatus: previousStatus,
-            changesSummary: ""
+            changesSummary: status === "REJECTED" 
+                ? `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"` 
+                : "Finance approved merchandiser pricing."
         };
-
-        if (status === "APPROVED") {
-            request.approvalNote = note || "";
-            if (request.part && request.part.unitCost) {
-                request.originalTotalAmount = request.quantity * request.part.unitCost;
-            } else {
-                request.originalTotalAmount = 0;
-            }
-            historyRecord.changesSummary = `Finance approved merchandiser pricing. Total amount updated to proposed $${request.merchandiserTotalAmount}. Status changed to COST_APPROVED.`;
-        } else if (status === "REJECTED") {
-            request.rejectionNote = note || "";
-            historyRecord.changesSummary = `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"`;
-        }
 
         if (!request.editHistory) request.editHistory = [];
         request.editHistory.push(historyRecord);

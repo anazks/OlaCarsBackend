@@ -51,7 +51,7 @@ exports.create = async (data) => {
             phone: driver.personalInfo?.phone,
             whatsappNumber: driver.personalInfo?.whatsappNumber,
             branch: driver.branch || data.branch,
-            status: (driver.status === 'SUSPENDED' || driver.status === 'REJECTED' || driver.status === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE',
+            status: driver.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
             createdBy: driver.createdBy,
             creatorRole: driver.creatorRole
         };
