@@ -6,10 +6,15 @@ const paymentReceivedSchema = new mongoose.Schema({
         required: true, 
         unique: true 
     },
+    customerId: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Customer', 
+        required: true 
+    },
     driverId: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'Driver', 
-        required: true 
+        required: false 
     },
     amountReceived: { 
         type: Number, 

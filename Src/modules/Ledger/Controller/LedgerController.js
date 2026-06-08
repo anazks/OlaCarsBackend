@@ -62,6 +62,7 @@ const getLedgerEntries = async (req, res) => {
         const entries = await LedgerEntry.find(query)
             .populate("transaction", "paymentMethod status transactionCategory transactionType")
             .populate("accountingCode", "code name category")
+            .populate("contact", "name email")
             .sort({ entryDate: -1 })
             .skip(skip)
             .limit(limit);
@@ -106,6 +107,7 @@ const getLedgerEntryById = async (req, res) => {
             .populate("manualJournal")
             .populate("voucher")
             .populate("accountingCode", "code name category")
+            .populate("contact", "name email")
             .populate("createdBy", "name email");
 
         if (!entry) {

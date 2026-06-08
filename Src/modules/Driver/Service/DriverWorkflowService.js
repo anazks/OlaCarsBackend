@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const { getDriverByIdService, updateDriverService } = require("../Repo/DriverRepo");
 const { DRIVER_STATUSES } = require("../Model/DriverModel");
 const { ROLES } = require("../../../shared/constants/roles");
+const Customer = require("../../Customer/Model/CustomerModel");
 
 // ─── Role Hierarchy (reuses project pattern) ──────────────────────────
 const ROLE_HIERARCHY = {
@@ -353,6 +354,7 @@ async function processDriverProgress(driverId, targetStatus, updateData = {}, us
         try {
             session.startTransaction();
             const result = await updateDriverService(driverId, rejectionUpdate, session);
+            await Customer.findOneAndUpdate({ driver: driverId }, { status: 'INACTIVE' }, { session });
             await session.commitTransaction();
             return result;
         } catch (err) {
@@ -400,6 +402,11 @@ async function processDriverProgress(driverId, targetStatus, updateData = {}, us
     try {
         session.startTransaction();
         const updatedDriver = await updateDriverService(driverId, finalUpdate, session);
+        
+        // Sync Customer status
+        const custStatus = (targetStatus === 'SUSPENDED' || targetStatus === 'REJECTED' || targetStatus === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE';
+        await Customer.findOneAndUpdate({ driver: driverId }, { status: custStatus }, { session });
+
         await session.commitTransaction();
         return updatedDriver;
     } catch (err) {

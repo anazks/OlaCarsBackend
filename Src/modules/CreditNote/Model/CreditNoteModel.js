@@ -7,10 +7,15 @@ const creditnoteSchema = new mongoose.Schema({
         unique: true, 
         trim: true 
     },
+    customerId: { 
+        type: mongoose.Schema.Types.ObjectId, 
+        ref: 'Customer', 
+        required: true 
+    },
     driverId: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'Driver', 
-        required: true 
+        required: false 
     },
     invoiceId: { 
         type: mongoose.Schema.Types.ObjectId, 

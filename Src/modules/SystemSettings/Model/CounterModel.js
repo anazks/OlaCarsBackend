@@ -35,4 +35,10 @@ async function getNextDriverId() {
     return `OLA-${String(seq).padStart(6, "0")}`;
 }
 
-module.exports = { Counter, getNextSequence, getNextDriverId };
+async function getNextCustomerId() {
+    const seq = await getNextSequence("customerId");
+    return `CUST-${String(seq).padStart(6, "0")}`;
+}
+
+module.exports = { Counter, getNextSequence, getNextDriverId, getNextCustomerId };
+

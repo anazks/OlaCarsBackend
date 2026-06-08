@@ -15,11 +15,17 @@ const addAccountingCode = async (req, res) => {
 
 const getAccountingCodes = async (req, res) => {
     try {
-        const query = {};
-        if (req.query.category) query.category = req.query.category;
-        if (req.query.isActive !== undefined) query.isActive = req.query.isActive === 'true';
-        const codes = await AccountingCodeService.getAll(query);
-        return res.status(200).json({ success: true, data: codes });
+        const result = await AccountingCodeService.getAll(req.query);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages
+            }
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

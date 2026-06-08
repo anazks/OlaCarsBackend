@@ -15,6 +15,10 @@ const lineItemSchema = new mongoose.Schema({
     qty: { type: Number, required: true, default: 1 },
     unitPrice: { type: Number, required: true, default: 0 },
     total: { type: Number, default: 0 },
+    inventoryPart: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryPart", required: false },
+    tax: { type: mongoose.Schema.Types.ObjectId, ref: "Tax", required: false },
+    taxRate: { type: Number, default: 0 },
+    taxAmount: { type: Number, default: 0 }
 }, { _id: false });
 
 const invoiceSchema = new mongoose.Schema({
@@ -28,10 +32,15 @@ const invoiceSchema = new mongoose.Schema({
         enum: ["RENTAL", "WORKSHOP", "MANUAL", "DEPOSIT"],
         default: "RENTAL"
     },
+    customer: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Customer",
+        required: true,
+    },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Driver",
-        required: true,
+        required: false,
     },
     vehicle: {
         type: mongoose.Schema.Types.ObjectId,
@@ -95,6 +104,7 @@ const invoiceSchema = new mongoose.Schema({
     discountType: { type: String, enum: ["PERCENTAGE", "FIXED"], default: "PERCENTAGE" },
     discountValue: { type: Number, default: 0 },
     discountAmount: { type: Number, default: 0 },
+    isTaxInclusive: { type: Boolean, default: false },
     taxRate: { type: Number, default: 0 },
     taxAmount: { type: Number, default: 0 },
     tax: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
@@ -125,10 +135,12 @@ const invoiceSchema = new mongoose.Schema({
     mailSentRecovery: { type: Boolean, default: false },
 }, { timestamps: true });
 
-invoiceSchema.index({ driver: 1, weekNumber: 1 }, { 
+invoiceSchema.index({ customer: 1, weekNumber: 1 }, { 
     unique: true,
     partialFilterExpression: { invoiceType: 'RENTAL' }
 });
+invoiceSchema.index({ customer: 1 });
+invoiceSchema.index({ driver: 1 });
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 

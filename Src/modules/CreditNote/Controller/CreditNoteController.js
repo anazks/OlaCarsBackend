@@ -42,10 +42,11 @@ exports.applyCreditNote = async (req, res) => {
  */
 exports.getAllCreditNotes = async (req, res) => {
     try {
-        const { page, limit, driverId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate } = req.query;
-        console.log('CreditNote Query Params:', { page, limit, driverId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate });
+        const { page, limit, driverId, customerId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate } = req.query;
+        console.log('CreditNote Query Params:', { page, limit, driverId, customerId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate });
         const filter = {};
         if (driverId) filter.driverId = driverId;
+        if (customerId) filter.customerId = customerId;
         if (status) filter.status = status;
         if (invoiceId) filter.invoiceId = invoiceId;
 

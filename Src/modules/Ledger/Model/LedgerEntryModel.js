@@ -52,6 +52,15 @@ const ledgerEntrySchema = new mongoose.Schema(
             taxAmount: { type: Number, default: 0 },
             isTaxInclusive: { type: Boolean, default: false },
         },
+        contact: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Customer",
+            required: false,
+        },
+        transactionType: {
+            type: String,
+            required: false,
+        },
         // Audit Trail
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

@@ -144,8 +144,17 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             const startSeq = await InvoiceService.getNextInvoiceNumberVal();
             const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
 
+            const Customer = require("../../Customer/Model/CustomerModel");
+            const customerDoc = await Customer.findOne({ driver: driver._id });
+            if (!customerDoc) {
+                console.error(`[InvoiceCronService] Customer not found for driver ${driver.driverId}, skipping invoice generation.`);
+                skippedCount++;
+                continue;
+            }
+
             const newInvoice = new Invoice({
                 invoiceNumber,
+                customer: customerDoc._id,
                 driver: driver._id,
                 vehicle: driver.currentVehicle._id || driver.currentVehicle,
                 weekNumber: nextPeriod.weekNumber,

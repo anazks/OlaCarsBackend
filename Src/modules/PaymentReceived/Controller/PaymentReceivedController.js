@@ -2,10 +2,19 @@ const PaymentReceived = require('../Model/PaymentReceivedModel');
 
 exports.createPaymentReceived = async (req, res) => {
     try {
-        const { driverId, amountReceived, paymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
+        const { driverId, customerId, amountReceived, paymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
 
-        if (!driverId || !amountReceived || !depositedTo) {
-            return res.status(400).json({ success: false, message: "Missing required fields: driverId, amountReceived, depositedTo are required." });
+        let finalCustomerId = customerId;
+        if (!finalCustomerId && driverId) {
+            const Customer = require('../../Customer/Model/CustomerModel');
+            const customerDoc = await Customer.findOne({ driver: driverId });
+            if (customerDoc) {
+                finalCustomerId = customerDoc._id;
+            }
+        }
+
+        if (!finalCustomerId || !amountReceived || !depositedTo) {
+            return res.status(400).json({ success: false, message: "Missing required fields: customerId (or driverId resolving to a customer), amountReceived, depositedTo are required." });
         }
 
         const mongoose = require('mongoose');
@@ -17,7 +26,8 @@ exports.createPaymentReceived = async (req, res) => {
         // 2. Create PaymentReceived document
         const newDoc = new PaymentReceived({
             paymentNumber,
-            driverId,
+            customerId: finalCustomerId,
+            driverId: driverId || undefined,
             amountReceived,
             paymentDate: paymentDate || new Date(),
             paymentMethod: paymentMethod || "Cash",
@@ -34,6 +44,7 @@ exports.createPaymentReceived = async (req, res) => {
         // 3. Update applied Invoices (if any)
         if (invoices && invoices.length > 0) {
             const { Invoice } = require('../../Invoice/Model/InvoiceModel');
+            const InvoiceService = require('../../Invoice/Service/InvoiceService');
             for (const inv of invoices) {
                 const invoice = await Invoice.findById(inv.invoiceId);
                 if (invoice) {
@@ -53,6 +64,7 @@ exports.createPaymentReceived = async (req, res) => {
                         note: notes || `Payment received (PR: ${paymentNumber})`
                     });
                     await invoice.save();
+                    await InvoiceService.syncInvoiceToAdditionalPayments(invoice);
                     console.log(`[PaymentReceivedController] Settled $${inv.amountApplied} on Invoice ${invoice.invoiceNumber}. Remaining Balance: $${invoice.balance}`);
                 }
             }
@@ -64,22 +76,24 @@ exports.createPaymentReceived = async (req, res) => {
         if (excessAmount > 0) {
             try {
                 const InvoiceService = require('../../Invoice/Service/InvoiceService');
-                await InvoiceService.applyExcessToNextInvoice(driverId, excessAmount, {
+                await InvoiceService.applyExcessToNextInvoice(finalCustomerId, excessAmount, {
                     paymentMethod,
                     referenceNumber,
-                    notes
+                    notes,
+                    createdBy: creatorId,
+                    creatorRole: creatorRole
                 });
             } catch (err) {
                 console.error("[PaymentReceivedController] Failed to apply excess overpayment to subsequent invoices:", err);
             }
         }
 
-        // Always recompute carryover and rollover driver invoices to maintain clean records
+        // Always recompute carryover and rollover customer invoices to maintain clean records
         try {
             const InvoiceService = require('../../Invoice/Service/InvoiceService');
-            await InvoiceService.rolloverDriverInvoices(driverId);
+            await InvoiceService.rolloverCustomerInvoices(finalCustomerId);
         } catch (err) {
-            console.error("[PaymentReceivedController] Rollover driver invoices failed:", err);
+            console.error("[PaymentReceivedController] Rollover customer invoices failed:", err);
         }
 
         // 4. Post Double-Entry Ledger through PaymentTransaction
@@ -146,8 +160,8 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId } = req.query;
-        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId });
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId, customerId } = req.query;
+        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId, customerId });
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const query = {};
@@ -157,6 +171,10 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         if (driverId) {
             query.driverId = driverId;
+        }
+
+        if (customerId) {
+            query.customerId = customerId;
         }
 
         if (search) {
@@ -172,10 +190,21 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             }).select('_id');
             const driverIds = drivers.map(d => d._id);
 
+            // Find matching customers
+            const Customer = require('../../Customer/Model/CustomerModel');
+            const customers = await Customer.find({
+                $or: [
+                    { "name": searchRegex },
+                    { "customerId": searchRegex }
+                ]
+            }).select('_id');
+            const customerIds = customers.map(c => c._id);
+
             query.$or = [
                 { paymentNumber: searchRegex },
                 { referenceNumber: searchRegex },
-                { driverId: { $in: driverIds } }
+                { driverId: { $in: driverIds } },
+                { customerId: { $in: customerIds } }
             ];
         }
 
@@ -186,6 +215,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         const total = await PaymentReceived.countDocuments(query);
         const docs = await PaymentReceived.find(query)
+            .populate('customerId', 'name customerId')
             .populate('driverId', 'personalInfo driverId')
             .populate('depositedTo', 'name code')
             .sort(sort)
@@ -207,10 +237,10 @@ exports.getAllPaymentReceiveds = async (req, res) => {
     }
 };
 
-
 exports.getPaymentReceivedById = async (req, res) => {
     try {
         const doc = await PaymentReceived.findById(req.params.id)
+            .populate('customerId', 'name customerId email phone branch')
             .populate('driverId', 'personalInfo driverId')
             .populate('depositedTo', 'name code');
         if (!doc) return res.status(404).json({ success: false, message: 'Not found' });

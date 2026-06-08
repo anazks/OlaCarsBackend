@@ -54,6 +54,10 @@ exports.getById = async (id) => {
 };
 
 exports.generateRentInvoices = async (driverId, vehicleId, amount, count, frequency = 'MONTHLY', createdBy, creatorRole, session = null) => {
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const customerDoc = await Customer.findOne({ driver: driverId }, null, { session });
+    if (!customerDoc) throw new Error(`Customer profile not found for Driver ${driverId}`);
+
     const assignmentDate = new Date();
     assignmentDate.setHours(0, 0, 0, 0);
 
@@ -98,6 +102,7 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
 
         invoicesData.push({
             invoiceNumber,
+            customer: customerDoc._id,
             driver: driverId,
             vehicle: vehicleId,
             weekNumber: periodNum,
@@ -144,7 +149,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     if (paymentMethod === "PREPAYMENT_CREDIT") {
         // Settle this invoice using the driver's available prepayment credits, up to the specified amount
         const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
-        const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
+        const payments = await PaymentReceived.find({ customerId: invoice.customer, status: 'COMPLETED' });
 
         let remainingToApply = amount; // the amount the user wants to pay using prepayment credit
         if (remainingToApply > invoice.balance) {
@@ -205,8 +210,22 @@ exports.payInvoice = async (invoiceId, paymentData) => {
         await invoice.save();
         await exports.syncInvoiceToAdditionalPayments(invoice);
 
+        // Generate ledger entry for rollover (DR Advance Received, CR Accounts Receivable)
+        try {
+            const LedgerService = require("../../Ledger/Service/LedgerService");
+            await LedgerService.generateRolloverLedgerEntry({
+                customer: invoice.customer,
+                invoice: invoice,
+                amount: totalAppliedFromCredit,
+                createdBy,
+                creatorRole
+            });
+        } catch (ledgerErr) {
+            console.error("[InvoiceService] Failed to generate rollover ledger entry for prepayment credit:", ledgerErr);
+        }
+
         // Roll over carry over across all invoices
-        await exports.rolloverDriverInvoices(invoice.driver);
+        await exports.rolloverCustomerInvoices(invoice.customer);
 
         return invoice;
     }
@@ -290,21 +309,21 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 
     // Handle excess (apply to the next available invoice if possible)
     if (excessAmount > 0) {
-        await this.applyExcessToNextInvoice(invoice.driver, excessAmount, paymentData);
+        await this.applyExcessToNextInvoice(invoice.customer, excessAmount, paymentData);
     }
 
     // Ledger & Payment Transaction
     await this.createLedgerEntry(amount, paymentMethod, invoice, createdBy, creatorRole, note);
 
     // Roll over carry over across all invoices
-    await this.rolloverDriverInvoices(invoice.driver);
+    await this.rolloverCustomerInvoices(invoice.customer);
 
     return updatedInvoice;
 };
 
-exports.applyExcessToNextInvoice = async (driverId, excessAmount, paymentData) => {
+exports.applyExcessToNextInvoice = async (customerId, excessAmount, paymentData) => {
     // Find the next UNPAID invoice ordered by weekNumber
-    const nextInvoices = await Invoice.find({ driver: driverId, status: { $ne: 'PAID' }, isDeleted: false })
+    const nextInvoices = await Invoice.find({ customer: customerId, status: { $ne: 'PAID' }, isDeleted: false })
         .sort({ weekNumber: 1 });
 
     let rem = excessAmount;
@@ -337,13 +356,28 @@ exports.applyExcessToNextInvoice = async (driverId, excessAmount, paymentData) =
         }
         const updatedInv = await Invoice.findByIdAndUpdate(nextInv._id, upd, { new: true });
         await exports.syncInvoiceToAdditionalPayments(updatedInv);
+
+        // Generate ledger entry for rollover (DR Advance Received, CR Accounts Receivable)
+        try {
+            const LedgerService = require("../../Ledger/Service/LedgerService");
+            await LedgerService.generateRolloverLedgerEntry({
+                customer: customerId,
+                invoice: updatedInv,
+                amount: toPay,
+                createdBy: paymentData ? paymentData.createdBy : undefined,
+                creatorRole: paymentData ? paymentData.creatorRole : undefined
+            });
+        } catch (ledgerErr) {
+            console.error("[InvoiceService] Failed to generate rollover ledger entry:", ledgerErr);
+        }
+
         rem -= toPay;
     }
 }
 
-exports.rolloverDriverInvoices = async (driverId) => {
+exports.rolloverCustomerInvoices = async (customerId) => {
     // Read all invoices sorted by week
-    const invoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: 1 });
+    const invoices = await Invoice.find({ customer: customerId, isDeleted: false }).sort({ weekNumber: 1 });
 
     let totalCarryOver = 0;
     const today = new Date();
@@ -377,6 +411,15 @@ exports.rolloverDriverInvoices = async (driverId) => {
     }
 };
 
+// Deprecated driver alias for compatibility
+exports.rolloverDriverInvoices = async (driverId) => {
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const customerDoc = await Customer.findOne({ driver: driverId });
+    if (customerDoc) {
+        await exports.rolloverCustomerInvoices(customerDoc._id);
+    }
+};
+
 exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note) => {
     try {
         console.log(`[InvoiceService] Starting ledger generation for invoice payment ${invoice.invoiceNumber}`);
@@ -397,8 +440,8 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
 
             const transactionData = {
                 accountingCode: accCode._id,
-                referenceId: invoice.driver,
-                referenceModel: "Driver",
+                referenceId: invoice.customer,
+                referenceModel: "Customer",
                 transactionCategory: "INCOME",
                 transactionType: "CREDIT",
                 isTaxInclusive: false,
@@ -421,10 +464,10 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             // The auto-created PaymentReceived double-entry below handles Cash Debit and Accounts Receivable Credit.
             console.log(`[InvoiceService] Skipping direct direct ledger entry generation for payment transaction ${newTransaction._id} to avoid double-booking.`);
 
-            // Fetch driver details to get the branch
-            const { Driver } = require("../../Driver/Model/DriverModel");
-            const driverDoc = await Driver.findById(invoice.driver);
-            const branchId = invoice.branch || (driverDoc ? driverDoc.branch : undefined);
+            // Fetch customer details to get the branch
+            const Customer = require("../../Customer/Model/CustomerModel");
+            const customerDoc = await Customer.findById(invoice.customer);
+            const branchId = invoice.branch || (customerDoc ? customerDoc.branch : undefined);
 
             // Fetch a cash/bank asset account
             let cashBankAccount = await AccountingCode.findOne({ category: "ASSET", code: { $nin: ["1100", "1200"] } });
@@ -447,7 +490,8 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
 
                 const prData = {
                     paymentNumber: `PR-${Date.now()}`,
-                    driverId: invoice.driver,
+                    customerId: invoice.customer,
+                    driverId: invoice.driver || undefined,
                     amountReceived: amount,
                     paymentDate: new Date(),
                     paymentMethod: normalizedPRMethod,
@@ -476,8 +520,8 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                 // which LedgerService will process as: Debit Cash/Bank, Credit Accounts Receivable (1200).
                 const prTransactionData = {
                     accountingCode: cashBankAccount._id,
-                    referenceId: prDoc ? prDoc._id : invoice.driver,
-                    referenceModel: prDoc ? "PaymentReceived" : "Driver",
+                    referenceId: prDoc ? prDoc._id : invoice.customer,
+                    referenceModel: prDoc ? "PaymentReceived" : "Customer",
                     transactionCategory: "ASSET",
                     transactionType: "DEBIT",
                     isTaxInclusive: false,
@@ -509,25 +553,31 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
 
 exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const {
-        driver: driverId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
+        driver: driverId, customer: customerId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
         lineItems = [], discountType = 'PERCENTAGE', discountValue = 0,
-        notes
+        isTaxInclusive = false, notes
     } = data;
 
-    if (!driverId) throw new Error("Driver is required for manual invoice creation");
+    let finalCustomerId = customerId;
+    if (!finalCustomerId && driverId) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const customerDoc = await Customer.findOne({ driver: driverId });
+        if (customerDoc) {
+            finalCustomerId = customerDoc._id;
+        }
+    }
+
+    if (!finalCustomerId) throw new Error("Customer is required for manual invoice creation");
     if (!dueDate) throw new Error("Due date is required");
     if (!lineItems || lineItems.length === 0) throw new Error("At least one line item is required");
 
     // Compute subtotal from line items
-    const enrichedLineItems = lineItems.map(item => ({
-        name: item.name,
-        description: item.description || '',
-        qty: Number(item.qty) || 1,
-        unitPrice: Number(item.unitPrice) || 0,
-        total: Math.round((Number(item.qty) || 1) * (Number(item.unitPrice) || 0) * 100) / 100,
-    }));
-
-    const subtotal = enrichedLineItems.reduce((sum, item) => sum + item.total, 0);
+    let subtotal = 0;
+    for (const item of lineItems) {
+        const qty = Number(item.qty) || 1;
+        const unitPrice = Number(item.unitPrice) || 0;
+        subtotal += Math.round(qty * unitPrice * 100) / 100;
+    }
 
     // Compute discount
     let discountAmount = 0;
@@ -540,29 +590,85 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     }
 
     const afterDiscount = subtotal - discountAmount;
+    const discountFactor = subtotal > 0 ? (afterDiscount / subtotal) : 0;
 
-    // Fetch tax and compute tax rate
-    let finalTaxRate = typeof data.taxRate === 'number' ? data.taxRate : 0;
-    let taxDoc = null;
-    if (data.tax) {
-        taxDoc = await Tax.findById(data.tax);
-        if (taxDoc) {
-            finalTaxRate = taxDoc.rate;
+    const enrichedLineItems = [];
+    let totalTaxAmount = 0;
+    let totalBaseAmount = 0;
+    let firstAppliedTaxDoc = null;
+    let firstAppliedTaxRate = 0;
+
+    const taxInclusiveParsed = isTaxInclusive === true || String(isTaxInclusive).toLowerCase() === 'true';
+
+    for (const item of lineItems) {
+        const qty = Number(item.qty) || 1;
+        const unitPrice = Number(item.unitPrice) || 0;
+        const itemTotal = Math.round(qty * unitPrice * 100) / 100;
+
+        let itemTaxRate = 0;
+        let itemTaxDoc = null;
+
+        if (item.tax) {
+            itemTaxDoc = await Tax.findById(item.tax);
+            if (itemTaxDoc) {
+                itemTaxRate = itemTaxDoc.rate;
+                if (!firstAppliedTaxDoc) {
+                    firstAppliedTaxDoc = itemTaxDoc;
+                    firstAppliedTaxRate = itemTaxRate;
+                }
+            }
+        } else if (item.taxRate !== undefined && item.taxRate !== null) {
+            itemTaxRate = parseFloat(item.taxRate) || 0;
+            if (itemTaxRate > 0 && !firstAppliedTaxDoc) {
+                firstAppliedTaxRate = itemTaxRate;
+            }
         }
-    } else {
-        taxDoc = await Tax.findOne({ isActive: true, isDeleted: false });
-        if (taxDoc) {
-            finalTaxRate = taxDoc.rate;
+
+        const itemDiscountedTotal = Math.round(itemTotal * discountFactor * 100) / 100;
+        let itemTaxAmount = 0;
+        let itemBaseAmount = itemDiscountedTotal;
+
+        if (itemTaxRate > 0) {
+            if (taxInclusiveParsed) {
+                itemBaseAmount = Math.round((itemDiscountedTotal / (1 + itemTaxRate / 100)) * 100) / 100;
+                itemTaxAmount = Math.round((itemDiscountedTotal - itemBaseAmount) * 100) / 100;
+            } else {
+                itemTaxAmount = Math.round((itemDiscountedTotal * itemTaxRate / 100) * 100) / 100;
+            }
         }
+
+        totalTaxAmount += itemTaxAmount;
+        totalBaseAmount += itemBaseAmount;
+
+        enrichedLineItems.push({
+            name: item.name,
+            description: item.description || '',
+            qty,
+            unitPrice,
+            total: itemTotal,
+            inventoryPart: item.inventoryPart || undefined,
+            tax: itemTaxDoc ? itemTaxDoc._id : undefined,
+            taxRate: itemTaxRate,
+            taxAmount: itemTaxAmount
+        });
     }
 
-    // Compute tax
-    const totalAmountDue = afterDiscount;
-    const baseAmount = finalTaxRate > 0 ? Math.round((afterDiscount / (1 + finalTaxRate / 100)) * 100) / 100 : afterDiscount;
-    const taxAmount = Math.round((afterDiscount - baseAmount) * 100) / 100;
+    let taxAmount = Math.round(totalTaxAmount * 100) / 100;
+    let baseAmount = Math.round(totalBaseAmount * 100) / 100;
+    let totalAmountDue;
 
-    // Auto-assign weekNumber (next available for this driver)
-    const existingInvoices = await Invoice.find({ driver: driverId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+    if (taxInclusiveParsed) {
+        totalAmountDue = Math.round(afterDiscount * 100) / 100;
+        baseAmount = Math.round((totalAmountDue - taxAmount) * 100) / 100;
+    } else {
+        totalAmountDue = Math.round((baseAmount + taxAmount) * 100) / 100;
+    }
+
+    const finalTaxRate = firstAppliedTaxRate;
+    const taxDoc = firstAppliedTaxDoc;
+
+    // Auto-assign weekNumber (next available for this customer)
+    const existingInvoices = await Invoice.find({ customer: finalCustomerId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
     const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
 
     // Generate sequential manual invoice number
@@ -571,7 +677,8 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
 
     const invoiceData = {
         invoiceNumber,
-        driver: driverId,
+        customer: finalCustomerId,
+        driver: driverId || undefined,
         vehicle: vehicleId || undefined,
         weekNumber: nextWeekNumber,
         weekLabel: weekLabel || `Manual Invoice - ${new Date(dueDate).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
@@ -594,6 +701,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         discountType,
         discountValue: Number(discountValue),
         discountAmount,
+        isTaxInclusive: taxInclusiveParsed,
         notes: notes || '',
         createdBy,
         creatorRole,
@@ -608,7 +716,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         }
         await exports.applyPrepaymentsToInvoice(newInvoice._id);
     }
-    return await Invoice.findById(newInvoice._id).populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
+    return await Invoice.findById(newInvoice._id).populate('customer', 'name customerId').populate('driver', 'personalInfo driverId').populate('vehicle', 'plateNumber make model');
 };
 
 exports.applyPrepaymentsToInvoice = async (invoiceId) => {
@@ -618,8 +726,8 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice || invoice.status === 'PAID') return;
 
-    // Find all completed PaymentReceived records for this driver
-    const payments = await PaymentReceived.find({ driverId: invoice.driver, status: 'COMPLETED' });
+    // Find all completed PaymentReceived records for this customer
+    const payments = await PaymentReceived.find({ customerId: invoice.customer, status: 'COMPLETED' });
 
     let remainingToPay = invoice.balance;
     if (remainingToPay <= 0) return;
@@ -670,8 +778,8 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
     if (remainingToPay < invoice.balance) {
         await invoice.save();
         await exports.syncInvoiceToAdditionalPayments(invoice);
-        // Also trigger rollover driver invoices to maintain carryover calculations
-        await exports.rolloverDriverInvoices(invoice.driver);
+        // Also trigger rollover customer invoices to maintain carryover calculations
+        await exports.rolloverCustomerInvoices(invoice.customer);
     }
 };
 

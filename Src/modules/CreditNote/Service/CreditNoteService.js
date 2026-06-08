@@ -9,19 +9,33 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
  * Creates a new Credit Note and processes adjustments.
  */
 const createCreditNote = async (data, actor) => {
-    const { driverId, invoiceId, amount, reason, notes, creditNoteDate } = data;
+    const { driverId, customerId, invoiceId, amount, reason, notes, creditNoteDate } = data;
 
-    if (!driverId || !amount || !reason) {
-        throw new Error("Missing required Credit Note fields: driverId, amount, and reason are mandatory.");
+    if (!amount || !reason) {
+        throw new Error("Missing required Credit Note fields: amount and reason are mandatory.");
     }
 
     if (Number(amount) <= 0) {
         throw new Error("Credit Note amount must be greater than 0.");
     }
 
-    const driver = await Driver.findById(driverId);
-    if (!driver) {
-        throw new Error("Driver not found.");
+    let finalCustomerId = customerId;
+    if (!finalCustomerId && driverId) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const customerDoc = await Customer.findOne({ driver: driverId });
+        if (customerDoc) {
+            finalCustomerId = customerDoc._id;
+        }
+    }
+
+    if (!finalCustomerId) {
+        throw new Error("Customer is required (directly or resolved via Driver).");
+    }
+
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const customer = await Customer.findById(finalCustomerId);
+    if (!customer) {
+        throw new Error("Customer not found.");
     }
 
     const creditNoteNumber = `CN-${Date.now()}`;
@@ -29,7 +43,8 @@ const createCreditNote = async (data, actor) => {
     // 1. Create the Credit Note Record directly in OPEN status (without applying yet)
     const creditNoteDoc = await CreditNote.create({
         creditNoteNumber,
-        driverId,
+        customerId: finalCustomerId,
+        driverId: driverId || undefined,
         invoiceId: invoiceId || undefined,
         amount,
         reason,
@@ -49,16 +64,16 @@ const createCreditNote = async (data, actor) => {
         }
 
         if (accCode) {
-            const driverName = driver.personalInfo?.fullName || "Driver";
-            const txNote = `Credit Note [${creditNoteNumber}]: ${reason} for ${driverName}${notes ? ' - ' + notes : ''}`;
+            const customerName = customer.name || "Customer";
+            const txNote = `Credit Note [${creditNoteNumber}]: ${reason} for ${customerName}${notes ? ' - ' + notes : ''}`;
 
-            // FIX: Bind explicitly to Driver Model so it registers under Driver Ledger Accounts!
+            // Bind explicitly to Customer Model so it registers under Customer Ledger Accounts!
             const transactionData = {
                 accountingCode: accCode._id,
-                referenceId: driverId,
-                referenceModel: "Driver",
+                referenceId: finalCustomerId,
+                referenceModel: "Customer",
                 transactionCategory: "INCOME",
-                transactionType: "DEBIT", // Reduces the driver receivable account
+                transactionType: "DEBIT", // Reduces the customer receivable account
                 isTaxInclusive: false,
                 baseAmount: amount,
                 totalAmount: amount,
@@ -73,7 +88,7 @@ const createCreditNote = async (data, actor) => {
             const newTransaction = await PaymentTransaction.create(transactionData);
             const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
             await LedgerService.autoGenerateLedgerEntry(populatedTx);
-            console.log(`[CreditNoteService] Generated ledger reversal linked to Driver: ${creditNoteNumber}`);
+            console.log(`[CreditNoteService] Generated ledger reversal linked to Customer: ${creditNoteNumber}`);
         }
     } catch (err) {
         console.error("[CreditNoteService] Failed to generate ledger record for Credit Note:", err.message);
@@ -104,10 +119,10 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
         throw new Error("Cannot apply credit to a fully paid invoice.");
     }
 
-    // Ensure credit note driver matches invoice driver
-    const invDriverId = typeof invoice.driver === 'object' ? invoice.driver._id.toString() : invoice.driver.toString();
-    if (creditNote.driverId.toString() !== invDriverId) {
-        throw new Error("Operational mismatch: Credit Note operator does not match Invoice operator.");
+    // Ensure credit note customer matches invoice customer
+    const invCustomerId = typeof invoice.customer === 'object' ? invoice.customer._id.toString() : invoice.customer.toString();
+    if (creditNote.customerId.toString() !== invCustomerId) {
+        throw new Error("Operational mismatch: Credit Note customer does not match Invoice customer.");
     }
 
     // Cap application at invoice's remaining balance
@@ -148,7 +163,7 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
     // Trigger carry-over dynamic balance rollovers
     try {
         const InvoiceService = require("../../Invoice/Service/InvoiceService");
-        await InvoiceService.rolloverDriverInvoices(invoice.driver);
+        await InvoiceService.rolloverCustomerInvoices(invoice.customer);
     } catch (rollErr) {
         console.error("[CreditNoteService] Carry-over rollover failed during application:", rollErr.message);
     }
@@ -195,11 +210,22 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         }).select('_id');
         const driverIds = drivers.map(d => d._id);
 
+        // Find matching customers
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const customers = await Customer.find({
+            $or: [
+                { "name": searchRegex },
+                { "customerId": searchRegex }
+            ]
+        }).select('_id');
+        const customerIds = customers.map(c => c._id);
+
         filter.$or = [
             { creditNoteNumber: searchRegex },
             { reason: searchRegex },
             { notes: searchRegex },
-            { driverId: { $in: driverIds } }
+            { driverId: { $in: driverIds } },
+            { customerId: { $in: customerIds } }
         ];
     }
 
@@ -214,6 +240,10 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         .sort(sort)
         .skip(skip)
         .limit(limit)
+        .populate({
+            path: 'customerId',
+            select: 'customerId name email phone branch'
+        })
         .populate({
             path: 'driverId',
             select: 'driverId personalInfo identityDocs'
@@ -236,6 +266,10 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
  */
 const getCreditNoteById = async (id) => {
     return await CreditNote.findById(id)
+        .populate({
+            path: 'customerId',
+            select: 'customerId name email phone branch address city state country status'
+        })
         .populate({
             path: 'driverId',
             select: 'driverId personalInfo branch currentVehicle'
@@ -299,6 +333,7 @@ const updateCreditNote = async (id, data) => {
     if (data.notes !== undefined) $set.notes = data.notes;
     if (data.creditNoteDate) $set.creditNoteDate = new Date(data.creditNoteDate);
     if (data.driverId) $set.driverId = data.driverId;
+    if (data.customerId) $set.customerId = data.customerId;
     // Allow unsetting invoiceId with null, or linking to a new one
     if (data.invoiceId !== undefined) $set.invoiceId = data.invoiceId || null;
     if (typeof data.amount === 'number' && data.amount > 0) $set.amount = data.amount;
@@ -328,9 +363,10 @@ const refundCreditNote = async (id, actor) => {
         throw new Error("Only OPEN or DRAFT credit notes can be refunded.");
     }
 
-    const driver = await Driver.findById(creditNote.driverId);
-    if (!driver) {
-        throw new Error("Driver not found for credit account.");
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const customer = await Customer.findById(creditNote.customerId);
+    if (!customer) {
+        throw new Error("Customer not found for credit account.");
     }
 
     // 1. Update status to CLOSED to signify final disposition
@@ -346,14 +382,14 @@ const refundCreditNote = async (id, actor) => {
         }
 
         if (accCode) {
-            const driverName = driver.personalInfo?.fullName || "Driver";
-            const txNote = `Credit Note Refund Payout [${creditNote.creditNoteNumber}] for ${driverName}`;
+            const customerName = customer.name || "Customer";
+            const txNote = `Credit Note Refund Payout [${creditNote.creditNoteNumber}] for ${customerName}`;
 
             // CREDIT transaction of INCOME type = reverses the original DEBIT reducing operator receivable debt!
             const transactionData = {
                 accountingCode: accCode._id,
-                referenceId: creditNote.driverId,
-                referenceModel: "Driver",
+                referenceId: creditNote.customerId,
+                referenceModel: "Customer",
                 transactionCategory: "INCOME",
                 transactionType: "CREDIT", // Counter-balances the issuing DEBIT
                 isTaxInclusive: false,
