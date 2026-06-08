@@ -76,11 +76,19 @@ exports.getAllCustomers = async (req, res) => {
 
 exports.getCustomerById = async (req, res) => {
     try {
-        const doc = await Customer.findOne({ _id: req.params.id, isDeleted: false })
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const doc = await Customer.findOne({ $or: queryOr, isDeleted: false })
             .populate('branch')
             .populate({
                 path: 'driver',
-                populate: { path: 'assignedVehicle' }
+                populate: { path: 'currentVehicle' }
             });
             
         if (!doc) return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -92,8 +100,16 @@ exports.getCustomerById = async (req, res) => {
 
 exports.updateCustomer = async (req, res) => {
     try {
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
         const updatedDoc = await Customer.findOneAndUpdate(
-            { _id: req.params.id, isDeleted: false },
+            { $or: queryOr, isDeleted: false },
             req.body,
             { new: true }
         ).populate('branch');
@@ -107,7 +123,15 @@ exports.updateCustomer = async (req, res) => {
 
 exports.downloadStatementPdf = async (req, res) => {
     try {
-        const customer = await Customer.findOne({ _id: req.params.id, isDeleted: false }).populate('branch');
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: false }).populate('branch');
         if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
 
         const { Invoice } = require('../../Invoice/Model/InvoiceModel');
@@ -146,8 +170,16 @@ exports.downloadStatementPdf = async (req, res) => {
 
 exports.deleteCustomer = async (req, res) => {
     try {
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
         const deletedDoc = await Customer.findOneAndUpdate(
-            { _id: req.params.id },
+            { $or: queryOr },
             { isDeleted: true },
             { new: true }
         );
