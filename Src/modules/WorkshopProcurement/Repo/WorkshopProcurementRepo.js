@@ -27,7 +27,14 @@ exports.getProcurementRequestById = async (id) => {
         .populate("part")
         .populate("branch")
         .populate("requestedBy", "fullName")
-        .populate("supplier");
+        .populate("supplier")
+        .populate({
+            path: "ledgerEntries",
+            populate: [
+                { path: "accountingCode", select: "code name category" },
+                { path: "taxInfo.taxApplied", select: "name rate" }
+            ]
+        });
 };
 
 exports.updateProcurementRequest = async (id, data) => {
