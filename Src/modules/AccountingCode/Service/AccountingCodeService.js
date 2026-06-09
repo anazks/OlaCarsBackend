@@ -99,7 +99,7 @@ exports.getAll = async (queryParams = {}) => {
             const defaultRole = "ADMIN";
 
             // 1. Vehicle Accumulated Depreciation
-            const vehicleAccumDep = await AccountingCode.findOne({ name: "Acumulated Depretiacion of Vehicles/Depreciación Acumulada de Vehículos", isDeleted: false });
+            const vehicleAccumDep = await AccountingCode.findOne({ code: "1210-VEH-DEP" });
             if (!vehicleAccumDep) {
                 await AccountingCode.create({
                     code: "1210-VEH-DEP",
@@ -111,10 +111,12 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (vehicleAccumDep.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(vehicleAccumDep._id, { isDeleted: false, isActive: true });
             }
 
             // 2. Vehicle Depreciation Expense
-            const vehicleDepExp = await AccountingCode.findOne({ name: "DEPRECIATION OF VEHICLES", isDeleted: false });
+            const vehicleDepExp = await AccountingCode.findOne({ code: "5010-VEH-DEP" });
             if (!vehicleDepExp) {
                 await AccountingCode.create({
                     code: "5010-VEH-DEP",
@@ -126,10 +128,12 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (vehicleDepExp.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(vehicleDepExp._id, { isDeleted: false, isActive: true });
             }
 
             // 3. Vehicles Fixed Asset Account
-            const vehicleAsset = await AccountingCode.findOne({ name: /vehicles/i, category: "ASSET", accountType: "fixed asset", isDeleted: false });
+            const vehicleAsset = await AccountingCode.findOne({ code: "1200-VEH" });
             if (!vehicleAsset) {
                 await AccountingCode.create({
                     code: "1200-VEH",
@@ -141,10 +145,12 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (vehicleAsset.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(vehicleAsset._id, { isDeleted: false, isActive: true });
             }
 
             // 4. General Fixed Asset Account
-            const generalAsset = await AccountingCode.findOne({ name: "General Fixed Assets", category: "ASSET", accountType: "fixed asset", isDeleted: false });
+            const generalAsset = await AccountingCode.findOne({ code: "1200-GEN" });
             if (!generalAsset) {
                 await AccountingCode.create({
                     code: "1200-GEN",
@@ -156,10 +162,12 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (generalAsset.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(generalAsset._id, { isDeleted: false, isActive: true });
             }
 
             // 5. General Accumulated Depreciation
-            const generalAccumDep = await AccountingCode.findOne({ name: "Accumulated Depreciation of General Assets", isDeleted: false });
+            const generalAccumDep = await AccountingCode.findOne({ code: "1210-GEN-DEP" });
             if (!generalAccumDep) {
                 await AccountingCode.create({
                     code: "1210-GEN-DEP",
@@ -171,10 +179,12 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (generalAccumDep.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(generalAccumDep._id, { isDeleted: false, isActive: true });
             }
 
             // 6. General Depreciation Expense
-            const generalDepExp = await AccountingCode.findOne({ name: "Depreciation Expense", isDeleted: false });
+            const generalDepExp = await AccountingCode.findOne({ code: "5010-GEN-DEP" });
             if (!generalDepExp) {
                 await AccountingCode.create({
                     code: "5010-GEN-DEP",
@@ -186,6 +196,8 @@ exports.getAll = async (queryParams = {}) => {
                     createdBy: defaultCreator,
                     creatorRole: defaultRole
                 });
+            } else if (generalDepExp.isDeleted) {
+                await AccountingCode.findByIdAndUpdate(generalDepExp._id, { isDeleted: false, isActive: true });
             }
         }
     } catch (err) {

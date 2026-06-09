@@ -19,6 +19,7 @@ const VEHICLE_STATUSES = [
     "TRANSFER COMPLETE",
     "RETIRED",
     "PRE-BOOKED",
+    "W. GROUP ACTIVE",
 ];
 
 const checklistItemSchema = new mongoose.Schema({
@@ -249,8 +250,16 @@ const vehicleSchema = new mongoose.Schema(
 
 // Pre-validate hook to handle empty/null VINs and auto-calculate weeklyRent
 vehicleSchema.pre("validate", async function () {
-    if (this.basicDetails && (this.basicDetails.vin === "" || this.basicDetails.vin === null)) {
-        this.basicDetails.vin = undefined;
+    if (this.basicDetails) {
+        const vinVal = this.basicDetails.vin;
+        if (vinVal === "" || vinVal === null || vinVal === undefined) {
+            this.basicDetails.vin = undefined;
+        } else if (typeof vinVal === "string") {
+            const clean = vinVal.trim().toUpperCase();
+            if (!clean || clean === "N/A" || clean === "NA" || clean === "-" || clean === "—" || clean === "NULL" || clean === "UNDEFINED") {
+                this.basicDetails.vin = undefined;
+            }
+        }
     }
 
     // Auto-calculate weeklyRent from purchasePrice / leaseDurationWeeks (default 260 = 5 years)
@@ -269,12 +278,24 @@ vehicleSchema.pre("validate", async function () {
 vehicleSchema.pre("findOneAndUpdate", async function () {
     const update = this.getUpdate();
     if (update.$set) {
-        if (update.$set["basicDetails.vin"] === "" || update.$set["basicDetails.vin"] === null) {
+        const vinVal = update.$set["basicDetails.vin"];
+        if (vinVal === "" || vinVal === null || vinVal === undefined) {
             update.$set["basicDetails.vin"] = undefined;
+        } else if (typeof vinVal === "string") {
+            const clean = vinVal.trim().toUpperCase();
+            if (!clean || clean === "N/A" || clean === "NA" || clean === "-" || clean === "—" || clean === "NULL" || clean === "UNDEFINED") {
+                update.$set["basicDetails.vin"] = undefined;
+            }
         }
     } else if (update.basicDetails) {
-        if (update.basicDetails.vin === "" || update.basicDetails.vin === null) {
+        const vinVal = update.basicDetails.vin;
+        if (vinVal === "" || vinVal === null || vinVal === undefined) {
             update.basicDetails.vin = undefined;
+        } else if (typeof vinVal === "string") {
+            const clean = vinVal.trim().toUpperCase();
+            if (!clean || clean === "N/A" || clean === "NA" || clean === "-" || clean === "—" || clean === "NULL" || clean === "UNDEFINED") {
+                update.basicDetails.vin = undefined;
+            }
         }
     }
 });
