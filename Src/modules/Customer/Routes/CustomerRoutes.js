@@ -11,6 +11,7 @@ const ALL_ROLES = Object.values(ROLES);
 router.use(authenticate);
 
 router.post('/', authorize(...ALL_ROLES), hasPermission('DRIVER_CREATE'), CustomerController.createCustomer);
+router.post('/bulk', authorize(...ALL_ROLES), hasPermission('DRIVER_CREATE'), CustomerController.bulkCreateCustomers);
 router.get('/', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.getAllCustomers);
 router.get('/:id/statement/pdf', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.downloadStatementPdf);
 router.get('/:id', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.getCustomerById);
