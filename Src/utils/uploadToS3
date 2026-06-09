@@ -8,20 +8,16 @@ const s3 = require("../config/s3");
  * @param {string} folder - Target folder path
  * @returns {Promise<string>} - Public S3 URL
  */
+
+
 const uploadToS3 = async (file, folder = "uploads") => {
   // Check if AWS credentials are configured
   const hasAWSConfig = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION && process.env.AWS_BUCKET_NAME;
 
   if (!hasAWSConfig) {
-    const missing = [];
-    if (!process.env.AWS_ACCESS_KEY_ID) missing.push("AWS_ACCESS_KEY_ID");
-    if (!process.env.AWS_SECRET_ACCESS_KEY) missing.push("AWS_SECRET_ACCESS_KEY");
-    if (!process.env.AWS_REGION) missing.push("AWS_REGION");
-    if (!process.env.AWS_BUCKET_NAME) missing.push("AWS_BUCKET_NAME");
-    
-    const errorMsg = `[Upload] AWS credentials not fully configured. Missing: ${missing.join(", ")}`;
-    console.error(errorMsg);
-    throw new Error(errorMsg);
+    console.log(`[Upload] AWS credentials not fully configured. Falling back to local storage for folder: ${folder}`);
+    const uploadLocal = require("./uploadLocal.js");
+    return uploadLocal(file, folder);
   }
 
   try {

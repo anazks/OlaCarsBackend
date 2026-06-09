@@ -393,7 +393,7 @@ exports.rolloverCustomerInvoices = async (customerId) => {
         } else if (inv.status !== "PAID" && !isOverdue) {
             // First Non-overdue pending invoice: absorb the carryover
             const newCarryOver = totalCarryOver;
-            const newTotalDue = inv.baseAmount + newCarryOver;
+            const newTotalDue = inv.baseAmount + (inv.taxAmount || 0) + newCarryOver;
             const newBalance = Math.max(0, newTotalDue - inv.amountPaid);
 
             if (inv.carryOverAmount !== newCarryOver || inv.totalAmountDue !== newTotalDue) {
@@ -422,6 +422,7 @@ exports.rolloverDriverInvoices = async (driverId) => {
 
 exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note) => {
     try {
+        const finalCreatorRole = creatorRole ? creatorRole.toUpperCase() : "ADMIN";
         console.log(`[InvoiceService] Starting ledger generation for invoice payment ${invoice.invoiceNumber}`);
         const mongoose = require("mongoose");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
@@ -452,7 +453,7 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                 paymentDate: new Date(),
                 notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
                 createdBy,
-                creatorRole
+                creatorRole: finalCreatorRole
             };
 
             console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
@@ -532,7 +533,7 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                     paymentDate: new Date(),
                     notes: `Invoice Payment (${invoice.invoiceNumber}) - Week ${invoice.weekNumber}${note ? ' - ' + note : ''}`,
                     createdBy,
-                    creatorRole
+                    creatorRole: finalCreatorRole
                 };
                 
                 console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
@@ -608,8 +609,9 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         let itemTaxRate = 0;
         let itemTaxDoc = null;
 
-        if (item.tax) {
-            itemTaxDoc = await Tax.findById(item.tax);
+        const lineItemTax = item.tax || data.tax;
+        if (lineItemTax) {
+            itemTaxDoc = await Tax.findById(lineItemTax);
             if (itemTaxDoc) {
                 itemTaxRate = itemTaxDoc.rate;
                 if (!firstAppliedTaxDoc) {
@@ -797,7 +799,7 @@ exports.updateInvoice = async (id, data) => {
 
     if (typeof data.baseAmount === 'number') {
         invoice.baseAmount = data.baseAmount;
-        invoice.totalAmountDue = invoice.baseAmount + (invoice.carryOverAmount || 0);
+        invoice.totalAmountDue = invoice.baseAmount + (invoice.taxAmount || 0) + (invoice.carryOverAmount || 0);
         invoice.balance = Math.max(0, invoice.totalAmountDue - (invoice.amountPaid || 0));
 
         if (invoice.balance <= 0) invoice.status = 'PAID';
@@ -911,6 +913,7 @@ exports.syncInvoiceToAdditionalPayments = async (invoice) => {
 
 exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, createdBy, creatorRole, note, accountCode) => {
     try {
+        const finalCreatorRole = creatorRole ? creatorRole.toUpperCase() : "ADMIN";
         console.log(`[InvoiceService] Starting bulk ledger generation for invoice payment ${invoice.invoiceNumber}`);
         const mongoose = require("mongoose");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
@@ -944,7 +947,7 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
                 paymentDate: invoice.dueDate || new Date(),
                 notes: `Invoice Payment (${invoice.invoiceNumber})${note ? ' - ' + note : ''}`,
                 createdBy,
-                creatorRole
+                creatorRole: finalCreatorRole
             };
 
             console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
@@ -991,6 +994,7 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
 
                 const prData = {
                     paymentNumber: `PR-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`, // unique suffix
+                    customerId: invoice.customer,
                     driverId: invoice.driver,
                     amountReceived: amount,
                     paymentDate: invoice.dueDate || new Date(),
@@ -1027,7 +1031,7 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
                     paymentDate: invoice.dueDate || new Date(),
                     notes: `Invoice Payment (${invoice.invoiceNumber})${note ? ' - ' + note : ''}`,
                     createdBy,
-                    creatorRole
+                    creatorRole: finalCreatorRole
                 };
                 
                 console.log(`[InvoiceService] Creating Debit PaymentTransaction for amount ${amount}`);
@@ -1385,11 +1389,22 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
     console.log(`[InvoiceService] Recalculating tax for ${openInvoices.length} open invoices linked to tax ${taxId} with new rate ${newRate}%`);
 
     for (const invoice of openInvoices) {
-        // Tax-inclusive: totalAmountDue stays the same, recalculate the base/tax split
-        const currentTotal = invoice.totalAmountDue;
-        const newBaseAmount = newRate > 0 ? Math.round((currentTotal / (1 + newRate / 100)) * 100) / 100 : currentTotal;
-        const newTaxAmount = Math.round((currentTotal - newBaseAmount) * 100) / 100;
-        const newBalance = Math.max(0, currentTotal - invoice.amountPaid);
+        let newBaseAmount, newTaxAmount, newTotalDue;
+        const taxInclusiveParsed = invoice.isTaxInclusive === true || String(invoice.isTaxInclusive).toLowerCase() === 'true';
+
+        if (taxInclusiveParsed) {
+            // Tax-inclusive: totalAmountDue stays the same, recalculate the base/tax split
+            newTotalDue = invoice.totalAmountDue;
+            newBaseAmount = newRate > 0 ? Math.round((newTotalDue / (1 + newRate / 100)) * 100) / 100 : newTotalDue;
+            newTaxAmount = Math.round((newTotalDue - newBaseAmount) * 100) / 100;
+        } else {
+            // Tax-exclusive: baseAmount stays the same, recalculate the tax and totalAmountDue
+            newBaseAmount = invoice.baseAmount || 0;
+            newTaxAmount = newRate > 0 ? Math.round((newBaseAmount * newRate / 100) * 100) / 100 : 0;
+            newTotalDue = Math.round((newBaseAmount + newTaxAmount) * 100) / 100;
+        }
+        
+        const newBalance = Math.max(0, newTotalDue - invoice.amountPaid);
         
         let newStatus = invoice.status;
         if (newStatus !== 'DRAFT') {
@@ -1401,6 +1416,7 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
         invoice.taxRate = newRate;
         invoice.baseAmount = newBaseAmount;
         invoice.taxAmount = newTaxAmount;
+        invoice.totalAmountDue = newTotalDue;
         invoice.balance = newBalance;
         invoice.status = newStatus;
 

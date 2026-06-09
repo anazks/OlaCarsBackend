@@ -154,6 +154,16 @@ exports.recordBillPayment = async (billId, paymentData, userData) => {
         }
         await bill.save();
 
+        // Trigger draft Fixed Asset creation if the bill is fully paid
+        if (bill.status === "PAID") {
+            try {
+                const FixedAssetService = require("../../FixedAsset/Service/FixedAssetService");
+                await FixedAssetService.autoCreateDraftAssetsFromBill(bill._id, userData);
+            } catch (faErr) {
+                console.error("[BillService] Failed to trigger auto fixed asset creation:", faErr);
+            }
+        }
+
         // AUTO-CREATE PAYMENT MADE RECORD (Zoho Accounting Integration)
         try {
             const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
@@ -178,6 +188,8 @@ exports.recordBillPayment = async (billId, paymentData, userData) => {
                     billNumber: bill.billNumber,
                     amountApplied: payment.totalAmount
                 }],
+                paidThroughAccount: payment.accountingCode,
+                branch: bill.branch,
                 status: "COMPLETED"
             };
             const pmDoc = await PaymentMade.create(pmData);

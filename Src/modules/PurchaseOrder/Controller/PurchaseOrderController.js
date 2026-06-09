@@ -247,8 +247,8 @@ const approvePurchaseOrder = async (req, res) => {
         const approverId = req.user.id;
 
         // Validate status
-        if (!["APPROVED", "REJECTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED, REJECTED, MANAGER_APPROVED, or PENDING_FINANCE_APPROVAL." });
+        if (!["APPROVED", "REJECTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL", "RECEIVED"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status. Must be APPROVED, REJECTED, MANAGER_APPROVED, PENDING_FINANCE_APPROVAL, or RECEIVED." });
         }
 
         const currentPO = await getPurchaseOrderByIdService(poId);
@@ -256,18 +256,34 @@ const approvePurchaseOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: "Purchase Order not found." });
         }
 
-        if (!["WAITING", "REQUESTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL"].includes(currentPO.status)) {
-            return res.status(400).json({ success: false, message: "Purchase order is already processed." });
+        const isReceiving = status === "RECEIVED";
+
+        if (isReceiving) {
+            if (currentPO.status !== "APPROVED") {
+                return res.status(400).json({ success: false, message: "Only approved Purchase Orders can be marked as received." });
+            }
+        } else {
+            if (!["WAITING", "REQUESTED", "MANAGER_APPROVED", "PENDING_FINANCE_APPROVAL"].includes(currentPO.status)) {
+                return res.status(400).json({ success: false, message: "Purchase order is already processed." });
+            }
         }
 
-        // Rule 6: No self-approval (Always enforced)
-        if (currentPO.createdBy._id.toString() === approverId) {
+        // Rule 6: No self-approval (Always enforced unless receiving)
+        if (!isReceiving && currentPO.createdBy._id.toString() === approverId) {
             return res.status(403).json({ success: false, message: "You cannot approve your own Purchase Order." });
         }
 
         const isFinanceApproval = currentPO.status === "PENDING_FINANCE_APPROVAL";
 
-        if (!isFinanceApproval) {
+        if (isReceiving) {
+            // For marking as received, we restrict to Admin and Financial Admin roles
+            if (approverRole !== ROLES.ADMIN && approverRole !== ROLES.FINANCEADMIN) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Only Admin and Financial Admin can mark a Purchase Order as received.",
+                });
+            }
+        } else if (!isFinanceApproval) {
             // Rule 1: Hierarchical check — approver level must be > creator level
             const creatorLevel = ROLE_LEVEL[currentPO.creatorRole] || 0;
             const approverLevel = ROLE_LEVEL[approverRole] || 0;
@@ -301,7 +317,7 @@ const approvePurchaseOrder = async (req, res) => {
         // Rules 2 & 3: Branch / Country scoping
         const poBranchId = currentPO.branch._id ? currentPO.branch._id.toString() : currentPO.branch.toString();
 
-        if (!isFinanceApproval && approverRole === ROLES.BRANCHMANAGER) {
+        if (!isReceiving && !isFinanceApproval && approverRole === ROLES.BRANCHMANAGER) {
             // Rule 2: BM can only approve POs from their branch
             if (req.user.branchId.toString() !== poBranchId) {
                 return res.status(403).json({
@@ -309,7 +325,7 @@ const approvePurchaseOrder = async (req, res) => {
                     message: "You can only approve Purchase Orders from your own branch.",
                 });
             }
-        } else if (!isFinanceApproval && approverRole === ROLES.COUNTRYMANAGER) {
+        } else if (!isReceiving && !isFinanceApproval && approverRole === ROLES.COUNTRYMANAGER) {
             // Rule 3: CM can only approve POs from branches in their country
             const poBranch = await Branch.findById(poBranchId).select("country");
             if (!poBranch || poBranch.country !== req.user.country) {
@@ -356,12 +372,24 @@ const approvePurchaseOrder = async (req, res) => {
         } else if (status === "REJECTED") {
             currentPO.rejectionNote = note;
             historyRecord.changesSummary = `Rejected merchandiser proposed pricing. Note: "${note || 'No note provided'}"`;
+        } else if (status === "RECEIVED") {
+            historyRecord.changesSummary = `Purchase Order marked as RECEIVED.`;
         } else {
             historyRecord.changesSummary = `Status updated to ${status}.`;
         }
 
         currentPO.editHistory.push(historyRecord);
         await currentPO.save();
+
+        // Trigger draft fixed asset creation if PO status is RECEIVED
+        if (status === "RECEIVED") {
+            try {
+                const FixedAssetService = require("../../FixedAsset/Service/FixedAssetService");
+                await FixedAssetService.autoCreateDraftAssetsFromPO(currentPO._id, { id: approverId, role: approverRole });
+            } catch (faErr) {
+                console.error("[PurchaseOrderController] Failed to trigger auto fixed asset creation:", faErr);
+            }
+        }
 
         return res.status(200).json({ success: true, data: currentPO });
     } catch (error) {
