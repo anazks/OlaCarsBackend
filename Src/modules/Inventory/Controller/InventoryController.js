@@ -34,24 +34,42 @@ const createPartHandler = async (req, res) => {
 };
 
 /**
- * Bulk create inventory parts.
+ * Bulk create or update inventory parts.
  * @route POST /api/inventory/bulk
  */
 const bulkCreatePartsHandler = async (req, res) => {
     try {
-        const { parts } = req.body;
+        const { parts, branch: selectedBranch } = req.body;
         if (!Array.isArray(parts) || parts.length === 0) {
             return res.status(400).json({ success: false, message: "A valid array of parts is required." });
         }
 
-        const enrichedParts = parts.map(part => ({
-            ...part,
-            createdBy: req.user.id,
-            creatorRole: req.user.role
-        }));
+        const userRole = req.user.role;
+        const userId = req.user.id || req.user._id;
+        const userBranchId = req.user.branchId;
 
-        const result = await require("../Repo/InventoryPartRepo").bulkCreateParts(enrichedParts);
-        return res.status(201).json({ success: true, data: result });
+        // Determine branch mapping scope
+        const branchRoles = ["BRANCHMANAGER", "OPERATIONSTAFF", "FINANCESTAFF", "WORKSHOPSTAFF", "WORKSHOPMANAGER"];
+        const isAutoAssign = branchRoles.includes(userRole);
+        let branchId = isAutoAssign ? userBranchId : selectedBranch;
+
+        const results = await require("../Repo/InventoryPartRepo").bulkExcelUploadParts(
+            parts,
+            userId,
+            userRole,
+            branchId
+        );
+
+        let statusCode = 201;
+        if (results.errors.length > 0) {
+            statusCode = results.created.length > 0 ? 207 : 400;
+        }
+
+        return res.status(statusCode).json({
+            success: results.created.length > 0,
+            message: `${results.created.length} part(s) synced, ${results.errors.length} error(s).`,
+            data: results
+        });
     } catch (error) {
         const statusCode = error.cause || 500;
         return res.status(statusCode).json({ success: false, message: error.message });

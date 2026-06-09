@@ -238,9 +238,15 @@ exports.generateInvoicePdf = (invoice, res) => {
        .text(`$${formatCurrency(invoice.balance)}`, totalsValX, tableY, { align: "right", width: 85, bold: true });
 
     // Notes at the bottom
+    let bottomY = 600;
     if (invoice.notes) {
-        doc.fontSize(9).fillColor(secondaryColor).text("Memo Notes:", leftMargin, 600)
-           .fillColor(primaryColor).text(invoice.notes, leftMargin, 612, { width: 250 });
+        doc.fontSize(9).fillColor(secondaryColor).text("Memo Notes:", leftMargin, bottomY)
+           .fillColor(primaryColor).text(invoice.notes, leftMargin, bottomY + 12, { width: 250 });
+        bottomY += 45;
+    }
+    if (invoice.terms) {
+        doc.fontSize(9).fillColor(secondaryColor).text("Terms & Conditions:", leftMargin, bottomY)
+           .fillColor(primaryColor).text(invoice.terms, leftMargin, bottomY + 12, { width: 250 });
     }
 
     // Signatures / Footer

@@ -3,6 +3,7 @@ const router = express.Router();
 const PaymentReceivedController = require('../Controller/PaymentReceivedController');
 
 router.post('/', PaymentReceivedController.createPaymentReceived);
+router.post('/bulk-upload', PaymentReceivedController.bulkUploadPayments);
 router.get('/', PaymentReceivedController.getAllPaymentReceiveds);
 router.get('/:id', PaymentReceivedController.getPaymentReceivedById);
 router.put('/:id', PaymentReceivedController.updatePaymentReceived);

@@ -1053,6 +1053,8 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
 exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) => {
     const { Invoice } = require("../Model/InvoiceModel");
     const { Driver } = require("../../Driver/Model/DriverModel");
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const Branch = require("../../Branch/Model/BranchModel");
     const LedgerService = require("../../Ledger/Service/LedgerService");
     const Tax = require("../../Tax/Model/TaxModel");
 
@@ -1060,7 +1062,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
     const defaultTaxRate = activeTax ? activeTax.rate : 0;
     const startSeq = await exports.getNextInvoiceNumberVal();
 
-    // 1. Fetch all drivers into memory for fast map-based lookups
+    // 1. Fetch all drivers, customers, and branches into memory for fast map-based lookups
     const driversList = await Driver.find({ isDeleted: false });
     const driversByName = new Map();
     const driversById = new Map();
@@ -1073,6 +1075,28 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             driversById.set(d.driverId.trim().toLowerCase(), d);
         }
     }
+
+    const customersList = await Customer.find({ isDeleted: false });
+    const customersById = new Map();
+    const customersByName = new Map();
+    const customersByDriverId = new Map();
+    for (const c of customersList) {
+        if (c.customerId) {
+            customersById.set(c.customerId.trim().toLowerCase(), c);
+        }
+        if (c.customerNumber) {
+            customersById.set(c.customerNumber.trim().toLowerCase(), c);
+        }
+        if (c.name) {
+            customersByName.set(c.name.trim().toLowerCase().replace(/\s+/g, ' '), c);
+        }
+        if (c.driver) {
+            customersByDriverId.set(c.driver.toString(), c);
+        }
+    }
+
+    const branches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
+    const defaultBranchId = branches[0] ? branches[0]._id : undefined;
 
     const createdInvoices = [];
     const errors = [];
@@ -1138,35 +1162,66 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const headerRow = headerRowObj.row;
         const origIdx = headerRowObj.originalIndex;
 
-        // Lookup Driver
-        const customerIdVal = getRowVal(headerRow, ["Customer ID", "customerId", "driver id", "driverId"]);
-        const customerNameVal = getRowVal(headerRow, ["Customer Name", "customerName", "fullName", "driver name", "driverName", "customer", "driver"]);
+        // Resolve Customer Document strictly by Customer Name
+        const customerIdVal = getRowVal(headerRow, ["Customer ID", "customerId", "customerNumber"]);
+        const customerNameVal = getRowVal(headerRow, ["Customer Name", "customerName", "customer"]);
+        const customerNumberVal = getRowVal(headerRow, ["Customer Number", "customerNumber"]);
 
         const customerIdInput = (customerIdVal || "").toString().trim().toLowerCase();
         const customerNameInput = (customerNameVal || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
+        const customerNumberInput = (customerNumberVal || "").toString().trim().toLowerCase();
 
-        let driver = null;
-        if (customerIdInput) {
-            driver = driversById.get(customerIdInput);
-        }
-        if (!driver && customerNameInput) {
-            // Try exact match first
-            driver = driversByName.get(customerNameInput);
-            
-            // If not found, try flexible matching (substring)
-            if (!driver) {
-                for (const [dbName, dbDriver] of driversByName.entries()) {
-                    if (dbName.includes(customerNameInput) || customerNameInput.includes(dbName)) {
-                        driver = dbDriver;
+        let customerDoc = null;
+        if (customerNameInput) {
+            customerDoc = customersByName.get(customerNameInput);
+            if (!customerDoc) {
+                for (const [dbName, dbCust] of customersByName.entries()) {
+                    const cleanDb = dbName.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
+                    const cleanInput = customerNameInput.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
+                    if (cleanDb === cleanInput || cleanDb.includes(cleanInput) || cleanInput.includes(cleanDb)) {
+                        customerDoc = dbCust;
                         break;
                     }
                 }
             }
         }
 
-        if (!driver) {
-            errors.push(`Invoice group "${key}" (Row ${origIdx}): Driver not found for Customer ID "${customerIdVal || ''}" or Customer Name "${customerNameVal || ''}"`);
+        // Fallback to customer ID if not found by name
+        if (!customerDoc && customerIdInput) {
+            customerDoc = customersById.get(customerIdInput);
+        }
+        if (!customerDoc && customerNumberInput) {
+            customerDoc = customersById.get(customerNumberInput);
+        }
+
+        if (!customerDoc) {
+            errors.push(`Invoice group "${key}" (Row ${origIdx}): Customer Name "${customerNameVal || ''}" not found in the database.`);
             continue;
+        }
+
+        // Resolve driver from customerDoc's pre-existing driver link first
+        let driver = null;
+        if (customerDoc.driver) {
+            const driverIdStr = customerDoc.driver.toString();
+            driver = driversList.find(d => d._id.toString() === driverIdStr);
+        }
+
+        // Fallback driver lookup
+        if (!driver) {
+            if (customerIdInput) {
+                driver = driversById.get(customerIdInput);
+            }
+            if (!driver && customerNameInput) {
+                driver = driversByName.get(customerNameInput);
+                if (!driver) {
+                    for (const [dbName, dbDriver] of driversByName.entries()) {
+                        if (dbName.includes(customerNameInput) || customerNameInput.includes(dbName)) {
+                            driver = dbDriver;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         // Validate invoice duplicates - skip if duplicate exists
@@ -1198,12 +1253,11 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice"])) || 0;
             const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal"])) || (qty * unitPrice);
 
-            // Calculate tax
+            // Calculate tax for this line item
             let taxPct = defaultTaxRate;
             const itemTaxPctVal = getRowVal(r, ["Item Tax %", "itemTaxPct", "taxRate"]);
             if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
                 taxPct = Number(itemTaxPctVal);
-                // If it's a decimal like 0.16 instead of 16, convert it
                 if (taxPct > 0 && taxPct < 1) {
                     taxPct = taxPct * 100;
                 }
@@ -1218,7 +1272,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 description: getRowVal(r, ["Item Desc", "itemDesc"]) || "",
                 qty,
                 unitPrice,
-                total: itemTotal
+                total: itemTotal,
+                taxRate: taxPct,
+                taxAmount: taxAmt
             });
 
             calculatedSubtotal += itemTotal;
@@ -1250,15 +1306,32 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         // Subtotal, Discount & Tax calculations at Invoice level
         const discountType = getRowVal(headerRow, ["Discount Type", "discountType"]) === "Percentage" ? "PERCENTAGE" : "FIXED";
-        const discountValue = Number(getRowVal(headerRow, ["Discount", "discount"])) || 0;
-        const discountAmount = Number(getRowVal(headerRow, ["Discount Amount", "discountAmount", "Entity Discount Amount"])) || 0;
+        const discountValue = Number(getRowVal(headerRow, ["Entity Discount Percent", "entityDiscountPercent", "Discount", "discount"])) || 0;
+        const discountAmount = Number(getRowVal(headerRow, ["Entity Discount Amount", "entityDiscountAmount"])) || 
+                               Number(getRowVal(headerRow, ["Discount Amount", "discountAmount"])) || 0;
+
+        // Is Inclusive Tax check (case-insensitive)
+        const isInclusiveTaxVal = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
+        const taxInclusiveParsed = isInclusiveTaxVal !== undefined && 
+            (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1');
 
         const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal"])) || calculatedSubtotal;
-        const taxAmount = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount"])) || calculatedTaxAmount;
-        const totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (subtotal - discountAmount + taxAmount);
+        const taxAmount = calculatedTaxAmount; // Always sum of line items tax amounts
+        
+        let baseAmount;
+        let totalAmountDue;
+        
+        if (taxInclusiveParsed) {
+            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (subtotal - discountAmount);
+            baseAmount = totalAmountDue - taxAmount;
+        } else {
+            baseAmount = subtotal - discountAmount;
+            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (baseAmount + taxAmount);
+        }
+
         const balance = Number(getRowVal(headerRow, ["Balance", "balance"])) || 0;
 
-        // Map status: Closed -> PAID, Overdue -> OVERDUE, Draft -> DRAFT, Cancelled/Rejected -> CANCELLED, Pending -> PENDING
+        // Map status: Closed/Paid -> PAID, Overdue -> OVERDUE, Draft -> DRAFT, Cancelled/Rejected -> CANCELLED, Pending -> PENDING
         const rawStatus = (getRowVal(headerRow, ["Invoice Status", "status"]) || "PENDING").toString().trim().toUpperCase();
         let status = "PENDING";
         if (rawStatus === "CLOSED" || rawStatus === "PAID") {
@@ -1274,7 +1347,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const amountPaid = status === "PAID" ? totalAmountDue : Math.max(0, totalAmountDue - balance);
         const finalBalance = status === "PAID" ? 0 : balance;
 
-        // Map Notes: Invoice ID and Tax ID are separately recorded in note field
+        // Map Notes: Invoice ID and Tax ID are separately recorded in note field if they aren't already included
         const notesList = [];
         const rawNotes = getRowVal(headerRow, ["Notes", "notes"]);
         if (rawNotes) {
@@ -1289,6 +1362,10 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             notesList.push(`Tax ID: ${rawTaxId}`);
         }
         const finalNotes = notesList.join("\n");
+
+        // Terms & Conditions column
+        const rawTerms = getRowVal(headerRow, ["Terms & Conditions", "Terms and Conditions", "termsAndConditions", "terms"]);
+        const terms = rawTerms ? String(rawTerms).trim() : undefined;
 
         // Format dates
         const dueDate = parseFlexibleDate(getRowVal(headerRow, ["Due Date", "dueDate"])) || new Date();
@@ -1306,14 +1383,21 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             paidAt = dueDate;
         }
 
+        // Auto-assign weekNumber (next available for this customer)
+        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+        const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+
         const newInvoiceData = {
             invoiceNumber,
-            invoiceType: "MANUAL",
-            driver: driver._id,
-            vehicle: driver.currentVehicle || undefined,
+            invoiceType: invoiceType || "MANUAL",
+            customer: customerDoc._id,
+            driver: driver ? driver._id : undefined,
+            vehicle: (driver && driver.currentVehicle) || undefined,
+            weekNumber: nextWeekNumber,
+            weekLabel: `Bulk Invoice - ${generatedAt.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
             dueDate,
             generatedAt,
-            baseAmount: subtotal - discountAmount,
+            baseAmount,
             tax: activeTax ? activeTax._id : undefined,
             taxRate: itemTaxRate,
             taxAmount,
@@ -1328,7 +1412,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             discountType,
             discountValue,
             discountAmount,
+            isTaxInclusive: taxInclusiveParsed,
             notes: finalNotes,
+            terms,
             createdBy,
             creatorRole
         };
@@ -1337,29 +1423,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             const created = await Invoice.create(newInvoiceData);
             createdInvoices.push(created);
 
-            // Post General Ledger entries
-            try {
-                if (status !== "DRAFT") {
-                    await LedgerService.generateInvoiceLedgerEntries(created);
-                    
-                    // For CLOSED (PAID) or partially paid invoices, post corresponding payments and auto-create PaymentReceived
-                    if (status === "PAID" || amountPaid > 0) {
-                        const accountCode = getRowVal(headerRow, ["Account Code", "accountCode"]);
-                        const paymentMethod = "Bank Transfer"; // User requested all payment methods to be Bank Transfer on bulk upload
-                        await exports.createLedgerEntryForBulkUpload(
-                            amountPaid,
-                            paymentMethod,
-                            created,
-                            createdBy,
-                            creatorRole,
-                            "Bulk upload payment received",
-                            accountCode
-                        );
-                    }
-                }
-            } catch (ledgerErr) {
-                console.error(`[InvoiceService] Failed ledger generation for bulk invoice ${invoiceNumber}:`, ledgerErr);
-            }
+            // General Ledger entries are bypassed for bulk invoice uploads as requested.
         } catch (err) {
             errors.push(`Invoice group "${key}" (Row ${origIdx}): Failed to create invoice - ${err.message}`);
         }
