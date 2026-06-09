@@ -188,6 +188,8 @@ exports.recordBillPayment = async (billId, paymentData, userData) => {
                     billNumber: bill.billNumber,
                     amountApplied: payment.totalAmount
                 }],
+                paidThroughAccount: payment.accountingCode,
+                branch: bill.branch,
                 status: "COMPLETED"
             };
             const pmDoc = await PaymentMade.create(pmData);
