@@ -1,5 +1,12 @@
 const { ServiceBill } = require("../Model/ServiceBillModel");
-
+const mongoose = require("mongoose");
+// Pre-load common schemas to avoid MissingSchemaError during populate
+try { require("../../Branch/Model/BranchModel"); } catch (e) {}
+try { require("../../WorkshopStaff/Model/WorkshopStaffModel"); } catch (e) {}
+try { require("../../WorkshopManager/Model/WorkshopManagerModel"); } catch (e) {}
+try { require("../../Admin/Model/AdminModel"); } catch (e) {}
+try { require("../../FinanceAdmin/Model/FinanceAdminModel"); } catch (e) {}
+try { require("../../BranchManager/Model/BranchManagerModel"); } catch (e) {}
 /**
  * Auto-generates a bill number: SB-YYYYMM-XXXX
  */

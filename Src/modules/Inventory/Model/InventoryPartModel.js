@@ -42,8 +42,9 @@ const inventoryPartSchema = new mongoose.Schema(
         leadTimeDays: { type: Number, default: 7 },
 
         // Accounting codes
-        purchaseAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
-        incomeAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
+        inventoryAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode", required: true },
+        purchaseAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode", required: true },
+        incomeAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode", required: true },
         taxId: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
 
         // Tracking
