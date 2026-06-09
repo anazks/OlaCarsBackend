@@ -2,13 +2,13 @@ const { addLedgerEntryService, getLedgerEntriesService } = require("../Repo/Ledg
 const filterBody = require('../../../shared/utils/filterBody.js');
 
 const ALLOWED_CREATE_FIELDS = [
-    'transaction', 
+    'transaction',
     'manualJournal',
     'branch',
-    'accountingCode', 
-    'type', 
-    'amount', 
-    'description', 
+    'accountingCode',
+    'type',
+    'amount',
+    'description',
     'entryDate',
     'taxInfo',
     'voucher',
@@ -47,15 +47,15 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
         }
 
         // Construct standard description showing context
-        const accSuffix = paymentTransaction.accountingCode && paymentTransaction.accountingCode.name 
-            ? ` [${paymentTransaction.accountingCode.name}]` 
+        const accSuffix = paymentTransaction.accountingCode && paymentTransaction.accountingCode.name
+            ? ` [${paymentTransaction.accountingCode.name}]`
             : "";
-        
+
         let description = `Payment [${paymentTransaction.transactionType}] for ${paymentTransaction.referenceModel}${accSuffix}. Ref ID: ${paymentTransaction.referenceId}. Notes: ${paymentTransaction.notes || "None"}.`;
 
         // Resolve branch from reference model
         let branchId = paymentTransaction.branch; // Try direct first
-        
+
         // Enrich description if this is a Purchase Order or Bill payment
         if (paymentTransaction.referenceModel === "PurchaseOrder") {
             const PurchaseOrder = require('../../PurchaseOrder/Model/PurchaseOrderModel');
@@ -70,14 +70,14 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
             const bill = await Bill.findById(paymentTransaction.referenceId).populate('supplier');
             if (bill) {
                 const supplierName = bill.supplier ? bill.supplier.name : "Unknown Supplier";
-                
+
                 // 1. Find Accounts Payable account (code 2100)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
                 const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
-                
+
                 if (apAccount) {
                     console.log(`[LedgerService] Generating double-entry for Bill Payment: Debit Accounts Payable, Credit Bank/Cash`);
-                    
+
                     // Leg 1: DEBIT Accounts Payable (Liability decreases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
@@ -103,7 +103,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: paymentTransaction.creatorRole
                     });
-                    
+
                     console.log(`[LedgerService] Standalone Bill Payment double-entry posted successfully.`);
                     return; // Return early since we fully logged both legs!
                 } else {
@@ -117,14 +117,14 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
             const pmtMade = await PaymentMade.findById(paymentTransaction.referenceId).populate('supplier');
             if (pmtMade) {
                 const supplierName = pmtMade.supplier ? pmtMade.supplier.name : "Unknown Supplier";
-                
+
                 // 1. Find Accounts Payable account (code 2100)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
                 const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
-                
+
                 if (apAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Made: Debit Accounts Payable, Credit Bank/Cash`);
-                    
+
                     // Leg 1: DEBIT Accounts Payable (Liability decreases/Prepayment increases)
                     await addLedgerEntryService({
                         transaction: paymentTransaction._id,
@@ -150,7 +150,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: paymentTransaction.creatorRole
                     });
-                    
+
                     console.log(`[LedgerService] Standalone Payment Made double-entry posted successfully.`);
                     return; // Return early since we fully logged both legs!
                 } else {
@@ -168,7 +168,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                 const driverName = pmtRec.driverId ? (pmtRec.driverId.personalInfo?.fullName || pmtRec.driverId.name) : "Unknown Driver";
                 const customerName = pmtRec.customerId ? pmtRec.customerId.name : (pmtRec.driverId ? pmtRec.driverId.name : "Unknown Customer");
                 const finalBranch = pmtRec.branch || (pmtRec.driverId ? pmtRec.driverId.branch : undefined) || (pmtRec.customerId ? pmtRec.customerId.branch : undefined) || branchId;
-                
+
                 // Normalize creatorRole to uppercase if available
                 let finalCreatorRole = paymentTransaction.creatorRole ? paymentTransaction.creatorRole.toUpperCase() : "ADMIN";
                 const { ROLES } = require("../../../shared/constants/roles");
@@ -181,13 +181,13 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                 const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
                     || await AccountingCode.findOne({ code: "1100" })
                     || await AccountingCode.findOne({ code: "1200" });
-                
+
                 const advanceAccount = await AccountingCode.findOne({ code: "2.1.02" })
                     || await AccountingCode.findOne({ name: /Advance Received From Customer/i });
 
                 if (arAccount && advanceAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable and/or Advance Received`);
-                    
+
                     const totalAmount = paymentTransaction.totalAmount;
                     const invoices = pmtRec.invoices || [];
                     const totalApplied = invoices.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0);
@@ -236,7 +236,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                             creatorRole: finalCreatorRole
                         });
                     }
-                    
+
                     console.log(`[LedgerService] Standalone Payment Received double-entry posted successfully.`);
                     return; // Return early since we fully logged all legs!
                 } else {
@@ -280,7 +280,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
 exports.generateInvoiceLedgerEntries = async (invoice) => {
     try {
         console.log(`[LedgerService] Generating ledger entries for created invoice: ${invoice.invoiceNumber}`);
-        
+
         const LedgerEntry = require("../Model/LedgerEntryModel");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const Customer = require("../../Customer/Model/CustomerModel");
@@ -321,7 +321,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             salesAccount = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
         } else {
             // Sales (IN0010) or fallback to sales by name/any sales code
-            salesAccount = await AccountingCode.findOne({ code: "IN0010" }) 
+            salesAccount = await AccountingCode.findOne({ code: "IN0010" })
                 || await AccountingCode.findOne({ name: /sales/i })
                 || await AccountingCode.findOne({ code: "4100" });
         }
@@ -370,7 +370,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
         });
 
         // Determine credited accounts for line items or general
-        if (invoice.invoiceType === "MANUAL" && invoice.lineItems && invoice.lineItems.length > 0) {
+        if (invoice.lineItems && invoice.lineItems.length > 0) {
             const InventoryPart = mongoose.model("InventoryPart");
             const subtotal = invoice.subtotal || invoice.totalAmountDue;
             const factor = subtotal > 0 ? (baseAmount / subtotal) : 1;
@@ -386,38 +386,97 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
 
                 // Determine revenue account for this item
                 let itemSalesAccount = salesAccount;
+                if (invoice.invoiceType === "WORKSHOP") {
+                    itemSalesAccount = await AccountingCode.findOne({ code: "IN0008" })
+                        || await AccountingCode.findOne({ name: /Workshop Income/i })
+                        || salesAccount;
+                }
+
+                let partDoc = null;
                 if (item.inventoryPart) {
-                    const partDoc = await InventoryPart.findById(item.inventoryPart);
-                    if (partDoc && partDoc.salesAccount) {
-                        const customAccount = await AccountingCode.findById(partDoc.salesAccount);
-                        if (customAccount) {
-                            itemSalesAccount = customAccount;
-                        }
+                    partDoc = await InventoryPart.findById(item.inventoryPart)
+                        .populate("incomeAccountId")
+                        .populate("purchaseAccountId")
+                        .populate("inventoryAccountId");
+                    if (partDoc && partDoc.incomeAccountId) {
+                        itemSalesAccount = partDoc.incomeAccountId;
                     }
                 }
 
-                // Leg 2: CREDIT Sales / Rental Income for this line item (increases Revenue)
+                // Leg 2: CREDIT Sales / Rental/Workshop Income for this line item (increases Revenue)
                 if (itemBaseAmount > 0) {
                     await addLedgerEntryService({
                         branch: branchId,
                         accountingCode: itemSalesAccount._id,
                         type: "CREDIT",
                         amount: itemBaseAmount,
-                        description: `Invoice Created (Credit ${itemSalesAccount.code === "IN0002" ? 'Rental Income' : 'Sales'}) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
+                        description: `Invoice Created (Credit ${itemSalesAccount.name || 'Sales'}) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
                         entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
                         createdBy: invoice.createdBy,
                         creatorRole: invoice.creatorRole
                     });
                 }
+
+                // COGS entries for parts used
+                if (partDoc && item.qty > 0) {
+                    const unitCost = partDoc.unitCost || 0;
+                    const costAmount = unitCost * item.qty;
+                    if (costAmount > 0) {
+                        const fallbackPurchase = await AccountingCode.findOne({ code: "CGS0001" })
+                            || await AccountingCode.findOne({ name: /Cost of Goods Sold/i })
+                            || await AccountingCode.findOne({ code: "5100" });
+                        const fallbackInventory = await AccountingCode.findOne({ code: "INV0001" })
+                            || await AccountingCode.findOne({ code: "1300" })
+                            || await AccountingCode.findOne({ name: /Inventory Asset/i })
+                            || await AccountingCode.findOne({ code: "1.1.04" });
+
+                        const purchaseAcc = partDoc.purchaseAccountId || fallbackPurchase;
+                        const inventoryAcc = partDoc.inventoryAccountId || fallbackInventory;
+
+                        if (purchaseAcc) {
+                            // DEBIT COGS/Purchase account (increases Expense)
+                            await addLedgerEntryService({
+                                branch: branchId,
+                                accountingCode: purchaseAcc._id,
+                                type: "DEBIT",
+                                amount: costAmount,
+                                description: `COGS (Debit ${purchaseAcc.name || 'COGS'}) [Part: ${partDoc.partName || item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
+                                entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
+                                createdBy: invoice.createdBy,
+                                creatorRole: invoice.creatorRole
+                            });
+                        }
+
+                        if (inventoryAcc) {
+                            // CREDIT Inventory Asset (decreases Asset)
+                            await addLedgerEntryService({
+                                branch: branchId,
+                                accountingCode: inventoryAcc._id,
+                                type: "CREDIT",
+                                amount: costAmount,
+                                description: `Inventory Asset (Credit ${inventoryAcc.name || 'Inventory'}) [Part: ${partDoc.partName || item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
+                                entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
+                                createdBy: invoice.createdBy,
+                                creatorRole: invoice.creatorRole
+                            });
+                        }
+                    }
+                }
             }
         } else {
+            let fallbackSalesAccount = salesAccount;
+            if (invoice.invoiceType === "WORKSHOP") {
+                fallbackSalesAccount = await AccountingCode.findOne({ code: "IN0008" })
+                    || await AccountingCode.findOne({ name: /Workshop Income/i })
+                    || salesAccount;
+            }
             // General fallback (Leg 2: CREDIT Rental Income (Sales) or Sales (increases Revenue))
             await addLedgerEntryService({
                 branch: branchId,
-                accountingCode: salesAccount._id,
+                accountingCode: fallbackSalesAccount._id,
                 type: "CREDIT",
                 amount: baseAmount,
-                description: `Invoice Created (Credit ${isLinkedToDriver ? 'Rental Income' : 'Sales'}) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
+                description: `Invoice Created (Credit ${fallbackSalesAccount.name || 'Sales'}) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
                 entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
                 createdBy: invoice.createdBy,
                 creatorRole: invoice.creatorRole
@@ -451,7 +510,7 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
 exports.generateRolloverLedgerEntry = async ({ customer, invoice, amount, createdBy, creatorRole }) => {
     try {
         console.log(`[LedgerService] Generating rollover ledger entries for customer ${customer} and invoice ${invoice.invoiceNumber}`);
-        
+
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const Customer = require("../../Customer/Model/CustomerModel");
 

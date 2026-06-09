@@ -33,6 +33,10 @@ exports.createPart = async (data) => {
             const incomeAcc = await AccountingCode.findOne({ code: "IN0008" });
             if (incomeAcc) data.incomeAccountId = incomeAcc._id;
         }
+        if (!data.inventoryAccountId) {
+            const invAcc = await AccountingCode.findOne({ code: "AST0001" });
+            if (invAcc) data.inventoryAccountId = invAcc._id;
+        }
         if (!data.taxId) {
             const defaultTax = await Tax.findOne({ name: "ITBMS" });
             if (defaultTax) data.taxId = defaultTax._id;
@@ -51,6 +55,7 @@ exports.bulkCreateParts = async (partsData) => {
     try {
         const purchaseAcc = await AccountingCode.findOne({ code: "CGS0001" });
         const incomeAcc = await AccountingCode.findOne({ code: "IN0008" });
+        const invAcc = await AccountingCode.findOne({ code: "AST0001" });
         const defaultTax = await Tax.findOne({ name: "ITBMS" });
 
         const enriched = partsData.map(part => {
@@ -60,6 +65,9 @@ exports.bulkCreateParts = async (partsData) => {
             }
             if (!copy.incomeAccountId && incomeAcc) {
                 copy.incomeAccountId = incomeAcc._id;
+            }
+            if (!copy.inventoryAccountId && invAcc) {
+                copy.inventoryAccountId = invAcc._id;
             }
             if (!copy.taxId && defaultTax) {
                 copy.taxId = defaultTax._id;
@@ -105,6 +113,7 @@ exports.getParts = async (filters = {}) => {
         return await InventoryPart.find(query)
             .populate("branchId", "name")
             .populate("supplierId", "name")
+            .populate("inventoryAccountId", "code name")
             .populate("purchaseAccountId", "code name")
             .populate("incomeAccountId", "code name")
             .populate("taxId", "name rate")
@@ -122,6 +131,7 @@ exports.getPartById = async (id) => {
         return await InventoryPart.findById(id)
             .populate("branchId", "name")
             .populate("supplierId", "name")
+            .populate("inventoryAccountId", "code name")
             .populate("purchaseAccountId", "code name")
             .populate("incomeAccountId", "code name")
             .populate("taxId", "name rate");

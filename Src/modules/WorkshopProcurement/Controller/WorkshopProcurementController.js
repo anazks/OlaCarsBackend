@@ -347,12 +347,14 @@ exports.addInventoryToStock = async (req, res) => {
         const deficitQuantity = Math.max(0, requestedQuantity - receivedQuantity);
         const surplusQuantity = Math.max(0, receivedQuantity - requestedQuantity);
 
-        // Cost calculations: prioritise merchandiserPrice over part.unitCost
+        // Cost calculations: prioritise merchandiserPrice over part.unitCost for PR stats
         const pricePerUnit = request.merchandiserPrice || (request.part && request.part.unitCost) || 0;
         const deficitAmount = deficitQuantity * pricePerUnit;
         const surplusAmount = surplusQuantity * pricePerUnit;
 
-        const totalReceivedAmount = receivedQuantity * pricePerUnit;
+        // Ledger transactions should use the selling price of the Part Name (unitCost)
+        const sellingPrice = (request.part && request.part.unitCost) || 0;
+        const totalReceivedAmount = receivedQuantity * sellingPrice;
 
         // 4. Calculate inclusive tax metadata
         const taxRate = taxProfile ? taxProfile.rate : 7;
