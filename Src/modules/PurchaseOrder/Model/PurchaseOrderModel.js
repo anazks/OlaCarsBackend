@@ -10,7 +10,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED", "DISPOSED", "PENDING_FINANCE_APPROVAL"],
+            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED", "DISPOSED", "PENDING_FINANCE_APPROVAL", "RECEIVED"],
             default: "WAITING",
         },
         purpose: {
