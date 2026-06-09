@@ -190,7 +190,7 @@ const getStaffPerformance = async (filters = {}) => {
                     activeVehicleIds: {
                         $addToSet: {
                             $cond: [
-                                { $in: ["$statusHistory.status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] },
+                                { $in: ["$statusHistory.status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"]] },
                                 "$_id",
                                 "$$REMOVE",
                             ],
@@ -290,7 +290,7 @@ const getStaffPerformance = async (filters = {}) => {
         // For Vehicles
         const vehicleAggr = await Vehicle.aggregate([
             { $match: { isDeleted: false } },
-            { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] }, 1, 0] } } } }
+            { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"]] }, 1, 0] } } } }
         ]);
         const bVehicles = {};
         for (let v of vehicleAggr) { if (v._id) bVehicles[v._id.toString()] = v; }
@@ -373,7 +373,7 @@ const getStaffPerformance = async (filters = {}) => {
         // For Vehicles
         const vehicleAggr = await Vehicle.aggregate([
             { $match: { isDeleted: false } },
-            { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] }, 1, 0] } } } }
+            { $group: { _id: "$purchaseDetails.branch", totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"]] }, 1, 0] } } } }
         ]);
         const cVehicles = {};
         for (let v of vehicleAggr) {
@@ -434,7 +434,7 @@ const getStaffPerformance = async (filters = {}) => {
 
         const vehicleAggr = await Vehicle.aggregate([
             { $match: { isDeleted: false } },
-            { $group: { _id: null, totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"]] }, 1, 0] } } } }
+            { $group: { _id: null, totalVehicles: { $sum: 1 }, activeVehicles: { $sum: { $cond: [{ $in: ["$status", ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"]] }, 1, 0] } } } }
         ]);
         const globalVehicles = vehicleAggr[0] || { totalVehicles: 0, activeVehicles: 0 };
 
@@ -542,7 +542,7 @@ const getStaffPerformance = async (filters = {}) => {
         { $unwind: "$branchDetails" },
         {
             $match: {
-                "statusHistory.status": { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"] },
+                "statusHistory.status": { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"] },
                 ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {}),
                 ...(filters.branchId ? { "purchaseDetails.branch": new mongoose.Types.ObjectId(filters.branchId) } : {}),
                 ...(filters.country ? { "branchDetails.country": filters.country } : {})

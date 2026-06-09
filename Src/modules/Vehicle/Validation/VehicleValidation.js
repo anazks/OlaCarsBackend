@@ -17,6 +17,7 @@ const VEHICLE_STATUSES = [
     "TRANSFER PENDING",
     "TRANSFER COMPLETE",
     "RETIRED",
+    "W. GROUP ACTIVE",
 ];
 
 const addVehicleSchema = {

@@ -42,7 +42,7 @@ exports.getSummaryStats = async (filters) => {
     }
 
     // Counts
-    let totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"] } });
+    let totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"] } });
     const activeDrivers = await Driver.countDocuments({ ...baseQuery, status: "ACTIVE" });
 
     // Aggregation for Revenue / Outstanding via Ledger (Income category)
@@ -117,7 +117,7 @@ exports.getSummaryStats = async (filters) => {
         } else {
             const s = v.status;
             if (s === "ACTIVE — AVAILABLE") fleetStatus.available += 1;
-            else if (s === "ACTIVE — RENTED") fleetStatus.rented += 1;
+            else if (s === "ACTIVE — RENTED" || s === "W. GROUP ACTIVE") fleetStatus.rented += 1;
             else if (s === "ACTIVE — MAINTENANCE" || s === "REPAIR IN PROGRESS") fleetStatus.maintenance += 1;
             else if (s === "RETIRED") fleetStatus.retired += 1;
             else fleetStatus.other += 1;
