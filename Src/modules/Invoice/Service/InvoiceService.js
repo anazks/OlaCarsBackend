@@ -1392,16 +1392,64 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
         let newBaseAmount, newTaxAmount, newTotalDue;
         const taxInclusiveParsed = invoice.isTaxInclusive === true || String(invoice.isTaxInclusive).toLowerCase() === 'true';
 
-        if (taxInclusiveParsed) {
-            // Tax-inclusive: totalAmountDue stays the same, recalculate the base/tax split
-            newTotalDue = invoice.totalAmountDue;
-            newBaseAmount = newRate > 0 ? Math.round((newTotalDue / (1 + newRate / 100)) * 100) / 100 : newTotalDue;
-            newTaxAmount = Math.round((newTotalDue - newBaseAmount) * 100) / 100;
+        if (invoice.invoiceType === 'MANUAL' && invoice.lineItems && invoice.lineItems.length > 0) {
+            const subtotal = invoice.subtotal || 0;
+            const discountAmount = invoice.discountAmount || 0;
+            const discountFactor = subtotal > 0 ? ((subtotal - discountAmount) / subtotal) : 1;
+
+            let totalTaxAmount = 0;
+            let totalBaseAmount = 0;
+
+            for (const item of invoice.lineItems) {
+                let itemTaxRate = item.taxRate || 0;
+                if (String(item.tax) === String(taxId) || (!item.tax && String(invoice.tax) === String(taxId))) {
+                    itemTaxRate = newRate;
+                    item.taxRate = newRate;
+                }
+
+                const itemTotal = item.total || (item.qty * item.unitPrice) || 0;
+                const itemDiscountedTotal = Math.round(itemTotal * discountFactor * 100) / 100;
+
+                let itemTaxAmount = 0;
+                let itemBaseAmount = itemDiscountedTotal;
+
+                if (itemTaxRate > 0) {
+                    if (taxInclusiveParsed) {
+                        itemBaseAmount = Math.round((itemDiscountedTotal / (1 + itemTaxRate / 100)) * 100) / 100;
+                        itemTaxAmount = Math.round((itemDiscountedTotal - itemBaseAmount) * 100) / 100;
+                    } else {
+                        itemTaxAmount = Math.round((itemDiscountedTotal * itemTaxRate / 100) * 100) / 100;
+                    }
+                }
+                item.taxAmount = itemTaxAmount;
+                totalTaxAmount += itemTaxAmount;
+                totalBaseAmount += itemBaseAmount;
+            }
+
+            newTaxAmount = Math.round(totalTaxAmount * 100) / 100;
+            newBaseAmount = Math.round(totalBaseAmount * 100) / 100;
+
+            if (taxInclusiveParsed) {
+                const afterDiscount = subtotal - discountAmount;
+                newTotalDue = Math.round(afterDiscount * 100) / 100;
+                newBaseAmount = Math.round((newTotalDue - newTaxAmount) * 100) / 100;
+            } else {
+                newTotalDue = Math.round((newBaseAmount + newTaxAmount) * 100) / 100;
+            }
+
+            invoice.markModified('lineItems');
         } else {
-            // Tax-exclusive: baseAmount stays the same, recalculate the tax and totalAmountDue
-            newBaseAmount = invoice.baseAmount || 0;
-            newTaxAmount = newRate > 0 ? Math.round((newBaseAmount * newRate / 100) * 100) / 100 : 0;
-            newTotalDue = Math.round((newBaseAmount + newTaxAmount) * 100) / 100;
+            if (taxInclusiveParsed) {
+                // Tax-inclusive: totalAmountDue stays the same, recalculate the base/tax split
+                newTotalDue = invoice.totalAmountDue;
+                newBaseAmount = newRate > 0 ? Math.round((newTotalDue / (1 + newRate / 100)) * 100) / 100 : newTotalDue;
+                newTaxAmount = Math.round((newTotalDue - newBaseAmount) * 100) / 100;
+            } else {
+                // Tax-exclusive: baseAmount stays the same, recalculate the tax and totalAmountDue
+                newBaseAmount = invoice.baseAmount || 0;
+                newTaxAmount = newRate > 0 ? Math.round((newBaseAmount * newRate / 100) * 100) / 100 : 0;
+                newTotalDue = Math.round((newBaseAmount + newTaxAmount) * 100) / 100;
+            }
         }
         
         const newBalance = Math.max(0, newTotalDue - invoice.amountPaid);

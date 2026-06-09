@@ -31,12 +31,12 @@ const runTest = async () => {
         }
 
         // 2. Get or Create a test customer
-        let customer = await Customer.findOne({ name: "Test Inventory Ledger Cust" });
+        let customer = await Customer.findOne({ name: "Test Consolidate Ledger Cust" });
         if (!customer) {
             customer = await Customer.create({
-                name: "Test Inventory Ledger Cust",
-                customerId: "CUST-INV-LEDG-1",
-                email: "cust-inv-ledger@example.com",
+                name: "Test Consolidate Ledger Cust",
+                customerId: "CUST-CONSOL-LEDG",
+                email: "cust-consol-ledger@example.com",
                 phone: "9876543210",
                 branch: branch._id,
                 createdBy: new mongoose.Types.ObjectId(),
@@ -50,23 +50,18 @@ const runTest = async () => {
         const cogsCode = await AccountingCode.findOne({ code: "CGS0001" });
         const invAssetCode = await AccountingCode.findOne({ code: "INV0001" });
 
-        console.log(`AR Code ID: ${arCode?._id} (${arCode?.code})`);
-        console.log(`Sales Code ID: ${salesCode?._id} (${salesCode?.code})`);
-        console.log(`COGS Code ID: ${cogsCode?._id} (${cogsCode?.code})`);
-        console.log(`Inventory Asset ID: ${invAssetCode?._id} (${invAssetCode?.code})`);
-
         if (!arCode || !salesCode || !cogsCode || !invAssetCode) {
             throw new Error("Missing required accounting codes!");
         }
 
-        // 4. Create a test inventory part
-        // Delete first to avoid duplicates
-        await InventoryPart.deleteMany({ partNumber: "TEST-PART-LEDG-1" });
-        const part = await InventoryPart.create({
-            partName: "Test Part Ledger",
-            partNumber: "TEST-PART-LEDG-1",
+        // 4. Create two test inventory parts sharing the same accounts
+        await InventoryPart.deleteMany({ partNumber: { $in: ["TEST-PART-CONSOL-1", "TEST-PART-CONSOL-2"] } });
+        
+        const part1 = await InventoryPart.create({
+            partName: "Test Part Consol 1",
+            partNumber: "TEST-PART-CONSOL-1",
             category: "Engine",
-            unitCost: 40.00, // COGS cost is $40.00
+            unitCost: 40.00, // COGS cost is 2 * 40 = $80
             quantityOnHand: 10,
             branchId: branch._id,
             inventoryAccountId: invAssetCode._id,
@@ -75,29 +70,52 @@ const runTest = async () => {
             createdBy: new mongoose.Types.ObjectId(),
             creatorRole: "ADMIN"
         });
-        console.log(`Created test inventory part: ${part.partName} with unit cost: $${part.unitCost}`);
 
-        // 5. Create manual invoice containing this part
-        // Sales price is $100.00, quantity is 2 (total sale $200.00)
-        // Expected COGS is $80.00
+        const part2 = await InventoryPart.create({
+            partName: "Test Part Consol 2",
+            partNumber: "TEST-PART-CONSOL-2",
+            category: "Engine",
+            unitCost: 20.00, // COGS cost is 3 * 20 = $60
+            quantityOnHand: 15,
+            branchId: branch._id,
+            inventoryAccountId: invAssetCode._id,
+            purchaseAccountId: cogsCode._id,
+            incomeAccountId: salesCode._id,
+            createdBy: new mongoose.Types.ObjectId(),
+            creatorRole: "ADMIN"
+        });
+
+        console.log(`Created parts: ${part1.partName} and ${part2.partName}`);
+
+        // 5. Create manual invoice containing both parts
+        // Item 1: sales price $100, qty 2 => total $200, cost $80
+        // Item 2: sales price $50, qty 3 => total $150, cost $60
+        // Total Base = 350. Total COGS = 140.
         const invoiceData = {
-            invoiceNumber: `INV-TST-${Date.now()}`,
+            invoiceNumber: `INV-CONSOL-${Date.now()}`,
             customer: customer._id,
             invoiceType: "MANUAL",
             invoiceDate: new Date(),
             dueDate: new Date(),
-            baseAmount: 200,
-            subtotal: 200,
+            baseAmount: 350,
+            subtotal: 350,
             taxAmount: 0,
-            totalAmountDue: 200,
-            balance: 200,
+            totalAmountDue: 350,
+            balance: 350,
             lineItems: [
                 {
-                    name: part.partName,
+                    name: part1.partName,
                     qty: 2,
                     unitPrice: 100,
                     total: 200,
-                    inventoryPart: part._id
+                    inventoryPart: part1._id
+                },
+                {
+                    name: part2.partName,
+                    qty: 3,
+                    unitPrice: 50,
+                    total: 150,
+                    inventoryPart: part2._id
                 }
             ],
             status: "PENDING",
@@ -124,32 +142,45 @@ const runTest = async () => {
 
         for (const entry of entries) {
             const code = entry.accountingCode.code;
-            console.log(`Account: ${code} (${entry.accountingCode.name}) | Type: ${entry.type} | Amount: $${entry.amount}`);
+            console.log(`Account: ${code} (${entry.accountingCode.name}) | Type: ${entry.type} | Amount: $${entry.amount} | Desc: ${entry.description}`);
             
             if (code === "1.1.03") {
-                if (entry.type !== "DEBIT" || entry.amount !== 200) {
-                    throw new Error("Incorrect AR posting!");
+                if (entry.type !== "DEBIT" || entry.amount !== 350) {
+                    throw new Error("Incorrect AR posting amount!");
                 }
                 hasAR = true;
             }
             if (code === "IN0010") {
-                if (entry.type !== "CREDIT" || entry.amount !== 200) {
-                    throw new Error("Incorrect Sales posting!");
+                if (entry.type !== "CREDIT" || entry.amount !== 350) {
+                    throw new Error(`Incorrect Sales posting amount! Got $${entry.amount}`);
+                }
+                if (!entry.description.includes("Test Part Consol 1") || !entry.description.includes("Test Part Consol 2")) {
+                    throw new Error("Consolidated sales description should include all items!");
                 }
                 hasSales = true;
             }
             if (code === "CGS0001") {
-                if (entry.type !== "DEBIT" || entry.amount !== 80) {
-                    throw new Error(`Incorrect COGS posting! Expected DEBIT $80, got ${entry.type} $${entry.amount}`);
+                if (entry.type !== "DEBIT" || entry.amount !== 140) {
+                    throw new Error(`Incorrect COGS posting! Expected DEBIT $140, got ${entry.type} $${entry.amount}`);
+                }
+                if (!entry.description.includes("Test Part Consol 1") || !entry.description.includes("Test Part Consol 2")) {
+                    throw new Error("Consolidated COGS description should include all items!");
                 }
                 hasCOGS = true;
             }
             if (code === "INV0001") {
-                if (entry.type !== "CREDIT" || entry.amount !== 80) {
-                    throw new Error(`Incorrect Inventory Asset posting! Expected CREDIT $80, got ${entry.type} $${entry.amount}`);
+                if (entry.type !== "CREDIT" || entry.amount !== 140) {
+                    throw new Error(`Incorrect Inventory Asset posting! Expected CREDIT $140, got ${entry.type} $${entry.amount}`);
+                }
+                if (!entry.description.includes("Test Part Consol 1") || !entry.description.includes("Test Part Consol 2")) {
+                    throw new Error("Consolidated Inventory Asset description should include all items!");
                 }
                 hasInvAsset = true;
             }
+        }
+
+        if (entries.length !== 4) {
+            throw new Error(`Expected exactly 4 ledger entries (consolidated), but got ${entries.length}!`);
         }
 
         if (!hasAR) throw new Error("Missing AR ledger entry!");
@@ -157,13 +188,14 @@ const runTest = async () => {
         if (!hasCOGS) throw new Error("Missing COGS/Purchase ledger entry!");
         if (!hasInvAsset) throw new Error("Missing Inventory Asset ledger entry!");
 
-        console.log("\n✅ ALL POSTING CHECKS PASSED!");
+        console.log("\n✅ ALL POSTING CONSOLIDATION CHECKS PASSED!");
 
         // Clean up
         console.log("Cleaning up test documents...");
         await Invoice.deleteOne({ _id: invoice._id });
         await LedgerEntry.deleteMany({ description: new RegExp(invoice.invoiceNumber) });
-        await InventoryPart.deleteOne({ _id: part._id });
+        await InventoryPart.deleteOne({ _id: part1._id });
+        await InventoryPart.deleteOne({ _id: part2._id });
         await Customer.deleteOne({ _id: customer._id });
         console.log("Cleanup complete.");
 

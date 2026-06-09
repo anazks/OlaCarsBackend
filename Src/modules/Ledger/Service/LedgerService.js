@@ -390,6 +390,28 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             const subtotal = invoice.subtotal || baseAmount;
             const factor = subtotal > 0 ? (baseAmount / subtotal) : 1;
 
+            const entriesToPost = {};
+
+            function addEntryToPost({ accountingCode, type, amount, itemName, entryType }) {
+                if (!accountingCode) return;
+                const key = `${accountingCode._id}_${type}`;
+                if (!entriesToPost[key]) {
+                    entriesToPost[key] = {
+                        branch: branchId,
+                        accountingCode: accountingCode._id,
+                        type: type,
+                        amount: 0,
+                        itemNames: [],
+                        entryType: entryType,
+                        accountingCodeObj: accountingCode
+                    };
+                }
+                entriesToPost[key].amount = Math.round((entriesToPost[key].amount + amount) * 100) / 100;
+                if (itemName && !entriesToPost[key].itemNames.includes(itemName)) {
+                    entriesToPost[key].itemNames.push(itemName);
+                }
+            }
+
             let allocatedBase = 0;
             for (let i = 0; i < invoice.lineItems.length; i++) {
                 const item = invoice.lineItems[i];
@@ -414,15 +436,12 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
 
                 // Leg 2: CREDIT Sales / Rental/Workshop Income for this line item (increases Revenue)
                 if (itemBaseAmount > 0) {
-                    await addLedgerEntryService({
-                        branch: branchId,
-                        accountingCode: itemSalesAccount._id,
+                    addEntryToPost({
+                        accountingCode: itemSalesAccount,
                         type: "CREDIT",
                         amount: itemBaseAmount,
-                        description: `Invoice Created (Credit ${itemSalesAccount.name || 'Sales'}) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
-                        entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
-                        createdBy: invoice.createdBy,
-                        creatorRole: invoice.creatorRole
+                        itemName: item.name,
+                        entryType: "SALES"
                     });
                 }
 
@@ -450,15 +469,12 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
 
                 // Leg 3 (itemized): CREDIT Tax Payable for this line item
                 if (item.taxAmount > 0 && itemTaxAccount) {
-                    await addLedgerEntryService({
-                        branch: branchId,
-                        accountingCode: itemTaxAccount._id,
+                    addEntryToPost({
+                        accountingCode: itemTaxAccount,
                         type: "CREDIT",
                         amount: item.taxAmount,
-                        description: `Invoice Created (Credit Tax Payable 7%) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
-                        entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
-                        createdBy: invoice.createdBy,
-                        creatorRole: invoice.creatorRole
+                        itemName: item.name,
+                        entryType: "TAX"
                     });
                 }
 
@@ -479,33 +495,61 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
 
                         // DEBIT COGS / Purchase Account
                         if (itemPurchaseAccount) {
-                            await addLedgerEntryService({
-                                branch: branchId,
-                                accountingCode: itemPurchaseAccount._id,
+                            addEntryToPost({
+                                accountingCode: itemPurchaseAccount,
                                 type: "DEBIT",
                                 amount: totalCost,
-                                description: `Inventory cost recognition (Debit Cost of Goods Sold) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
-                                entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
-                                createdBy: invoice.createdBy,
-                                creatorRole: invoice.creatorRole
+                                itemName: item.name,
+                                entryType: "COGS"
                             });
                         }
 
                         // CREDIT Inventory Asset Account
                         if (inventoryAssetAccount) {
-                            await addLedgerEntryService({
-                                branch: branchId,
-                                accountingCode: inventoryAssetAccount._id,
+                            addEntryToPost({
+                                accountingCode: inventoryAssetAccount,
                                 type: "CREDIT",
                                 amount: totalCost,
-                                description: `Inventory reduction recognition (Credit Inventory Asset) [Item: ${item.name}] - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
-                                entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
-                                createdBy: invoice.createdBy,
-                                creatorRole: invoice.creatorRole
+                                itemName: item.name,
+                                entryType: "INVENTORY"
                             });
                         }
                     }
                 }
+            }
+
+            // Post all consolidated entries
+            for (const key in entriesToPost) {
+                const entry = entriesToPost[key];
+                if (entry.amount <= 0) continue;
+
+                const itemsStr = entry.itemNames.length > 1
+                    ? `[Items: ${entry.itemNames.join(", ")}]`
+                    : `[Item: ${entry.itemNames[0]}]`;
+
+                let description = "";
+                if (entry.entryType === "SALES") {
+                    description = `Invoice Created (Credit ${entry.accountingCodeObj.name || 'Sales'}) ${itemsStr} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+                } else if (entry.entryType === "TAX") {
+                    description = `Invoice Created (Credit Tax Payable) ${itemsStr} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+                } else if (entry.entryType === "COGS") {
+                    description = `Inventory cost recognition (Debit Cost of Goods Sold) ${itemsStr} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+                } else if (entry.entryType === "INVENTORY") {
+                    description = `Inventory reduction recognition (Credit Inventory Asset) ${itemsStr} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+                } else {
+                    description = `Invoice Created Ledger Entry ${itemsStr} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+                }
+
+                await addLedgerEntryService({
+                    branch: entry.branch,
+                    accountingCode: entry.accountingCode,
+                    type: entry.type,
+                    amount: entry.amount,
+                    description: description,
+                    entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
+                    createdBy: invoice.createdBy,
+                    creatorRole: invoice.creatorRole
+                });
             }
         } else {
             let fallbackSalesAccount = salesAccount;

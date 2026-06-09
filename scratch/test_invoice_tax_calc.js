@@ -229,8 +229,8 @@ const runTests = async () => {
         if (totalCredits !== 230) {
             throw new Error(`Assertion failed: Total credits should be 230, got ${totalCredits}`);
         }
-        if (ledgerEntries.length !== 5) {
-            throw new Error(`Assertion failed: Should find EXACTLY 5 ledger entries (itemized sales & tax) but got ${ledgerEntries.length} (double booking guard failed)`);
+        if (ledgerEntries.length !== 3) {
+            throw new Error(`Assertion failed: Should find EXACTLY 3 ledger entries (consolidated sales & tax) but got ${ledgerEntries.length} (double booking guard failed)`);
         }
         console.log("Ledger entry verification passed! Balanced double-entry verified and no duplicate booking occurred.");
 
