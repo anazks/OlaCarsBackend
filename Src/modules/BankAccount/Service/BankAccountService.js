@@ -12,8 +12,15 @@ const ensureAccountingCode = async (data) => {
         console.log(`[BankAccountService] Creating new AccountingCode for code ${data.accountCode}`);
         
         // Define category and account type based on accountType
-        const category = data.accountType === "Credit Card" ? "LIABILITY" : "ASSET";
-        const accountType = data.accountType === "Credit Card" ? "Other Current Liability" : "Bank";
+        let category = "ASSET";
+        let accountType = "Bank";
+        if (data.accountType === "Credit Card") {
+            category = "LIABILITY";
+            accountType = "Other Current Liability";
+        } else if (data.accountType === "Cash") {
+            category = "ASSET";
+            accountType = "Cash";
+        }
         
         // Normalize role for validation constraint
         let role = (data.creatorRole || "ADMIN").toUpperCase();
@@ -77,8 +84,11 @@ const createBankAccount = async (data) => {
 const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 
 const syncMissingBankAccounts = async () => {
-    const bankCodes = await AccountingCode.find({ accountType: "Bank", isDeleted: false });
-    for (const code of bankCodes) {
+    const codes = await AccountingCode.find({ 
+        accountType: { $in: ["Bank", "Cash"] }, 
+        isDeleted: false 
+    });
+    for (const code of codes) {
         // Parse unique account number
         const numMatch = code.name.match(/\d+/);
         const rawNum = numMatch ? numMatch[0] : 'ACC';
@@ -98,7 +108,9 @@ const syncMissingBankAccounts = async () => {
             
             // Parse bankName
             let bankName = 'Ola Bank';
-            if (code.name.toLowerCase().includes('banco general')) {
+            if (code.accountType === 'Cash') {
+                bankName = 'Cash Account';
+            } else if (code.name.toLowerCase().includes('banco general')) {
                 bankName = 'Banco General';
             } else if (code.name.toLowerCase().includes('bct')) {
                 bankName = 'BCT Bank';
@@ -121,7 +133,7 @@ const syncMissingBankAccounts = async () => {
                 initialBalance: 0,
                 currentBalance: 0,
                 status: 'ACTIVE',
-                accountType: 'Bank',
+                accountType: code.accountType === 'Cash' ? 'Cash' : 'Bank',
                 accountName: code.name,
                 accountCode: code.code,
                 description: `Auto-created from Chart of Accounts for code ${code.code}`,
@@ -136,6 +148,10 @@ const syncMissingBankAccounts = async () => {
             }
             if (!existing.accountCode) {
                 existing.accountCode = code.code;
+                updated = true;
+            }
+            if (code.accountType === 'Cash' && existing.accountType !== 'Cash') {
+                existing.accountType = 'Cash';
                 updated = true;
             }
             if (updated) {
@@ -175,12 +191,20 @@ const updateBankAccount = async (id, data) => {
         data.accountingCode = accountingCodeId;
     }
 
+    // Get the old bank account first to compare initialBalance
+    const oldAccount = await BankAccount.findOne({ _id: id, isDeleted: false });
+    if (!oldAccount) throw new AppError("Bank account not found", 404);
+
+    if (data.initialBalance !== undefined) {
+        const delta = Number(data.initialBalance) - Number(oldAccount.initialBalance || 0);
+        data.currentBalance = Number(oldAccount.currentBalance || 0) + delta;
+    }
+
     const account = await BankAccount.findOneAndUpdate(
         { _id: id, isDeleted: false },
         data,
         { new: true, runValidators: true }
     ).populate("accountingCode");
-    if (!account) throw new AppError("Bank account not found", 404);
     return account;
 };
 
