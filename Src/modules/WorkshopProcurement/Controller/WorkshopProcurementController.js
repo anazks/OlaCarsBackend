@@ -175,26 +175,19 @@ exports.financeApproveRequest = async (req, res) => {
         request.approvedBy = approverId;
         request.approvedByRole = approverRole;
 
+        if (status === "REJECTED") {
+            request.rejectionReason = note || "";
+        }
+
         const historyRecord = {
             editedAt: new Date(),
             editedBy: approverId,
             editorRole: approverRole,
             previousStatus: previousStatus,
-            changesSummary: ""
+            changesSummary: status === "REJECTED" 
+                ? `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"` 
+                : "Finance approved merchandiser pricing."
         };
-
-        if (status === "APPROVED") {
-            request.approvalNote = note || "";
-            if (request.part && request.part.unitCost) {
-                request.originalTotalAmount = request.quantity * request.part.unitCost;
-            } else {
-                request.originalTotalAmount = 0;
-            }
-            historyRecord.changesSummary = `Finance approved merchandiser pricing. Total amount updated to proposed $${request.merchandiserTotalAmount}. Status changed to COST_APPROVED.`;
-        } else if (status === "REJECTED") {
-            request.rejectionNote = note || "";
-            historyRecord.changesSummary = `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"`;
-        }
 
         if (!request.editHistory) request.editHistory = [];
         request.editHistory.push(historyRecord);
@@ -307,7 +300,15 @@ exports.addInventoryToStock = async (req, res) => {
         }
 
         const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
-        const request = await WorkshopProcurement.findById(id).populate("part");
+        const request = await WorkshopProcurement.findById(id).populate({
+            path: "part",
+            populate: [
+                { path: "purchaseAccountId" },
+                { path: "incomeAccountId" },
+                { path: "taxId" }
+            ]
+        });
+
         if (!request) {
             return res.status(404).json({ success: false, message: "Procurement Request not found." });
         }
@@ -324,27 +325,108 @@ exports.addInventoryToStock = async (req, res) => {
         const { receiveStock } = require("../../Inventory/Service/InventoryService.js");
         await receiveStock(request.part._id, receivedQuantity, { id: approverId, role: approverRole });
 
-        // 2. Calculate deficit quantities and amounts
+        // 2. Resolve accounting codes and tax profiles
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel.js");
+        const Tax = require("../../Tax/Model/TaxModel.js");
+
+        let purchaseAccount = request.part?.purchaseAccountId;
+        if (!purchaseAccount) {
+            purchaseAccount = await AccountingCode.findOne({ code: "CGS0001" });
+        }
+        let incomeAccount = request.part?.incomeAccountId;
+        if (!incomeAccount) {
+            incomeAccount = await AccountingCode.findOne({ code: "IN0008" });
+        }
+        let taxProfile = request.part?.taxId;
+        if (!taxProfile) {
+            taxProfile = await Tax.findOne({ name: "ITBMS" });
+        }
+
+        // 3. Calculate exact, deficit, and surplus quantities/amounts
         const requestedQuantity = request.quantity || 0;
         const deficitQuantity = Math.max(0, requestedQuantity - receivedQuantity);
+        const surplusQuantity = Math.max(0, receivedQuantity - requestedQuantity);
 
         // Cost calculations: prioritise merchandiserPrice over part.unitCost
         const pricePerUnit = request.merchandiserPrice || (request.part && request.part.unitCost) || 0;
         const deficitAmount = deficitQuantity * pricePerUnit;
+        const surplusAmount = surplusQuantity * pricePerUnit;
 
-        // 3. Update request with receipt details
+        const totalReceivedAmount = receivedQuantity * pricePerUnit;
+
+        // 4. Calculate inclusive tax metadata
+        const taxRate = taxProfile ? taxProfile.rate : 7;
+        const taxAmount = totalReceivedAmount - (totalReceivedAmount / (1 + taxRate / 100));
+        const taxInfoObj = {
+            taxApplied: taxProfile?._id || null,
+            taxAmount: Number(taxAmount.toFixed(2)) || 0,
+            isTaxInclusive: true
+        };
+
+        // 5. Create double-entry ledger records
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel.js");
+        const entries = [];
+
+        if (totalReceivedAmount > 0) {
+            if (purchaseAccount) {
+                const debitEntry = await LedgerEntry.create({
+                    branch: request.branch,
+                    accountingCode: purchaseAccount._id,
+                    type: "DEBIT",
+                    amount: Number(totalReceivedAmount.toFixed(2)),
+                    description: `Inventory received for PR ${request.requestNumber} - ${request.part?.partName || 'Part'}`,
+                    entryDate: new Date(),
+                    taxInfo: taxInfoObj,
+                    createdBy: approverId,
+                    creatorRole: approverRole
+                });
+                entries.push(debitEntry._id);
+            }
+
+            if (incomeAccount) {
+                const creditEntry = await LedgerEntry.create({
+                    branch: request.branch,
+                    accountingCode: incomeAccount._id,
+                    type: "CREDIT",
+                    amount: Number(totalReceivedAmount.toFixed(2)),
+                    description: `Inventory received for PR ${request.requestNumber} - ${request.part?.partName || 'Part'}`,
+                    entryDate: new Date(),
+                    taxInfo: taxInfoObj,
+                    createdBy: approverId,
+                    creatorRole: approverRole
+                });
+                entries.push(creditEntry._id);
+            }
+        }
+
+        // 6. Update request with receipt details & ledger entry references
         request.receivedQuantity = receivedQuantity;
         request.deficitQuantity = deficitQuantity;
         request.deficitAmount = deficitAmount;
+        request.surplusQuantity = surplusQuantity;
+        request.surplusAmount = surplusAmount;
+        request.ledgerEntries = entries;
         request.inventoryAdded = true;
 
         const previousStatus = request.status;
+        let changesSummary = `Stock added to inventory. Received: ${receivedQuantity}.`;
+        if (deficitQuantity > 0) {
+            changesSummary += ` Deficit Qty: ${deficitQuantity}, Deficit Cost: $${deficitAmount.toFixed(2)}.`;
+        } else if (surplusQuantity > 0) {
+            changesSummary += ` Surplus Qty: ${surplusQuantity}, Surplus Cost: $${surplusAmount.toFixed(2)}.`;
+        } else {
+            changesSummary += ` Exact match received.`;
+        }
+        if (entries.length > 0) {
+            changesSummary += ` Ledger entries recorded.`;
+        }
+
         const historyRecord = {
             editedAt: new Date(),
             editedBy: approverId,
             editorRole: approverRole,
             previousStatus: previousStatus,
-            changesSummary: `Stock added to inventory. Received: ${receivedQuantity}, Deficit Qty: ${deficitQuantity}, Deficit Cost: $${deficitAmount.toFixed(2)}.`
+            changesSummary
         };
 
         if (!request.editHistory) request.editHistory = [];
@@ -354,7 +436,7 @@ exports.addInventoryToStock = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: "Inventory successfully updated and deficit recorded.",
+            message: "Inventory successfully updated and ledger entries created.",
             data: request
         });
     } catch (error) {

@@ -3,6 +3,7 @@ const { getWorkOrderById } = require("../../WorkOrder/Repo/WorkOrderRepo");
 const { addPaymentTransactionService } = require("../../Payment/Repo/PaymentTransactionRepo");
 const { autoGenerateLedgerEntry } = require("../../Ledger/Service/LedgerService");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+const Tax = require("../../Tax/Model/TaxModel");
 
 /**
  * Generate a ServiceBill from a completed Work Order.
@@ -32,8 +33,45 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo");
     const configuredHourlyRate = (await getSetting("hourlyLabourRate")) || 150;
     const hourlyRate = options.hourlyRate !== undefined ? Number(options.hourlyRate) : configuredHourlyRate;
-    const taxRate = options.taxRate || 0;
     const discount = options.discount || 0;
+
+    // ─── Tax Profile: Auto-fetch ITBMS from Tax collection if no explicit rate ───
+    let taxRate = 0;
+    let taxName = "";
+    let taxProfileId = null;
+
+    if (options.taxRate !== undefined && options.taxRate !== null) {
+        // Explicit tax rate passed from frontend (user override)
+        taxRate = Number(options.taxRate);
+        taxName = options.taxName || "Custom Tax";
+        if (options.taxProfileId) taxProfileId = options.taxProfileId;
+    } else {
+        // Auto-fetch ITBMS tax profile (default workshop tax)
+        try {
+            const itbmsTax = await Tax.findOne({
+                name: { $regex: /ITBMS/i },
+                isActive: true,
+                isDeleted: { $ne: true }
+            });
+            if (itbmsTax) {
+                taxRate = itbmsTax.rate;
+                taxName = itbmsTax.name;
+                taxProfileId = itbmsTax._id;
+                console.log(`[ServiceBill] Auto-applied tax profile: ${itbmsTax.name} @ ${itbmsTax.rate}%`);
+            } else {
+                // Fallback: try any active tax profile
+                const anyTax = await Tax.findOne({ isActive: true, isDeleted: { $ne: true } });
+                if (anyTax) {
+                    taxRate = anyTax.rate;
+                    taxName = anyTax.name;
+                    taxProfileId = anyTax._id;
+                    console.log(`[ServiceBill] Fallback tax profile: ${anyTax.name} @ ${anyTax.rate}%`);
+                }
+            }
+        } catch (err) {
+            console.error("[ServiceBill] Failed to fetch tax profile:", err.message);
+        }
+    }
 
     // Build line items from parts
     const lineItems = [];
@@ -82,6 +120,9 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const miscTotal = lineItems.filter(i => i.type === "MISC").reduce((sum, item) => sum + item.lineTotal, 0);
 
     const subtotal = partsTotal + labourTotal + miscTotal;
+
+    // ─── ITBMS Inclusive Tax Calculation ───
+    // Tax is INCLUSIVE: subtotal is the pre-tax base, tax is added on top
     const taxAmount = Math.round(subtotal * (taxRate / 100) * 100) / 100;
     const totalAmount = subtotal + taxAmount - discount;
 
@@ -145,6 +186,8 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         isDriverBilled: !!options.isDriverBilled,
         lineItems,
         subtotal,
+        taxProfileId,
+        taxName,
         taxRate,
         taxAmount,
         discount,
@@ -199,6 +242,16 @@ const approveBill = async (billId, user) => {
                 }
 
                 const invoiceNumber = await generateWorkshopInvoiceNumber();
+
+                // Build line items for the invoice from the service bill
+                const invoiceLineItems = (fullyPopulatedBill.lineItems || []).map(li => ({
+                    name: li.description,
+                    description: `${li.type} — ${li.description}`,
+                    qty: li.quantity,
+                    unitPrice: li.unitPrice,
+                    total: li.lineTotal,
+                }));
+
                 const invoiceData = {
                     invoiceNumber,
                     invoiceType: "WORKSHOP",
@@ -206,10 +259,17 @@ const approveBill = async (billId, user) => {
                     vehicle: fullyPopulatedBill.vehicleId._id || fullyPopulatedBill.vehicleId,
                     serviceBill: fullyPopulatedBill._id,
                     dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000), // Default 1 day due
-                    baseAmount: fullyPopulatedBill.totalAmount,
+                    // Tax-inclusive totals
+                    lineItems: invoiceLineItems,
+                    subtotal: fullyPopulatedBill.subtotal || 0,
+                    taxRate: fullyPopulatedBill.taxRate || 0,
+                    taxAmount: fullyPopulatedBill.taxAmount || 0,
+                    tax: fullyPopulatedBill.taxProfileId || undefined,
+                    baseAmount: fullyPopulatedBill.subtotal || fullyPopulatedBill.totalAmount,
                     totalAmountDue: fullyPopulatedBill.totalAmount,
                     balance: fullyPopulatedBill.totalAmount,
                     status: "PENDING",
+                    notes: `Workshop Service Bill ${fullyPopulatedBill.billNumber}${fullyPopulatedBill.taxName ? ` | Tax: ${fullyPopulatedBill.taxName} (${fullyPopulatedBill.taxRate}%)` : ''}`,
                     createdBy: user.id,
                     creatorRole: user.role
                 };

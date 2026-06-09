@@ -45,25 +45,35 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
         }
     }
 
-    // 2. Find all active drivers who have a vehicle
-    const activeDrivers = await Driver.find({
+    // 2. Find all active customers who are linked to a driver
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const activeCustomers = await Customer.find({
         status: 'ACTIVE',
         isDeleted: false,
-        currentVehicle: { $ne: null }
-    }).populate('currentVehicle').populate({
-        path: 'branch',
-        populate: { path: 'branchManager' }
+        driver: { $ne: null }
+    }).populate({
+        path: 'driver',
+        populate: [
+            { path: 'currentVehicle' },
+            { path: 'branch', populate: { path: 'branchManager' } }
+        ]
     });
 
     const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
     const taxRate = activeTax ? activeTax.rate : 0;
 
-    console.log(`[InvoiceCronService] Found ${activeDrivers.length} active drivers with vehicles.`);
+    console.log(`[InvoiceCronService] Found ${activeCustomers.length} active customers with drivers.`);
 
     let generatedCount = 0;
     let skippedCount = 0;
 
-    for (const driver of activeDrivers) {
+    for (const customer of activeCustomers) {
+        const driver = customer.driver;
+        if (!driver || driver.status !== 'ACTIVE' || !driver.currentVehicle || driver.isDeleted) {
+            skippedCount++;
+            continue;
+        }
+
         try {
             if (!driver.rentTracking || driver.rentTracking.length === 0) {
                 console.log(`[InvoiceCronService] Driver ${driver.driverId} has no rentTracking. Skipping.`);
@@ -144,17 +154,9 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             const startSeq = await InvoiceService.getNextInvoiceNumberVal();
             const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
 
-            const Customer = require("../../Customer/Model/CustomerModel");
-            const customerDoc = await Customer.findOne({ driver: driver._id });
-            if (!customerDoc) {
-                console.error(`[InvoiceCronService] Customer not found for driver ${driver.driverId}, skipping invoice generation.`);
-                skippedCount++;
-                continue;
-            }
-
             const newInvoice = new Invoice({
                 invoiceNumber,
-                customer: customerDoc._id,
+                customer: customer._id,
                 driver: driver._id,
                 vehicle: driver.currentVehicle._id || driver.currentVehicle,
                 weekNumber: nextPeriod.weekNumber,

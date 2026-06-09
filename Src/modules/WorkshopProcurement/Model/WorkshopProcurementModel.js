@@ -83,6 +83,18 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         deficitAmount: {
             type: Number,
         },
+        surplusQuantity: {
+            type: Number,
+        },
+        surplusAmount: {
+            type: Number,
+        },
+        ledgerEntries: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "LedgerEntry",
+            }
+        ],
         inventoryAdded: {
             type: Boolean,
             default: false,

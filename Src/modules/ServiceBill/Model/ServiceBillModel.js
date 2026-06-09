@@ -45,6 +45,8 @@ const serviceBillSchema = new mongoose.Schema(
 
         // Totals
         subtotal: { type: Number, default: 0 },
+        taxProfileId: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
+        taxName: { type: String, default: "" },
         taxRate: { type: Number, default: 0 },
         taxAmount: { type: Number, default: 0 },
         discount: { type: Number, default: 0 },

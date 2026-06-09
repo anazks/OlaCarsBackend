@@ -61,16 +61,33 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
 
         // 3. Searching (Regex partial match)
         if (search && options.searchFields && options.searchFields.length > 0) {
-            const searchRegex = { $regex: search, $options: 'i' };
-            const searchQueries = options.searchFields.map(field => ({
-                [field]: searchRegex
-            }));
-            
-            if (query.$or) {
-                // If there's already an $or (e.g. from role scoping), we wrap both in $and
-                query = { $and: [query, { $or: searchQueries }] };
-            } else {
-                query.$or = searchQueries;
+            const words = search.trim().split(/\s+/).filter(Boolean);
+            if (words.length > 0) {
+                const wordQueries = words.map(word => {
+                    const searchRegex = { $regex: word, $options: 'i' };
+                    return {
+                        $or: options.searchFields.map(field => ({
+                            [field]: searchRegex
+                        }))
+                    };
+                });
+                
+                if (wordQueries.length === 1) {
+                    const singleOr = wordQueries[0].$or;
+                    if (query.$or) {
+                        query = { $and: [query, { $or: singleOr }] };
+                    } else {
+                        query.$or = singleOr;
+                    }
+                } else {
+                    if (query.$and) {
+                        query.$and.push(...wordQueries);
+                    } else if (query.$or) {
+                        query = { $and: [query, ...wordQueries] };
+                    } else {
+                        query.$and = wordQueries;
+                    }
+                }
             }
         }
 

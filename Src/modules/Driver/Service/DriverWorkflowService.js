@@ -404,7 +404,7 @@ async function processDriverProgress(driverId, targetStatus, updateData = {}, us
         const updatedDriver = await updateDriverService(driverId, finalUpdate, session);
         
         // Sync Customer status
-        const custStatus = (targetStatus === 'SUSPENDED' || targetStatus === 'REJECTED' || targetStatus === 'INACTIVE') ? 'INACTIVE' : 'ACTIVE';
+        const custStatus = targetStatus === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE';
         await Customer.findOneAndUpdate({ driver: driverId }, { status: custStatus }, { session });
 
         await session.commitTransaction();
