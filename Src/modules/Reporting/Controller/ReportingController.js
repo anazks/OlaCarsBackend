@@ -95,7 +95,7 @@ exports.getStaffPerformance = async (req, res) => {
         const user = req.user;
 
         // Staff-wise report is mainly for Managers
-        if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF) {
+        if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF || user.role === ROLES.OPERATIONSTAFF) {
             filters.branch = user.branchId;
         } else if (user.role === ROLES.COUNTRYMANAGER) {
             filters.country = user.country;

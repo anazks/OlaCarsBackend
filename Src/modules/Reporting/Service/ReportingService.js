@@ -2,8 +2,8 @@ const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const Branch = require("../../Branch/Model/BranchModel");
 const { Driver } = require("../../Driver/Model/DriverModel");
-const { Task } = require("../../StaffPerformance/Model/TaskModel");
-const { Target } = require("../../StaffPerformance/Model/TargetModel");
+const Task = require("../../StaffPerformance/Model/TaskModel");
+const Target = require("../../StaffPerformance/Model/TargetModel");
 const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
 const OperationStaff = require("../../OperationStaff/Model/OperationStaffModel");
 const WorkshopStaff = require("../../WorkshopStaff/Model/WorkshopStaffModel");
@@ -239,8 +239,7 @@ exports.getStaffPerformanceReport = async (filters) => {
         branchIds = branches.map(b => b._id);
     }
 
-    if (branchIds.length === 0 && !branch && !country) return [];
-
+    // If no branch/country filter (admin case), fetch all staff globally
     const staffQuery = { isDeleted: false };
     if (branchIds.length > 0) staffQuery.branchId = { $in: branchIds };
 

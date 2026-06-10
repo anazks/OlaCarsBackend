@@ -9,9 +9,11 @@ const { hasPermission } = require("../../../shared/middlewares/permissionMiddlew
 const ACCESS_ROLES = [
     ROLES.ADMIN,
     ROLES.FINANCEADMIN,
+    ROLES.OPERATIONADMIN,
     ROLES.COUNTRYMANAGER,
     ROLES.BRANCHMANAGER,
-    ROLES.FINANCESTAFF
+    ROLES.FINANCESTAFF,
+    ROLES.OPERATIONSTAFF
 ];
 
 

@@ -25,7 +25,7 @@ exports.editWorkshopRepo = async (data) => {
 
 exports.deleteWorkshopRepo = async (id) => {
   try {
-    await Workshop.findByIdAndUpdate(id, { isDeleted: true });
+    return await Workshop.findByIdAndUpdate(id, { isDeleted: true });
   } catch (error) {
     throw error;
   }
