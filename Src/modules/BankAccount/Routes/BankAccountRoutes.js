@@ -37,4 +37,10 @@ router.delete(
     BankAccountController.deleteBankAccount
 );
 
+router.post(
+    "/:id/statement",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.importStatement
+);
+
 module.exports = router;
