@@ -17,21 +17,27 @@ const branchSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Differentiates between a branch and a workshop
+    type: {
+      type: String,
+      enum: ["BRANCH", "WORKSHOP"],
+      default: "BRANCH",
+    },
+
+
+
     address: {
       type: String,
-      required: true,
       trim: true,
     },
 
     city: {
       type: String,
-      required: true,
       trim: true,
     },
 
     state: {
       type: String,
-      required: true,
       trim: true,
     },
 
@@ -49,7 +55,6 @@ const branchSchema = new mongoose.Schema(
 
     country: {
       type: String,
-      required: true,
       trim: true,
     },
     countryManager: {
@@ -69,7 +74,7 @@ const branchSchema = new mongoose.Schema(
     creatorRole: {
       type: String,
       required: true,
-      enum: ["ADMIN", "OPERATIONADMIN", "FINANCEADMIN", "COUNTRYMANAGER"],
+      enum: ["ADMIN", "OPERATIONADMIN", "FINANCEADMIN", "COUNTRYMANAGER", "BRANCHMANAGER"],
     },
 
     status: {
@@ -85,8 +90,20 @@ const branchSchema = new mongoose.Schema(
   },
   {
     timestamps: true, // createdAt & updatedAt
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
+    toJSON: {
+      virtuals: true,
+      transform(doc, ret) {
+        delete ret.__v;
+        return ret;
+      },
+    },
+    toObject: {
+      virtuals: true,
+      transform(doc, ret) {
+        delete ret.__v;
+        return ret;
+      },
+    },
   }
 );
 

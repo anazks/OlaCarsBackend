@@ -172,6 +172,7 @@ router.get("/", authenticate, hasPermission("INVENTORY_VIEW"), getPartsHandler);
  *       200:
  *         description: List of low-stock parts
  */
+router.get("/low-stock", authenticate, hasPermission("INVENTORY_VIEW"), getLowStockHandler);
 router.get("/low-stock/:branchId", authenticate, hasPermission("INVENTORY_VIEW"), getLowStockHandler);
 
 /**

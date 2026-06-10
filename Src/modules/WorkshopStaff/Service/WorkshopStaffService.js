@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopStaff = require("../Model/WorkshopStaffModel.js");
-const Workshop = require("../../Workshop/Model/WorkshopModel.js");
+const Branch = require("../../Branch/Model/BranchModel.js");
 const { jwtConfig } = require("../../../config/jwtConfig.js");
 const filterBody = require("../../../shared/utils/filterBody.js");
 const validatePassword = require("../../../shared/utils/passwordValidator.js");
@@ -76,7 +76,7 @@ exports.create = async (data) => {
   validatePassword(data.password);
   const hashedPassword = await bcrypt.hash(data.password, 12);
 
-  const workshop = await Workshop.findById(data.workshopId);
+  const workshop = await Branch.findOne({ _id: data.workshopId, type: "WORKSHOP" });
   if (!workshop) {
     throw new AppError("Workshop not found", 404);
   }
@@ -100,7 +100,7 @@ exports.create = async (data) => {
     phone: data.phone,
     passwordHash: hashedPassword,
     workshopId: data.workshopId,
-    branchId: workshop.branchId,
+    branchId: workshop.parentBranch,
     status: data.status,
     permissions: finalPermissions,
     createdBy: data.createdBy,
@@ -121,11 +121,11 @@ exports.update = async (id, body) => {
     delete filtered.password;
   }
   if (filtered.workshopId) {
-    const workshop = await Workshop.findById(filtered.workshopId);
+    const workshop = await Branch.findOne({ _id: filtered.workshopId, type: "WORKSHOP" });
     if (!workshop) {
       throw new AppError("Workshop not found", 404);
     }
-    filtered.branchId = workshop.branchId;
+    filtered.branchId = workshop.parentBranch;
   }
   if (Object.keys(filtered).length === 0) {
     throw new AppError("No valid fields to update", 400);

@@ -1,4 +1,4 @@
-const Workshop = require("../Model/WorkshopModel.js");
+const Branch = require("../../Branch/Model/BranchModel.js");
 const filterBody = require("../../../shared/utils/filterBody.js");
 const AppError = require("../../../shared/utils/AppError.js");
 const {
@@ -12,31 +12,40 @@ const {
 const ALLOWED_CREATE_FIELDS = [
   "name",
   "code",
-  "branchId",
   "phone",
   "email",
   "status",
+  "address",
+  "city",
+  "state",
+  "country",
+  "countryManager",
 ];
 const ALLOWED_UPDATE_FIELDS = [
   "name",
   "code",
-  "branchId",
   "phone",
   "email",
   "status",
+  "address",
+  "city",
+  "state",
+  "country",
+  "countryManager",
 ];
 
 exports.create = async (data) => {
   const filtered = filterBody(data, ...ALLOWED_CREATE_FIELDS);
   filtered.createdBy = data.createdBy;
   filtered.creatorRole = data.creatorRole;
+  filtered.type = "WORKSHOP";
   const workshop = await addWorkshopRepo(filtered);
   return workshop;
 };
 
 exports.getAll = async (queryParams = {}, options = {}) => {
   return await getWorkshopsRepo(queryParams, {
-    baseQuery: { isDeleted: false },
+    baseQuery: { isDeleted: false, type: "WORKSHOP" },
     defaultSort: { createdAt: -1 },
     ...options,
   });

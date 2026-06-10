@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const WorkshopManager = require("../Model/WorkshopManagerModel.js");
-const Workshop = require("../../Workshop/Model/WorkshopModel.js");
+const Branch = require("../../Branch/Model/BranchModel.js");
 const { jwtConfig } = require("../../../config/jwtConfig.js");
 const filterBody = require("../../../shared/utils/filterBody.js");
 const validatePassword = require("../../../shared/utils/passwordValidator.js");
@@ -77,7 +77,7 @@ exports.create = async (data) => {
   validatePassword(data.password);
   const hashedPassword = await bcrypt.hash(data.password, 12);
 
-  const workshop = await Workshop.findById(data.workshopId);
+  const workshop = await Branch.findOne({ _id: data.workshopId, type: "WORKSHOP" });
   if (!workshop) {
     throw new AppError("Workshop not found", 404);
   }
@@ -88,7 +88,7 @@ exports.create = async (data) => {
     phone: data.phone,
     passwordHash: hashedPassword,
     workshopId: data.workshopId,
-    branchId: workshop.branchId,
+    branchId: workshop.parentBranch,
     status: data.status,
     createdBy: data.createdBy,
     creatorRole: data.creatorRole,
@@ -103,11 +103,11 @@ exports.create = async (data) => {
 exports.update = async (id, body) => {
   const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
   if (filtered.workshopId) {
-    const workshop = await Workshop.findById(filtered.workshopId);
+    const workshop = await Branch.findOne({ _id: filtered.workshopId, type: "WORKSHOP" });
     if (!workshop) {
       throw new AppError("Workshop not found", 404);
     }
-    filtered.branchId = workshop.branchId;
+    filtered.branchId = workshop.parentBranch;
   }
 
   if (Object.keys(filtered).length === 0) {
@@ -224,7 +224,7 @@ exports.loginService = async (email, password) => {
 exports.createWorkshopManagerService = async (data) => {
   validatePassword(data.password);
 
-  const workshop = await Workshop.findById(data.workshopId);
+  const workshop = await Branch.findOne({ _id: data.workshopId, type: "WORKSHOP" });
   if (!workshop) {
     throw new AppError("Workshop not found", 404);
   }
@@ -247,7 +247,7 @@ exports.createWorkshopManagerService = async (data) => {
   const payload = {
     ...data,
     permissions: finalPermissions,
-    branchId: workshop.branchId,
+    branchId: workshop.parentBranch,
   };
   return await addWorkshopManagerRepo(payload);
 };
