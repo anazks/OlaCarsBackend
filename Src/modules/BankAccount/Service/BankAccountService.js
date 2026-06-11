@@ -353,6 +353,169 @@ const importStatement = async (id, options) => {
     };
 };
 
+const recordManualPayment = async (targetId, data) => {
+    const {
+        amount,
+        depositDate,
+        paymentMode,
+        description,
+        currency,
+        fromAccountId,
+        branchId,
+        supportingDocument,
+        userId,
+        userRole
+    } = data;
+
+    const targetAccount = await BankAccount.findOne({ _id: targetId, isDeleted: false });
+    if (!targetAccount) throw new AppError("Target bank account not found", 404);
+
+    const fromAccount = await BankAccount.findOne({ _id: fromAccountId, isDeleted: false });
+    if (!fromAccount) throw new AppError("Source bank account (From Account) not found", 404);
+
+    if (!targetAccount.accountingCode) {
+        throw new AppError("Target bank account is not linked to any accounting code", 400);
+    }
+    if (!fromAccount.accountingCode) {
+        throw new AppError("Source bank account is not linked to any accounting code", 400);
+    }
+
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+        throw new AppError("Amount must be a positive number", 400);
+    }
+
+    const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
+
+    let finalRole = (userRole || "ADMIN").toUpperCase();
+    const { ROLES } = require("../../../shared/constants/roles");
+    if (!Object.values(ROLES).includes(finalRole)) {
+        finalRole = "ADMIN";
+    }
+
+    let finalBranchId = branchId;
+    if (!finalBranchId) {
+        const Branch = require("../../Branch/Model/BranchModel");
+        const defaultBranch = await Branch.findOne({ isDeleted: false });
+        if (defaultBranch) {
+            finalBranchId = defaultBranch._id;
+        } else {
+            throw new AppError("No active branch found in the system. A branch is required to record ledger transactions.", 400);
+        }
+    }
+
+    const journalPayload = {
+        description: description || `Manual Payment via ${paymentMode}`,
+        date: depositDate ? new Date(depositDate) : new Date(),
+        branch: finalBranchId,
+        paymentMode,
+        currency: currency || "USD",
+        fromAccount: fromAccountId,
+        supportingDocument,
+        lines: [
+            {
+                accountingCode: targetAccount.accountingCode,
+                type: "DEBIT",
+                amount: numericAmount,
+                description: description || `Manual Payment Received - Mode: ${paymentMode}`
+            },
+            {
+                accountingCode: fromAccount.accountingCode,
+                type: "CREDIT",
+                amount: numericAmount,
+                description: description || `Manual Payment Sent - Mode: ${paymentMode}`
+            }
+        ],
+        createdBy: userId,
+        creatorRole: finalRole
+    };
+
+    const result = await ManualJournalService.createManualJournal(journalPayload);
+
+    // Update target balance (DEBIT: increases Asset balance, decreases Liability balance)
+    let targetBalanceChange = 0;
+    if (targetAccount.accountType === "Credit Card") {
+        targetBalanceChange = -numericAmount;
+    } else {
+        targetBalanceChange = numericAmount;
+    }
+    targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
+    await targetAccount.save();
+
+    // Update from balance (CREDIT: decreases Asset balance, increases Liability balance)
+    let fromBalanceChange = 0;
+    if (fromAccount.accountType === "Credit Card") {
+        fromBalanceChange = numericAmount;
+    } else {
+        fromBalanceChange = -numericAmount;
+    }
+    fromAccount.currentBalance = Number(fromAccount.currentBalance || 0) + fromBalanceChange;
+    await fromAccount.save();
+
+    return {
+        success: true,
+        journal: result.journal,
+        targetNewBalance: targetAccount.currentBalance,
+        fromNewBalance: fromAccount.currentBalance
+    };
+};
+
+/**
+ * Delete ALL ledger transactions linked to a bank account's accounting code.
+ * Also removes the parent ManualJournal documents and resets currentBalance.
+ */
+const deleteAllTransactions = async (id) => {
+    const account = await BankAccount.findOne({ _id: id, isDeleted: false });
+    if (!account) throw new AppError("Bank account not found", 404);
+
+    if (!account.accountingCode) {
+        throw new AppError("Bank account has no accounting code linked", 400);
+    }
+
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+
+    // Find all ledger entries for this account's accounting code
+    const entries = await LedgerEntry.find({ accountingCode: account.accountingCode });
+
+    // Collect unique manualJournal IDs from those entries
+    const journalIds = [...new Set(
+        entries
+            .filter(e => e.manualJournal)
+            .map(e => e.manualJournal.toString())
+    )];
+
+    // Delete all ledger entries that reference these journals
+    // (covers the double-entry partner lines too)
+    let deletedEntries = 0;
+    if (journalIds.length > 0) {
+        const result = await LedgerEntry.deleteMany({ manualJournal: { $in: journalIds } });
+        deletedEntries = result.deletedCount;
+
+        // Delete the ManualJournal header documents
+        await ManualJournal.deleteMany({ _id: { $in: journalIds } });
+    }
+
+    // Also remove any orphaned entries directly on this accounting code (no journal)
+    const orphanResult = await LedgerEntry.deleteMany({
+        accountingCode: account.accountingCode,
+        manualJournal: { $exists: false }
+    });
+    deletedEntries += orphanResult.deletedCount;
+
+    // Reset the balance back to the initial balance
+    const previousBalance = account.currentBalance;
+    account.currentBalance = account.initialBalance || 0;
+    await account.save();
+
+    return {
+        deletedJournals: journalIds.length,
+        deletedEntries,
+        previousBalance,
+        newBalance: account.currentBalance
+    };
+};
+
 module.exports = {
     createBankAccount,
     getAllBankAccounts,
@@ -360,5 +523,7 @@ module.exports = {
     updateBankAccount,
     deleteBankAccount,
     updateBalance,
-    importStatement
+    importStatement,
+    recordManualPayment,
+    deleteAllTransactions
 };

@@ -89,6 +89,7 @@ const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeR
 const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
 const BillRouter = require("./Src/modules/Bill/Routes/BillRoutes");
 const FixedAssetRouter = require("./Src/modules/FixedAsset/Routes/FixedAssetRoutes");
+const GpsRouter = require("./Src/modules/Gps/Routes/GpsRouter");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -218,6 +219,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/gps", GpsRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
 app.use("/api/payment-requests", PaymentRequestRouter);

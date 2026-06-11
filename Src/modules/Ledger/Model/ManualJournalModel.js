@@ -33,6 +33,22 @@ const manualJournalSchema = new mongoose.Schema(
             enum: ["DRAFT", "POSTED", "CANCELLED"],
             default: "DRAFT",
         },
+        paymentMode: {
+            type: String,
+        },
+        currency: {
+            type: String,
+            default: "USD",
+        },
+        fromAccount: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "BankAccount",
+        },
+        supportingDocument: {
+            name: { type: String },
+            url: { type: String },
+            uploadedAt: { type: Date },
+        },
         // Audit Trail
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

@@ -107,3 +107,78 @@ exports.importStatement = async (req, res, next) => {
     }
 };
 
+exports.recordManualPayment = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const {
+            amount,
+            depositDate,
+            paymentMode,
+            description,
+            currency,
+            fromAccountId,
+            branchId
+        } = req.body;
+
+        if (!amount) {
+            return res.status(400).json({ success: false, message: "Amount is required" });
+        }
+        if (!depositDate) {
+            return res.status(400).json({ success: false, message: "Deposit Date is required" });
+        }
+        if (!paymentMode) {
+            return res.status(400).json({ success: false, message: "Payment Mode is required" });
+        }
+        if (!fromAccountId) {
+            return res.status(400).json({ success: false, message: "From Account is required" });
+        }
+
+        const uploadLocal = require("../../../utils/uploadLocal");
+        let supportingDocument;
+        if (req.file) {
+            const fileUrl = uploadLocal(req.file, "manual-payments");
+            supportingDocument = {
+                name: req.file.originalname,
+                url: fileUrl,
+                uploadedAt: new Date()
+            };
+        }
+
+        const result = await BankAccountService.recordManualPayment(id, {
+            amount: Number(amount),
+            depositDate,
+            paymentMode,
+            description,
+            currency,
+            fromAccountId,
+            branchId,
+            supportingDocument,
+            userId: req.user?._id || req.user?.id,
+            userRole: req.user?.role
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Manual payment recorded successfully",
+            data: result
+        });
+    } catch (error) {
+        console.error("Record manual payment error:", error);
+        next(error);
+    }
+};
+
+exports.deleteAllTransactions = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const result = await BankAccountService.deleteAllTransactions(id);
+        res.status(200).json({
+            success: true,
+            message: `Deleted ${result.deletedJournals} journals and ${result.deletedEntries} ledger entries. Balance reset to ${result.newBalance}.`,
+            data: result
+        });
+    } catch (error) {
+        console.error("Delete all transactions error:", error);
+        next(error);
+    }
+};
