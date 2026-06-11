@@ -738,6 +738,49 @@ const getVehiclesDueForService = async (req, res, next) => {
     }
 };
 
+const mapExcelStatus = (excelStatus) => {
+    if (!excelStatus) return "PENDING ENTRY";
+    const statusStr = excelStatus.toString().trim().toUpperCase();
+
+    // Check if it's already a valid DB status (with dash-normalized check)
+    const { VEHICLE_STATUSES } = require("../Model/VehicleModel");
+    const matchedValidStatus = VEHICLE_STATUSES.find(s => {
+        const dbStatusNorm = s.replace(/\s*[—–-]\s*/g, '-').toUpperCase();
+        const inputStatusNorm = statusStr.replace(/\s*[—–-]\s*/g, '-').toUpperCase();
+        return dbStatusNorm === inputStatusNorm;
+    });
+    if (matchedValidStatus) {
+        return matchedValidStatus;
+    }
+    
+    if (statusStr === "ACTIVE VEHICLES") {
+        return "ACTIVE — RENTED";
+    }
+    if (statusStr === "AGENCY / INSURANCE") {
+        return "INSURANCE VERIFICATION";
+    }
+    if (statusStr === "CARS READY TO SALE-NEW") {
+        return "RETIRED";
+    }
+    if (statusStr === "CARS READY TO SALE-USED") {
+        return "ACTIVE — AVAILABLE";
+    }
+    if (statusStr === "NON ACTIVE CARS - DOCUMENTS ISSUE" || statusStr === "NON ACTIVE CARS-DOCUMENTS ISSUE" || statusStr === "NON ACTIVE CARS - DOCUMENT ISSUE") {
+        return "DOCUMENTS REVIEW";
+    }
+    if (statusStr === "NON ACTIVE CARS - IN REPAIR" || statusStr === "NON ACTIVE CARS-IN REPAIR") {
+        return "REPAIR IN PROGRESS";
+    }
+    if (statusStr === "TOTAL LOSS") {
+        return "RETIRED";
+    }
+    if (statusStr === "W. GROUP" || statusStr === "W GROUP" || statusStr === "W.GROUP" || statusStr === "WGROUP") {
+        return "W. GROUP ACTIVE";
+    }
+
+    return "PENDING ENTRY";
+};
+
 /**
  * Bulk-create vehicles from a parsed payload.
  * @route POST /api/vehicle/bulk
@@ -798,19 +841,16 @@ const bulkAddVehicles = async (req, res) => {
                 results.errors.push({ row: rowNum, message: "Missing or invalid required field: year" });
                 continue;
             }
-            if (!row.vin || !row.vin.trim()) {
-                results.errors.push({ row: rowNum, message: "Missing required field: vin" });
-                continue;
-            }
             if (!row.registrationNumber || !row.registrationNumber.trim()) {
                 results.errors.push({ row: rowNum, message: "Missing required field: registrationNumber" });
                 continue;
             }
 
             try {
+                const mappedStatus = mapExcelStatus(row.status);
                 // Prepare vehicle structure
                 const vehicleData = {
-                    status: "PENDING ENTRY",
+                    status: mappedStatus,
                     createdBy: userId,
                     creatorRole: userRole,
                     purchaseDetails: {
@@ -828,7 +868,14 @@ const bulkAddVehicles = async (req, res) => {
                         fuelType: row.fuelType ? row.fuelType.trim() : undefined,
                         transmission: row.transmission || undefined,
                         colour: row.colour ? row.colour.trim() : undefined,
-                        vin: row.vin.trim().toUpperCase(),
+                        vin: (() => {
+                            if (!row.vin) return undefined;
+                            const clean = row.vin.toString().trim().toUpperCase();
+                            if (!clean || clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED') {
+                                return undefined;
+                            }
+                            return clean;
+                        })(),
                         odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
                         gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
                         weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
@@ -841,7 +888,7 @@ const bulkAddVehicles = async (req, res) => {
                         registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
                     },
                     statusHistory: [{
-                        status: "PENDING ENTRY",
+                        status: mappedStatus,
                         changedBy: userId,
                         changedByRole: userRole,
                         timestamp: new Date(),

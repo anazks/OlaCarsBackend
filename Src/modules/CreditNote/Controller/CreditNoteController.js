@@ -148,3 +148,15 @@ exports.downloadCreditNotePdf = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.bulkUploadCreditNotes = async (req, res) => {
+    try {
+        const { rows } = req.body;
+        const actor = { id: req.user.id, role: req.user.role };
+        const result = await CreditNoteService.bulkUploadCreditNotes(rows, actor);
+        res.status(200).json({ success: true, ...result });
+    } catch (error) {
+        console.error("[CreditNoteController] Error in bulkUploadCreditNotes:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

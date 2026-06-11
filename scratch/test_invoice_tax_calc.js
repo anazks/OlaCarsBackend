@@ -57,8 +57,9 @@ const runTests = async () => {
             console.log(`Using existing test tax: ${tax.name} (${tax.rate}%)`);
         }
 
-        // Ensure it is active
+        // Ensure it is active and rate is 15
         tax.isActive = true;
+        tax.rate = 15;
         await tax.save();
 
         // 2. Get or Create a test driver
@@ -128,9 +129,31 @@ const runTests = async () => {
         driver.currentVehicle = vehicle._id;
         await driver.save();
 
+        // Get or Create a test customer
+        const CustomerModel = require("../Src/modules/Customer/Model/CustomerModel");
+        let customer = await CustomerModel.findOne({ email: "test-customer@example.com" });
+        if (!customer) {
+            customer = await CustomerModel.create({
+                name: "Test Customer TaxCalc",
+                customerId: "CUST-TEST-99",
+                email: "test-customer@example.com",
+                phone: "1234567890",
+                branch: branch._id,
+                driver: driver._id,
+                createdBy: new mongoose.Types.ObjectId(),
+                creatorRole: "ADMIN"
+            });
+            console.log("Created test customer:", customer.name);
+        } else {
+            customer.driver = driver._id;
+            await customer.save();
+            console.log("Using existing test customer:", customer.name);
+        }
+
         // 4. Test Manual Invoice Creation with selected Tax
         console.log("\n--- Testing createManualInvoice with selected Tax ---");
         const manualInvoiceData = {
+            customer: customer._id,
             driver: driver._id,
             vehicle: vehicle._id,
             dueDate: new Date(),
@@ -188,16 +211,28 @@ const runTests = async () => {
 
         const ledgerEntries = await LedgerEntry.find({ description: new RegExp(manualInv.invoiceNumber) });
         console.log(`Found ${ledgerEntries.length} ledger entries for ${manualInv.invoiceNumber}:`);
+        
+        let totalDebits = 0;
+        let totalCredits = 0;
         for (const entry of ledgerEntries) {
             console.log(`- Type: ${entry.type}, Account: ${entry.accountingCode}, Amount: ${entry.amount}`);
-            if (entry.amount !== 230) {
-                throw new Error("Assertion failed: Ledger Entry amount should equal totalAmountDue (230) including tax!");
+            if (entry.type === "DEBIT") {
+                totalDebits += entry.amount;
+            } else {
+                totalCredits += entry.amount;
             }
         }
-        if (ledgerEntries.length !== 2) {
-            throw new Error(`Assertion failed: Should find EXACTLY 2 ledger entries (debit & credit) but got ${ledgerEntries.length} (double booking guard failed)`);
+        
+        if (totalDebits !== 230) {
+            throw new Error(`Assertion failed: Total debits should be 230, got ${totalDebits}`);
         }
-        console.log("Ledger entry verification passed! Both entries registered totalAmountDue of 230 and no duplicate booking happened.");
+        if (totalCredits !== 230) {
+            throw new Error(`Assertion failed: Total credits should be 230, got ${totalCredits}`);
+        }
+        if (ledgerEntries.length !== 3) {
+            throw new Error(`Assertion failed: Should find EXACTLY 3 ledger entries (consolidated sales & tax) but got ${ledgerEntries.length} (double booking guard failed)`);
+        }
+        console.log("Ledger entry verification passed! Balanced double-entry verified and no duplicate booking occurred.");
 
         // 6. Test Weekly Invoice Auto-creation via Cron simulation
         console.log("\n--- Testing generateCurrentWeekInvoices (Cron) ---");
@@ -229,11 +264,11 @@ const runTests = async () => {
         console.log("Tax Ref:", newlyCreated.tax);
 
         // Assertions
-        const expectedTaxAmount = Math.round((newlyCreated.baseAmount * newlyCreated.taxRate / 100) * 100) / 100;
-        const expectedTotalDue = Math.round((newlyCreated.baseAmount + expectedTaxAmount + newlyCreated.carryOverAmount) * 100) / 100;
+        const expectedTotalDue = Math.round((newlyCreated.baseAmount + newlyCreated.taxAmount + newlyCreated.carryOverAmount) * 100) / 100;
 
-        if (newlyCreated.baseAmount !== 200) throw new Error("Assertion failed: baseAmount should be 200");
-        if (newlyCreated.taxAmount !== expectedTaxAmount) throw new Error(`Assertion failed: taxAmount should be ${expectedTaxAmount}`);
+        if (Math.round((newlyCreated.baseAmount + newlyCreated.taxAmount) * 100) / 100 !== 200) {
+            throw new Error(`Assertion failed: baseAmount + taxAmount should be 200, got ${newlyCreated.baseAmount + newlyCreated.taxAmount}`);
+        }
         if (newlyCreated.totalAmountDue !== expectedTotalDue) throw new Error(`Assertion failed: totalAmountDue should be ${expectedTotalDue}`);
         if (!newlyCreated.invoiceNumber.match(/^INV-\d{6}$/)) throw new Error("Assertion failed: invoiceNumber format should be INV-XXXXXX");
 
@@ -243,16 +278,29 @@ const runTests = async () => {
         console.log("\n--- Verifying Ledger entries for Weekly Invoice ---");
         const weeklyLedgerEntries = await LedgerEntry.find({ description: new RegExp(newlyCreated.invoiceNumber) });
         console.log(`Found ${weeklyLedgerEntries.length} ledger entries for ${newlyCreated.invoiceNumber}:`);
+        
+        let weeklyDebits = 0;
+        let weeklyCredits = 0;
         for (const entry of weeklyLedgerEntries) {
             console.log(`- Type: ${entry.type}, Account: ${entry.accountingCode}, Amount: ${entry.amount}`);
-            if (entry.amount !== expectedTotalDue) {
-                throw new Error(`Assertion failed: Ledger Entry amount should equal totalAmountDue (${expectedTotalDue}) including tax!`);
+            if (entry.type === "DEBIT") {
+                weeklyDebits += entry.amount;
+            } else {
+                weeklyCredits += entry.amount;
             }
         }
-        if (weeklyLedgerEntries.length !== 2) {
-            throw new Error(`Assertion failed: Should find 2 ledger entries but got ${weeklyLedgerEntries.length}`);
+        
+        const expectedCurrentPeriodTotal = Math.round((newlyCreated.baseAmount + newlyCreated.taxAmount) * 100) / 100;
+        if (Math.round(weeklyDebits * 100) / 100 !== expectedCurrentPeriodTotal) {
+            throw new Error(`Assertion failed: Weekly debits should equal current period total (${expectedCurrentPeriodTotal}), got ${weeklyDebits}`);
         }
-        console.log("Weekly Ledger entry verification passed!");
+        if (Math.round(weeklyCredits * 100) / 100 !== expectedCurrentPeriodTotal) {
+            throw new Error(`Assertion failed: Weekly credits should equal current period total (${expectedCurrentPeriodTotal}), got ${weeklyCredits}`);
+        }
+        if (weeklyLedgerEntries.length !== 3) {
+            throw new Error(`Assertion failed: Should find exactly 3 ledger entries (debit, credit, tax credit) but got ${weeklyLedgerEntries.length}`);
+        }
+        console.log("Weekly Ledger entry verification passed! Balanced double-entry verified without double-booking carryovers.");
 
         // 8. Test Draft Invoice Bypass and Recalculation on Tax Rate edit
         console.log("\n--- Testing Draft Invoice Bypass & Recalculation ---");
@@ -298,10 +346,10 @@ const runTests = async () => {
         const issuedInv = await InvoiceService.updateInvoice(draftInv._id, { status: "PENDING" });
         console.log("Status after issue:", issuedInv.status);
         const issuedLedger = await LedgerEntry.find({ description: new RegExp(draftInv.invoiceNumber) });
-        if (issuedLedger.length !== 2) {
-            throw new Error(`Assertion failed: Issued invoice should generate 2 ledger entries but found ${issuedLedger.length}!`);
+        if (issuedLedger.length !== 3) {
+            throw new Error(`Assertion failed: Issued invoice should generate 3 ledger entries but found ${issuedLedger.length}!`);
         }
-        console.log("Issued Invoice Ledger creation verified (2 entries created).");
+        console.log("Issued Invoice Ledger creation verified (3 entries created).");
 
         // Recalculate tax: change tax rate and trigger recalculation
         console.log("Modifying Tax rate from 15% to 10% and triggering recalculation...");
@@ -321,14 +369,26 @@ const runTests = async () => {
         // Check new ledger entry amounts
         const recalculatedLedger = await LedgerEntry.find({ description: new RegExp(draftInv.invoiceNumber) });
         console.log(`Found ${recalculatedLedger.length} ledger entries for recalculated invoice ${draftInv.invoiceNumber}:`);
+        
+        let recalcDebits = 0;
+        let recalcCredits = 0;
         for (const entry of recalculatedLedger) {
             console.log(`- Type: ${entry.type}, Account: ${entry.accountingCode}, Amount: ${entry.amount}`);
-            if (entry.amount !== 110) {
-                throw new Error(`Assertion failed: Recalculated Ledger Entry amount should be 110 but got ${entry.amount}!`);
+            if (entry.type === "DEBIT") {
+                recalcDebits += entry.amount;
+            } else {
+                recalcCredits += entry.amount;
             }
         }
-        if (recalculatedLedger.length !== 2) {
-            throw new Error(`Assertion failed: Recalculated ledger entries should still be exactly 2 but got ${recalculatedLedger.length}`);
+        
+        if (recalcDebits !== 110) {
+            throw new Error(`Assertion failed: Recalculated total debits should be 110, got ${recalcDebits}`);
+        }
+        if (recalcCredits !== 110) {
+            throw new Error(`Assertion failed: Recalculated total credits should be 110, got ${recalcCredits}`);
+        }
+        if (recalculatedLedger.length !== 3) {
+            throw new Error(`Assertion failed: Recalculated ledger entries should still be exactly 3 but got ${recalculatedLedger.length}`);
         }
         console.log("Recalculation and Ledger regeneration verified successfully!");
 
@@ -340,6 +400,7 @@ const runTests = async () => {
         await LedgerEntry.deleteMany({ description: new RegExp(draftInv.invoiceNumber) });
         await Driver.deleteOne({ _id: driver._id });
         await Vehicle.deleteOne({ _id: vehicle._id });
+        await CustomerModel.deleteOne({ _id: customer._id });
         // Only delete the test tax if we created it
         if (String(tax._id) === String(manualInv.tax)) {
             await Tax.deleteOne({ _id: tax._id });

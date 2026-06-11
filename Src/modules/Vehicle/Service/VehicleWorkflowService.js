@@ -136,7 +136,7 @@ const STATUS_RULES = {
         }
     },
     "ACTIVE — AVAILABLE": {
-        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
+        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED", "W. GROUP ACTIVE"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
@@ -171,12 +171,12 @@ const STATUS_RULES = {
         }
     },
     "ACTIVE — MAINTENANCE": {
-        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"],
+        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"],
         allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.ADMIN,
     },
     "SUSPENDED": {
-        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE"],
+        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "W. GROUP ACTIVE"],
         allowedRoles: [ROLES.BRANCHMANAGER],
         minHierarchy: ROLES.COUNTRYMANAGER,
         gateValidator: (vehicle, payload) => {
@@ -209,7 +209,7 @@ const STATUS_RULES = {
         minHierarchy: ROLES.COUNTRYMANAGER,
     },
     "RETIRED": {
-        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — MAINTENANCE", "SUSPENDED"],
+        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — MAINTENANCE", "SUSPENDED", "W. GROUP ACTIVE"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
@@ -219,6 +219,11 @@ const STATUS_RULES = {
             }
             return null;
         }
+    },
+    "W. GROUP ACTIVE": {
+        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
+        minHierarchy: ROLES.ADMIN,
     }
 };
 

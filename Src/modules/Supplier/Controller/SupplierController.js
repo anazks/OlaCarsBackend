@@ -83,6 +83,34 @@ const downloadSupplierPdf = async (req, res) => {
     }
 };
 
+const bulkAddSuppliers = async (req, res) => {
+    try {
+        const { suppliers } = req.body;
+
+        if (!Array.isArray(suppliers) || suppliers.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'suppliers' array." });
+        }
+
+        if (suppliers.length > 500) {
+            return res.status(400).json({ success: false, message: "Maximum 500 suppliers per bulk upload." });
+        }
+
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        const results = await SupplierService.bulkCreate(suppliers, userId, userRole);
+
+        const statusCode = results.created.length > 0 ? 201 : 400;
+        return res.status(statusCode).json({
+            success: results.created.length > 0,
+            message: `${results.created.length} supplier(s) created, ${results.errors.length} error(s).`,
+            data: results,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addSupplier,
     getSuppliers,
@@ -90,4 +118,5 @@ module.exports = {
     updateSupplier,
     deleteSupplier,
     downloadSupplierPdf,
+    bulkAddSuppliers,
 };

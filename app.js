@@ -70,6 +70,9 @@ const {
 const {
   initOutboundCallScheduler,
 } = require("./Src/modules/Voice/Scheduler/OutboundCallScheduler");
+const {
+  startFixedAssetCronJob,
+} = require("./Src/modules/FixedAsset/Service/FixedAssetCronService");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
@@ -85,6 +88,8 @@ const RecurringTransactionRouter = require("./Src/modules/RecurringTransaction/R
 const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeRoutes");
 const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
 const BillRouter = require("./Src/modules/Bill/Routes/BillRoutes");
+const FixedAssetRouter = require("./Src/modules/FixedAsset/Routes/FixedAssetRoutes");
+const GpsRouter = require("./Src/modules/Gps/Routes/GpsRouter");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -214,6 +219,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/gps", GpsRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
 app.use("/api/payment-requests", PaymentRequestRouter);
@@ -232,6 +238,7 @@ app.use("/api/recurring-transactions", RecurringTransactionRouter);
 app.use("/api/payments-made", PaymentMadeRouter);
 app.use("/api/vendor-credits", VendorCreditRouter);
 app.use("/api/bills", BillRouter);
+app.use("/api/fixed-assets", FixedAssetRouter);
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
@@ -293,8 +300,9 @@ const startServer = async () => {
       initAlertScheduler();
       startInvoiceCronJob();
       initOutboundCallScheduler();
+      startFixedAssetCronJob();
       console.log(
-        "Internal cron schedulers (Alerts, Invoices, Outbound Calls) started",
+        "Internal cron schedulers (Alerts, Invoices, Outbound Calls, Fixed Assets) started",
       );
     } else {
       console.log("Internal cron scheduler disabled (using external service)");

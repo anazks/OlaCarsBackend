@@ -51,8 +51,8 @@ const invoiceSchema = new mongoose.Schema({
         ref: "ServiceBill",
     },
     weekNumber: {
-        type: Number,
-        required: function() { return this.invoiceType === 'RENTAL'; }
+        type: String,
+        required: function() { return this.invoiceType === 'RENTAL'; },
     },
     weekLabel: {
         type: String
@@ -109,6 +109,7 @@ const invoiceSchema = new mongoose.Schema({
     taxAmount: { type: Number, default: 0 },
     tax: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
     notes: { type: String },
+    terms: { type: String },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         refPath: "creatorRole",

@@ -11,12 +11,12 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
 const createCreditNote = async (data, actor) => {
     const { driverId, customerId, invoiceId, amount, reason, notes, creditNoteDate } = data;
 
-    if (!amount || !reason) {
+    if ((amount === undefined || amount === null) || !reason) {
         throw new Error("Missing required Credit Note fields: amount and reason are mandatory.");
     }
 
-    if (Number(amount) <= 0) {
-        throw new Error("Credit Note amount must be greater than 0.");
+    if (Number(amount) < 0) {
+        throw new Error("Credit Note amount must be greater than or equal to 0.");
     }
 
     let finalCustomerId = customerId;
@@ -415,6 +415,441 @@ const refundCreditNote = async (id, actor) => {
     return creditNote;
 };
 
+/**
+ * Bulk upload credit notes from an Excel/CSV parsed JSON array of rows.
+ */
+const bulkUploadCreditNotes = async (rows, actor) => {
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+        throw new Error("No data rows provided.");
+    }
+
+    const Customer = require("../../Customer/Model/CustomerModel");
+    const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+
+    // 1. Fetch reference collections for fast lookups
+    const customersList = await Customer.find({ isDeleted: false });
+    const customersByName = new Map();
+    const customersById = new Map();
+    for (const c of customersList) {
+        if (c.name) {
+            customersByName.set(c.name.trim().toLowerCase().replace(/\s+/g, ' '), c);
+        }
+        if (c.customerId) {
+            customersById.set(c.customerId.trim().toLowerCase(), c);
+        }
+        if (c.customerNumber) {
+            customersById.set(c.customerNumber.trim().toLowerCase(), c);
+        }
+    }
+
+    const getRowVal = (r, possibleKeys) => {
+        for (const key of possibleKeys) {
+            const cleanKey = key.replace(/^\ufeff/, '').trim().toLowerCase();
+            if (r[key] !== undefined) return r[key];
+            for (const k of Object.keys(r)) {
+                const cleanK = k.replace(/^\ufeff/, '').trim().toLowerCase();
+                if (cleanK === cleanKey) {
+                    return r[k];
+                }
+            }
+        }
+        return undefined;
+    };
+
+    const parseFlexibleDate = (dateStr) => {
+        if (!dateStr) return null;
+        if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+        if (typeof dateStr === 'number') {
+            const date = new Date((dateStr - 25569) * 86400 * 1000);
+            return isNaN(date.getTime()) ? null : date;
+        }
+        const str = dateStr.toString().trim();
+        if (!str) return null;
+        const dmyRegex = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/;
+        const match = str.match(dmyRegex);
+        if (match) {
+            const day = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10) - 1;
+            const year = parseInt(match[3], 10);
+            const date = new Date(year, month, day);
+            if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) {
+                return date;
+            }
+        }
+        const parsedDate = new Date(str);
+        return isNaN(parsedDate.getTime()) ? null : parsedDate;
+    };
+
+    const createdNotes = [];
+    const errors = [];
+    const skipped = [];
+
+    // Process each row
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const origIdx = i + 1;
+
+        // Resolve Customer Name - MANDATORY
+        const customerNameVal = getRowVal(row, ["Customer Name", "customerName", "customer"]);
+        const customerNameInput = (customerNameVal || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
+
+        let customerDoc = null;
+        if (customerNameInput) {
+            customerDoc = customersByName.get(customerNameInput);
+            if (!customerDoc) {
+                for (const [dbName, dbCust] of customersByName.entries()) {
+                    const cleanDb = dbName.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
+                    const cleanInput = customerNameInput.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
+                    if (cleanDb === cleanInput || cleanDb.includes(cleanInput) || cleanInput.includes(cleanDb)) {
+                        customerDoc = dbCust;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Fallback to customer ID
+        if (!customerDoc) {
+            const customerIdVal = getRowVal(row, ["Customer ID", "customerId", "customerNumber"]);
+            const customerNumberVal = getRowVal(row, ["Customer Number", "customerNumber"]);
+            if (customerIdVal) {
+                customerDoc = customersById.get(customerIdVal.toString().trim().toLowerCase());
+            }
+            if (!customerDoc && customerNumberVal) {
+                customerDoc = customersById.get(customerNumberVal.toString().trim().toLowerCase());
+            }
+        }
+
+        if (!customerDoc) {
+            errors.push(`Row ${origIdx}: Customer Name "${customerNameVal || ''}" is mandatory but was not found in database.`);
+            continue;
+        }
+
+        // Resolve Credit Note Number
+        const cnNoVal = getRowVal(row, ["Credit Note Number", "creditNoteNumber", "CreditNotes ID", "creditNotesId"]);
+        const key = (cnNoVal || "").toString().trim();
+
+        // Check if credit note already exists in DB
+        if (key && !key.startsWith("TEMP-")) {
+            const existingCN = await CreditNote.findOne({ creditNoteNumber: key });
+            if (existingCN) {
+                skipped.push(`Row ${origIdx}: Credit Note number "${key}" already exists. Skipping.`);
+                continue;
+            }
+        }
+
+        // Resolve amount
+        const amountVal = getRowVal(row, ["Total", "total", "Amount", "amount", "SubTotal", "subtotal", "Balance", "balance", "Item Total", "itemTotal"]);
+        const totalAmount = parseFloat(amountVal !== undefined && amountVal !== null ? amountVal : 0);
+        if (isNaN(totalAmount) || totalAmount < 0) {
+            errors.push(`Row ${origIdx}: Invalid credit note amount "${amountVal || ''}".`);
+            continue;
+        }
+
+        // Resolve dates
+        const dateVal = getRowVal(row, ["Credit Note Date", "creditNoteDate", "Issued Date", "issuedDate", "Date", "date"]);
+        const creditNoteDate = parseFlexibleDate(dateVal) || new Date();
+
+        // Resolve reason
+        const reasonVal = getRowVal(row, ["Subject", "subject", "Adjustment Description", "adjustmentDescription", "Reason", "reason"]) || "Bulk Upload Correction";
+        const reason = reasonVal.toString().trim();
+
+        // Build notes
+        const notesList = [];
+        const excelNotes = getRowVal(row, ["Notes", "notes", "description"]);
+        if (excelNotes) notesList.push(excelNotes);
+
+        const refNo = getRowVal(row, ["Reference#", "referenceNumber", "Reference Number"]);
+        if (refNo) notesList.push(`Reference: ${refNo}`);
+
+        // Custom Fields
+        const staffName = getRowVal(row, ["CF.STAFF NAME", "cfStaffName"]);
+        if (staffName) notesList.push(`Staff Name: ${staffName}`);
+        
+        const cufe = getRowVal(row, ["CF.CUFE", "cfCufe"]);
+        if (cufe) notesList.push(`CUFE: ${cufe}`);
+        
+        const protocol = getRowVal(row, ["CF.Protocolo de autorización", "cfProtocol"]);
+        if (protocol) notesList.push(`Protocol: ${protocol}`);
+
+        const authDate = getRowVal(row, ["CF.Fecha de autorización", "cfAuthDate"]);
+        if (authDate) notesList.push(`Auth Date: ${authDate}`);
+
+        // Tax Fields
+        const taxName = getRowVal(row, ["Item Tax", "itemTax", "taxName"]);
+        const taxRate = getRowVal(row, ["Item Tax %", "itemTaxPct", "taxRate"]);
+        const taxAmount = getRowVal(row, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
+        const taxType = getRowVal(row, ["Item Tax Type", "itemTaxType", "taxType"]);
+        
+        if (taxName || taxRate || taxAmount || taxType) {
+            const taxParts = [];
+            if (taxName) taxParts.push(`Tax Name: ${taxName}`);
+            if (taxRate) taxParts.push(`Tax %: ${taxRate}`);
+            if (taxAmount) taxParts.push(`Tax Amount: ${taxAmount}`);
+            if (taxType) taxParts.push(`Tax Type: ${taxType}`);
+            notesList.push(`[Tax Details] ${taxParts.join(', ')}`);
+        }
+
+        const finalNotes = notesList.join("\n");
+
+        // Resolve Applied Invoice Numbers (comma separated)
+        const rawInvNumbers = getRowVal(row, ["Applied Invoice Number", "appliedInvoiceNumber", "Invoice Number", "invoiceNumber"]) || "";
+        const invNumbers = rawInvNumbers.toString().split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+        let customerInvoices = [];
+        if (invNumbers.length > 0) {
+            const foundInvoices = await Invoice.find({
+                invoiceNumber: { $in: invNumbers },
+                isDeleted: false
+            });
+            // Filter to only this customer's invoices
+            customerInvoices = foundInvoices.filter(inv => {
+                const invCustomerId = typeof inv.customer === 'object' ? inv.customer._id.toString() : inv.customer.toString();
+                return invCustomerId === customerDoc._id.toString();
+            });
+        }
+
+        let remainingAmount = totalAmount;
+        const cnSegmentNumbers = [];
+
+        if (totalAmount === 0) {
+            const creditNoteNumber = key && !key.startsWith("TEMP-")
+                ? key
+                : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+            const cnExists = await CreditNote.findOne({ creditNoteNumber });
+            if (cnExists) {
+                skipped.push(`Row ${origIdx}: Credit Note number "${creditNoteNumber}" already exists. Skipping.`);
+            } else {
+                const isClosed = customerInvoices.length > 0;
+                await CreditNote.create({
+                    creditNoteNumber,
+                    customerId: customerDoc._id,
+                    driverId: customerDoc.driver || undefined,
+                    invoiceId: isClosed ? customerInvoices[0]._id : undefined,
+                    amount: 0,
+                    reason,
+                    notes: finalNotes,
+                    creditNoteDate,
+                    status: isClosed ? 'CLOSED' : 'OPEN',
+                    createdBy: actor.id || actor._id,
+                    creatorRole: actor.role
+                });
+
+                cnSegmentNumbers.push(creditNoteNumber);
+
+                if (isClosed) {
+                    const invoice = customerInvoices[0];
+                    const newPaymentEntry = {
+                        amount: 0,
+                        paidAt: creditNoteDate,
+                        paymentMethod: "Prepayment Credit",
+                        note: `Credit Note Applied (${creditNoteNumber})`
+                    };
+                    await Invoice.findByIdAndUpdate(
+                        invoice._id,
+                        { $push: { payments: newPaymentEntry } },
+                        { runValidators: false }
+                    );
+                }
+            }
+        } else {
+            // Apply credit note sequentially across target invoices
+            if (customerInvoices.length > 0 && remainingAmount > 0) {
+                for (const invoice of customerInvoices) {
+                    if (remainingAmount <= 0) break;
+                    if (invoice.status === 'PAID') continue;
+
+                    const appliedAmount = Math.min(remainingAmount, invoice.balance);
+                    if (appliedAmount <= 0) continue;
+
+                    const creditNoteNumber = key && !key.startsWith("TEMP-")
+                        ? (customerInvoices.length > 1 ? `${key}-${invoice.invoiceNumber}` : key)
+                        : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+                    // Ensure unique segment check
+                    const segmentExists = await CreditNote.findOne({ creditNoteNumber });
+                    if (segmentExists) {
+                        skipped.push(`Row ${origIdx}: Credit Note segment "${creditNoteNumber}" already exists. Skipping segment.`);
+                        remainingAmount -= appliedAmount;
+                        continue;
+                    }
+
+                    // Create CLOSED Credit Note document
+                    await CreditNote.create({
+                        creditNoteNumber,
+                        customerId: customerDoc._id,
+                        driverId: customerDoc.driver || undefined,
+                        invoiceId: invoice._id,
+                        amount: appliedAmount,
+                        reason,
+                        notes: finalNotes,
+                        creditNoteDate,
+                        status: 'CLOSED',
+                        createdBy: actor.id || actor._id,
+                        creatorRole: actor.role
+                    });
+
+                    cnSegmentNumbers.push(creditNoteNumber);
+
+                    // Update Invoice
+                    const newAmountPaid = (invoice.amountPaid || 0) + appliedAmount;
+                    const newBalance = Math.max(0, invoice.balance - appliedAmount);
+                    let newStatus = invoice.status;
+                    if (newBalance <= 0) {
+                        newStatus = 'PAID';
+                    } else if (newAmountPaid > 0) {
+                        newStatus = 'PARTIAL';
+                    }
+
+                    const newPaymentEntry = {
+                        amount: appliedAmount,
+                        paidAt: creditNoteDate,
+                        paymentMethod: "Prepayment Credit",
+                        note: `Credit Note Applied (${creditNoteNumber})`
+                    };
+
+                    await Invoice.findByIdAndUpdate(
+                        invoice._id,
+                        {
+                            $set: {
+                                amountPaid: newAmountPaid,
+                                balance: newBalance,
+                                status: newStatus
+                            },
+                            $push: { payments: newPaymentEntry }
+                        },
+                        { runValidators: false }
+                    );
+
+                    // Rollover dynamic balance
+                    try {
+                        const InvoiceService = require("../../Invoice/Service/InvoiceService");
+                        await InvoiceService.rolloverCustomerInvoices(customerDoc._id);
+                    } catch (rollErr) {
+                        console.error("[CreditNoteService] Rollover customer invoices failed in bulk application:", rollErr.message);
+                    }
+
+                    // Generate ledger reversal
+                    try {
+                        let accCode = await AccountingCode.findOne({ code: "4200" });
+                        if (!accCode) {
+                            accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
+                        }
+
+                        if (accCode) {
+                            const customerName = customerDoc.name || "Customer";
+                            const txNote = `Credit Note Applied [${creditNoteNumber}]: ${reason} to Invoice ${invoice.invoiceNumber} for ${customerName}${finalNotes ? ' - ' + finalNotes : ''}`;
+
+                            const transactionData = {
+                                accountingCode: accCode._id,
+                                referenceId: customerDoc._id,
+                                referenceModel: "Customer",
+                                transactionCategory: "INCOME",
+                                transactionType: "DEBIT",
+                                isTaxInclusive: false,
+                                baseAmount: appliedAmount,
+                                totalAmount: appliedAmount,
+                                paymentMethod: "OTHER",
+                                status: "COMPLETED",
+                                paymentDate: creditNoteDate,
+                                notes: txNote,
+                                createdBy: actor.id || actor._id,
+                                creatorRole: actor.role
+                            };
+
+                            const newTransaction = await PaymentTransaction.create(transactionData);
+                            const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
+                            await LedgerService.autoGenerateLedgerEntry(populatedTx);
+                        }
+                    } catch (err) {
+                        console.error("[CreditNoteService] Failed to generate ledger record for Credit Note Segment:", err.message);
+                    }
+
+                    remainingAmount -= appliedAmount;
+                }
+            }
+        }
+
+        // Create an OPEN credit note for any leftover amount (or if no invoice was specified)
+        if (remainingAmount > 0) {
+            const creditNoteNumber = key && !key.startsWith("TEMP-")
+                ? (cnSegmentNumbers.length > 0 ? `${key}-OPEN` : key)
+                : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+            const cnExists = await CreditNote.findOne({ creditNoteNumber });
+            if (cnExists) {
+                skipped.push(`Row ${origIdx}: Remaining credit note number "${creditNoteNumber}" already exists. Skipping.`);
+            } else {
+                await CreditNote.create({
+                    creditNoteNumber,
+                    customerId: customerDoc._id,
+                    driverId: customerDoc.driver || undefined,
+                    amount: remainingAmount,
+                    reason,
+                    notes: finalNotes,
+                    creditNoteDate,
+                    status: 'OPEN',
+                    createdBy: actor.id || actor._id,
+                    creatorRole: actor.role
+                });
+
+                cnSegmentNumbers.push(creditNoteNumber);
+
+                // Generate ledger reversal
+                try {
+                    let accCode = await AccountingCode.findOne({ code: "4200" });
+                    if (!accCode) {
+                        accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
+                    }
+
+                    if (accCode) {
+                        const customerName = customerDoc.name || "Customer";
+                        const txNote = `Credit Note Issued [${creditNoteNumber}]: ${reason} for ${customerName}${finalNotes ? ' - ' + finalNotes : ''}`;
+
+                        const transactionData = {
+                            accountingCode: accCode._id,
+                            referenceId: customerDoc._id,
+                            referenceModel: "Customer",
+                            transactionCategory: "INCOME",
+                            transactionType: "DEBIT",
+                            isTaxInclusive: false,
+                            baseAmount: remainingAmount,
+                            totalAmount: remainingAmount,
+                            paymentMethod: "OTHER",
+                            status: "COMPLETED",
+                            paymentDate: creditNoteDate,
+                            notes: txNote,
+                            createdBy: actor.id || actor._id,
+                            creatorRole: actor.role
+                        };
+
+                        const newTransaction = await PaymentTransaction.create(transactionData);
+                        const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
+                        await LedgerService.autoGenerateLedgerEntry(populatedTx);
+                    }
+                } catch (err) {
+                    console.error("[CreditNoteService] Failed to generate ledger record for Remaining Credit Note:", err.message);
+                }
+            }
+        }
+
+        createdNotes.push(...cnSegmentNumbers);
+    }
+
+    return {
+        successCount: createdNotes.length,
+        errorCount: errors.length,
+        skippedCount: skipped.length,
+        errors,
+        skipped,
+        createdNotes
+    };
+};
+
 module.exports = {
     createCreditNote,
     applyCreditNoteToInvoice,
@@ -422,5 +857,6 @@ module.exports = {
     getCreditNoteById,
     voidCreditNote,
     updateCreditNote,
-    refundCreditNote
+    refundCreditNote,
+    bulkUploadCreditNotes
 };

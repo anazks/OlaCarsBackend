@@ -6,6 +6,7 @@ const { authenticate } = require('../../../shared/middlewares/authMiddleware');
 // Ensure authentication is required for all credit note operations
 router.use(authenticate);
 
+router.post('/bulk-upload', CreditNoteController.bulkUploadCreditNotes);
 router.post('/', CreditNoteController.createCreditNote);
 router.get('/', CreditNoteController.getAllCreditNotes);
 router.get('/:id/pdf', CreditNoteController.downloadCreditNotePdf);

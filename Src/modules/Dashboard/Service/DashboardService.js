@@ -42,7 +42,7 @@ exports.getSummaryStats = async (filters) => {
     }
 
     // Counts
-    let totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED"] } });
+    let totalActiveVehicles = await Vehicle.countDocuments({ ...vehicleQuery, status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE — RENTED", "W. GROUP ACTIVE"] } });
     const activeDrivers = await Driver.countDocuments({ ...baseQuery, status: "ACTIVE" });
 
     // Aggregation for Revenue / Outstanding via Ledger (Income category)
@@ -117,7 +117,7 @@ exports.getSummaryStats = async (filters) => {
         } else {
             const s = v.status;
             if (s === "ACTIVE — AVAILABLE") fleetStatus.available += 1;
-            else if (s === "ACTIVE — RENTED") fleetStatus.rented += 1;
+            else if (s === "ACTIVE — RENTED" || s === "W. GROUP ACTIVE") fleetStatus.rented += 1;
             else if (s === "ACTIVE — MAINTENANCE" || s === "REPAIR IN PROGRESS") fleetStatus.maintenance += 1;
             else if (s === "RETIRED") fleetStatus.retired += 1;
             else fleetStatus.other += 1;
@@ -126,6 +126,21 @@ exports.getSummaryStats = async (filters) => {
 
     totalActiveVehicles = fleetStatus.available + fleetStatus.rented;
 
+    // Calculate real last 12 months rolling revenue from General Ledger
+    const twelveMonthsAgo = moment().subtract(12, "months").toDate();
+    const l12Match = { 
+        accountingCode: { $in: codeIds },
+        isDeleted: { $ne: true }
+    };
+    if (branchIds) l12Match.branch = { $in: branchIds };
+    l12Match.entryDate = { $gte: twelveMonthsAgo };
+
+    const l12RevAggr = await LedgerEntry.aggregate([
+        { $match: l12Match },
+        { $group: { _id: null, total: { $sum: "$amount" } } }
+    ]);
+    const realLast12MonthsRevenue = l12RevAggr.length > 0 ? l12RevAggr[0].total : 0;
+
     return {
         stats: {
             totalActiveVehicles,
@@ -133,7 +148,7 @@ exports.getSummaryStats = async (filters) => {
             outstandingCollections,
             activeDrivers,
             collectionCompliance,
-            last12MonthsRevenue: monthlyRevenue * 1.2, // placeholder mock trend logic
+            last12MonthsRevenue: realLast12MonthsRevenue,
             outstandingBalance: outstandingCollections
         },
         alerts,

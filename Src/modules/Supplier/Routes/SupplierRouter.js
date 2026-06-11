@@ -7,6 +7,7 @@ const {
     updateSupplier,
     deleteSupplier,
     downloadSupplierPdf,
+    bulkAddSuppliers,
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -74,6 +75,8 @@ const AUTHORIZED_ROLES = [
  *         description: Supplier created successfully
  */
 router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), validate(addSupplierSchema), addSupplier);
+
+router.post("/bulk", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), bulkAddSuppliers);
 
 /**
  * @swagger
