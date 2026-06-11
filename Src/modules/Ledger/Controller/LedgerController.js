@@ -11,6 +11,7 @@ const getLedgerEntries = async (req, res) => {
         if (req.query.manualJournal) query.manualJournal = req.query.manualJournal;
         if (req.query.voucher) query.voucher = req.query.voucher;
         if (req.query.transaction) query.transaction = req.query.transaction;
+        if (req.query.transactionId) query.transactionId = req.query.transactionId;
 
         // Optional Branch Filter
         if (req.query.branch) query.branch = req.query.branch;
@@ -46,6 +47,7 @@ const getLedgerEntries = async (req, res) => {
             query.$or = [
                 { description: searchRegex },
                 { creatorRole: searchRegex },
+                { transactionId: searchRegex },
                 { accountingCode: { $in: matchingCodes.map(c => c._id) } }
             ];
         }
@@ -120,7 +122,36 @@ const getLedgerEntryById = async (req, res) => {
     }
 };
 
+const importLedgerEntries = async (req, res) => {
+    try {
+        const { importFromExcel, importRows } = require("../Service/LedgerImportService");
+        let result;
+
+        const createdBy = req.user._id || req.user.id;
+        const creatorRole = req.user.role ? req.user.role.toUpperCase() : "ADMIN";
+
+        if (req.body.rows && Array.isArray(req.body.rows)) {
+            result = await importRows(req.body.rows, { createdBy, creatorRole });
+        } else if (req.file) {
+            result = await importFromExcel(req.file.buffer, { createdBy, creatorRole });
+        } else {
+            return res.status(400).json({ success: false, message: "No file uploaded or rows provided." });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Import complete: ${result.inserted} entries created, ${result.linked} linked to invoices.`,
+            data: result,
+        });
+    } catch (error) {
+        console.error("[LedgerController] Import failed:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
+    importLedgerEntries,
 };
+

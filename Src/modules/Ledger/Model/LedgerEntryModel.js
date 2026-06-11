@@ -61,6 +61,11 @@ const ledgerEntrySchema = new mongoose.Schema(
             type: String,
             required: false,
         },
+        transactionId: {
+            type: String,
+            required: false,
+            trim: true,
+        },
         // Audit Trail
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -84,5 +89,6 @@ ledgerEntrySchema.index({ branch: 1 });
 ledgerEntrySchema.index({ accountingCode: 1 });
 ledgerEntrySchema.index({ type: 1 });
 ledgerEntrySchema.index({ entryDate: 1 });
+ledgerEntrySchema.index({ transactionId: 1 });
 
 module.exports = mongoose.model("LedgerEntry", ledgerEntrySchema);
