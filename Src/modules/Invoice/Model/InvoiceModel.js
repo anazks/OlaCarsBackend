@@ -37,6 +37,10 @@ const invoiceSchema = new mongoose.Schema({
         ref: "Customer",
         required: true,
     },
+    invoiceID: {
+        type: String,
+        required: false,
+    },
     driver: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Driver",

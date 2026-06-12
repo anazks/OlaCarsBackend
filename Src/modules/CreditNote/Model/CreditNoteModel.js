@@ -4,7 +4,6 @@ const creditnoteSchema = new mongoose.Schema({
     creditNoteNumber: { 
         type: String, 
         required: true, 
-        unique: true, 
         trim: true 
     },
     customerId: { 
@@ -21,6 +20,15 @@ const creditnoteSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'Invoice', 
         required: false 
+    },
+    invoices: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Invoice'
+    }],
+    taxId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Tax',
+        required: false
     },
     amount: { 
         type: Number, 

@@ -9,7 +9,7 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
  * Creates a new Credit Note and processes adjustments.
  */
 const createCreditNote = async (data, actor) => {
-    const { driverId, customerId, invoiceId, amount, reason, notes, creditNoteDate } = data;
+    const { driverId, customerId, invoiceId, invoices, taxId, amount, reason, notes, creditNoteDate } = data;
 
     if ((amount === undefined || amount === null) || !reason) {
         throw new Error("Missing required Credit Note fields: amount and reason are mandatory.");
@@ -46,6 +46,8 @@ const createCreditNote = async (data, actor) => {
         customerId: finalCustomerId,
         driverId: driverId || undefined,
         invoiceId: invoiceId || undefined,
+        invoices: invoices || (invoiceId ? [invoiceId] : []),
+        taxId: taxId || undefined,
         amount,
         reason,
         notes,
@@ -171,7 +173,10 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
     // Link invoice to Credit Note and CLOSE it (also bypass full-doc validation)
     const closedNote = await CreditNote.findByIdAndUpdate(
         id,
-        { $set: { invoiceId, status: 'CLOSED' } },
+        { 
+            $set: { invoiceId, status: 'CLOSED' },
+            $addToSet: { invoices: invoiceId }
+        },
         { new: true, runValidators: false }
     );
 
@@ -251,7 +256,12 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         .populate({
             path: 'invoiceId',
             select: 'invoiceNumber weekLabel totalAmountDue balance status'
-        });
+        })
+        .populate({
+            path: 'invoices',
+            select: 'invoiceNumber weekLabel totalAmountDue balance status'
+        })
+        .populate('taxId');
 
     return {
         data: items,
@@ -274,7 +284,12 @@ const getCreditNoteById = async (id) => {
             path: 'driverId',
             select: 'driverId personalInfo branch currentVehicle'
         })
-        .populate('invoiceId');
+        .populate('invoiceId')
+        .populate({
+            path: 'invoices',
+            select: 'invoiceNumber weekLabel totalAmountDue balance status'
+        })
+        .populate('taxId');
 };
 
 /**
@@ -336,6 +351,8 @@ const updateCreditNote = async (id, data) => {
     if (data.customerId) $set.customerId = data.customerId;
     // Allow unsetting invoiceId with null, or linking to a new one
     if (data.invoiceId !== undefined) $set.invoiceId = data.invoiceId || null;
+    if (data.invoices !== undefined) $set.invoices = data.invoices || [];
+    if (data.taxId !== undefined) $set.taxId = data.taxId || null;
     if (typeof data.amount === 'number' && data.amount > 0) $set.amount = data.amount;
 
     // If this was a DRAFT (migrated record), also promote it to OPEN
@@ -445,6 +462,19 @@ const bulkUploadCreditNotes = async (rows, actor) => {
         }
     }
 
+    const TaxModel = require("../../Tax/Model/TaxModel");
+    const taxesList = await TaxModel.find({ isDeleted: false });
+    const taxesByName = new Map();
+    const taxesByRate = new Map();
+    for (const t of taxesList) {
+        if (t.name) {
+            taxesByName.set(t.name.trim().toLowerCase(), t);
+        }
+        if (t.rate !== undefined && t.rate !== null) {
+            taxesByRate.set(t.rate, t);
+        }
+    }
+
     const getRowVal = (r, possibleKeys) => {
         for (const key of possibleKeys) {
             const cleanKey = key.replace(/^\ufeff/, '').trim().toLowerCase();
@@ -532,14 +562,7 @@ const bulkUploadCreditNotes = async (rows, actor) => {
         const cnNoVal = getRowVal(row, ["Credit Note Number", "creditNoteNumber", "CreditNotes ID", "creditNotesId"]);
         const key = (cnNoVal || "").toString().trim();
 
-        // Check if credit note already exists in DB
-        if (key && !key.startsWith("TEMP-")) {
-            const existingCN = await CreditNote.findOne({ creditNoteNumber: key });
-            if (existingCN) {
-                skipped.push(`Row ${origIdx}: Credit Note number "${key}" already exists. Skipping.`);
-                continue;
-            }
-        }
+
 
         // Resolve amount
         const amountVal = getRowVal(row, ["Total", "total", "Amount", "amount", "SubTotal", "subtotal", "Balance", "balance", "Item Total", "itemTotal"]);
@@ -593,23 +616,74 @@ const bulkUploadCreditNotes = async (rows, actor) => {
             notesList.push(`[Tax Details] ${taxParts.join(', ')}`);
         }
 
-        const finalNotes = notesList.join("\n");
+        // Resolve Tax Document
+        let taxDoc = null;
+        const taxNameVal = getRowVal(row, ["Item Tax", "itemTax", "taxName", "Tax1 ID", "tax1Id", "Tax ID", "taxId"]);
+        if (taxNameVal) {
+            const cleanTaxName = taxNameVal.toString().trim().toLowerCase();
+            taxDoc = taxesByName.get(cleanTaxName);
+        }
+        if (!taxDoc) {
+            if (taxRate !== undefined && taxRate !== null) {
+                const cleanTaxRate = parseFloat(taxRate);
+                if (!isNaN(cleanTaxRate)) {
+                    taxDoc = taxesByRate.get(cleanTaxRate);
+                }
+            }
+        }
 
         // Resolve Applied Invoice Numbers (comma separated)
         const rawInvNumbers = getRowVal(row, ["Applied Invoice Number", "appliedInvoiceNumber", "Invoice Number", "invoiceNumber"]) || "";
-        const invNumbers = rawInvNumbers.toString().split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        if (rawInvNumbers) {
+            notesList.push(`Applied Invoices: ${rawInvNumbers}`);
+        }
+
+        const finalNotes = notesList.join("\n");
+        const invNumbers = rawInvNumbers.toString().split(',').map(s => s.trim()).filter(Boolean);
+        const queryInvNumbers = Array.from(new Set(invNumbers.flatMap(num => {
+            const clean = num.replace(/\s+/g, '');
+            const rawDigits = num.replace(/\D/g, '');
+            const parsedIntStr = rawDigits ? parseInt(rawDigits, 10).toString() : '';
+            
+            return [
+                num,
+                num.toUpperCase(),
+                num.toLowerCase(),
+                clean,
+                clean.toUpperCase(),
+                clean.toLowerCase(),
+                rawDigits,
+                parsedIntStr,
+                `INV-${clean}`,
+                `INV-${rawDigits}`,
+                `INV-${parsedIntStr}`,
+                `INV-${String(rawDigits).padStart(6, '0')}`,
+                `INV-${String(parsedIntStr).padStart(6, '0')}`,
+                `INV- ${clean}`,
+                `INV- ${rawDigits}`
+            ].filter(Boolean);
+        })));
 
         let customerInvoices = [];
         if (invNumbers.length > 0) {
             const foundInvoices = await Invoice.find({
-                invoiceNumber: { $in: invNumbers },
+                invoiceNumber: { $in: queryInvNumbers },
                 isDeleted: false
             });
             // Filter to only this customer's invoices
             customerInvoices = foundInvoices.filter(inv => {
-                const invCustomerId = typeof inv.customer === 'object' ? inv.customer._id.toString() : inv.customer.toString();
+                if (!inv.customer) return false;
+                const invCustomerId = inv.customer._id 
+                    ? inv.customer._id.toString() 
+                    : inv.customer.toString();
                 return invCustomerId === customerDoc._id.toString();
             });
+
+            // Fallback: If no invoices matched this customer name specifically,
+            // but we found matching invoice numbers in the system, use them directly.
+            if (customerInvoices.length === 0 && foundInvoices.length > 0) {
+                customerInvoices = foundInvoices;
+            }
         }
 
         let remainingAmount = totalAmount;
@@ -620,41 +694,38 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                 ? key
                 : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-            const cnExists = await CreditNote.findOne({ creditNoteNumber });
-            if (cnExists) {
-                skipped.push(`Row ${origIdx}: Credit Note number "${creditNoteNumber}" already exists. Skipping.`);
-            } else {
-                const isClosed = customerInvoices.length > 0;
-                await CreditNote.create({
-                    creditNoteNumber,
-                    customerId: customerDoc._id,
-                    driverId: customerDoc.driver || undefined,
-                    invoiceId: isClosed ? customerInvoices[0]._id : undefined,
+            const isClosed = customerInvoices.length > 0;
+            await CreditNote.create({
+                creditNoteNumber,
+                customerId: customerDoc._id,
+                driverId: customerDoc.driver || undefined,
+                invoiceId: isClosed ? customerInvoices[0]._id : undefined,
+                invoices: isClosed ? customerInvoices.map(inv => inv._id) : [],
+                taxId: taxDoc ? taxDoc._id : undefined,
+                amount: 0,
+                reason,
+                notes: finalNotes,
+                creditNoteDate,
+                status: isClosed ? 'CLOSED' : 'OPEN',
+                createdBy: actor.id || actor._id,
+                creatorRole: actor.role
+            });
+
+            cnSegmentNumbers.push(creditNoteNumber);
+
+            if (isClosed) {
+                const invoice = customerInvoices[0];
+                const newPaymentEntry = {
                     amount: 0,
-                    reason,
-                    notes: finalNotes,
-                    creditNoteDate,
-                    status: isClosed ? 'CLOSED' : 'OPEN',
-                    createdBy: actor.id || actor._id,
-                    creatorRole: actor.role
-                });
-
-                cnSegmentNumbers.push(creditNoteNumber);
-
-                if (isClosed) {
-                    const invoice = customerInvoices[0];
-                    const newPaymentEntry = {
-                        amount: 0,
-                        paidAt: creditNoteDate,
-                        paymentMethod: "Prepayment Credit",
-                        note: `Credit Note Applied (${creditNoteNumber})`
-                    };
-                    await Invoice.findByIdAndUpdate(
-                        invoice._id,
-                        { $push: { payments: newPaymentEntry } },
-                        { runValidators: false }
-                    );
-                }
+                    paidAt: creditNoteDate,
+                    paymentMethod: "Prepayment Credit",
+                    note: `Credit Note Applied (${creditNoteNumber})`
+                };
+                await Invoice.findByIdAndUpdate(
+                    invoice._id,
+                    { $push: { payments: newPaymentEntry } },
+                    { runValidators: false }
+                );
             }
         } else {
             // Apply credit note sequentially across target invoices
@@ -670,13 +741,7 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                         ? (customerInvoices.length > 1 ? `${key}-${invoice.invoiceNumber}` : key)
                         : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-                    // Ensure unique segment check
-                    const segmentExists = await CreditNote.findOne({ creditNoteNumber });
-                    if (segmentExists) {
-                        skipped.push(`Row ${origIdx}: Credit Note segment "${creditNoteNumber}" already exists. Skipping segment.`);
-                        remainingAmount -= appliedAmount;
-                        continue;
-                    }
+
 
                     // Create CLOSED Credit Note document
                     await CreditNote.create({
@@ -684,6 +749,8 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                         customerId: customerDoc._id,
                         driverId: customerDoc.driver || undefined,
                         invoiceId: invoice._id,
+                        invoices: [invoice._id],
+                        taxId: taxDoc ? taxDoc._id : undefined,
                         amount: appliedAmount,
                         reason,
                         notes: finalNotes,
@@ -780,14 +847,13 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                 ? (cnSegmentNumbers.length > 0 ? `${key}-OPEN` : key)
                 : `CN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
-            const cnExists = await CreditNote.findOne({ creditNoteNumber });
-            if (cnExists) {
-                skipped.push(`Row ${origIdx}: Remaining credit note number "${creditNoteNumber}" already exists. Skipping.`);
-            } else {
+            {
                 await CreditNote.create({
                     creditNoteNumber,
                     customerId: customerDoc._id,
                     driverId: customerDoc.driver || undefined,
+                    invoices: customerInvoices.map(inv => inv._id),
+                    taxId: taxDoc ? taxDoc._id : undefined,
                     amount: remainingAmount,
                     reason,
                     notes: finalNotes,

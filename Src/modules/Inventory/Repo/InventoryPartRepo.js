@@ -283,11 +283,14 @@ exports.restockPart = async (partId, qty) => {
  */
 exports.getLowStockParts = async (branchId) => {
     try {
-        return await InventoryPart.find({
-            branchId,
+        const query = {
             isActive: true,
             $expr: { $lte: ["$quantityOnHand", "$reorderLevel"] },
-        })
+        };
+        if (branchId) {
+            query.branchId = branchId;
+        }
+        return await InventoryPart.find(query)
             .populate("supplierId", "name")
             .sort({ quantityOnHand: 1 });
     } catch (error) {
