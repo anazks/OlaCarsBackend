@@ -20,6 +20,12 @@ router.post("/",
     BillController.createBill
 );
 
+router.post("/bulk-upload", 
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission("BILL_CREATE"), 
+    BillController.bulkUploadBills
+);
+
 router.get("/", 
     hasPermission("BILL_VIEW"), 
     BillController.getAllBills

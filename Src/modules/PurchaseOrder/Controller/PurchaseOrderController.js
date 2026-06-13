@@ -10,6 +10,7 @@ const Branch = require("../../Branch/Model/BranchModel.js");
 const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
 const uploadToS3 = require("../../../utils/uploadToS3");
 const uploadLocal = require("../../../utils/uploadLocal");
+const PurchaseOrderService = require("../Service/PurchaseOrderService.js");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -707,6 +708,20 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
     }
 };
 
+const bulkUploadPurchaseOrders = async (req, res) => {
+    try {
+        const { rows } = req.body;
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+            return res.status(400).json({ success: false, message: "No data rows provided for bulk upload." });
+        }
+        const actor = { id: req.user.id || req.user._id, role: req.user.role };
+        const result = await PurchaseOrderService.bulkUploadPurchaseOrders(rows, actor, req.user.branchId);
+        return res.status(201).json({ success: true, message: "Bulk upload processed", data: result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
@@ -717,4 +732,5 @@ module.exports = {
     getEligiblePurchaseOrdersForBilling,
     uploadPODocument,
     auditPurchaseOrder,
+    bulkUploadPurchaseOrders,
 };

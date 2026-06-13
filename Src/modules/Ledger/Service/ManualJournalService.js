@@ -34,9 +34,27 @@ exports.createManualJournal = async (data) => {
     // 2. Create Ledger Entries for each line
     const ledgerEntries = [];
     for (const line of lines) {
+        // Sanitize optional fields to avoid mongoose BSON/ObjectId cast errors
+        const sanitizedLine = { ...line };
+        if (sanitizedLine.contact === "") {
+            delete sanitizedLine.contact;
+        }
+        if (sanitizedLine.transactionType === "") {
+            delete sanitizedLine.transactionType;
+        }
+        if (sanitizedLine.taxInfo) {
+            if (sanitizedLine.taxInfo.taxApplied === "") {
+                delete sanitizedLine.taxInfo;
+            } else {
+                sanitizedLine.taxInfo = {
+                    taxApplied: sanitizedLine.taxInfo.taxApplied
+                };
+            }
+        }
+
         const entry = await createLedgerEntry({
-            ...line,
-            description: line.description || journalData.description, // Ensure description is never empty
+            ...sanitizedLine,
+            description: sanitizedLine.description || journalData.description, // Ensure description is never empty
             manualJournal: journal._id,
             branch: journalData.branch,
             entryDate: journalData.date || new Date(),
