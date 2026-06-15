@@ -37,4 +37,22 @@ router.delete(
     BankAccountController.deleteBankAccount
 );
 
+router.delete(
+    "/:id/transactions",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.deleteAllTransactions
+);
+
+router.post(
+    "/:id/statement",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.uploadBankStatement
+);
+
+router.post(
+    "/:id/bulk-upload",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.bulkUploadTransactions
+);
+
 module.exports = router;

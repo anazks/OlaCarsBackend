@@ -65,7 +65,7 @@ const getLedgerEntries = async (req, res) => {
             .populate("transaction", "paymentMethod status transactionCategory transactionType")
             .populate("accountingCode", "code name category")
             .populate("contact", "name email")
-            .sort({ entryDate: -1 })
+            .sort({ entryDate: -1, _id: -1 })
             .skip(skip)
             .limit(limit);
 
