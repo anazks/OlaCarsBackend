@@ -33,7 +33,7 @@ async function main() {
                 contactName: "Test Supplier Bulk 1",
                 displayName: "Test Supplier Bulk 1",
                 email: "test_bulk_1@example.com",
-                accountsPayable: "Accounts Payable", // or code e.g. "2100"
+                accountsPayable: "Accounts Payable", // or code e.g. "2.1.01"
                 cfActiveDate: "2026-06-09"
             }
         ];

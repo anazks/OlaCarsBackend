@@ -8,6 +8,30 @@ const Supplier = require("../../Supplier/Model/SupplierModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const Tax = require("../../Tax/Model/TaxModel");
 
+const parsePaymentDate = (dateInput) => {
+    if (!dateInput) return new Date();
+    
+    let dateStr = typeof dateInput === 'string' ? dateInput : '';
+    if (dateStr) {
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            const year = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            const day = parseInt(match[3], 10);
+            
+            const hasZeroTime = !dateStr.includes('T') || /T00:00:00/.test(dateStr) || /T00:00:00.000Z/.test(dateStr);
+            if (hasZeroTime) {
+                const dateObj = new Date();
+                dateObj.setFullYear(year, month - 1, day);
+                return dateObj;
+            }
+        }
+    }
+    
+    const parsed = new Date(dateInput);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 exports.createBillFromPO = async (poId, userData, overrides = {}) => {
     console.log(`[BillService] Starting conversion for PO: ${poId}`);
     const po = await PurchaseOrder.findById(poId);
@@ -68,12 +92,12 @@ exports.createBillFromPO = async (poId, userData, overrides = {}) => {
 async function postBillToLedger(bill, userData) {
     const extractId = (val) => (val && val._id ? val._id : val);
     
-    // 1. Find the Accounts Payable account ID (assuming code 2100 exists)
+    // 1. Find the Accounts Payable account ID (assuming code 2.1.01 exists)
     const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-    const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
+    const apAccount = await AccountingCode.findOne({ code: "2.1.01", category: "LIABILITY" });
     
     if (!apAccount) {
-        console.error("[BillService] Accounts Payable account (2100) not found. Skipping ledger entry.");
+        console.error("[BillService] Accounts Payable account (2.1.01) not found. Skipping ledger entry.");
         return;
     }
 
@@ -127,6 +151,7 @@ exports.recordBillPayment = async (billId, paymentData, userData) => {
     const payment = new PaymentTransaction({
         ...paymentData,
         baseAmount: paymentData.totalAmount,
+        paymentDate: parsePaymentDate(paymentData.paymentDate),
         referenceId: billId,
         referenceModel: "Bill",
         transactionCategory: "EXPENSE",

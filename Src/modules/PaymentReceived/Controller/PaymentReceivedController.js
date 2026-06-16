@@ -1,8 +1,32 @@
 const PaymentReceived = require('../Model/PaymentReceivedModel');
 
+const parsePaymentDate = (dateInput) => {
+    if (!dateInput) return new Date();
+    
+    let dateStr = typeof dateInput === 'string' ? dateInput : '';
+    if (dateStr) {
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            const year = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            const day = parseInt(match[3], 10);
+            
+            const hasZeroTime = !dateStr.includes('T') || /T00:00:00/.test(dateStr) || /T00:00:00.000Z/.test(dateStr);
+            if (hasZeroTime) {
+                const dateObj = new Date();
+                dateObj.setFullYear(year, month - 1, day);
+                return dateObj;
+            }
+        }
+    }
+    
+    const parsed = new Date(dateInput);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 exports.createPaymentReceived = async (req, res) => {
     try {
-        const { driverId, customerId, amountReceived, paymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
+        const { driverId, customerId, amountReceived, paymentDate: rawPaymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
 
         let finalCustomerId = customerId;
         if (!finalCustomerId && driverId) {
@@ -17,6 +41,7 @@ exports.createPaymentReceived = async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing required fields: customerId (or driverId resolving to a customer), amountReceived, depositedTo are required." });
         }
 
+        const paymentDate = parsePaymentDate(rawPaymentDate);
         const mongoose = require('mongoose');
 
         // 1. Generate sequential PR number
@@ -29,7 +54,7 @@ exports.createPaymentReceived = async (req, res) => {
             customerId: finalCustomerId,
             driverId: driverId || undefined,
             amountReceived,
-            paymentDate: paymentDate || new Date(),
+            paymentDate,
             paymentMethod: paymentMethod || "Cash",
             referenceNumber,
             notes,
@@ -59,7 +84,7 @@ exports.createPaymentReceived = async (req, res) => {
                     // Add payment item to payments array
                     invoice.payments.push({
                         amount: inv.amountApplied,
-                        paidAt: paymentDate || new Date(),
+                        paidAt: paymentDate,
                         paymentMethod: paymentMethod || "Cash",
                         note: notes || `Payment received (PR: ${paymentNumber})`
                     });
@@ -127,7 +152,7 @@ exports.createPaymentReceived = async (req, res) => {
             totalAmount: amountReceived,
             paymentMethod: "CASH",
             status: "COMPLETED",
-            paymentDate: paymentDate || new Date(),
+            paymentDate: paymentDate,
             notes: notes || `Payment received from Customer (PR: ${paymentNumber})`,
             branch,
             createdBy: creatorId,

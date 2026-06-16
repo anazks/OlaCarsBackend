@@ -18,11 +18,13 @@ const getLedgerEntries = async (req, res) => {
 
         if (req.query.startDate || req.query.endDate) {
             query.entryDate = {};
-            if (req.query.startDate) query.entryDate.$gte = new Date(req.query.startDate);
+            if (req.query.startDate) {
+                const startStr = req.query.startDate.includes("T") ? req.query.startDate : `${req.query.startDate}T00:00:00.000Z`;
+                query.entryDate.$gte = new Date(startStr);
+            }
             if (req.query.endDate) {
-                const end = new Date(req.query.endDate);
-                end.setHours(23, 59, 59, 999);
-                query.entryDate.$lte = end;
+                const endStr = req.query.endDate.includes("T") ? req.query.endDate : `${req.query.endDate}T23:59:59.999Z`;
+                query.entryDate.$lte = new Date(endStr);
             }
         }
 

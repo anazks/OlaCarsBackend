@@ -20,7 +20,7 @@ async function seedCodes() {
         { code: "4040", name: "Spare Parts Sales", category: "INCOME" },
         { code: "1100", name: "Cash on Hand", category: "ASSET" },
         { code: "1110", name: "Bank Balance", category: "ASSET" },
-        { code: "2100", name: "Accounts Payable", category: "LIABILITY" },
+        { code: "2.1.01", name: "Accounts Payable", category: "LIABILITY" },
         { code: "5100", name: "Workshop Operating Expense", category: "EXPENSE" }
     ];
 
