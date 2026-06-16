@@ -221,7 +221,9 @@ exports.recordManualPayment = async (req, res, next) => {
             description,
             currency,
             fromAccountId,
-            branchId
+            branchId,
+            customerId,
+            invoiceId
         } = req.body;
 
         if (!amount) {
@@ -257,6 +259,8 @@ exports.recordManualPayment = async (req, res, next) => {
             fromAccountId,
             branchId,
             supportingDocument,
+            customerId,
+            invoiceId,
             userId: req.user?._id || req.user?.id,
             userRole: req.user?.role
         });

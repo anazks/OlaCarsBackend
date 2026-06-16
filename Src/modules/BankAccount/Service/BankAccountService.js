@@ -364,7 +364,9 @@ const recordManualPayment = async (targetId, data) => {
         branchId,
         supportingDocument,
         userId,
-        userRole
+        userRole,
+        customerId,
+        invoiceId
     } = data;
 
     const targetAccount = await BankAccount.findOne({ _id: targetId, isDeleted: false });
@@ -404,9 +406,38 @@ const recordManualPayment = async (targetId, data) => {
         }
     }
 
+    // Resolve credit accounting code and load invoice if provided
+    let creditAccountingCode = fromAccount.accountingCode;
+    let invoiceDoc = null;
+
+    if (invoiceId) {
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        invoiceDoc = await Invoice.findOne({ _id: invoiceId, isDeleted: false });
+        if (invoiceDoc) {
+            const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
+                || await AccountingCode.findOne({ code: "1100" })
+                || await AccountingCode.findOne({ code: "1200" });
+            if (arAccount) {
+                creditAccountingCode = arAccount._id;
+            }
+        }
+    }
+
     const journalPayload = {
         description: description || `Manual Payment via ${paymentMode}`,
-        date: depositDate ? new Date(depositDate) : new Date(),
+        date: (() => {
+            if (!depositDate) return new Date();
+            const dateParts = String(depositDate).split("-");
+            if (dateParts.length === 3) {
+                const year = parseInt(dateParts[0], 10);
+                const month = parseInt(dateParts[1], 10) - 1;
+                const day = parseInt(dateParts[2], 10);
+                const d = new Date();
+                d.setFullYear(year, month, day);
+                return d;
+            }
+            return new Date(depositDate);
+        })(),
         branch: finalBranchId,
         paymentMode,
         currency: currency || "USD",
@@ -417,13 +448,15 @@ const recordManualPayment = async (targetId, data) => {
                 accountingCode: targetAccount.accountingCode,
                 type: "DEBIT",
                 amount: numericAmount,
-                description: description || `Manual Payment Received - Mode: ${paymentMode}`
+                description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
+                contact: customerId || undefined
             },
             {
-                accountingCode: fromAccount.accountingCode,
+                accountingCode: creditAccountingCode,
                 type: "CREDIT",
                 amount: numericAmount,
-                description: description || `Manual Payment Sent - Mode: ${paymentMode}`
+                description: description || `Manual Payment Sent - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
+                contact: customerId || undefined
             }
         ],
         createdBy: userId,
@@ -431,6 +464,95 @@ const recordManualPayment = async (targetId, data) => {
     };
 
     const result = await ManualJournalService.createManualJournal(journalPayload);
+
+    // Apply the payment to the Invoice if one is selected
+    if (invoiceDoc && invoiceDoc.status !== "PAID") {
+        const timestamp = new Date();
+        let newPaid = (invoiceDoc.amountPaid || 0) + numericAmount;
+        let newBalance = Math.max(0, invoiceDoc.totalAmountDue - newPaid);
+        let newStatus = "PENDING";
+        
+        let excessAmount = 0;
+        if (newPaid > invoiceDoc.totalAmountDue) {
+            excessAmount = newPaid - invoiceDoc.totalAmountDue;
+            newPaid = invoiceDoc.totalAmountDue;
+            newBalance = 0;
+        }
+        
+        if (newBalance <= 0) newStatus = "PAID";
+        else if (newPaid > 0) newStatus = "PARTIAL";
+        
+        const paymentRecord = {
+            amount: numericAmount - excessAmount,
+            paidAt: timestamp,
+            paymentMethod: paymentMode || "Cash",
+            transactionId: result.journal?.journalNumber || undefined,
+            note: description || `Payment reflected via manual payment record`,
+        };
+        
+        invoiceDoc.amountPaid = newPaid;
+        invoiceDoc.balance = newBalance;
+        invoiceDoc.status = newStatus;
+        invoiceDoc.payments.push(paymentRecord);
+        if (newStatus === "PAID" && !invoiceDoc.paidAt) {
+            invoiceDoc.paidAt = timestamp;
+        }
+        await invoiceDoc.save();
+
+        // Sync with Service Bill if it's workshop
+        if (invoiceDoc.invoiceType === 'WORKSHOP' && invoiceDoc.serviceBill) {
+            try {
+                const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+                const bill = await ServiceBill.findById(invoiceDoc.serviceBill);
+                if (bill) {
+                    const billAmount = numericAmount - excessAmount;
+                    const newBillAmountPaid = (bill.amountPaid || 0) + billAmount;
+                    const newBillPaymentStatus = newBillAmountPaid >= bill.totalAmount - 0.01 ? "PAID" : "PARTIAL";
+                    const newBillStatus = newBillPaymentStatus === "PAID" ? "PAID" : bill.status;
+                    
+                    await ServiceBill.findByIdAndUpdate(bill._id, {
+                        $inc: { amountPaid: billAmount },
+                        $push: {
+                            payments: {
+                                amount: billAmount,
+                                paidAt: timestamp,
+                                paymentMethod: paymentMode || "Cash",
+                                paymentReference: result.journal?.journalNumber,
+                                notes: description || `Payment synced from Invoice ${invoiceDoc.invoiceNumber}`,
+                                recordedBy: userId
+                            }
+                        },
+                        $set: {
+                            paymentStatus: newBillPaymentStatus,
+                            status: newBillStatus,
+                            paidAt: newBillPaymentStatus === "PAID" ? timestamp : bill.paidAt
+                        }
+                    });
+                }
+            } catch (billErr) {
+                console.error("Failed to sync bill for invoice payment:", billErr);
+            }
+        }
+
+        // Run sync, excess application and rollover calculations
+        try {
+            const InvoiceService = require("../../Invoice/Service/InvoiceService");
+            await InvoiceService.syncInvoiceToAdditionalPayments(invoiceDoc);
+            await InvoiceService.rolloverCustomerInvoices(invoiceDoc.customer);
+            
+            // Handle excess if any
+            if (excessAmount > 0) {
+                await InvoiceService.applyExcessToNextInvoice(invoiceDoc.customer, excessAmount, {
+                    paymentMethod: paymentMode || "Cash",
+                    transactionId: result.journal?.journalNumber || undefined,
+                    createdBy: userId,
+                    creatorRole: finalRole
+                });
+            }
+        } catch (syncErr) {
+            console.error("Failed to run sync and rollover services for invoice:", syncErr);
+        }
+    }
 
     // Update target balance (DEBIT: increases Asset balance, decreases Liability balance)
     let targetBalanceChange = 0;
