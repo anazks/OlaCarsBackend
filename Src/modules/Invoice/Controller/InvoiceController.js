@@ -9,7 +9,8 @@ exports.getInvoices = async (req, res) => {
             success: true, 
             message: "Invoices retrieved successfully", 
             data: result.data,
-            pagination: result.pagination
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -23,7 +24,8 @@ exports.getRegistryInvoices = async (req, res) => {
         return res.status(200).json({ 
             success: true, 
             data: result.data,
-            pagination: result.pagination
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

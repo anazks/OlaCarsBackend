@@ -18,7 +18,7 @@ exports.getAllBills = async (query = {}) => {
         .populate("supplier", "name")
         .populate("branch", "name")
         .populate("taxId")
-        .sort({ createdAt: 1 });
+        .sort({ billDate: -1, createdAt: -1 });
 };
 
 exports.updateBill = async (id, data) => {
