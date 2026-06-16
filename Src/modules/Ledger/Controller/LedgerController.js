@@ -151,9 +151,51 @@ const importLedgerEntries = async (req, res) => {
     }
 };
 
+const deleteLedgerJournal = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the ledger entry ID
+        const ManualJournal = require("../Model/ManualJournalModel");
+
+        // Find the ledger entry to get its manualJournal reference
+        const entry = await LedgerEntry.findById(id);
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        if (!entry.manualJournal) {
+            // No parent journal — only delete this single entry
+            await LedgerEntry.deleteOne({ _id: id });
+            return res.status(200).json({
+                success: true,
+                message: "Ledger entry deleted (no parent journal)",
+                deletedEntries: 1,
+                deletedJournals: 0
+            });
+        }
+
+        const journalId = entry.manualJournal;
+
+        // Delete ALL ledger entries for this journal (both DEBIT + CREDIT sides)
+        const delEntries = await LedgerEntry.deleteMany({ manualJournal: journalId });
+
+        // Delete the ManualJournal header
+        await ManualJournal.deleteOne({ _id: journalId });
+
+        return res.status(200).json({
+            success: true,
+            message: `Deleted journal and ${delEntries.deletedCount} ledger entries`,
+            deletedEntries: delEntries.deletedCount,
+            deletedJournals: 1
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
     importLedgerEntries,
+    deleteLedgerJournal,
 };
 

@@ -111,6 +111,36 @@ exports.deleteAllTransactions = async (req, res, next) => {
     }
 };
 
+exports.importStatement = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { branchId, transactions } = req.body;
+
+        if (!branchId) {
+            return res.status(400).json({ success: false, message: "Branch ID is required" });
+        }
+        if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
+            return res.status(400).json({ success: false, message: "Transactions array is required and cannot be empty" });
+        }
+
+        const result = await BankAccountService.importStatement(id, {
+            branchId,
+            transactions,
+            userId: req.user?._id || req.user?.id,
+            userRole: req.user?.role
+        });
+
+        res.status(200).json({
+            success: true,
+            message: `Successfully imported ${result.importedCount} transactions.`,
+            data: result
+        });
+    } catch (error) {
+        console.error("Bank statement import error:", error);
+        next(error);
+    }
+};
+
 exports.uploadBankStatement = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -177,6 +207,67 @@ exports.uploadBankStatement = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in uploadBankStatement controller:", error);
+        next(error);
+    }
+};
+
+exports.recordManualPayment = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const {
+            amount,
+            depositDate,
+            paymentMode,
+            description,
+            currency,
+            fromAccountId,
+            branchId
+        } = req.body;
+
+        if (!amount) {
+            return res.status(400).json({ success: false, message: "Amount is required" });
+        }
+        if (!depositDate) {
+            return res.status(400).json({ success: false, message: "Deposit Date is required" });
+        }
+        if (!paymentMode) {
+            return res.status(400).json({ success: false, message: "Payment Mode is required" });
+        }
+        if (!fromAccountId) {
+            return res.status(400).json({ success: false, message: "From Account is required" });
+        }
+
+        const uploadLocal = require("../../../utils/uploadLocal");
+        let supportingDocument;
+        if (req.file) {
+            const fileUrl = uploadLocal(req.file, "manual-payments");
+            supportingDocument = {
+                name: req.file.originalname,
+                url: fileUrl,
+                uploadedAt: new Date()
+            };
+        }
+
+        const result = await BankAccountService.recordManualPayment(id, {
+            amount: Number(amount),
+            depositDate,
+            paymentMode,
+            description,
+            currency,
+            fromAccountId,
+            branchId,
+            supportingDocument,
+            userId: req.user?._id || req.user?.id,
+            userRole: req.user?.role
+        });
+
+        res.status(200).json({
+            success: true,
+            message: "Manual payment recorded successfully",
+            data: result
+        });
+    } catch (error) {
+        console.error("Record manual payment error:", error);
         next(error);
     }
 };
@@ -252,12 +343,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             // 3. Match from the user's specific transaction types
             if (!resolvedType) {
                 const creditTypes = [
-                    "CREDIT", 
-                    "EXPENSE", 
-                    "VENDOR PAYMENT", 
-                    "TRANSFER FUND", 
-                    "PAYMENT REFUND", 
-                    "SALES RETURN", 
+                    "CREDIT",
+                    "EXPENSE",
+                    "VENDOR PAYMENT",
+                    "TRANSFER FUND",
+                    "PAYMENT REFUND",
+                    "SALES RETURN",
                     "WITHDRAWAL"
                 ];
                 if (creditTypes.includes(typeVal)) {

@@ -92,6 +92,11 @@ const billSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+billSchema.index({ createdAt: -1 });
+billSchema.index({ status: 1 });
+billSchema.index({ supplier: 1 });
+billSchema.index({ branch: 1 });
+
 // Middleware to update balanceDue and calculate inclusive tax amount before saving
 billSchema.pre("save", async function () {
     this.balanceDue = this.totalAmount - this.amountPaid;

@@ -5,6 +5,8 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
 
+const upload = require("../../../utils/multerConfig");
+
 router.use(authenticate);
 
 router.post(
@@ -31,28 +33,40 @@ router.put(
     BankAccountController.updateBankAccount
 );
 
-router.delete(
-    "/:id",
-    authorize(ROLES.ADMIN),
-    BankAccountController.deleteBankAccount
-);
-
+// Delete all transactions (specific sub-route before the general /:id)
 router.delete(
     "/:id/transactions",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
     BankAccountController.deleteAllTransactions
 );
 
+// Delete bank account
+router.delete(
+    "/:id",
+    authorize(ROLES.ADMIN),
+    BankAccountController.deleteBankAccount
+);
+
+// Upload statement
 router.post(
     "/:id/statement",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
-    BankAccountController.uploadBankStatement
+    BankAccountController.importStatement
 );
 
+// Bulk upload transactions
 router.post(
     "/:id/bulk-upload",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
     BankAccountController.bulkUploadTransactions
+);
+
+// Record manual payment
+router.post(
+    "/:id/manual-payment",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    upload.single("supportingDocument"),
+    BankAccountController.recordManualPayment
 );
 
 module.exports = router;

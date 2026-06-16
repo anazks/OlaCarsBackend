@@ -46,6 +46,25 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
 
+    const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
+
+    if (queryParams.month || queryParams.year) {
+        const now = new Date();
+        const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
+        if (queryParams.month) {
+            const m = parseInt(queryParams.month) - 1;
+            query.generatedAt = {
+                $gte: new Date(y, m, 1, 0, 0, 0, 0),
+                $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
+            };
+        } else {
+            query.generatedAt = {
+                $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+                $lte: new Date(y, 11, 31, 23, 59, 59, 999)
+            };
+        }
+    }
+
     if (queryParams.search) {
         // Simple search by invoice number if searching
         query.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
@@ -53,6 +72,96 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
     const totalCount = await Invoice.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
+
+    // Calculate metrics (matching filters but without skip/limit pagination)
+    const metricsQuery = { ...baseQuery };
+    if (queryParams.driver && mongoose.Types.ObjectId.isValid(queryParams.driver)) {
+        metricsQuery.driver = new mongoose.Types.ObjectId(queryParams.driver);
+    }
+    if (queryParams.customer && mongoose.Types.ObjectId.isValid(queryParams.customer)) {
+        metricsQuery.customer = new mongoose.Types.ObjectId(queryParams.customer);
+    }
+    if (queryParams.vehicle && mongoose.Types.ObjectId.isValid(queryParams.vehicle)) {
+        metricsQuery.vehicle = new mongoose.Types.ObjectId(queryParams.vehicle);
+    }
+    if (queryParams.status && queryParams.status !== 'ALL') metricsQuery.status = queryParams.status;
+    if (queryParams.weekNumber) metricsQuery.weekNumber = queryParams.weekNumber;
+    if (queryParams.invoiceType) {
+        if (queryParams.invoiceType === 'RENTAL') {
+            metricsQuery.invoiceType = { $in: ['RENTAL', null, undefined] };
+        } else {
+            metricsQuery.invoiceType = queryParams.invoiceType;
+        }
+    }
+    if (queryParams.search) {
+        metricsQuery.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
+    }
+
+    if (hasDateFilter) {
+        if (queryParams.startDate || queryParams.endDate) {
+            metricsQuery.dueDate = {};
+            if (queryParams.startDate) metricsQuery.dueDate.$gte = new Date(queryParams.startDate);
+            if (queryParams.endDate) {
+                const end = new Date(queryParams.endDate);
+                end.setHours(23, 59, 59, 999);
+                metricsQuery.dueDate.$lte = end;
+            }
+        }
+        if (queryParams.month || queryParams.year) {
+            const now = new Date();
+            const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
+            if (queryParams.month) {
+                const m = parseInt(queryParams.month) - 1;
+                metricsQuery.generatedAt = {
+                    $gte: new Date(y, m, 1, 0, 0, 0, 0),
+                    $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
+                };
+            } else {
+                metricsQuery.generatedAt = {
+                    $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+                    $lte: new Date(y, 11, 31, 23, 59, 59, 999)
+                };
+            }
+        }
+    } else {
+        // Default to last 30 days of generatedAt
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        thirtyDaysAgo.setHours(0, 0, 0, 0);
+        metricsQuery.generatedAt = { $gte: thirtyDaysAgo };
+    }
+
+    console.log('[InvoiceRepo] metricsQuery:', JSON.stringify(metricsQuery));
+    const allCount = await Invoice.countDocuments({ isDeleted: false });
+    const matchCount = await Invoice.countDocuments(metricsQuery);
+    console.log(`[InvoiceRepo] Total active invoices in DB: ${allCount}, Matched for stats: ${matchCount}`);
+
+    const sampleInvoices = await Invoice.find({ isDeleted: false }).limit(3).select('invoiceNumber generatedAt dueDate').lean();
+    console.log('[InvoiceRepo] Sample invoices in DB:', sampleInvoices);
+
+    const stats = await Invoice.aggregate([
+        { $match: metricsQuery },
+        {
+            $group: {
+                _id: null,
+                totalGrossBilled: { $sum: "$totalAmountDue" },
+                totalNetSettled: { $sum: "$amountPaid" },
+                totalCurrentBalance: { $sum: "$balance" }
+            }
+        }
+    ]);
+
+    const metrics = (stats && stats.length > 0) ? {
+        totalGrossBilled: stats[0].totalGrossBilled || 0,
+        totalNetSettled: stats[0].totalNetSettled || 0,
+        totalCurrentBalance: stats[0].totalCurrentBalance || 0,
+        isFilteredPeriod: hasDateFilter
+    } : {
+        totalGrossBilled: 0,
+        totalNetSettled: 0,
+        totalCurrentBalance: 0,
+        isFilteredPeriod: hasDateFilter
+    };
 
     // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to workshop/weekNumber sorting
     let sortOpt = options.defaultSort;
@@ -100,6 +209,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
             currentPage: page,
             limit,
         },
+        metrics
     };
 };
 
