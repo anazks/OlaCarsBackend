@@ -10,6 +10,7 @@ const {
     getEligiblePurchaseOrdersForBilling,
     uploadPODocument,
     auditPurchaseOrder,
+    bulkUploadPurchaseOrders,
 } = require("../Controller/PurchaseOrderController.js");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -221,6 +222,14 @@ const upload = require("../../../utils/multerConfig.js");
  *       201:
  *         description: PO created successfully
  */
+router.post(
+    "/bulk-upload",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER),
+    hasPermission("PURCHASE_ORDER_CREATE"),
+    bulkUploadPurchaseOrders
+);
+
 router.post(
     "/",
     authenticate,

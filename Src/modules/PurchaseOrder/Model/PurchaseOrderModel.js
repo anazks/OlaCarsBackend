@@ -59,6 +59,9 @@ const purchaseOrderSchema = new mongoose.Schema(
         approvalNote: {
             type: String,
         },
+        description: {
+            type: String,
+        },
         purchaseOrderDate: {
             type: Date,
             default: Date.now,

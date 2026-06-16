@@ -84,3 +84,17 @@ exports.createBill = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.bulkUploadBills = async (req, res, next) => {
+    try {
+        const rows = req.body.rows || req.body;
+        const actor = { id: req.user._id || req.user.id, role: req.user.role };
+        const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId);
+        res.status(200).json({
+            success: true,
+            data: result
+        });
+    } catch (error) {
+        next(error);
+    }
+};

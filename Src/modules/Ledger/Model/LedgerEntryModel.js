@@ -77,6 +77,10 @@ const ledgerEntrySchema = new mongoose.Schema(
             required: true,
             enum: Object.values(ROLES),
         },
+        runningBalance: {
+            type: Number,
+            required: false,
+        },
     },
     { timestamps: true }
 );

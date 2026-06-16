@@ -1,9 +1,17 @@
 const express = require("express");
 const router = express.Router();
-const { getGpsVehicles, getGpsLocations, getDeviceLiveStreamingUrl, getDeviceMediaEventUrl } = require("../Controller/GpsController");
+const { getGpsVehicles, getGpsLocations,GpsController, getDeviceLiveStreamingUrl, getDeviceMediaEventUrl } = require("../Controller/GpsController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
+
+const ALLOWED_ROLES = [
+    ROLES.ADMIN, 
+    ROLES.FINANCEADMIN, 
+    ROLES.OPERATIONADMIN, 
+    ROLES.COUNTRYMANAGER, 
+    ROLES.BRANCHMANAGER
+];
 
 /**
  * @swagger
@@ -15,6 +23,9 @@ const { ROLES } = require("../../../shared/constants/roles");
  *       - bearerAuth: []
  *     responses:
  *       200:
+ *         description: List of GPS vehicles
+ */
+router.get("/vehicles", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsVehicles);
  *         description: List of GPS vehicles retrieved successfully
  *       401:
  *         description: Unauthorized access token
@@ -27,6 +38,7 @@ router.get("/vehicles", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADMIN)
  * @swagger
  * /api/gps/locations:
  *   get:
+ *     summary: Retrieve GPS locations
  *     summary: Retrieve real-time positions for given or all GPS vehicles
  *     tags: [GPS]
  *     security:
@@ -36,6 +48,11 @@ router.get("/vehicles", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADMIN)
  *         name: imeis
  *         schema:
  *           type: string
+ *     responses:
+ *       200:
+ *         description: List of GPS locations
+ */
+router.get("/locations", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsLocations);
  *         description: Comma-separated list of device IMEIs
  *     responses:
  *       200:
@@ -47,6 +64,7 @@ router.get("/locations", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADMIN
  * @swagger
  * /api/gps/live-stream:
  *   get:
+ *     summary: Retrieve Live Stream URL
  *     summary: Retrieve live streaming page URL for a GPS device
  *     tags: [GPS]
  *     security:
@@ -54,6 +72,13 @@ router.get("/locations", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADMIN
  *     parameters:
  *       - in: query
  *         name: imei
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Live stream url
+ */
+router.get("/live-stream", authenticate, authorize(...ALLOWED_ROLES), GpsController.getDeviceLiveStream);
  *         required: true
  *         schema:
  *           type: string
@@ -74,6 +99,7 @@ router.get("/live-stream", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADM
  * @swagger
  * /api/gps/media-event:
  *   get:
+ *     summary: Retrieve Media Event URL
  *     summary: Retrieve media event page URL for a GPS device
  *     tags: [GPS]
  *     security:
@@ -81,6 +107,13 @@ router.get("/live-stream", authenticate, authorize(ROLES.ADMIN, ROLES.FINANCEADM
  *     parameters:
  *       - in: query
  *         name: imei
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Media Event URL
+ */
+router.get("/media-event", authenticate, authorize(...ALLOWED_ROLES), GpsController.getDeviceMediaEvent);
  *         required: true
  *         schema:
  *           type: string

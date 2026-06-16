@@ -15,7 +15,7 @@ const billSchema = new mongoose.Schema(
         supplier: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Supplier",
-            required: true,
+            required: false,
         },
         customer: {
             type: mongoose.Schema.Types.ObjectId,
@@ -59,6 +59,23 @@ const billSchema = new mongoose.Schema(
             enum: ["DRAFT", "OPEN", "PARTIALLY_PAID", "PAID", "VOID"],
             default: "OPEN",
         },
+        isInclusiveTax: {
+            type: Boolean,
+            default: false,
+        },
+        taxId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Tax",
+            required: false,
+        },
+        taxPercentage: {
+            type: Number,
+            default: 0,
+        },
+        taxAmount: {
+            type: Number,
+            default: 0,
+        },
         notes: {
             type: String,
         },
@@ -75,13 +92,24 @@ const billSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Middleware to update balanceDue before saving
+billSchema.index({ createdAt: -1 });
+billSchema.index({ status: 1 });
+billSchema.index({ supplier: 1 });
+billSchema.index({ branch: 1 });
+
+// Middleware to update balanceDue and calculate inclusive tax amount before saving
 billSchema.pre("save", async function () {
     this.balanceDue = this.totalAmount - this.amountPaid;
     if (this.balanceDue <= 0 && this.totalAmount > 0) {
         this.status = "PAID";
     } else if (this.amountPaid > 0 && this.balanceDue > 0) {
         this.status = "PARTIALLY_PAID";
+    }
+
+    if (this.isInclusiveTax && this.taxPercentage > 0) {
+        this.taxAmount = Number((this.totalAmount - (this.totalAmount / (1 + (this.taxPercentage / 100)))).toFixed(4));
+    } else {
+        this.taxAmount = 0;
     }
 });
 

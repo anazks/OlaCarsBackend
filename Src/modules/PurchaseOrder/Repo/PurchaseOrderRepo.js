@@ -32,6 +32,7 @@ exports.getPurchaseOrdersService = async (queryParams = {}, options = {}) => {
                 { path: "supplier", select: "name contactPerson email" }
             ],
             dateFilterField: "createdAt",
+            defaultSort: { createdAt: 1 },
             ...options
         };
 

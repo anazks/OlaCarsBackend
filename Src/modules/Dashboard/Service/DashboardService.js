@@ -5,6 +5,8 @@ const { Alert } = require("../../Alert/Model/AlertModel");
 const Branch = require("../../Branch/Model/BranchModel");
 const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 const moment = require("moment");
+const Bill = require("../../Bill/Model/BillModel");
+
 
 const getBranchIds = async (country, branchId) => {
     let ids = null;
@@ -77,7 +79,38 @@ exports.getSummaryStats = async (filters) => {
         outstandingCollections += (i.balance || 0);
     });
 
+    // Calculate Total Payables from Bills (all outstanding bills from the database)
+    const billMatch = { status: { $nin: ["PAID", "VOID"] } };
+
+    const currentBills = await Bill.find(billMatch);
+    let totalPayables = 0;
+    currentBills.forEach(b => {
+        totalPayables += (b.balanceDue || 0);
+    });
+
+    // Calculate Last Month's Balance Due from Bills (all outstanding bills up to lastMonthEndDate)
+    let lastMonthStartDate, lastMonthEndDate;
+    if (endDate) {
+        lastMonthStartDate = moment(endDate).subtract(1, 'month').startOf('month').toDate();
+        lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
+    } else {
+        lastMonthStartDate = moment().subtract(1, 'month').startOf('month').toDate();
+        lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
+    }
+
+    const lastMonthBillMatch = {
+        status: { $nin: ["PAID", "VOID"] },
+        billDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
+    };
+
+    const lastMonthBills = await Bill.find(lastMonthBillMatch);
+    let lastMonthBalanceDue = 0;
+    lastMonthBills.forEach(b => {
+        lastMonthBalanceDue += (b.balanceDue || 0);
+    });
+
     const collectionCompliance = 94; // Fixed standard compliance if revenue can't be linked directly to invoice totals.
+
 
     // Alert Counts
     const alertGrouping = await Alert.aggregate([
@@ -149,7 +182,9 @@ exports.getSummaryStats = async (filters) => {
             activeDrivers,
             collectionCompliance,
             last12MonthsRevenue: realLast12MonthsRevenue,
-            outstandingBalance: outstandingCollections
+            outstandingBalance: outstandingCollections,
+            totalPayables,
+            lastMonthBalanceDue
         },
         alerts,
         fleetStatus,

@@ -9,6 +9,7 @@ exports.getBillById = async (id) => {
         .populate("supplier")
         .populate("branch")
         .populate("purchaseOrder")
+        .populate("taxId")
         .populate("items.accountId");
 };
 
@@ -16,7 +17,8 @@ exports.getAllBills = async (query = {}) => {
     return await Bill.find(query)
         .populate("supplier", "name")
         .populate("branch", "name")
-        .sort({ createdAt: -1 });
+        .populate("taxId")
+        .sort({ billDate: -1, createdAt: -1 });
 };
 
 exports.updateBill = async (id, data) => {

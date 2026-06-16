@@ -239,6 +239,8 @@ app.use("/api/payments-made", PaymentMadeRouter);
 app.use("/api/vendor-credits", VendorCreditRouter);
 app.use("/api/bills", BillRouter);
 app.use("/api/fixed-assets", FixedAssetRouter);
+app.use("/api/gps", GpsRouter);
+
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
