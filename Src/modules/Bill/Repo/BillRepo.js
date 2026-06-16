@@ -21,6 +21,30 @@ exports.getAllBills = async (query = {}) => {
         .sort({ billDate: -1, createdAt: -1 });
 };
 
+exports.getAllBillsPaginated = async (query = {}, page = 1, limit = 10) => {
+    const skip = (page - 1) * limit;
+    const totalItems = await Bill.countDocuments(query);
+    const totalPages = Math.ceil(totalItems / limit);
+    
+    const data = await Bill.find(query)
+        .populate("supplier", "name")
+        .populate("branch", "name")
+        .populate("taxId")
+        .sort({ billDate: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+        
+    return {
+        data,
+        pagination: {
+            totalItems,
+            totalPages,
+            currentPage: page,
+            limit
+        }
+    };
+};
+
 exports.updateBill = async (id, data) => {
     return await Bill.findByIdAndUpdate(id, data, { new: true, runValidators: true });
 };

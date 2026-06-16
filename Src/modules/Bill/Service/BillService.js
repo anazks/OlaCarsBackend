@@ -129,10 +129,132 @@ async function postBillToLedger(bill, userData) {
 }
 
 exports.getAllBills = async (query = {}) => {
-    const cleanedQuery = { ...query };
-    delete cleanedQuery.limit;
-    delete cleanedQuery.page;
-    return await BillRepo.getAllBills(cleanedQuery);
+    const page = parseInt(query.page, 10);
+    const limit = parseInt(query.limit, 10);
+
+    const mongooseQuery = {};
+
+    // 1. Status Filter
+    if (query.status && query.status !== 'ALL') {
+        mongooseQuery.status = query.status;
+    }
+
+    // 2. Branch Filter
+    if (query.branch && query.branch !== 'all') {
+        mongooseQuery.branch = query.branch;
+    }
+
+    // 3. Supplier Filter
+    if (query.supplier) {
+        mongooseQuery.supplier = query.supplier;
+    }
+
+    // 4. Date Range Filters (billDate)
+    if (query.fromDate || query.toDate) {
+        mongooseQuery.billDate = {};
+        if (query.fromDate) {
+            mongooseQuery.billDate.$gte = new Date(query.fromDate + 'T00:00:00.000Z');
+        }
+        if (query.toDate) {
+            mongooseQuery.billDate.$lte = new Date(query.toDate + 'T23:59:59.999Z');
+        }
+    }
+
+    // 5. Month & Year Filters
+    if (query.month || query.year) {
+        const now = new Date();
+        const y = query.year ? parseInt(query.year, 10) : now.getFullYear();
+        if (query.month) {
+            const m = parseInt(query.month, 10) - 1;
+            mongooseQuery.billDate = {
+                $gte: new Date(Date.UTC(y, m, 1, 0, 0, 0, 0)),
+                $lte: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999))
+            };
+        } else {
+            mongooseQuery.billDate = {
+                $gte: new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0)),
+                $lte: new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999))
+            };
+        }
+    }
+
+    // 6. Search Filter (by Bill Number, Supplier Name, or Notes)
+    if (query.search) {
+        const searchRegex = new RegExp(query.search, 'i');
+        
+        // Find matching supplier IDs
+        const matchingSuppliers = await Supplier.find({ name: searchRegex }).select('_id').lean();
+        const supplierIds = matchingSuppliers.map(s => s._id);
+
+        mongooseQuery.$or = [
+            { billNumber: searchRegex },
+            { notes: searchRegex },
+            { supplier: { $in: supplierIds } }
+        ];
+    }
+
+    // Determine if we have custom date filters
+    const hasDateFilter = !!(query.fromDate || query.toDate || query.month || query.year);
+
+    // Build query specifically for metrics
+    const metricsQuery = { ...mongooseQuery };
+    if (!hasDateFilter) {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        thirtyDaysAgo.setHours(0, 0, 0, 0);
+        metricsQuery.billDate = { $gte: thirtyDaysAgo };
+    }
+
+    const stats = await Bill.aggregate([
+        { $match: metricsQuery },
+        {
+            $group: {
+                _id: null,
+                totalBilled: { $sum: "$totalAmount" },
+                totalBalanceDue: { $sum: "$balanceDue" },
+                openCount: { $sum: { $cond: [{ $eq: ["$status", "OPEN"] }, 1, 0] } },
+                partialCount: { $sum: { $cond: [{ $eq: ["$status", "PARTIALLY_PAID"] }, 1, 0] } },
+                paidCount: { $sum: { $cond: [{ $eq: ["$status", "PAID"] }, 1, 0] } }
+            }
+        }
+    ]);
+
+    const metrics = (stats && stats.length > 0) ? {
+        totalBilled: stats[0].totalBilled || 0,
+        totalBalanceDue: stats[0].totalBalanceDue || 0,
+        openCount: stats[0].openCount || 0,
+        partialCount: stats[0].partialCount || 0,
+        paidCount: stats[0].paidCount || 0,
+        isFilteredPeriod: hasDateFilter
+    } : {
+        totalBilled: 0,
+        totalBalanceDue: 0,
+        openCount: 0,
+        partialCount: 0,
+        paidCount: 0,
+        isFilteredPeriod: hasDateFilter
+    };
+
+    if (page && limit) {
+        const result = await BillRepo.getAllBillsPaginated(mongooseQuery, page, limit);
+        return {
+            data: result.data,
+            pagination: result.pagination,
+            metrics
+        };
+    } else {
+        const bills = await BillRepo.getAllBills(mongooseQuery);
+        return {
+            data: bills,
+            pagination: {
+                totalItems: bills.length,
+                totalPages: 1,
+                currentPage: 1,
+                limit: bills.length
+            },
+            metrics
+        };
+    }
 };
 
 exports.getBillById = async (id) => {
