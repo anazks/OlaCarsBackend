@@ -107,6 +107,10 @@ exports.deleteAllTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in deleteAllTransactions controller:", error);
+        next(error);
+    }
+};
+
 exports.importStatement = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -203,6 +207,10 @@ exports.uploadBankStatement = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in uploadBankStatement controller:", error);
+        next(error);
+    }
+};
+
 exports.recordManualPayment = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -335,12 +343,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             // 3. Match from the user's specific transaction types
             if (!resolvedType) {
                 const creditTypes = [
-                    "CREDIT", 
-                    "EXPENSE", 
-                    "VENDOR PAYMENT", 
-                    "TRANSFER FUND", 
-                    "PAYMENT REFUND", 
-                    "SALES RETURN", 
+                    "CREDIT",
+                    "EXPENSE",
+                    "VENDOR PAYMENT",
+                    "TRANSFER FUND",
+                    "PAYMENT REFUND",
+                    "SALES RETURN",
                     "WITHDRAWAL"
                 ];
                 if (creditTypes.includes(typeVal)) {
@@ -399,17 +407,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in bulkUploadTransactions controller:", error);
-exports.deleteAllTransactions = async (req, res, next) => {
-    try {
-        const { id } = req.params;
-        const result = await BankAccountService.deleteAllTransactions(id);
-        res.status(200).json({
-            success: true,
-            message: `Deleted ${result.deletedJournals} journals and ${result.deletedEntries} ledger entries. Balance reset to ${result.newBalance}.`,
-            data: result
-        });
-    } catch (error) {
-        console.error("Delete all transactions error:", error);
         next(error);
     }
 };

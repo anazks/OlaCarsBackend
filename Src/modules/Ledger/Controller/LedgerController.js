@@ -145,6 +145,10 @@ const importLedgerEntries = async (req, res) => {
         });
     } catch (error) {
         console.error("[LedgerController] Import failed:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 const deleteLedgerJournal = async (req, res) => {
     try {
         const { id } = req.params; // This is the ledger entry ID
