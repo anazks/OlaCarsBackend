@@ -219,6 +219,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/gps", GpsRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
 app.use("/api/payment-requests", PaymentRequestRouter);
