@@ -412,6 +412,14 @@ exports.rolloverOverdueRent = async (driverId) => {
  * - Weekly: Due on every Wednesday.
  */
 exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY' }, session = null) => {
+    // Load existing rent tracking history to preserve it during re-contracting
+    const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
+    const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
+    let maxWeekNum = 0;
+    if (existingTracking.length > 0) {
+        maxWeekNum = Math.max(...existingTracking.map(t => t.weekNumber));
+    }
+
     const installments = [];
     const assignmentDate = new Date();
     assignmentDate.setHours(0, 0, 0, 0);
@@ -447,7 +455,7 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
             dueDate.setDate(1); // Ensure it's always the 1st
         }
         
-        const periodNum = i + 1;
+        const periodNum = maxWeekNum + i + 1;
         installments.push({
             weekNumber: periodNum,
             weekLabel: isWeekly 
@@ -464,9 +472,11 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
         });
     }
 
-    // Replace the entire rentTracking to avoid duplicates on re-assignment
+    // Combine existing installments (past history) and new installments
+    const combinedTracking = [...existingTracking, ...installments];
+
     const updatedDriver = await updateDriverService(driverId, {
-        $set: { rentTracking: installments }
+        $set: { rentTracking: combinedTracking }
     }, session);
 
     // Generate Invoice documents

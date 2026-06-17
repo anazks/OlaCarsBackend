@@ -49,11 +49,11 @@ const getDrivers = async (req, res) => {
     try {
         const queryParams = { ...req.query };
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
-        
+
         const result = await DriverService.getAll(queryParams, { includeSensitive: isFinanceRole });
-        
-        return res.status(200).json({ 
-            success: true, 
+
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
@@ -74,10 +74,10 @@ const getDrivers = async (req, res) => {
 const getDriverById = async (req, res) => {
     try {
         const isFinanceRole = ["FINANCESTAFF", "FINANCEADMIN", "ADMIN"].includes(req.user.role);
-        
+
         // Ensure overdue rent is rolled over before fetching
         await DriverService.rolloverOverdueRent(req.params.id);
-        
+
         const driver = await DriverService.getById(req.params.id, { includeSensitive: isFinanceRole });
         if (!driver) return res.status(404).json({ success: false, message: "Driver not found" });
         return res.status(200).json({ success: true, data: driver });
@@ -149,7 +149,7 @@ const progressDriverStatus = async (req, res) => {
 const uploadDriverDocuments = async (req, res) => {
     try {
         const driverId = req.params.id;
-        
+
         console.log(`[Driver Upload] Starting upload for driver: ${driverId}`);
 
         const driver = await getDriverByIdService(driverId, { includeSensitive: false });
@@ -159,7 +159,7 @@ const uploadDriverDocuments = async (req, res) => {
 
         const files = req.files;
         console.log(`[Driver Upload] Files received:`, Object.keys(files || {}));
-        
+
         if (!files || Object.keys(files).length === 0) {
             console.warn(`[Driver Upload] No files provided`);
             return res.status(400).json({ success: false, message: "No documents uploaded" });
@@ -175,7 +175,7 @@ const uploadDriverDocuments = async (req, res) => {
             try {
                 const file = fileArray[0];
                 console.log(`[Driver Upload] Processing field: ${fieldName}, file: ${file.originalname}`);
-                
+
                 // Pass folder path only - uploadToS3 will handle timestamp and filename
                 const folder = `drivers/${driverId}/documents`;
                 const uploadedKey = await uploadToS3(file, folder);
@@ -214,8 +214,8 @@ const uploadDriverDocuments = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: uploadErrors.length > 0 
-                ? `Uploaded ${Object.keys(uploadedKeys).length} files with ${uploadErrors.length} error(s)` 
+            message: uploadErrors.length > 0
+                ? `Uploaded ${Object.keys(uploadedKeys).length} files with ${uploadErrors.length} error(s)`
                 : "Documents uploaded and driver record updated.",
             data: uploadedKeys,
             errors: uploadErrors.length > 0 ? uploadErrors : undefined,
@@ -450,7 +450,7 @@ const dataMigrateDrivers = async (req, res) => {
                 // Try to get from request, first record or generate a new one
                 const firstRecordFleet = drivers.length > 0 ? (drivers[0].fleetNumber || drivers[0].vehicleFleetNumber) : null;
                 const fleetToAssign = (providedFleetNumber || firstRecordFleet || await generateNextFleetNumber()).toString().trim();
-                
+
                 // Check if fleet is already assigned to another staff
                 const otherStaff = await FinanceStaff.findOne({
                     fleetNumbers: fleetToAssign,
@@ -458,8 +458,8 @@ const dataMigrateDrivers = async (req, res) => {
                     isDeleted: false
                 });
                 if (otherStaff) {
-                    return res.status(409).json({ 
-                        success: false, 
+                    return res.status(409).json({
+                        success: false,
                         message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
                         errorType: 'DUPLICATE_FLEET'
                     });
@@ -520,8 +520,8 @@ const dataMigrateDrivers = async (req, res) => {
                 }
                 if (!existingVehicle && row.vehicleNumber && String(row.vehicleNumber || "").trim()) {
                     const regNum = String(row.vehicleNumber || "").trim().toUpperCase();
-                    existingVehicle = await Vehicle.findOne({ 
-                        "legalDocs.registrationNumber": { $regex: new RegExp("^" + regNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") } 
+                    existingVehicle = await Vehicle.findOne({
+                        "legalDocs.registrationNumber": { $regex: new RegExp("^" + regNum.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") }
                     });
                 }
 
@@ -549,7 +549,7 @@ const dataMigrateDrivers = async (req, res) => {
                     if (!currentFleetNumber && newFleetNumber) {
                         vehicleUpdateData["basicDetails.fleetNumber"] = newFleetNumber;
                     }
-                    
+
                     if (Object.keys(vehicleUpdateData).length > 0) {
                         await updateVehicleService(existingVehicle._id, vehicleUpdateData);
                     }
@@ -646,10 +646,10 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.whatsappNumber) driverUpdateData["personalInfo.whatsappNumber"] = String(row.whatsappNumber || "").trim();
                     if (row.dateOfBirth) driverUpdateData["personalInfo.dateOfBirth"] = row.dateOfBirth;
                     if (row.nationality) driverUpdateData["personalInfo.nationality"] = String(row.nationality || "").trim();
-                    
+
                     if (row.idType) driverUpdateData["identityDocs.idType"] = row.idType;
                     if (row.idNumber) driverUpdateData["identityDocs.idNumber"] = String(row.idNumber || "").trim();
-                    
+
                     if (row.licenseNumber) driverUpdateData["drivingLicense.licenseNumber"] = String(row.licenseNumber || "").trim();
                     if (row.licenseCountry) driverUpdateData["drivingLicense.licenseCountry"] = String(row.licenseCountry || "").trim();
                     if (row.licenseExpiry) driverUpdateData["drivingLicense.expiryDate"] = row.licenseExpiry;
@@ -999,6 +999,99 @@ const downloadStatementPdf = async (req, res) => {
     }
 };
 
+/**
+ * Cancel driver contract and release the vehicle.
+ * @route PUT /api/driver/:id/cancel-contract
+ */
+const cancelContract = async (req, res) => {
+    const mongoose = require("mongoose");
+    const session = await mongoose.startSession();
+    try {
+        session.startTransaction();
+        const driverId = req.params.id;
+        const user = req.user;
+        const { notes } = req.body;
+
+        const { Driver } = require("../Model/DriverModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+
+        // Fetch driver
+        const driver = await Driver.findById(driverId).session(session);
+        if (!driver || driver.isDeleted) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: "Driver not found" });
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Keep past installments and only remove future pending installments
+        const keptInstallments = (driver.rentTracking || []).filter(item => {
+            // Keep if already paid or partially paid
+            if (item.status !== 'PENDING') return true;
+            // Keep if dueDate is in the past or today (elapsed week)
+            const itemDueDate = new Date(item.dueDate);
+            itemDueDate.setHours(0, 0, 0, 0);
+            if (itemDueDate <= today) return true;
+
+            // Otherwise, it is a future pending week and can be removed
+            return false;
+        });
+
+        // Unassign vehicle from driver and change its status
+        const vehicleId = driver.currentVehicle;
+        if (vehicleId) {
+            const vehicle = await Vehicle.findById(vehicleId).session(session);
+            if (vehicle) {
+                vehicle.currentDriver = null;
+                vehicle.status = 'ACTIVE — AVAILABLE';
+                vehicle.statusHistory.push({
+                    status: 'ACTIVE — AVAILABLE',
+                    changedBy: user.id,
+                    changedByRole: user.role,
+                    timestamp: new Date(),
+                    notes: `Contract cancelled for driver ${driver.personalInfo?.fullName || driverId}. Vehicle released.`,
+                });
+                await vehicle.save({ session });
+            }
+        }
+
+        // Update driver status to INACTIVE, clear currentVehicle, update rentTracking, and add to history
+        driver.status = 'INACTIVE';
+        driver.currentVehicle = null;
+        driver.rentTracking = keptInstallments;
+        driver.statusHistory.push({
+            status: 'INACTIVE',
+            changedBy: user.id,
+            changedByRole: user.role,
+            timestamp: new Date(),
+            notes: notes || 'Contract cancelled. Rent repayment plan stopped, future pending installments cleared.',
+        });
+        await driver.save({ session });
+
+        // Sync Customer status to INACTIVE
+        await Customer.findOneAndUpdate(
+            { driver: driverId },
+            { status: 'INACTIVE' },
+            { session }
+        );
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Refetch updated driver to return
+        const updatedDriver = await getDriverByIdService(driverId);
+        return res.status(200).json({ success: true, data: updatedDriver });
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        const statusCode = error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -1015,4 +1108,5 @@ module.exports = {
     payAdditionalPayment,
     downloadContractPdf,
     downloadStatementPdf,
+    cancelContract,
 };

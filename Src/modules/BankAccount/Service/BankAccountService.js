@@ -179,20 +179,16 @@ const getAllBankAccounts = async (queryParams = {}) => {
     
     // For each bank account, attach the transaction count
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
     const updatedData = await Promise.all(result.data.map(async (account) => {
         const accObject = account.toObject ? account.toObject() : account;
         const codeId = account.accountingCode 
             ? (account.accountingCode._id || account.accountingCode)
             : null;
             
-        if (codeId) {
-            const count = await LedgerEntry.countDocuments({
-                accountingCode: codeId
-            });
-            accObject.transactionCount = count;
-        } else {
-            accObject.transactionCount = 0;
-        }
+        const ledgerCount = codeId ? await LedgerEntry.countDocuments({ accountingCode: codeId }) : 0;
+        const bankTxCount = await BankTransaction.countDocuments({ bankAccount: account._id });
+        accObject.transactionCount = ledgerCount + bankTxCount;
         return accObject;
     }));
     
@@ -205,19 +201,15 @@ const getBankAccountById = async (id) => {
     if (!account) throw new AppError("Bank account not found", 404);
     
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
     const accObject = account.toObject();
     const codeId = account.accountingCode 
         ? (account.accountingCode._id || account.accountingCode)
         : null;
 
-    if (codeId) {
-        const count = await LedgerEntry.countDocuments({
-            accountingCode: codeId
-        });
-        accObject.transactionCount = count;
-    } else {
-        accObject.transactionCount = 0;
-    }
+    const ledgerCount = codeId ? await LedgerEntry.countDocuments({ accountingCode: codeId }) : 0;
+    const bankTxCount = await BankTransaction.countDocuments({ bankAccount: account._id });
+    accObject.transactionCount = ledgerCount + bankTxCount;
     return accObject;
 };
 
@@ -246,19 +238,15 @@ const updateBankAccount = async (id, data) => {
     if (!account) throw new AppError("Bank account not found", 404);
 
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
     const accObject = account.toObject();
     const codeId = account.accountingCode 
         ? (account.accountingCode._id || account.accountingCode)
         : null;
 
-    if (codeId) {
-        const count = await LedgerEntry.countDocuments({
-            accountingCode: codeId
-        });
-        accObject.transactionCount = count;
-    } else {
-        accObject.transactionCount = 0;
-    }
+    const ledgerCount = codeId ? await LedgerEntry.countDocuments({ accountingCode: codeId }) : 0;
+    const bankTxCount = await BankTransaction.countDocuments({ bankAccount: account._id });
+    accObject.transactionCount = ledgerCount + bankTxCount;
     return accObject;
 };
 

@@ -61,6 +61,13 @@ router.post(
     BankAccountController.bulkUploadTransactions
 );
 
+// Get transactions
+router.get(
+    "/:id/transactions",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.getBankTransactions
+);
+
 // Record manual payment
 router.post(
     "/:id/manual-payment",
