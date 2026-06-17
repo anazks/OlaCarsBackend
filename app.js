@@ -73,6 +73,9 @@ const {
 const {
   startFixedAssetCronJob,
 } = require("./Src/modules/FixedAsset/Service/FixedAssetCronService");
+const {
+  startDashboardCronJob,
+} = require("./Src/modules/Dashboard/Service/DashboardCronService");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
@@ -303,12 +306,30 @@ const startServer = async () => {
       startInvoiceCronJob();
       initOutboundCallScheduler();
       startFixedAssetCronJob();
+      startDashboardCronJob();
       console.log(
-        "Internal cron schedulers (Alerts, Invoices, Outbound Calls, Fixed Assets) started",
+        "Internal cron schedulers (Alerts, Invoices, Outbound Calls, Fixed Assets, Dashboard Cache) started",
       );
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }
+
+    // Start historical precomputation backfill since 2025-01-01 in the background
+    const startHistoricalBackfill = async () => {
+      try {
+        const { precomputeForDateRange } = require("./Src/modules/Dashboard/Service/DashboardPrecomputeService");
+        const moment = require("moment");
+        const startDate = moment("2025-01-01").startOf("day").toDate();
+        const endDate = moment().subtract(1, "day").startOf("day").toDate();
+        console.log("[Dashboard Cache] Starting background historical precomputation backfill since 2025-01-01...");
+        precomputeForDateRange(startDate, endDate).catch(err => {
+          console.error("[Dashboard Cache] Background backfill failed:", err);
+        });
+      } catch (err) {
+        console.error("[Dashboard Cache] Error initiating backfill:", err);
+      }
+    };
+    startHistoricalBackfill();
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
