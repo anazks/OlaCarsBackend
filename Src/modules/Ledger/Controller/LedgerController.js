@@ -69,17 +69,44 @@ const getLedgerEntries = async (req, res) => {
             .skip(skip)
             .limit(limit);
 
-        // Calculate total summary stats for matching query using find + select to leverage Mongoose's schema casting
-        const allMatching = await LedgerEntry.find(query).select("type amount");
+        // Calculate total summary stats using aggregate
+        const buildMatchQuery = (q) => {
+            const match = { ...q };
+            if (match.accountingCode && typeof match.accountingCode === "string" && mongoose.Types.ObjectId.isValid(match.accountingCode)) {
+                match.accountingCode = new mongoose.Types.ObjectId(match.accountingCode);
+            }
+            if (match.branch && typeof match.branch === "string" && mongoose.Types.ObjectId.isValid(match.branch)) {
+                match.branch = new mongoose.Types.ObjectId(match.branch);
+            }
+            if (match.manualJournal && typeof match.manualJournal === "string" && mongoose.Types.ObjectId.isValid(match.manualJournal)) {
+                match.manualJournal = new mongoose.Types.ObjectId(match.manualJournal);
+            }
+            if (match.voucher && typeof match.voucher === "string" && mongoose.Types.ObjectId.isValid(match.voucher)) {
+                match.voucher = new mongoose.Types.ObjectId(match.voucher);
+            }
+            if (match.transaction && typeof match.transaction === "string" && mongoose.Types.ObjectId.isValid(match.transaction)) {
+                match.transaction = new mongoose.Types.ObjectId(match.transaction);
+            }
+            return match;
+        };
+
+        const aggregateQuery = buildMatchQuery(query);
+        const stats = await LedgerEntry.aggregate([
+            { $match: aggregateQuery },
+            {
+                $group: {
+                    _id: "$type",
+                    total: { $sum: "$amount" }
+                }
+            }
+        ]);
+
         let totalDebit = 0;
         let totalCredit = 0;
-        for (const entry of allMatching) {
-            if (entry.type === "DEBIT") {
-                totalDebit += entry.amount || 0;
-            } else if (entry.type === "CREDIT") {
-                totalCredit += entry.amount || 0;
-            }
-        }
+        stats.forEach(s => {
+            if (s._id === "DEBIT") totalDebit = s.total || 0;
+            if (s._id === "CREDIT") totalCredit = s.total || 0;
+        });
 
         return res.status(200).json({ 
             success: true, 
