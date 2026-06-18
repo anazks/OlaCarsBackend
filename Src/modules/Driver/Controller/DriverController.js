@@ -992,7 +992,10 @@ const downloadStatementPdf = async (req, res) => {
             `inline; filename="Driver_Statement_${driver.personalInfo?.fullName?.replace(/\s+/g, '_') || req.params.id}.pdf"`
         );
 
-        StatementPdfService.generateStatementPdf(driver, invoices, payments, creditNotes, res);
+        StatementPdfService.generateStatementPdf(driver, invoices, payments, creditNotes, res, {
+            sortBy: req.query.sortBy,
+            sortOrder: req.query.sortOrder
+        });
     } catch (error) {
         const statusCode = error.statusCode || 500;
         return res.status(statusCode).json({ success: false, message: error.message });
