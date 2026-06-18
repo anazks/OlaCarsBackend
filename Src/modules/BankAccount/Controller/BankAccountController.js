@@ -82,6 +82,7 @@ exports.deleteAllTransactions = async (req, res, next) => {
         const { id } = req.params;
         const BankAccount = require("../Model/BankAccountModel");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const BankTransaction = require("../Model/BankTransactionModel");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -96,6 +97,9 @@ exports.deleteAllTransactions = async (req, res, next) => {
         // Delete all ledger entries matching this accountingCode
         const deleteResult = await LedgerEntry.deleteMany({ accountingCode: accCodeId });
 
+        // Delete all bank transactions matching this bankAccount ID
+        const bankTxDeleteResult = await BankTransaction.deleteMany({ bankAccount: id });
+
         // Reset balance
         account.initialBalance = 0;
         account.currentBalance = 0;
@@ -103,10 +107,14 @@ exports.deleteAllTransactions = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `Deleted ${deleteResult.deletedCount} transaction entries. Balance reset to ${account.currentBalance}.`
+            message: `Deleted ${deleteResult.deletedCount} ledger entries and ${bankTxDeleteResult.deletedCount} bank transactions. Balance reset to ${account.currentBalance}.`
         });
     } catch (error) {
         console.error("Error in deleteAllTransactions controller:", error);
+        next(error);
+    }
+};
+
 exports.importStatement = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -147,7 +155,7 @@ exports.uploadBankStatement = async (req, res, next) => {
         }
 
         const BankAccount = require("../Model/BankAccountModel");
-        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const BankTransaction = require("../Model/BankTransactionModel");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -175,7 +183,8 @@ exports.uploadBankStatement = async (req, res, next) => {
                 balanceAccum -= amount;
             }
 
-            const entry = new LedgerEntry({
+            const entry = new BankTransaction({
+                bankAccount: id,
                 branch: branchId || undefined,
                 accountingCode: accCodeId,
                 type: txType,
@@ -203,6 +212,10 @@ exports.uploadBankStatement = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in uploadBankStatement controller:", error);
+        next(error);
+    }
+};
+
 exports.recordManualPayment = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -213,7 +226,9 @@ exports.recordManualPayment = async (req, res, next) => {
             description,
             currency,
             fromAccountId,
-            branchId
+            branchId,
+            customerId,
+            invoiceId
         } = req.body;
 
         if (!amount) {
@@ -249,6 +264,8 @@ exports.recordManualPayment = async (req, res, next) => {
             fromAccountId,
             branchId,
             supportingDocument,
+            customerId,
+            invoiceId,
             userId: req.user?._id || req.user?.id,
             userRole: req.user?.role
         });
@@ -274,7 +291,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         }
 
         const BankAccount = require("../Model/BankAccountModel");
-        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const BankTransaction = require("../Model/BankTransactionModel");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -289,10 +306,10 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const createdBy = req.user?._id || req.user?.id || req.user?.userId;
         const creatorRole = req.user?.role || "ADMIN";
 
-        // If clearExisting is selected, purge existing ledger entries first
+        // If clearExisting is selected, purge existing bank transactions first
         if (clearExisting === true) {
-            console.log(`[BulkUpload] Clearing existing ledger entries for account ${account.accountName}`);
-            await LedgerEntry.deleteMany({ accountingCode: accCodeId });
+            console.log(`[BulkUpload] Clearing existing bank transactions for account ${account.accountName}`);
+            await BankTransaction.deleteMany({ bankAccount: id });
             account.initialBalance = 0;
             account.currentBalance = 0;
         }
@@ -335,12 +352,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             // 3. Match from the user's specific transaction types
             if (!resolvedType) {
                 const creditTypes = [
-                    "CREDIT", 
-                    "EXPENSE", 
-                    "VENDOR PAYMENT", 
-                    "TRANSFER FUND", 
-                    "PAYMENT REFUND", 
-                    "SALES RETURN", 
+                    "CREDIT",
+                    "EXPENSE",
+                    "VENDOR PAYMENT",
+                    "TRANSFER FUND",
+                    "PAYMENT REFUND",
+                    "SALES RETURN",
                     "WITHDRAWAL"
                 ];
                 if (creditTypes.includes(typeVal)) {
@@ -369,7 +386,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 balanceAccum -= amountVal;
             }
 
-            const entry = new LedgerEntry({
+            const entry = new BankTransaction({
+                bankAccount: id,
                 branch: branchId || undefined,
                 accountingCode: accCodeId,
                 type: typeVal,
@@ -399,17 +417,76 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in bulkUploadTransactions controller:", error);
-exports.deleteAllTransactions = async (req, res, next) => {
+        next(error);
+    }
+};
+
+exports.getBankTransactions = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const result = await BankAccountService.deleteAllTransactions(id);
+        const { page = 1, limit = 25, type, startDate, endDate, search } = req.query;
+
+        const BankAccount = require("../Model/BankAccountModel");
+        const BankTransaction = require("../Model/BankTransactionModel");
+
+        const account = await BankAccount.findOne({ _id: id, isDeleted: false });
+        if (!account) {
+            return res.status(404).json({ success: false, message: "Bank account not found" });
+        }
+
+        const query = { bankAccount: id };
+
+        if (type) {
+            query.type = type.toUpperCase();
+        }
+
+        if (startDate || endDate) {
+            query.entryDate = {};
+            if (startDate) {
+                query.entryDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                query.entryDate.$lte = new Date(endDate);
+            }
+        }
+
+        if (search) {
+            query.$or = [
+                { description: { $regex: search, $options: "i" } },
+                { transactionId: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const skip = (pageNum - 1) * limitNum;
+
+        const total = await BankTransaction.countDocuments(query);
+        const transactions = await BankTransaction.find(query)
+            .sort({ entryDate: -1, createdAt: -1 })
+            .skip(skip)
+            .limit(limitNum);
+
+        // Map transactions to mimic LedgerEntry fields for frontend compatibility
+        const mappedTransactions = transactions.map(tx => {
+            const obj = tx.toObject();
+            obj.date = tx.entryDate;
+            obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
+            return obj;
+        });
+
         res.status(200).json({
             success: true,
-            message: `Deleted ${result.deletedJournals} journals and ${result.deletedEntries} ledger entries. Balance reset to ${result.newBalance}.`,
-            data: result
+            data: mappedTransactions,
+            pagination: {
+                total,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(total / limitNum)
+            }
         });
     } catch (error) {
-        console.error("Delete all transactions error:", error);
+        console.error("Error in getBankTransactions controller:", error);
         next(error);
     }
 };

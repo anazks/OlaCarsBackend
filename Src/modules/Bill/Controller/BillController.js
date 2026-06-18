@@ -15,11 +15,13 @@ exports.createBillFromPO = async (req, res, next) => {
 
 exports.getAllBills = async (req, res, next) => {
     try {
-        const bills = await BillService.getAllBills(req.query);
+        const result = await BillService.getAllBills(req.query);
         res.status(200).json({
             success: true,
-            count: bills.length,
-            data: bills
+            count: result.pagination ? result.pagination.totalItems : result.data.length,
+            data: result.data,
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         next(error);

@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getLedgerEntries, getLedgerEntryById, deleteLedgerJournal } = require("../Controller/LedgerController");
+const { getLedgerEntries, getLedgerEntryById, importLedgerEntries, deleteLedgerJournal } = require("../Controller/LedgerController");
 const ManualJournalController = require("../Controller/ManualJournalController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");

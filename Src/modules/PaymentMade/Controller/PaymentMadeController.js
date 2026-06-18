@@ -1,13 +1,39 @@
 const PaymentMade = require('../Model/PaymentMadeModel');
 const mongoose = require('mongoose');
 
+const parsePaymentDate = (dateInput) => {
+    if (!dateInput) return new Date();
+    
+    let dateStr = typeof dateInput === 'string' ? dateInput : '';
+    if (dateStr) {
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            const year = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            const day = parseInt(match[3], 10);
+            
+            const hasZeroTime = !dateStr.includes('T') || /T00:00:00/.test(dateStr) || /T00:00:00.000Z/.test(dateStr);
+            if (hasZeroTime) {
+                const dateObj = new Date();
+                dateObj.setFullYear(year, month - 1, day);
+                return dateObj;
+            }
+        }
+    }
+    
+    const parsed = new Date(dateInput);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 exports.createPaymentMade = async (req, res) => {
     try {
-        const { supplier, amount, paymentDate, paymentMethod, paidThroughAccount, referenceNumber, notes, branch, bills } = req.body;
+        const { supplier, amount, paymentDate: rawPaymentDate, paymentMethod, paidThroughAccount, referenceNumber, notes, branch, bills } = req.body;
         
         if (!supplier || !amount || !paidThroughAccount) {
             return res.status(400).json({ success: false, message: "Missing required fields: supplier, amount, paidThroughAccount are required." });
         }
+
+        const paymentDate = parsePaymentDate(rawPaymentDate);
 
         // 1. Generate sequential PMT number
         const count = await PaymentMade.countDocuments();
@@ -18,7 +44,7 @@ exports.createPaymentMade = async (req, res) => {
             paymentNumber,
             supplier,
             amount,
-            paymentDate: paymentDate || new Date(),
+            paymentDate,
             paymentMethod: paymentMethod || "Cash",
             referenceNumber,
             notes,
@@ -79,7 +105,7 @@ exports.createPaymentMade = async (req, res) => {
             totalAmount: amount,
             paymentMethod: "CASH",
             status: "COMPLETED",
-            paymentDate: paymentDate || new Date(),
+            paymentDate: paymentDate,
             notes: notes || `Payment made to Supplier (PMT: ${paymentNumber})`,
             branch,
             supplier,

@@ -33,41 +33,42 @@ router.put(
     BankAccountController.updateBankAccount
 );
 
-// ⚠️ Must be before DELETE /:id to avoid route collision
+// Delete all transactions (specific sub-route before the general /:id)
 router.delete(
     "/:id/transactions",
-    authorize(ROLES.ADMIN),
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
     BankAccountController.deleteAllTransactions
 );
 
+// Delete bank account
 router.delete(
     "/:id",
     authorize(ROLES.ADMIN),
     BankAccountController.deleteBankAccount
 );
 
-router.delete(
-    "/:id/transactions",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.deleteAllTransactions
-);
-
+// Upload statement
 router.post(
     "/:id/statement",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
-    BankAccountController.uploadBankStatement
+    BankAccountController.importStatement
 );
 
+// Bulk upload transactions
 router.post(
     "/:id/bulk-upload",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
     BankAccountController.bulkUploadTransactions
-router.post(
-    "/:id/statement",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.importStatement
 );
 
+// Get transactions
+router.get(
+    "/:id/transactions",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.getBankTransactions
+);
+
+// Record manual payment
 router.post(
     "/:id/manual-payment",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
