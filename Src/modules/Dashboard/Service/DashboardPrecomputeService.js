@@ -242,7 +242,7 @@ const precomputeBranchDate = async (date, branchId, country = null) => {
   await DashboardSummary.findOneAndUpdate(
     { date: updateDoc.date, branch: branchId || null },
     updateDoc,
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 };
 
@@ -259,7 +259,7 @@ exports.precomputeForDateRange = async (startDate, endDate) => {
 
   for (let i = 0; i <= daysDiff; i++) {
     const currentDay = moment(start).add(i, "days").toDate();
-    console.log(`[DashboardPrecomputeService] Precomputing for date: ${currentDay.toISOString().split("T")[0]}`);
+    // console.log(`[DashboardPrecomputeService] Precomputing for date: ${currentDay.toISOString().split("T")[0]}`);
 
     // Precompute for each active branch
     for (const branch of branches) {
