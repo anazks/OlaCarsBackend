@@ -106,6 +106,9 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
         const total = await model.countDocuments(query);
         
         let mongooseQuery = model.find(query).sort(sort).skip(skip).limit(numericLimit);
+        if (typeof mongooseQuery.allowDiskUse === "function") {
+            mongooseQuery = mongooseQuery.allowDiskUse();
+        }
 
         if (options.select) {
             mongooseQuery = mongooseQuery.select(options.select);
