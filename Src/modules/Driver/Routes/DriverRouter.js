@@ -16,6 +16,7 @@ const {
     payAdditionalPayment,
     downloadContractPdf,
     downloadStatementPdf,
+    cancelContract,
 } = require("../Controller/DriverController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -426,6 +427,14 @@ router.put(
     authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.ADMIN, ROLES.USER),
     hasSelfOrStaffPermission("DRIVER_ONBOARD"),
     progressDriverStatus
+);
+// ─── PUT /api/driver/:id/cancel-contract — Cancel Contract ────────────
+router.put(
+    "/:id/cancel-contract",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("DRIVER_EDIT"),
+    cancelContract
 );
 // ─── POST /api/driver/:id/upload-documents — S3 Upload ───────────────
 /**

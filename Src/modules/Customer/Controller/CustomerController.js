@@ -164,7 +164,10 @@ exports.downloadStatementPdf = async (req, res) => {
             `inline; filename="Customer_Statement_${customer.name.replace(/\s+/g, '_')}.pdf"`
         );
 
-        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res);
+        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res, {
+            sortBy: req.query.sortBy,
+            sortOrder: req.query.sortOrder
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
