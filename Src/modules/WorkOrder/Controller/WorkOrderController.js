@@ -59,9 +59,26 @@ const getWorkOrdersHandler = async (req, res) => {
         if (req.query.vehicleId) filters.vehicleId = req.query.vehicleId;
         if (req.query.priority) filters.priority = req.query.priority;
         if (req.query.workOrderType) filters.workOrderType = req.query.workOrderType;
+        if (req.query.page) filters.page = req.query.page;
+        if (req.query.limit) filters.limit = req.query.limit;
+        if (req.query.search) filters.search = req.query.search;
 
-        const workOrders = await WorkOrderRepo.getWorkOrders(filters);
-        return res.status(200).json({ success: true, data: workOrders });
+        const result = await WorkOrderRepo.getWorkOrders(filters);
+
+        if (filters.page && filters.limit) {
+            return res.status(200).json({
+                success: true,
+                data: result.docs,
+                pagination: {
+                    total: result.total,
+                    page: result.page,
+                    limit: result.limit,
+                    totalPages: result.totalPages
+                }
+            });
+        }
+
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

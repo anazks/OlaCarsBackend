@@ -33,10 +33,13 @@ exports.createRequest = async (req, res) => {
 
 exports.getRequests = async (req, res) => {
     try {
+        if (req.query.branchId) {
+            req.query.branch = req.query.branchId;
+            delete req.query.branchId;
+        }
+
         const baseQuery = {};
-        if (req.user.role === ROLES.WORKSHOPSTAFF) {
-            baseQuery.requestedBy = req.user.id;
-        } else if (req.user.role === ROLES.WORKSHOPMANAGER || req.user.role === ROLES.BRANCHMANAGER) {
+        if (req.user.role === ROLES.WORKSHOPSTAFF || req.user.role === ROLES.WORKSHOPMANAGER || req.user.role === ROLES.BRANCHMANAGER) {
             baseQuery.branch = req.user.branchId;
         }
 
@@ -96,7 +99,7 @@ exports.getRequestById = async (req, res) => {
 exports.auditProcurementRequest = async (req, res) => {
     try {
         const { id } = req.params;
-        const { merchandiserPrice, documents } = req.body;
+        const { merchandiserPrice, documents, supplierDetails } = req.body;
 
         if (merchandiserPrice === undefined || merchandiserPrice === null) {
             return res.status(400).json({ success: false, message: "Proposed unit price is required for audit." });
@@ -118,6 +121,15 @@ exports.auditProcurementRequest = async (req, res) => {
 
         if (documents && Array.isArray(documents)) {
             request.documents = documents;
+        }
+
+        if (supplierDetails) {
+            request.supplierDetails = {
+                name: supplierDetails.name || "",
+                email: supplierDetails.email || "",
+                phone: supplierDetails.phone || "",
+                address: supplierDetails.address || "",
+            };
         }
 
         request.status = "PENDING_FINANCE_APPROVAL";
@@ -186,17 +198,65 @@ exports.financeApproveRequest = async (req, res) => {
             previousStatus: previousStatus,
             changesSummary: status === "REJECTED" 
                 ? `Finance rejected merchandiser pricing. Note: "${note || 'No note provided'}"` 
-                : "Finance approved merchandiser pricing."
+                : "Finance approved merchandiser pricing and auto-created the corresponding Purchase Order."
         };
 
         if (!request.editHistory) request.editHistory = [];
         request.editHistory.push(historyRecord);
 
+        if (status === "APPROVED") {
+            const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel.js");
+            const purchaseOrderNumber = `PO-PR-${request.requestNumber}`;
+            
+            const existingPO = await PurchaseOrder.findOne({ purchaseOrderNumber });
+            if (!existingPO) {
+                const totalAmt = request.merchandiserTotalAmount || (request.quantity * (request.merchandiserPrice || request.part?.unitCost || 0));
+                const originalTotalAmt = request.originalTotalAmount || (request.quantity * (request.part?.unitCost || 0));
+                const poData = {
+                    purchaseOrderNumber,
+                    status: "APPROVED",
+                    purpose: "Spare Parts",
+                    items: [
+                        {
+                            itemName: request.part?.partName || "Unknown Part",
+                            quantity: request.quantity,
+                            description: request.notes || `Workshop Procurement PR ${request.requestNumber}`,
+                            unitPrice: request.merchandiserPrice || request.part?.unitCost || 0,
+                            merchandiserPrice: request.merchandiserPrice || request.part?.unitCost || 0,
+                            accountId: request.part?.purchaseAccountId || null,
+                        }
+                    ],
+                    totalAmount: totalAmt,
+                    merchandiserTotalAmount: totalAmt,
+                    originalTotalAmount: originalTotalAmt,
+                    branch: request.branch,
+                    supplier: request.supplier,
+                    supplierDetails: request.supplierDetails || null,
+                    createdBy: request.requestedBy,
+                    creatorRole: request.requestedByRole,
+                    approvedBy: approverId,
+                    approverRole: approverRole,
+                    documents: request.documents || [],
+                    approvalNote: note || "Auto-created from approved PR",
+                    editHistory: [
+                        {
+                            editedAt: new Date(),
+                            editedBy: approverId,
+                            editorRole: approverRole,
+                            previousStatus: "WAITING",
+                            changesSummary: `Purchase Order auto-created from approved Workshop Procurement PR ${request.requestNumber}.`
+                        }
+                    ]
+                };
+                await PurchaseOrder.create(poData);
+            }
+        }
+
         await request.save();
 
         res.status(200).json({
             success: true,
-            message: `Workshop Procurement Request successfully ${targetStatus.toLowerCase() === 'cost_approved' ? 'approved' : 'rejected'}.`,
+            message: `Workshop Procurement Request successfully ${targetStatus === 'COST_APPROVED' ? 'approved and PO created' : 'rejected'}.`,
             data: request
         });
     } catch (error) {
