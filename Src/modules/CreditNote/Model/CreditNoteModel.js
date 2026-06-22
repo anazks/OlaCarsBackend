@@ -53,6 +53,11 @@ const creditnoteSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    supportingDocument: {
+        name: { type: String },
+        url: { type: String },
+        uploadedAt: { type: Date }
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         required: true,

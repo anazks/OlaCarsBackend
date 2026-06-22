@@ -101,6 +101,11 @@ const invoiceSchema = new mongoose.Schema({
     pdfS3Key: {
         type: String
     },
+    supportingDocument: {
+        name: { type: String },
+        url: { type: String },
+        uploadedAt: { type: Date }
+    },
 
     // Manual invoice fields
     lineItems: [lineItemSchema],

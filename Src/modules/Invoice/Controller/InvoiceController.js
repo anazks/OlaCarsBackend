@@ -54,7 +54,30 @@ exports.createManualInvoice = async (req, res) => {
     try {
         const createdBy = req.user.id || req.user._id;
         const creatorRole = req.user.role;
-        const result = await InvoiceService.createManualInvoice(req.body, createdBy, creatorRole);
+
+        let invoiceData = { ...req.body };
+
+        // Parse lineItems if it was sent as a string (from FormData)
+        if (typeof invoiceData.lineItems === "string") {
+            try {
+                invoiceData.lineItems = JSON.parse(invoiceData.lineItems);
+            } catch (err) {
+                return res.status(400).json({ success: false, message: "Invalid JSON format for lineItems array." });
+            }
+        }
+
+        // Handle optional file upload
+        if (req.file) {
+            const uploadLocal = require("../../../utils/uploadLocal");
+            const fileUrl = uploadLocal(req.file, "invoices");
+            invoiceData.supportingDocument = {
+                name: req.file.originalname,
+                url: fileUrl,
+                uploadedAt: new Date(),
+            };
+        }
+
+        const result = await InvoiceService.createManualInvoice(invoiceData, createdBy, creatorRole);
         return res.status(201).json({ success: true, message: "Manual invoice created successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });

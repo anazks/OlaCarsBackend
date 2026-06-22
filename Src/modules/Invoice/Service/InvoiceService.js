@@ -556,7 +556,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const {
         driver: driverId, customer: customerId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
         lineItems = [], discountType = 'PERCENTAGE', discountValue = 0,
-        isTaxInclusive = false, notes
+        isTaxInclusive = false, notes, supportingDocument
     } = data;
 
     let finalCustomerId = customerId;
@@ -705,6 +705,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         discountAmount,
         isTaxInclusive: taxInclusiveParsed,
         notes: notes || '',
+        supportingDocument,
         createdBy,
         creatorRole,
     };
