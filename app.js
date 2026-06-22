@@ -346,3 +346,5 @@ process.on("SIGINT", () => {
   console.log("Server shutting down...");
   process.exit(0);
 });
+// Trigger nodemon reload after fixing DB URI
+

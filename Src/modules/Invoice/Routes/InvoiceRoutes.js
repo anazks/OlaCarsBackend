@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const InvoiceController = require("../Controller/InvoiceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const upload = require("../../../utils/multerConfig");
 
 // Require authentication for all invoice routes
 router.use(authenticate);
@@ -11,7 +12,7 @@ router.get("/driver/:driverId/pending", InvoiceController.getPendingInvoicesByDr
 router.get("/", InvoiceController.getInvoices);
 router.get("/:id", InvoiceController.getInvoiceById);
 router.get("/:id/pdf", InvoiceController.downloadInvoicePdf);
-router.post("/", InvoiceController.createManualInvoice);
+router.post("/", upload.single("supportingDocument"), InvoiceController.createManualInvoice);
 router.post("/bulk-upload", InvoiceController.bulkUploadInvoices);
 router.post("/:id/pay", InvoiceController.payInvoice);
 router.put("/:id", InvoiceController.updateInvoice);
