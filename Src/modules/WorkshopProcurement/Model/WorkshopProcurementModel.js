@@ -52,6 +52,12 @@ const WorkshopProcurementSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "Supplier",
         },
+        supplierDetails: {
+            name: { type: String },
+            email: { type: String },
+            phone: { type: String },
+            address: { type: String },
+        },
         notes: {
             type: String,
         },

@@ -21,7 +21,7 @@ const addFinanceAdminSchema = {
 
 const editFinanceAdminSchema = {
     params: Joi.object({
-        id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        id: Joi.string().required(),
     }),
     body: Joi.object({
         fullName: Joi.string().trim().min(3).max(50),
@@ -36,7 +36,7 @@ const editFinanceAdminSchema = {
 
 const changePasswordSchema = {
     params: Joi.object({
-        id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        id: Joi.string().required(),
     }),
     body: Joi.object({
         currentPassword: Joi.string().required(),
@@ -46,13 +46,13 @@ const changePasswordSchema = {
 
 const deleteFinanceAdminSchema = {
     params: Joi.object({
-        id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        id: Joi.string().required(),
     }),
 };
 
 const getFinanceAdminByIdSchema = {
     params: Joi.object({
-        id: Joi.string().pattern(/^[0-9a-fA-F]{24}$/).required(),
+        id: Joi.string().required(),
     }),
 };
 

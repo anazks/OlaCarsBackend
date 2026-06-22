@@ -39,6 +39,10 @@ const merchendiseSchema = new mongoose.Schema(
             enum: ["ACTIVE", "SUSPENDED", "LOCKED"],
             default: "ACTIVE",
         },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
+        },
         isDeleted: {
             type: Boolean,
             default: false,
