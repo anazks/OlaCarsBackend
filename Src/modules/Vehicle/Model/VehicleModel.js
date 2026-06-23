@@ -38,7 +38,15 @@ const vehicleSchema = new mongoose.Schema(
         },
         handlingStaff: {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'FinanceStaff'
+            refPath: 'handlingStaffModel'
+        },
+        handlingStaffModel: {
+            type: String,
+            enum: ['OperationStaff', 'FinanceStaff']
+        },
+        fleet: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Fleet'
         },
 
         // 1. Procurement & Purchase Details
@@ -250,6 +258,29 @@ const vehicleSchema = new mongoose.Schema(
 
 // Pre-validate hook to handle empty/null VINs and auto-calculate weeklyRent
 vehicleSchema.pre("validate", async function () {
+    if (this.fleet) {
+        try {
+            const Fleet = mongoose.model('Fleet');
+            const fleetDoc = await Fleet.findById(this.fleet);
+            if (fleetDoc) {
+                if (!this.basicDetails) this.basicDetails = {};
+                this.basicDetails.fleetNumber = fleetDoc.fleetNumber;
+                if (fleetDoc.assignedStaff) {
+                    this.handlingStaff = fleetDoc.assignedStaff;
+                    this.handlingStaffModel = fleetDoc.assignedStaffModel;
+                }
+            }
+        } catch (err) {
+            console.error("Error syncing fleet details in VehicleModel pre-validate hook:", err);
+        }
+    } else {
+        if (this.basicDetails && this.basicDetails.fleetNumber) {
+            this.basicDetails.fleetNumber = undefined;
+        }
+        this.handlingStaff = undefined;
+        this.handlingStaffModel = undefined;
+    }
+
     if (this.basicDetails) {
         const vinVal = this.basicDetails.vin;
         if (vinVal === "" || vinVal === null || vinVal === undefined) {
@@ -274,9 +305,58 @@ vehicleSchema.pre("validate", async function () {
     }
 });
 
-// Pre-update hook to handle empty/null VINs for findOneAndUpdate
+// Pre-update hook to handle empty/null VINs and sync fleet properties for findOneAndUpdate
 vehicleSchema.pre("findOneAndUpdate", async function () {
     const update = this.getUpdate();
+    
+    // 1. Sync fleet and handlingStaff properties if fleet is updated
+    let hasFleetUpdate = false;
+    let fleetId = null;
+    
+    if (update.$set) {
+        if (update.$set.fleet !== undefined) {
+            hasFleetUpdate = true;
+            fleetId = update.$set.fleet;
+        }
+    } else if (update.fleet !== undefined) {
+        hasFleetUpdate = true;
+        fleetId = update.fleet;
+    }
+    
+    if (hasFleetUpdate) {
+        if (fleetId) {
+            try {
+                const Fleet = mongoose.model('Fleet');
+                const fleetDoc = await Fleet.findById(fleetId);
+                if (fleetDoc) {
+                    if (update.$set) {
+                        update.$set["basicDetails.fleetNumber"] = fleetDoc.fleetNumber;
+                        update.$set.handlingStaff = fleetDoc.assignedStaff;
+                        update.$set.handlingStaffModel = fleetDoc.assignedStaffModel;
+                    } else {
+                        if (!update.basicDetails) update.basicDetails = {};
+                        update.basicDetails.fleetNumber = fleetDoc.fleetNumber;
+                        update.handlingStaff = fleetDoc.assignedStaff;
+                        update.handlingStaffModel = fleetDoc.assignedStaffModel;
+                    }
+                }
+            } catch (err) {
+                console.error("Error syncing fleet details in VehicleModel pre-findOneAndUpdate hook:", err);
+            }
+        } else {
+            if (update.$set) {
+                update.$set["basicDetails.fleetNumber"] = "";
+                update.$set.handlingStaff = null;
+                update.$set.handlingStaffModel = null;
+            } else {
+                if (update.basicDetails) update.basicDetails.fleetNumber = "";
+                update.handlingStaff = null;
+                update.handlingStaffModel = null;
+            }
+        }
+    }
+
+    // 2. Handle empty/null VINs
     if (update.$set) {
         const vinVal = update.$set["basicDetails.vin"];
         if (vinVal === "" || vinVal === null || vinVal === undefined) {
