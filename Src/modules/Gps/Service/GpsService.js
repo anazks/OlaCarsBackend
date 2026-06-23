@@ -194,7 +194,7 @@ class GpsService {
         try {
             const result = await this.requestApi('jimi.user.device.list', { target: TRACKSOLID_USER_ID });
             // The API returns a page structure or array depending on the exact version
-            const devices = Array.isArray(result) ? result : (result.data || []);
+            const devices = Array.isArray(result) ? result : (result.list || result.data || []);
             
             this.devicesCache = {
                 data: devices,
@@ -247,10 +247,31 @@ class GpsService {
 
             // If we have IMEIs that need fetching
             if (expiredOrMissingImeis.length > 0) {
-                const fetchImeisString = expiredOrMissingImeis.join(',');
-                console.log(`[GPS Service] Fetching fresh locations from Tracksolid for IMEIs: ${fetchImeisString}`);
-                const result = await this.requestApi('jimi.device.location.get', { imeis: fetchImeisString, map_type: 'GOOGLE' });
-                const list = Array.isArray(result) ? result : (result.data || []);
+                // Chunk the expiredOrMissingImeis into batches of 50 to respect API length/parameter limits
+                const batchSize = 50;
+                const batches = [];
+                for (let i = 0; i < expiredOrMissingImeis.length; i += batchSize) {
+                    batches.push(expiredOrMissingImeis.slice(i, i + batchSize));
+                }
+
+                console.log(`[GPS Service] Fetching fresh locations from Tracksolid in ${batches.length} batches (Total IMEIs: ${expiredOrMissingImeis.length})`);
+                
+                const results = await Promise.all(
+                    batches.map(async (batch) => {
+                        try {
+                            const fetchImeisString = batch.join(',');
+                            const result = await this.requestApi('jimi.device.location.get', { imeis: fetchImeisString, map_type: 'GOOGLE' });
+                            const list = Array.isArray(result) ? result : (result.list || result.data || []);
+                            return list;
+                        } catch (err) {
+                            console.error(`[GPS Service] Error fetching location batch:`, err.message);
+                            return [];
+                        }
+                    })
+                );
+
+                // Flatten the results
+                const list = results.flat();
                 
                 // Parse, cache and add the fetched locations
                 list.forEach(loc => {
