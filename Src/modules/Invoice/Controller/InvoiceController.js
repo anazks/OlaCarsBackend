@@ -188,7 +188,6 @@ exports.downloadInvoicePdf = async (req, res) => {
             return res.status(404).json({ success: false, message: "Invoice not found" });
         }
 
-        // Set headers to view/stream PDF directly in the browser
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
             "Content-Disposition",
@@ -201,3 +200,42 @@ exports.downloadInvoicePdf = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.getReconfigProgress = async (req, res) => {
+    try {
+        const DriverService = require("../../Driver/Service/DriverService");
+        const progress = DriverService.getReconfigProgress();
+        return res.status(200).json({ success: true, data: progress });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

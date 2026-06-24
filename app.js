@@ -33,6 +33,7 @@ const MerchendiseRouter = require("./Src/modules/Merchendise/Routes/MerchendiseR
 
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
+const FleetRouter = require("./Src/modules/Fleet/Routes/FleetRouter");
 const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
 const AccountingCodeRouter = require("./Src/modules/AccountingCode/Routes/AccountingCodeRouter");
 const TaxRouter = require("./Src/modules/Tax/Routes/TaxRouter");
@@ -200,6 +201,7 @@ app.use("/api/workshop-manager", WorkshopManagerRouter);
 app.use("/api/workshop", WorkshopRouter);
 app.use("/api/purchase-order", PurchaseOrderRouter);
 app.use("/api/vehicle", VehicleRouter);
+app.use("/api/fleet", FleetRouter);
 app.use("/api/supplier", SupplierRouter);
 app.use("/api/accounting-code", AccountingCodeRouter);
 app.use("/api/tax", TaxRouter);
