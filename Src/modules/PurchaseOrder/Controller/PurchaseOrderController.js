@@ -225,7 +225,28 @@ const getPurchaseOrderById = async (req, res) => {
         if (!po) {
             return res.status(404).json({ success: false, message: "Purchase Order not found" });
         }
-        return res.status(200).json({ success: true, data: po });
+
+        let poObj = po.toObject ? po.toObject() : po;
+
+        try {
+            if (po.purchaseOrderNumber && po.purchaseOrderNumber.startsWith("PO-PR-")) {
+                const prNumber = po.purchaseOrderNumber.replace("PO-PR-", "");
+                const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+                const linkedPR = await WorkshopProcurement.findOne({ requestNumber: prNumber })
+                    .populate("editHistory.editedBy", "fullName name email role")
+                    .populate("part")
+                    .populate("branch")
+                    .populate("requestedBy", "fullName name email role")
+                    .populate("approvedBy", "fullName name email role");
+                if (linkedPR) {
+                    poObj.linkedPR = linkedPR;
+                }
+            }
+        } catch (prErr) {
+            console.error("Failed to lookup linked PR:", prErr);
+        }
+
+        return res.status(200).json({ success: true, data: poObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
