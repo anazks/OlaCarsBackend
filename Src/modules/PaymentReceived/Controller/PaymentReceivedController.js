@@ -233,7 +233,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             ];
         }
 
-        let sort = { createdAt: -1 };
+        let sort = { paymentDate: -1 };
         if (sortBy) {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
         }
