@@ -322,8 +322,13 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 };
 
 exports.applyExcessToNextInvoice = async (customerId, excessAmount, paymentData) => {
-    // Find the next UNPAID invoice ordered by weekNumber
-    const nextInvoices = await Invoice.find({ customer: customerId, status: { $ne: 'PAID' }, isDeleted: false })
+    // Find the next UNPAID invoice ordered by weekNumber (excluding RENTAL invoices)
+    const nextInvoices = await Invoice.find({ 
+        customer: customerId, 
+        status: { $ne: 'PAID' }, 
+        invoiceType: { $ne: 'RENTAL' },
+        isDeleted: false 
+    })
         .sort({ weekNumber: 1 });
 
     let rem = excessAmount;
@@ -729,6 +734,11 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
 
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice || invoice.status === 'PAID') return;
+
+    if (invoice.invoiceType === 'RENTAL') {
+        console.log(`[InvoiceService] Skipping prepayment application for RENTAL invoice ${invoice.invoiceNumber}`);
+        return;
+    }
 
     // Find all completed PaymentReceived records for this customer
     const payments = await PaymentReceived.find({ customerId: invoice.customer, status: 'COMPLETED' });

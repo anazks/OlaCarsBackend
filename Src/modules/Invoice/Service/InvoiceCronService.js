@@ -16,10 +16,16 @@ const startInvoiceCronJob = () => {
     cron.schedule('0 0 * * *', async () => {
         console.log('[InvoiceCronService] Running daily invoice routines...');
         try {
+            const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+            const suspendedSetting = await SystemSettings.findOne({ key: 'invoice_cron_suspended' });
+            if (suspendedSetting && (suspendedSetting.value === true || suspendedSetting.value === 'true')) {
+                console.log('[InvoiceCronService] Invoice cron job is suspended. Skipping daily invoice routines.');
+                return;
+            }
+
             const today = new Date();
             const currentDay = today.getDay(); // 0 is Sunday, 1 is Monday, etc.
 
-            const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
             const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
             const generationDay = setting ? parseInt(setting.value) : 3; // Default 3 (Wednesday)
 
