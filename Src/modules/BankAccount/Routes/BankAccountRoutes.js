@@ -22,6 +22,12 @@ router.get(
 );
 
 router.get(
+    "/transactions/:transactionId",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.getBankTransactionById
+);
+
+router.get(
     "/:id",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
     BankAccountController.getBankAccount

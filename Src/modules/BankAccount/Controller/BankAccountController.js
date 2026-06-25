@@ -322,12 +322,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             // Date, Description, Transaction Details, Debit, Credit, Running Balance, Transaction Type, Amount
             const dateVal = tx.Date || tx.date;
             const descVal = tx.Description || tx.description || "";
-            const detailsVal = tx["Transaction Details"] || tx.transactionDetails || "";
+            const detailsVal = tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
             const debitVal = Number(tx.Debit || tx.debit) || 0;
             const creditVal = Number(tx.Credit || tx.credit) || 0;
-            const runningBalVal = Number(tx["Running Balance"] || tx.runningBalance) || 0;
-            let typeVal = String(tx["Transaction Type"] || tx.transactionType || "").trim().toUpperCase();
+            const runningBalVal = Number(tx["Running Balance"] || tx.runningBalance || tx.running_balance) || 0;
+            let typeVal = String(tx["Transaction Type"] || tx.transactionType || tx.transaction_type || "").trim().toUpperCase();
             let amountVal = Number(tx.Amount || tx.amount) || 0;
+            const transactionIdVal = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
 
             // Resolve Type based on priority
             let resolvedType = "";
@@ -395,6 +396,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 description: finalDescription || "Bulk uploaded ledger transaction",
                 entryDate: dateVal ? new Date(dateVal) : new Date(),
                 transactionType: typeVal,
+                transactionId: transactionIdVal,
                 runningBalance: runningBalVal !== 0 ? runningBalVal : balanceAccum,
                 createdBy,
                 creatorRole
@@ -487,6 +489,31 @@ exports.getBankTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in getBankTransactions controller:", error);
+        next(error);
+    }
+};
+
+exports.getBankTransactionById = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const BankTransaction = require("../Model/BankTransactionModel");
+
+        const transaction = await BankTransaction.findById(transactionId)
+            .populate("bankAccount", "accountName bankName accountNumber currency status")
+            .populate("branch", "name code")
+            .populate("accountingCode", "code name category")
+            .populate("createdBy", "name email");
+
+        if (!transaction) {
+            return res.status(404).json({ success: false, message: "Bank transaction not found" });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: transaction
+        });
+    } catch (error) {
+        console.error("Error in getBankTransactionById controller:", error);
         next(error);
     }
 };
