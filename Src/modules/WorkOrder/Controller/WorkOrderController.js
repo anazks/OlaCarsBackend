@@ -41,6 +41,22 @@ const createWorkOrderHandler = async (req, res) => {
 
         const wo = await WorkOrderRepo.createWorkOrder(data);
 
+        // Auto-save matched/resolved gpsSerialNumber (IMEI) to vehicle if not already present
+        if (data.vehicleId && data.gpsSerialNumber) {
+            try {
+                const VehicleRepo = require("../../Vehicle/Repo/VehicleRepo");
+                const vehicle = await VehicleRepo.getVehicleByIdService(data.vehicleId);
+                if (vehicle && !vehicle.gpsSerialNumber) {
+                    await VehicleRepo.updateVehicleService(data.vehicleId, {
+                        gpsSerialNumber: data.gpsSerialNumber
+                    });
+                    console.log(`[GPS AUTO-SAVE] Saved resolved IMEI ${data.gpsSerialNumber} to vehicle ${data.vehicleId}`);
+                }
+            } catch (err) {
+                console.error("[GPS AUTO-SAVE ERROR] Failed to save IMEI to vehicle:", err.message);
+            }
+        }
+
         return res.status(201).json({ success: true, data: wo });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

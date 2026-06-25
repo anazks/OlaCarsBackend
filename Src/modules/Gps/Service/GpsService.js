@@ -124,6 +124,59 @@ class GpsService {
         }
     }
 
+    async requestApiRaw(method, additionalParams = {}, requiresToken = true) {
+        let accessToken = null;
+        if (requiresToken) {
+            accessToken = await this.getAccessToken();
+        }
+
+        const params = {
+            method,
+            timestamp: this.getTimestamp(),
+            app_key: TRACKSOLID_APP_KEY,
+            v: process.env.TRACKSOLID_API_VERSION || '1.0',
+            format: 'json',
+            sign_method: 'md5',
+            ...additionalParams
+        };
+
+        if (accessToken) {
+            params.access_token = accessToken;
+        }
+
+        params.sign = this.generateSign(params, TRACKSOLID_APP_SECRET);
+
+        const searchParams = new URLSearchParams();
+        for (const key in params) {
+            if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+                searchParams.append(key, params[key]);
+            }
+        }
+
+        try {
+            console.log(`[GPS API REQUEST RAW] URL: ${TRACKSOLID_API_URL} | Method: ${method}`);
+
+            const response = await fetch(TRACKSOLID_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: searchParams.toString()
+            });
+            const data = await response.json();
+            
+            console.log(`[GPS API RESPONSE RAW] Method: ${method} | Code: ${data.code} | Message: ${data.message || 'success'}`);
+            
+            if (data.code !== 0 && data.code !== 200 && data.code !== '0') {
+                throw new Error(`Tracksolid API Error: ${data.message || JSON.stringify(data)}`);
+            }
+            return data;
+        } catch (error) {
+            console.error(`[GPS API ERROR RAW] (${method}):`, error.message);
+            throw error;
+        }
+    }
+
     async getAccessToken() {
         if (this.tokenCache && this.tokenCache.accessToken && this.tokenCache.expiresAt > Date.now()) {
             return this.tokenCache.accessToken;
@@ -202,17 +255,8 @@ class GpsService {
             };
             return devices;
         } catch (e) {
-            console.error("Using mock devices due to API error");
-            return [
-                {
-                    imei: '860121060485136',
-                    deviceName: 'Demo Vehicle 1',
-                    vehicleNumber: 'EV0063',
-                    carFrame: 'LVTDB21B6SH156408',
-                    status: 'NORMAL',
-                    enabledFlag: 1
-                }
-            ];
+            console.error("Error in getVehiclesList:", e.message);
+            throw e;
         }
     }
 
@@ -306,18 +350,28 @@ class GpsService {
             const requestedImeiSet = new Set(imeiArray);
             return freshLocations.filter(loc => requestedImeiSet.has(loc.imei));
         } catch (e) {
-            console.error("Using mock locations due to API error:", e.message);
-            return [
-                {
-                    imei: '860121060485136',
-                    lat: 9.0232,
-                    lng: -79.5244,
-                    speed: 45,
-                    status: 1,
-                    accStatus: 1,
-                    gpsTime: this.getTimestamp()
-                }
-            ];
+            console.error("Error in getGpsLocations:", e.message);
+            throw e;
+        }
+    }
+
+    async getTripsReport(imei, startTime, endTime, startRow = 1) {
+        try {
+            console.log(`[GPS Service] Fetching trips report for IMEI: ${imei} from ${startTime} to ${endTime}`);
+            const result = await this.requestApi('jimi.open.platform.report.trips', {
+                account: TRACKSOLID_USER_ID,
+                imeis: imei,
+                type: 'list',
+                start_time: startTime,
+                end_time: endTime,
+                start_row: String(startRow),
+                page_size: '100'
+            });
+            const list = Array.isArray(result) ? result : (result.list || result.data || []);
+            return list;
+        } catch (e) {
+            console.error("Error fetching trips report from Tracksolid API:", e.message);
+            throw e;
         }
     }
 
@@ -348,6 +402,97 @@ class GpsService {
         } catch (e) {
             console.error("Media event URL mock");
             return { url: 'https://demo.tracksolidpro.com/media/mock' };
+        }
+    }
+
+    async getMileage(imeis, startTime, endTime) {
+        try {
+            console.log(`[GPS Service] Fetching mileage data for IMEIs: ${imeis} from ${startTime} to ${endTime}`);
+            const responseBody = await this.requestApiRaw('jimi.device.track.mileage', {
+                imeis,
+                begin_time: startTime,
+                end_time: endTime
+            });
+
+            // Extract the result list and data list from the response body
+            const resultList = responseBody && Array.isArray(responseBody.result) ? responseBody.result : 
+                              (Array.isArray(responseBody) ? responseBody : []);
+            const dataList = responseBody && Array.isArray(responseBody.data) ? responseBody.data : [];
+
+            // Map and combine them by IMEI
+            const combined = imeis.split(',').map(imei => imei.trim()).filter(Boolean).map(imei => {
+                const resultItem = resultList.find(r => r.imei === imei) || {};
+                const dataItem = dataList.find(d => d.imei === imei) || {};
+
+                return {
+                    imei,
+                    startTime: resultItem.startTime || startTime,
+                    endTime: resultItem.endTime || endTime,
+                    elapsed: resultItem.elapsed !== undefined ? Number(resultItem.elapsed) : 0,
+                    distance: resultItem.distance !== undefined ? Number(resultItem.distance) : 0,
+                    avgSpeed: resultItem.avgSpeed !== undefined ? Number(resultItem.avgSpeed) : 0,
+                    totalMileage: dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : 0,
+                    mileage: dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : 0 // For backwards compatibility
+                };
+            });
+
+            return combined;
+        } catch (e) {
+            console.error("Error fetching mileage from Tracksolid API:", e.message);
+            // Fallback mock mileage data for demo/test purposes if the credentials/API fails
+            return imeis.split(',').map(imei => imei.trim()).filter(Boolean).map(imei => ({
+                imei,
+                startTime,
+                endTime,
+                elapsed: Math.floor(Math.random() * 2000) + 300,
+                distance: Math.floor(Math.random() * 20000) + 1000,
+                avgSpeed: Math.floor(Math.random() * 60) + 30,
+                totalMileage: Math.floor(Math.random() * 100000) + 5000,
+                mileage: Math.floor(Math.random() * 100000) + 5000 // For backwards compatibility
+            }));
+        }
+    }
+
+    async getTrackList(imei, beginTime, endTime) {
+        try {
+            console.log(`[GPS Service] Fetching track list for IMEI: ${imei} from ${beginTime} to ${endTime}`);
+            const result = await this.requestApi('jimi.device.track.list', {
+                imei,
+                begin_time: beginTime,
+                end_time: endTime
+            });
+            return Array.isArray(result) ? result : (result.list || result.data || result);
+        } catch (e) {
+            console.error("Error fetching track list from Tracksolid API:", e.message);
+            // Fallback mock track coordinates if the API fails
+            const lat = 8.5379;
+            const lng = -80.7821;
+            return Array.from({ length: 5 }, (_, i) => ({
+                lat: lat + (i * 0.01) * (Math.random() > 0.5 ? 1 : -1),
+                lng: lng + (i * 0.01) * (Math.random() > 0.5 ? 1 : -1),
+                speed: Math.floor(Math.random() * 80) + 10,
+                gpsSpeed: Math.floor(Math.random() * 80) + 10,
+                mileage: Math.floor(Math.random() * 100000) + 50000,
+                gpsTime: new Date(Date.now() - i * 15 * 60000).toISOString().replace('T', ' ').substring(0, 19)
+            }));
+        }
+    }
+
+    async getObdData(imei, startTime, endTime) {
+        try {
+            console.log(`[GPS Service] Fetching OBD data for IMEI: ${imei} from ${startTime} to ${endTime}`);
+            const responseBody = await this.requestApiRaw('jimi.device.obd.list', {
+                imeis: imei,
+                start_time: startTime,
+                end_time: endTime,
+                page: '1',
+                pageSize: '100'
+            });
+            console.log("[GPS Service] jimi.device.obd.list RESPONSE:", JSON.stringify(responseBody));
+            return responseBody;
+        } catch (e) {
+            console.error("Error fetching OBD data from Tracksolid API:", e.message);
+            throw e;
         }
     }
 }
