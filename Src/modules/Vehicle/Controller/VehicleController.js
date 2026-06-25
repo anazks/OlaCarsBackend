@@ -914,6 +914,103 @@ const bulkAddVehicles = async (req, res) => {
     }
 };
 
+const bulkUpdateVehicleRent = async (req, res) => {
+    try {
+        const { updates } = req.body;
+        if (!updates || !Array.isArray(updates)) {
+            return res.status(400).json({ success: false, message: "Invalid payload. 'updates' must be an array of objects." });
+        }
+
+        const { Vehicle } = require("../Model/VehicleModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const DriverService = require("../../Driver/Service/DriverService");
+
+        const results = { updated: [], errors: [] };
+
+        for (let i = 0; i < updates.length; i++) {
+            const row = updates[i];
+            const rowNum = i + 1;
+
+            // Map keys flexibly (supporting spaces, underscores, casing)
+            const registrationNumberRaw = row["Vehicle No"] || row["Vehicle_No"] || row["VehicleNo"] || row["registrationNumber"] || row["RegistrationNumber"] || row["registration_number"];
+            const vinRaw = row["VIN Number"] || row["VIN_Number"] || row["VINNumber"] || row["vin"] || row["VIN"] || row["vinNumber"];
+            const weeklyRentRaw = row["Weekly Rent"] || row["Weekly_Rent"] || row["WeeklyRent"] || row["weeklyRent"] || row["Weeklyrent"] || row["weekly_rent"];
+
+            const registrationNumber = registrationNumberRaw ? registrationNumberRaw.toString().trim() : "";
+            const vin = vinRaw ? vinRaw.toString().trim().toUpperCase() : "";
+            const weeklyRent = weeklyRentRaw !== undefined ? Number(weeklyRentRaw) : NaN;
+
+            if (!registrationNumber) {
+                results.errors.push({ row: rowNum, message: "Missing required column: Vehicle No" });
+                continue;
+            }
+            if (!vin) {
+                results.errors.push({ row: rowNum, message: "Missing required column: VIN Number" });
+                continue;
+            }
+            if (isNaN(weeklyRent) || weeklyRent < 0) {
+                results.errors.push({ row: rowNum, message: "Missing or invalid Weekly Rent value" });
+                continue;
+            }
+
+            try {
+                // Find matching vehicle
+                const vehicle = await Vehicle.findOne({
+                    "legalDocs.registrationNumber": { $regex: new RegExp(`^${registrationNumber}$`, "i") },
+                    "basicDetails.vin": { $regex: new RegExp(`^${vin}$`, "i") },
+                    isDeleted: false
+                });
+
+                if (!vehicle) {
+                    results.errors.push({ row: rowNum, message: `Vehicle not found matching Vehicle No: "${registrationNumber}" and VIN: "${vin}"` });
+                    continue;
+                }
+
+                // Update vehicle basicDetails.weeklyRent
+                vehicle.basicDetails.weeklyRent = weeklyRent;
+                await vehicle.save();
+
+                // Check for associated driver
+                let driverId = vehicle.currentDriver;
+                if (!driverId) {
+                    const driverDoc = await Driver.findOne({ currentVehicle: vehicle._id, isDeleted: false });
+                    if (driverDoc) driverId = driverDoc._id;
+                }
+
+                let driverUpdated = false;
+                if (driverId) {
+                    const scheduleRes = await DriverService.updateDriverRentScheduleForVehicle(driverId, vehicle._id, weeklyRent);
+                    if (scheduleRes.success) {
+                        driverUpdated = true;
+                        // Run rollover to ensure overdue rent ledger consistency
+                        await DriverService.rolloverOverdueRent(driverId);
+                    }
+                }
+
+                results.updated.push({
+                    row: rowNum,
+                    id: vehicle._id,
+                    vin: vehicle.basicDetails.vin,
+                    registrationNumber: vehicle.legalDocs.registrationNumber,
+                    weeklyRent: weeklyRent,
+                    driverUpdated
+                });
+            } catch (rowErr) {
+                results.errors.push({ row: rowNum, message: rowErr.message });
+            }
+        }
+
+        const statusCode = results.updated.length > 0 ? 200 : 400;
+        return res.status(statusCode).json({
+            success: results.updated.length > 0,
+            message: `${results.updated.length} vehicle(s) rent updated, ${results.errors.length} error(s).`,
+            data: results
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addVehicle,
     getVehicles,
@@ -927,4 +1024,5 @@ module.exports = {
     updateVehicle,
     getVehiclesDueForService,
     bulkAddVehicles,
+    bulkUpdateVehicleRent,
 };

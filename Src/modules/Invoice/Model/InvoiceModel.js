@@ -55,7 +55,7 @@ const invoiceSchema = new mongoose.Schema({
         ref: "ServiceBill",
     },
     weekNumber: {
-        type: String,
+        type: Number,
         required: function() { return this.invoiceType === 'RENTAL'; },
     },
     weekLabel: {

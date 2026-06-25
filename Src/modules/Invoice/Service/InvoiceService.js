@@ -670,8 +670,9 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const taxDoc = firstAppliedTaxDoc;
 
     // Auto-assign weekNumber (next available for this customer)
-    const existingInvoices = await Invoice.find({ customer: finalCustomerId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
-    const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+    // Sort by dueDate descending (not weekNumber) to avoid string-sorting bugs
+    const existingInvoices = await Invoice.find({ customer: finalCustomerId, isDeleted: false }).sort({ dueDate: -1, _id: -1 }).limit(1);
+    const nextWeekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
 
     // Generate sequential manual invoice number
     const startSeq = await getNextInvoiceNumberVal();
@@ -855,12 +856,10 @@ exports.updateGenerationSettings = async (data) => {
         { upsert: true, new: true }
     );
 
-    // Trigger dynamic rent plan update for all drivers
-    try {
-        await DriverService.reconfigureAllPendingRentPlans(generationDay);
-    } catch (err) {
-        console.error("[InvoiceService] Failed to reconfigure pending rent plans:", err);
-    }
+    // Trigger dynamic rent plan update for all drivers in background
+    DriverService.reconfigureAllPendingRentPlans(generationDay).catch(err => {
+        console.error("[InvoiceService] Background rent plan reconfiguration failed:", err);
+    });
 
     return { success: true };
 };
@@ -1385,8 +1384,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         }
 
         // Auto-assign weekNumber (next available for this customer)
-        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
-        const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+        // Sort by dueDate descending (not weekNumber) to avoid string-sorting bugs
+        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ dueDate: -1, _id: -1 }).limit(1);
+        const nextWeekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
 
         const newInvoiceData = {
             invoiceNumber,

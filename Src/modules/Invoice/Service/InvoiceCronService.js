@@ -14,9 +14,22 @@ const {
 const startInvoiceCronJob = () => {
     // Run daily at midnight
     cron.schedule('0 0 * * *', async () => {
-        console.log('[InvoiceCronService] Running daily invoice generation, reminders, and overdue check...');
+        console.log('[InvoiceCronService] Running daily invoice routines...');
         try {
-            await exports.generateDueInvoices();
+            const today = new Date();
+            const currentDay = today.getDay(); // 0 is Sunday, 1 is Monday, etc.
+
+            const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+            const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+            const generationDay = setting ? parseInt(setting.value) : 3; // Default 3 (Wednesday)
+
+            if (currentDay === generationDay) {
+                console.log(`[InvoiceCronService] Today (day ${currentDay}) matches the configured generation day (${generationDay}). Running weekly generation...`);
+                await exports.generateDueInvoices();
+            } else {
+                console.log(`[InvoiceCronService] Today is day ${currentDay}, but configured generation day is ${generationDay}. Skipping weekly generation.`);
+            }
+
             await exports.checkAndSendRentReminders();
             await exports.checkOverdueInvoices();
         } catch (error) {
@@ -28,6 +41,11 @@ const startInvoiceCronJob = () => {
 exports.generateCurrentWeekInvoices = async (manual = false, userId = null, userRole = null) => {
     console.log(`[InvoiceCronService] ${manual ? 'Manual' : 'Scheduled'} generation started by ${userRole || 'SYSTEM'}...`);
     
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
+
     // 1. Resolve Creator Details (Schema requires valid ObjectId and Enum)
     let finalUserId = userId;
     let finalUserRole = userRole;
@@ -81,129 +99,160 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
                 continue;
             }
 
-            // Find the most recent invoice to get the next week number
-            const lastInvoice = await Invoice.findOne({ driver: driver._id, isDeleted: false })
-                .sort({ weekNumber: -1 });
+            // Find the most recent RENTAL invoice to get the next week number
+            // Sort by dueDate (not weekNumber) to avoid string-sorting corruption bugs
+            let lastInvoice = await Invoice.findOne({ 
+                driver: driver._id, 
+                invoiceType: 'RENTAL',
+                isDeleted: false 
+            }).sort({ dueDate: -1, _id: -1 });
 
             const tracking = [...driver.rentTracking].sort((a, b) => a.weekNumber - b.weekNumber);
-            
-            let nextPeriod;
-            if (!lastInvoice) {
-                // If no invoices exist, start with the first period in tracking
-                nextPeriod = tracking[0];
-            } else {
-                // Find the period after the last generated invoice
-                const lastIdx = tracking.findIndex(t => t.weekNumber === lastInvoice.weekNumber);
-                if (lastIdx === -1) {
-                    // If last invoice weekNumber not in tracking, try to find the first tracking item with weekNumber > lastInvoice.weekNumber
-                    nextPeriod = tracking.find(t => t.weekNumber > lastInvoice.weekNumber);
-                } else {
-                    nextPeriod = tracking[lastIdx + 1];
-                }
-            }
 
-            if (!nextPeriod) {
-                console.log(`[InvoiceCronService] No next period found for Driver ${driver.driverId}. Last Week: ${lastInvoice?.weekNumber || 'None'}`);
-                skippedCount++;
-                continue;
-            }
-
-            // CHECK: Is it "this week"? 
-            // Only generate if dueDate is in the past OR within the next 7 days
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const dueLimit = new Date(today);
             dueLimit.setDate(today.getDate() + 7);
 
-            const dueDate = new Date(nextPeriod.dueDate);
-            dueDate.setHours(0, 0, 0, 0);
-            
-            // Limit generation to "this week" (within next 7 days)
-            if (dueDate > dueLimit) {
-                console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Next period (Week ${nextPeriod.weekNumber}) is too far in future. Due: ${dueDate.toISOString().split('T')[0]}, Limit: ${dueLimit.toISOString().split('T')[0]}`);
-                skippedCount++;
-                continue;
-            }
-
-            console.log(`[InvoiceCronService] PROCESSING ${driver.driverId}: Generating Week ${nextPeriod.weekNumber} (Due: ${dueDate.toISOString().split('T')[0]})`);
-
-            // Ensure we don't generate the same week twice (extra safety)
-            const existing = await Invoice.findOne({ 
-                driver: driver._id, 
-                weekNumber: nextPeriod.weekNumber, 
-                isDeleted: false 
-            });
-            
-            if (existing) {
-                console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Invoice for Week ${nextPeriod.weekNumber} already exists.`);
-                skippedCount++;
-                continue;
-            }
-
-            // Generate it!
-            let carryOver = 0;
-            if (lastInvoice && lastInvoice.status !== 'PAID') {
-                carryOver = lastInvoice.balance;
-            }
-
-            const amount = nextPeriod.amount;
-            const baseAmount = taxRate > 0 ? Math.round((amount / (1 + taxRate / 100)) * 100) / 100 : amount;
-            const taxAmount = Math.round((amount - baseAmount) * 100) / 100;
-            const newTotalDue = Math.round((amount + carryOver) * 100) / 100;
-            
-            const startSeq = await InvoiceService.getNextInvoiceNumberVal();
-            const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
-
-            const newInvoice = new Invoice({
-                invoiceNumber,
-                customer: customer._id,
-                driver: driver._id,
-                vehicle: driver.currentVehicle._id || driver.currentVehicle,
-                weekNumber: nextPeriod.weekNumber,
-                weekLabel: nextPeriod.weekLabel,
-                dueDate: nextPeriod.dueDate,
-                baseAmount,
-                carryOverAmount: carryOver,
-                tax: activeTax ? activeTax._id : undefined,
-                taxRate,
-                taxAmount,
-                totalAmountDue: newTotalDue,
-                amountPaid: 0,
-                balance: newTotalDue,
-                status: "PENDING",
-                payments: [],
-                createdBy: finalUserId,
-                creatorRole: finalUserRole
-            });
-
-            await newInvoice.save();
-            try {
-                const LedgerService = require("../../Ledger/Service/LedgerService");
-                await LedgerService.generateInvoiceLedgerEntries(newInvoice);
-            } catch (ledgerErr) {
-                console.error("[InvoiceCronService] Failed to generate ledger entries for invoice:", ledgerErr);
-            }
-            console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId}`);
-
-            // Immediate Created Email Notification for RENTAL invoices (duplicate-safe)
-            if (driver.personalInfo?.email && !newInvoice.mailSentCreated) {
-                const sent = await sendInvoiceCreatedEmail(
-                    driver.personalInfo.email,
-                    newInvoice,
-                    driver.personalInfo.fullName || "Driver",
-                    driver.branch?.address || "",
-                    driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
-                    newInvoice.mailSentCreated = true;
-                    await newInvoice.save();
+            // Loop to catch up on ALL past-due and current-week invoices
+            let driverGenerated = 0;
+            while (true) {
+                let nextPeriod;
+                if (!lastInvoice) {
+                    // If no invoices exist, start with the first period in tracking
+                    nextPeriod = tracking[0];
+                } else {
+                    const lastWeekNum = Number(lastInvoice.weekNumber);
+                    // Find the period after the last generated invoice
+                    const lastIdx = tracking.findIndex(t => Number(t.weekNumber) === lastWeekNum);
+                    if (lastIdx === -1) {
+                        nextPeriod = tracking.find(t => Number(t.weekNumber) > lastWeekNum);
+                    } else {
+                        nextPeriod = tracking[lastIdx + 1];
+                    }
                 }
+
+                if (!nextPeriod) {
+                    if (driverGenerated === 0) {
+                        console.log(`[InvoiceCronService] No next period found for Driver ${driver.driverId}. Last Week: ${lastInvoice?.weekNumber || 'None'}`);
+                        skippedCount++;
+                    }
+                    break;
+                }
+
+                const dueDate = new Date(nextPeriod.dueDate);
+                dueDate.setHours(0, 0, 0, 0);
+
+                // Stop if next period is too far in the future
+                if (dueDate > dueLimit) {
+                    if (driverGenerated === 0) {
+                        console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Next period (Week ${nextPeriod.weekNumber}) is too far in future. Due: ${dueDate.toISOString().split('T')[0]}, Limit: ${dueLimit.toISOString().split('T')[0]}`);
+                        skippedCount++;
+                    }
+                    break;
+                }
+
+                // Ensure we don't generate the same week twice (extra safety)
+                const existing = await Invoice.findOne({ 
+                    driver: driver._id, 
+                    invoiceType: 'RENTAL',
+                    weekNumber: nextPeriod.weekNumber, 
+                    isDeleted: false 
+                });
+                
+                if (existing) {
+                    console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Invoice for Week ${nextPeriod.weekNumber} already exists.`);
+                    // Move past this week by treating the existing invoice as the last one
+                    lastInvoice = existing;
+                    continue;
+                }
+
+                console.log(`[InvoiceCronService] PROCESSING ${driver.driverId}: Generating Week ${nextPeriod.weekNumber} (Due: ${dueDate.toISOString().split('T')[0]})`);
+
+                // Generate it!
+                let carryOver = 0;
+                if (lastInvoice && lastInvoice.status !== 'PAID') {
+                    carryOver = lastInvoice.balance;
+                }
+
+                const amount = nextPeriod.amount;
+                const baseAmount = taxRate > 0 ? Math.round((amount / (1 + taxRate / 100)) * 100) / 100 : amount;
+                const taxAmount = Math.round((amount - baseAmount) * 100) / 100;
+                const newTotalDue = Math.round((amount + carryOver) * 100) / 100;
+                
+                const startSeq = await InvoiceService.getNextInvoiceNumberVal();
+                const invoiceNumber = InvoiceService.formatInvoiceNumber(startSeq);
+
+                const newInvoice = new Invoice({
+                    invoiceNumber,
+                    customer: customer._id,
+                    driver: driver._id,
+                    vehicle: driver.currentVehicle._id || driver.currentVehicle,
+                    weekNumber: nextPeriod.weekNumber,
+                    weekLabel: nextPeriod.weekLabel,
+                    dueDate: nextPeriod.dueDate,
+                    baseAmount,
+                    carryOverAmount: carryOver,
+                    tax: activeTax ? activeTax._id : undefined,
+                    taxRate,
+                    taxAmount,
+                    totalAmountDue: newTotalDue,
+                    amountPaid: 0,
+                    balance: newTotalDue,
+                    status: "PENDING",
+                    payments: [],
+                    createdBy: finalUserId,
+                    creatorRole: finalUserRole
+                });
+
+                await newInvoice.save();
+                try {
+                    const LedgerService = require("../../Ledger/Service/LedgerService");
+                    await LedgerService.generateInvoiceLedgerEntries(newInvoice);
+                } catch (ledgerErr) {
+                    console.error("[InvoiceCronService] Failed to generate ledger entries for invoice:", ledgerErr);
+                }
+                console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId} (Week ${nextPeriod.weekNumber})`);
+
+                // Immediate Created Email Notification for RENTAL invoices
+                if (driver.personalInfo?.email && !newInvoice.mailSentCreated) {
+                    if (emailsEnabled) {
+                        const sent = await sendInvoiceCreatedEmail(
+                            driver.personalInfo.email,
+                            newInvoice,
+                            driver.personalInfo.fullName || "Driver",
+                            driver.branch?.address || "",
+                            driver.branch?.branchManager?.fullName || ""
+                        );
+                        if (sent) {
+                            newInvoice.mailSentCreated = true;
+                            await newInvoice.save();
+                        }
+                    } else {
+                        newInvoice.mailSentCreated = true;
+                        await newInvoice.save();
+                    }
+                }
+
+                generatedCount++;
+                driverGenerated++;
+                // Set this newly created invoice as lastInvoice for the next iteration
+                lastInvoice = newInvoice;
             }
 
-            generatedCount++;
+            if (driverGenerated > 0) {
+                console.log(`[InvoiceCronService] Driver ${driver.driverId}: Generated ${driverGenerated} catch-up invoices.`);
+            }
         } catch (err) {
             console.error(`[InvoiceCronService] Error processing driver ${driver.driverId}:`, err);
         }
+    }
+
+    try {
+        console.log('[InvoiceCronService] Checking for overdue invoices immediately after generation...');
+        await exports.checkOverdueInvoices();
+    } catch (overdueErr) {
+        console.error('[InvoiceCronService] Error running checkOverdueInvoices after generation:', overdueErr);
     }
 
     console.log(`[InvoiceCronService] Generation finished. Created: ${generatedCount}, Skipped: ${skippedCount}`);
@@ -219,6 +268,11 @@ exports.checkOverdueInvoices = async () => {
     console.log('[InvoiceCronService] Checking for overdue invoices...');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
 
     try {
         const overdueInvoices = await Invoice.find({
@@ -244,14 +298,19 @@ exports.checkOverdueInvoices = async () => {
 
             // Send Vehicle Recovery Email for overdue RENTAL invoices
             if (invoice.invoiceType === 'RENTAL' && invoice.driver?.personalInfo?.email && !invoice.mailSentRecovery) {
-                const sent = await sendVehicleRecoveryEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendVehicleRecoveryEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentRecovery = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentRecovery = true;
                     await invoice.save();
                 }
@@ -293,6 +352,11 @@ exports.checkOverdueInvoices = async () => {
 exports.checkAndSendRentReminders = async () => {
     console.log('[InvoiceCronService] Checking and sending rent reminders (3 days before & due today)...');
     
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -320,14 +384,19 @@ exports.checkAndSendRentReminders = async () => {
         console.log(`[InvoiceCronService] Found ${invoices3d.length} invoices due in 3 days.`);
         for (const invoice of invoices3d) {
             if (invoice.driver?.personalInfo?.email) {
-                const sent = await sendInvoiceReminderEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendInvoiceReminderEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentReminder3d = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentReminder3d = true;
                     await invoice.save();
                 }
@@ -359,14 +428,19 @@ exports.checkAndSendRentReminders = async () => {
         console.log(`[InvoiceCronService] Found ${invoicesToday.length} invoices due today.`);
         for (const invoice of invoicesToday) {
             if (invoice.driver?.personalInfo?.email) {
-                const sent = await sendInvoiceDueTodayEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendInvoiceDueTodayEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentDueToday = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentDueToday = true;
                     await invoice.save();
                 }
