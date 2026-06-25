@@ -41,6 +41,11 @@ const startInvoiceCronJob = () => {
 exports.generateCurrentWeekInvoices = async (manual = false, userId = null, userRole = null) => {
     console.log(`[InvoiceCronService] ${manual ? 'Manual' : 'Scheduled'} generation started by ${userRole || 'SYSTEM'}...`);
     
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
+
     // 1. Resolve Creator Details (Schema requires valid ObjectId and Enum)
     let finalUserId = userId;
     let finalUserRole = userRole;
@@ -209,16 +214,21 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
                 }
                 console.log(`[InvoiceCronService] SUCCESS: Created invoice ${newInvoice.invoiceNumber} for ${driver.driverId} (Week ${nextPeriod.weekNumber})`);
 
-                // Immediate Created Email Notification for RENTAL invoices (duplicate-safe)
+                // Immediate Created Email Notification for RENTAL invoices
                 if (driver.personalInfo?.email && !newInvoice.mailSentCreated) {
-                    const sent = await sendInvoiceCreatedEmail(
-                        driver.personalInfo.email,
-                        newInvoice,
-                        driver.personalInfo.fullName || "Driver",
-                        driver.branch?.address || "",
-                        driver.branch?.branchManager?.fullName || ""
-                    );
-                    if (sent) {
+                    if (emailsEnabled) {
+                        const sent = await sendInvoiceCreatedEmail(
+                            driver.personalInfo.email,
+                            newInvoice,
+                            driver.personalInfo.fullName || "Driver",
+                            driver.branch?.address || "",
+                            driver.branch?.branchManager?.fullName || ""
+                        );
+                        if (sent) {
+                            newInvoice.mailSentCreated = true;
+                            await newInvoice.save();
+                        }
+                    } else {
                         newInvoice.mailSentCreated = true;
                         await newInvoice.save();
                     }
@@ -259,6 +269,11 @@ exports.checkOverdueInvoices = async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
+
     try {
         const overdueInvoices = await Invoice.find({
             status: { $in: ["PENDING", "PARTIAL"] },
@@ -283,14 +298,19 @@ exports.checkOverdueInvoices = async () => {
 
             // Send Vehicle Recovery Email for overdue RENTAL invoices
             if (invoice.invoiceType === 'RENTAL' && invoice.driver?.personalInfo?.email && !invoice.mailSentRecovery) {
-                const sent = await sendVehicleRecoveryEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendVehicleRecoveryEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentRecovery = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentRecovery = true;
                     await invoice.save();
                 }
@@ -332,6 +352,11 @@ exports.checkOverdueInvoices = async () => {
 exports.checkAndSendRentReminders = async () => {
     console.log('[InvoiceCronService] Checking and sending rent reminders (3 days before & due today)...');
     
+    // Resolve email settings status
+    const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+    const emailSetting = await SystemSettings.findOne({ key: 'driver_payment_emails_enabled' });
+    const emailsEnabled = emailSetting ? (emailSetting.value === true || emailSetting.value === 'true') : true;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -359,14 +384,19 @@ exports.checkAndSendRentReminders = async () => {
         console.log(`[InvoiceCronService] Found ${invoices3d.length} invoices due in 3 days.`);
         for (const invoice of invoices3d) {
             if (invoice.driver?.personalInfo?.email) {
-                const sent = await sendInvoiceReminderEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendInvoiceReminderEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentReminder3d = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentReminder3d = true;
                     await invoice.save();
                 }
@@ -398,14 +428,19 @@ exports.checkAndSendRentReminders = async () => {
         console.log(`[InvoiceCronService] Found ${invoicesToday.length} invoices due today.`);
         for (const invoice of invoicesToday) {
             if (invoice.driver?.personalInfo?.email) {
-                const sent = await sendInvoiceDueTodayEmail(
-                    invoice.driver.personalInfo.email,
-                    invoice,
-                    invoice.driver.personalInfo.fullName || "Driver",
-                    invoice.driver.branch?.address || "",
-                    invoice.driver.branch?.branchManager?.fullName || ""
-                );
-                if (sent) {
+                if (emailsEnabled) {
+                    const sent = await sendInvoiceDueTodayEmail(
+                        invoice.driver.personalInfo.email,
+                        invoice,
+                        invoice.driver.personalInfo.fullName || "Driver",
+                        invoice.driver.branch?.address || "",
+                        invoice.driver.branch?.branchManager?.fullName || ""
+                    );
+                    if (sent) {
+                        invoice.mailSentDueToday = true;
+                        await invoice.save();
+                    }
+                } else {
                     invoice.mailSentDueToday = true;
                     await invoice.save();
                 }

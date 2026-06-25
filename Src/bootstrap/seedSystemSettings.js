@@ -11,6 +11,11 @@ const seedSystemSettings = async () => {
                 value: 1000,
                 description: "Amount above which only ADMIN can approve Purchase Orders.",
             },
+            {
+                key: "driver_payment_emails_enabled",
+                value: true,
+                description: "Toggle to enable or suspend driver rent payment email notifications.",
+            },
         ];
 
         for (const setting of defaultSettings) {
