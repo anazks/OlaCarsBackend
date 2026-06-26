@@ -94,6 +94,7 @@ const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeR
 const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
 const BillRouter = require("./Src/modules/Bill/Routes/BillRoutes");
 const FixedAssetRouter = require("./Src/modules/FixedAsset/Routes/FixedAssetRoutes");
+const FixedAssetTypeRouter = require("./Src/modules/FixedAsset/Routes/FixedAssetTypeRoutes");
 const GpsRouter = require("./Src/modules/Gps/Routes/GpsRouter");
 const mongoose = require("mongoose");
 const app = express();
@@ -246,6 +247,7 @@ app.use("/api/payments-made", PaymentMadeRouter);
 app.use("/api/vendor-credits", VendorCreditRouter);
 app.use("/api/bills", BillRouter);
 app.use("/api/fixed-assets", FixedAssetRouter);
+app.use("/api/fixed-asset-types", FixedAssetTypeRouter);
 app.use("/api/gps", GpsRouter);
 
 app.get("/health", (req, res) => {
@@ -304,6 +306,10 @@ const startServer = async () => {
 
     await seedAccountingCodes();
     console.log("Essential accounting codes verified/seeded");
+
+    const FixedAssetTypeService = require("./Src/modules/FixedAsset/Service/FixedAssetTypeService");
+    await FixedAssetTypeService.seedDefaultFixedAssetTypes();
+    console.log("Default Fixed Asset Types verified/seeded");
 
     if (process.env.ENABLE_INTERNAL_CRON !== "false") {
       initAlertScheduler();
