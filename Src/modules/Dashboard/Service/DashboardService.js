@@ -7,6 +7,7 @@ const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 const moment = require("moment");
 const Bill = require("../../Bill/Model/BillModel");
 const DashboardSummary = require("../Model/DashboardSummaryModel");
+const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
 
 const getBranchIds = async (country, branchId) => {
   let ids = null;
@@ -162,13 +163,22 @@ exports.getSummaryStats = async (filters) => {
   });
 
   // 1. Transactional metrics (summed over date range)
-  let monthlyRevenue = 0;
   let outstandingCollections = 0;
 
   filteredDocs.forEach(d => {
-    monthlyRevenue += d.metrics?.revenue || 0;
     outstandingCollections += d.metrics?.outstandingCollections || 0;
   });
+
+  // Query PaymentReceived for total amount received in the filtered period
+  const paymentQuery = {
+    status: "COMPLETED",
+    paymentDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  if (branchIds) {
+    paymentQuery.branch = { $in: branchIds };
+  }
+  const paymentsList = await PaymentReceived.find(paymentQuery);
+  let monthlyRevenue = paymentsList.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
 
   // 2. Snapshot metrics (latest values in the range)
   let latestDateDoc = null;
@@ -213,14 +223,47 @@ exports.getSummaryStats = async (filters) => {
 
   totalActiveVehicles = fleetStatus.available + fleetStatus.rented;
 
-  // 3. Current Payables and Last Month's Balance Due
-  const billMatch = { status: { $nin: ["PAID", "VOID"] } };
-  if (branchIds) billMatch.branchId = { $in: branchIds };
-  const payablesAggr = await Bill.aggregate([
-    { $match: billMatch },
-    { $group: { _id: null, total: { $sum: "$balanceDue" } } }
-  ]);
-  let totalPayables = payablesAggr.length > 0 ? payablesAggr[0].total : 0;
+  // 3. Current Invoice Balance (Filtered Period) and Last Month's Cumulative Invoice Balance
+  const invoiceMatch = {
+    isDeleted: false,
+    dueDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  
+  const pipeline = [
+    { $match: invoiceMatch }
+  ];
+
+  if (branchIds) {
+    pipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  pipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  const invoiceAggr = await Invoice.aggregate(pipeline);
+  let totalPayables = invoiceAggr.length > 0 ? invoiceAggr[0].totalBalance : 0;
 
   let lastMonthEndDate;
   if (endDate) {
@@ -229,17 +272,46 @@ exports.getSummaryStats = async (filters) => {
     lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
   }
 
-  const lastMonthBillMatch = {
-    status: { $nin: ["PAID", "VOID"] },
-    billDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
+  const lastMonthInvoiceMatch = {
+    isDeleted: false,
+    dueDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
   };
-  if (branchIds) lastMonthBillMatch.branchId = { $in: branchIds };
 
-  const lastMonthPayablesAggr = await Bill.aggregate([
-    { $match: lastMonthBillMatch },
-    { $group: { _id: null, total: { $sum: "$balanceDue" } } }
-  ]);
-  let lastMonthBalanceDue = lastMonthPayablesAggr.length > 0 ? lastMonthPayablesAggr[0].total : 0;
+  const lastMonthPipeline = [
+    { $match: lastMonthInvoiceMatch }
+  ];
+
+  if (branchIds) {
+    lastMonthPipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  lastMonthPipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  const lastMonthInvoiceAggr = await Invoice.aggregate(lastMonthPipeline);
+  let lastMonthBalanceDue = lastMonthInvoiceAggr.length > 0 ? lastMonthInvoiceAggr[0].totalBalance : 0;
 
   const collectionCompliance = 94;
 
