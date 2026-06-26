@@ -87,121 +87,126 @@ exports.create = async (data) => {
 
 const { applyQueryFeatures } = require('../../../shared/utils/queryHelper');
 
+let hasCheckedSpecialAccounts = false;
+
 exports.getAll = async (queryParams = {}) => {
     // Ensure special fixed asset accounts exist
-    try {
-        const count = await AccountingCode.countDocuments({
-            code: { $in: ["1210-VEH-DEP", "5010-VEH-DEP", "1200-VEH", "1200-GEN", "1210-GEN-DEP", "5010-GEN-DEP"] },
-            isDeleted: false
-        });
-        if (count < 6) {
-            const defaultCreator = "507f1f77bcf86cd799439011";
-            const defaultRole = "ADMIN";
+    if (!hasCheckedSpecialAccounts) {
+        try {
+            const count = await AccountingCode.countDocuments({
+                code: { $in: ["1210-VEH-DEP", "5010-VEH-DEP", "1200-VEH", "1200-GEN", "1210-GEN-DEP", "5010-GEN-DEP"] },
+                isDeleted: false
+            });
+            if (count < 6) {
+                const defaultCreator = "507f1f77bcf86cd799439011";
+                const defaultRole = "ADMIN";
 
-            // 1. Vehicle Accumulated Depreciation
-            const vehicleAccumDep = await AccountingCode.findOne({ code: "1210-VEH-DEP" });
-            if (!vehicleAccumDep) {
-                await AccountingCode.create({
-                    code: "1210-VEH-DEP",
-                    name: "Acumulated Depretiacion of Vehicles/Depreciación Acumulada de Vehículos",
-                    category: "ASSET",
-                    accountType: "fixed asset",
-                    description: "Contra-asset account for vehicle accumulated depreciation",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (vehicleAccumDep.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(vehicleAccumDep._id, { isDeleted: false, isActive: true });
-            }
+                // 1. Vehicle Accumulated Depreciation
+                const vehicleAccumDep = await AccountingCode.findOne({ code: "1210-VEH-DEP" });
+                if (!vehicleAccumDep) {
+                    await AccountingCode.create({
+                        code: "1210-VEH-DEP",
+                        name: "Acumulated Depretiacion of Vehicles/Depreciación Acumulada de Vehículos",
+                        category: "ASSET",
+                        accountType: "fixed asset",
+                        description: "Contra-asset account for vehicle accumulated depreciation",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (vehicleAccumDep.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(vehicleAccumDep._id, { isDeleted: false, isActive: true });
+                }
 
-            // 2. Vehicle Depreciation Expense
-            const vehicleDepExp = await AccountingCode.findOne({ code: "5010-VEH-DEP" });
-            if (!vehicleDepExp) {
-                await AccountingCode.create({
-                    code: "5010-VEH-DEP",
-                    name: "DEPRECIATION OF VEHICLES",
-                    category: "EXPENSE",
-                    accountType: "expense",
-                    description: "Depreciation expense for vehicles",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (vehicleDepExp.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(vehicleDepExp._id, { isDeleted: false, isActive: true });
-            }
+                // 2. Vehicle Depreciation Expense
+                const vehicleDepExp = await AccountingCode.findOne({ code: "5010-VEH-DEP" });
+                if (!vehicleDepExp) {
+                    await AccountingCode.create({
+                        code: "5010-VEH-DEP",
+                        name: "DEPRECIATION OF VEHICLES",
+                        category: "EXPENSE",
+                        accountType: "expense",
+                        description: "Depreciation expense for vehicles",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (vehicleDepExp.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(vehicleDepExp._id, { isDeleted: false, isActive: true });
+                }
 
-            // 3. Vehicles Fixed Asset Account
-            const vehicleAsset = await AccountingCode.findOne({ code: "1200-VEH" });
-            if (!vehicleAsset) {
-                await AccountingCode.create({
-                    code: "1200-VEH",
-                    name: "Vehicles/Vehículos",
-                    category: "ASSET",
-                    accountType: "fixed asset",
-                    description: "Fixed asset account for vehicles",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (vehicleAsset.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(vehicleAsset._id, { isDeleted: false, isActive: true });
-            }
+                // 3. Vehicles Fixed Asset Account
+                const vehicleAsset = await AccountingCode.findOne({ code: "1200-VEH" });
+                if (!vehicleAsset) {
+                    await AccountingCode.create({
+                        code: "1200-VEH",
+                        name: "Vehicles/Vehículos",
+                        category: "ASSET",
+                        accountType: "fixed asset",
+                        description: "Fixed asset account for vehicles",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (vehicleAsset.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(vehicleAsset._id, { isDeleted: false, isActive: true });
+                }
 
-            // 4. General Fixed Asset Account
-            const generalAsset = await AccountingCode.findOne({ code: "1200-GEN" });
-            if (!generalAsset) {
-                await AccountingCode.create({
-                    code: "1200-GEN",
-                    name: "General Fixed Assets",
-                    category: "ASSET",
-                    accountType: "fixed asset",
-                    description: "General fixed asset account",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (generalAsset.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(generalAsset._id, { isDeleted: false, isActive: true });
-            }
+                // 4. General Fixed Asset Account
+                const generalAsset = await AccountingCode.findOne({ code: "1200-GEN" });
+                if (!generalAsset) {
+                    await AccountingCode.create({
+                        code: "1200-GEN",
+                        name: "General Fixed Assets",
+                        category: "ASSET",
+                        accountType: "fixed asset",
+                        description: "General fixed asset account",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (generalAsset.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(generalAsset._id, { isDeleted: false, isActive: true });
+                }
 
-            // 5. General Accumulated Depreciation
-            const generalAccumDep = await AccountingCode.findOne({ code: "1210-GEN-DEP" });
-            if (!generalAccumDep) {
-                await AccountingCode.create({
-                    code: "1210-GEN-DEP",
-                    name: "Accumulated Depreciation of General Assets",
-                    category: "ASSET",
-                    accountType: "fixed asset",
-                    description: "Contra-asset account for general accumulated depreciation",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (generalAccumDep.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(generalAccumDep._id, { isDeleted: false, isActive: true });
-            }
+                // 5. General Accumulated Depreciation
+                const generalAccumDep = await AccountingCode.findOne({ code: "1210-GEN-DEP" });
+                if (!generalAccumDep) {
+                    await AccountingCode.create({
+                        code: "1210-GEN-DEP",
+                        name: "Accumulated Depreciation of General Assets",
+                        category: "ASSET",
+                        accountType: "fixed asset",
+                        description: "Contra-asset account for general accumulated depreciation",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (generalAccumDep.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(generalAccumDep._id, { isDeleted: false, isActive: true });
+                }
 
-            // 6. General Depreciation Expense
-            const generalDepExp = await AccountingCode.findOne({ code: "5010-GEN-DEP" });
-            if (!generalDepExp) {
-                await AccountingCode.create({
-                    code: "5010-GEN-DEP",
-                    name: "Depreciation Expense",
-                    category: "EXPENSE",
-                    accountType: "expense",
-                    description: "Depreciation expense account",
-                    currency: "USD",
-                    createdBy: defaultCreator,
-                    creatorRole: defaultRole
-                });
-            } else if (generalDepExp.isDeleted) {
-                await AccountingCode.findByIdAndUpdate(generalDepExp._id, { isDeleted: false, isActive: true });
+                // 6. General Depreciation Expense
+                const generalDepExp = await AccountingCode.findOne({ code: "5010-GEN-DEP" });
+                if (!generalDepExp) {
+                    await AccountingCode.create({
+                        code: "5010-GEN-DEP",
+                        name: "Depreciation Expense",
+                        category: "EXPENSE",
+                        accountType: "expense",
+                        description: "Depreciation expense account",
+                        currency: "USD",
+                        createdBy: defaultCreator,
+                        creatorRole: defaultRole
+                    });
+                } else if (generalDepExp.isDeleted) {
+                    await AccountingCode.findByIdAndUpdate(generalDepExp._id, { isDeleted: false, isActive: true });
+                }
             }
+            hasCheckedSpecialAccounts = true;
+        } catch (err) {
+            console.error("[AccountingCodeService] Failed to seed special accounts:", err);
         }
-    } catch (err) {
-        console.error("[AccountingCodeService] Failed to seed special accounts:", err);
     }
 
     const queryOptions = {
