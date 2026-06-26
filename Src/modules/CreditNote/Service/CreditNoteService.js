@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const CreditNote = require("../Model/CreditNoteModel");
 const { Invoice } = require("../../Invoice/Model/InvoiceModel");
 const { Driver } = require("../../Driver/Model/DriverModel");
@@ -9,7 +10,7 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
  * Creates a new Credit Note and processes adjustments.
  */
 const createCreditNote = async (data, actor) => {
-    const { driverId, customerId, invoiceId, amount, reason, notes, creditNoteDate } = data;
+    const { driverId, customerId, invoiceId, amount, reason, notes, creditNoteDate, taxId, isTaxInclusive, adjustment, adjustmentAccount } = data;
 
     if ((amount === undefined || amount === null) || !reason) {
         throw new Error("Missing required Credit Note fields: amount and reason are mandatory.");
@@ -40,6 +41,27 @@ const createCreditNote = async (data, actor) => {
 
     const creditNoteNumber = `CN-${Date.now()}`;
 
+    // Resolve Tax
+    let resolvedTax = null;
+    let finalTaxRate = 0;
+    if (taxId) {
+        const Tax = require("../../Tax/Model/TaxModel");
+        resolvedTax = await Tax.findById(taxId);
+        if (resolvedTax) {
+            finalTaxRate = resolvedTax.rate;
+        }
+    }
+
+    // Calculate Subtotal, Tax Amount, and Adjustment
+    const finalAdjustment = Number(adjustment) || 0;
+    let taxableTotal = amount - finalAdjustment;
+    let subtotal = taxableTotal;
+    let taxAmount = 0;
+    if (finalTaxRate > 0) {
+        subtotal = Number((taxableTotal / (1 + finalTaxRate / 100)).toFixed(2));
+        taxAmount = Number((taxableTotal - subtotal).toFixed(2));
+    }
+
     // 1. Create the Credit Note Record directly in OPEN status (without applying yet)
     const creditNoteDoc = await CreditNote.create({
         creditNoteNumber,
@@ -47,6 +69,13 @@ const createCreditNote = async (data, actor) => {
         driverId: driverId || undefined,
         invoiceId: invoiceId || undefined,
         amount,
+        subtotal,
+        isTaxInclusive: !!isTaxInclusive,
+        taxRate: finalTaxRate,
+        taxAmount,
+        tax: resolvedTax ? resolvedTax._id : undefined,
+        adjustment: finalAdjustment,
+        adjustmentAccount: adjustmentAccount || undefined,
         reason,
         notes,
         creditNoteDate: creditNoteDate || new Date(),
@@ -338,6 +367,14 @@ const updateCreditNote = async (id, data) => {
     if (data.invoiceId !== undefined) $set.invoiceId = data.invoiceId || null;
     if (typeof data.amount === 'number' && data.amount > 0) $set.amount = data.amount;
 
+    if (data.tax !== undefined) $set.tax = data.tax || null;
+    if (data.taxRate !== undefined) $set.taxRate = data.taxRate;
+    if (data.taxAmount !== undefined) $set.taxAmount = data.taxAmount;
+    if (data.subtotal !== undefined) $set.subtotal = data.subtotal;
+    if (data.isTaxInclusive !== undefined) $set.isTaxInclusive = data.isTaxInclusive;
+    if (data.adjustment !== undefined) $set.adjustment = data.adjustment;
+    if (data.adjustmentAccount !== undefined) $set.adjustmentAccount = data.adjustmentAccount;
+
     // If this was a DRAFT (migrated record), also promote it to OPEN
     if (creditNote.status === 'DRAFT') $set.status = 'OPEN';
 
@@ -425,12 +462,22 @@ const bulkUploadCreditNotes = async (rows, actor) => {
 
     const Customer = require("../../Customer/Model/CustomerModel");
     const { Invoice } = require("../../Invoice/Model/InvoiceModel");
-    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-    const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
-    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const Tax = require("../../Tax/Model/TaxModel");
 
     // 1. Fetch reference collections for fast lookups
     const customersList = await Customer.find({ isDeleted: false });
+    const taxesList = await Tax.find({ isDeleted: false, isActive: true });
+
+    const taxesById = new Map();
+    const taxesByName = new Map();
+    const taxesByRate = new Map();
+    for (const t of taxesList) {
+        taxesById.set(t._id.toString(), t);
+        if (t.name) {
+            taxesByName.set(t.name.trim().toLowerCase(), t);
+        }
+        taxesByRate.set(t.rate, t);
+    }
     const customersByName = new Map();
     const customersById = new Map();
     for (const c of customersList) {
@@ -591,9 +638,127 @@ const bulkUploadCreditNotes = async (rows, actor) => {
             if (taxAmount) taxParts.push(`Tax Amount: ${taxAmount}`);
             if (taxType) taxParts.push(`Tax Type: ${taxType}`);
             notesList.push(`[Tax Details] ${taxParts.join(', ')}`);
+        }        const finalNotes = notesList.join("\n");
+
+        // Resolve Credit Note Status from row
+        const rawStatusVal = getRowVal(row, ["Credit Note Status", "creditNoteStatus", "Status", "status"]);
+        let resolvedStatus = null;
+        if (rawStatusVal) {
+            const statusStr = rawStatusVal.toString().trim().toLowerCase();
+            if (statusStr === "closed" || statusStr === "applied" || statusStr === "closed/applied" || statusStr === "fully applied") {
+                resolvedStatus = "CLOSED";
+            } else if (statusStr === "draft") {
+                resolvedStatus = "DRAFT";
+            } else if (statusStr === "void" || statusStr === "voided") {
+                resolvedStatus = "VOID";
+            } else if (statusStr === "open" || statusStr === "unapplied") {
+                resolvedStatus = "OPEN";
+            }
         }
 
-        const finalNotes = notesList.join("\n");
+        // Identify and Resolve Tax details
+        const tax1IdVal = getRowVal(row, ["Tax1 ID", "tax1Id", "Tax ID", "taxId"]);
+        const taxNameVal = getRowVal(row, ["Item Tax", "itemTax", "taxName"]);
+        const taxRateVal = getRowVal(row, ["Item Tax %", "itemTaxPct", "taxRate"]);
+        const taxAmountVal = getRowVal(row, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
+
+        let resolvedTax = null;
+        let finalTaxRate = 0;
+
+        let parsedTaxRate = parseFloat(taxRateVal);
+        if (isNaN(parsedTaxRate)) {
+            parsedTaxRate = null;
+        }
+
+        // Try lookup by ID
+        if (tax1IdVal) {
+            const cleanId = tax1IdVal.toString().trim();
+            if (mongoose.Types.ObjectId.isValid(cleanId)) {
+                resolvedTax = taxesById.get(cleanId) || await Tax.findById(cleanId);
+            }
+            if (!resolvedTax) {
+                resolvedTax = taxesByName.get(cleanId.toLowerCase());
+            }
+        }
+
+        // Try lookup by name
+        if (!resolvedTax && taxNameVal) {
+            const cleanName = taxNameVal.toString().trim().toLowerCase();
+            resolvedTax = taxesByName.get(cleanName);
+        }
+
+        // Try lookup by rate
+        if (!resolvedTax && parsedTaxRate !== null) {
+            resolvedTax = taxesByRate.get(parsedTaxRate);
+        }
+
+        // If not found in DB, dynamically create the Tax record in the database
+        if (!resolvedTax && (taxNameVal || parsedTaxRate !== null)) {
+            const taxName = taxNameVal ? taxNameVal.toString().trim() : `Tax ${parsedTaxRate}%`;
+            const taxRate = parsedTaxRate !== null ? parsedTaxRate : 0;
+
+            resolvedTax = await Tax.findOne({ name: taxName, isDeleted: false });
+            if (!resolvedTax) {
+                resolvedTax = await Tax.create({
+                    name: taxName,
+                    rate: taxRate,
+                    isActive: true,
+                    createdBy: actor.id || actor._id,
+                    creatorRole: actor.role
+                });
+                taxesById.set(resolvedTax._id.toString(), resolvedTax);
+                taxesByName.set(taxName.toLowerCase(), resolvedTax);
+                taxesByRate.set(taxRate, resolvedTax);
+            }
+        }
+
+        if (resolvedTax) {
+            finalTaxRate = resolvedTax.rate;
+        } else if (parsedTaxRate !== null) {
+            finalTaxRate = parsedTaxRate;
+        }
+
+        // Determine if inclusive tax
+        const inclusiveTaxVal = getRowVal(row, ["Is Inclusive Tax", "isInclusiveTax", "inclusiveTax"]);
+        let isTaxInclusive = false;
+        if (inclusiveTaxVal !== undefined && inclusiveTaxVal !== null) {
+            const strVal = inclusiveTaxVal.toString().trim().toLowerCase();
+            if (strVal === "true" || strVal === "1" || strVal === "yes" || strVal === "y") {
+                isTaxInclusive = true;
+            }
+        }
+
+        // Parse Adjustment details from row
+        const adjustmentVal = getRowVal(row, ["Adjustment", "adjustment"]);
+        const parsedAdjustment = parseFloat(adjustmentVal !== undefined && adjustmentVal !== null ? adjustmentVal : 0) || 0;
+
+        const adjustmentAccountVal = getRowVal(row, ["Adjustment Account", "adjustmentAccount"]);
+        const finalAdjustmentAccount = adjustmentAccountVal ? adjustmentAccountVal.toString().trim() : undefined;
+
+        // Helper to calculate tax & adjustment breakdown for segment/total amounts
+        const calculateBreakdown = (targetTotal) => {
+            let segmentAdjustment = 0;
+            if (totalAmount > 0) {
+                // Distribute adjustment proportionally based on the target segment total
+                const ratio = targetTotal / totalAmount;
+                segmentAdjustment = Number((parsedAdjustment * ratio).toFixed(2));
+            } else if (targetTotal === 0 && parsedAdjustment !== 0) {
+                segmentAdjustment = 0;
+            }
+
+            let taxableTotal = targetTotal - segmentAdjustment;
+            let sub = taxableTotal;
+            let taxAmt = 0;
+            if (finalTaxRate > 0) {
+                sub = Number((taxableTotal / (1 + finalTaxRate / 100)).toFixed(2));
+                taxAmt = Number((taxableTotal - sub).toFixed(2));
+            }
+            return {
+                subtotal: sub,
+                taxAmount: taxAmt,
+                adjustment: segmentAdjustment
+            };
+        };
 
         // Resolve Applied Invoice Numbers (comma separated)
         const rawInvNumbers = getRowVal(row, ["Applied Invoice Number", "appliedInvoiceNumber", "Invoice Number", "invoiceNumber"]) || "";
@@ -631,10 +796,17 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                     driverId: customerDoc.driver || undefined,
                     invoiceId: isClosed ? customerInvoices[0]._id : undefined,
                     amount: 0,
+                    subtotal: 0,
+                    isTaxInclusive,
+                    taxRate: finalTaxRate,
+                    taxAmount: 0,
+                    tax: resolvedTax ? resolvedTax._id : undefined,
+                    adjustment: 0,
+                    adjustmentAccount: finalAdjustmentAccount,
                     reason,
                     notes: finalNotes,
                     creditNoteDate,
-                    status: isClosed ? 'CLOSED' : 'OPEN',
+                    status: resolvedStatus || (isClosed ? 'CLOSED' : 'OPEN'),
                     createdBy: actor.id || actor._id,
                     creatorRole: actor.role
                 });
@@ -678,6 +850,8 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                         continue;
                     }
 
+                    const breakdown = calculateBreakdown(appliedAmount);
+
                     // Create CLOSED Credit Note document
                     await CreditNote.create({
                         creditNoteNumber,
@@ -685,10 +859,17 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                         driverId: customerDoc.driver || undefined,
                         invoiceId: invoice._id,
                         amount: appliedAmount,
+                        subtotal: breakdown.subtotal,
+                        isTaxInclusive,
+                        taxRate: finalTaxRate,
+                        taxAmount: breakdown.taxAmount,
+                        tax: resolvedTax ? resolvedTax._id : undefined,
+                        adjustment: breakdown.adjustment,
+                        adjustmentAccount: finalAdjustmentAccount,
                         reason,
                         notes: finalNotes,
                         creditNoteDate,
-                        status: 'CLOSED',
+                        status: resolvedStatus || 'CLOSED',
                         createdBy: actor.id || actor._id,
                         creatorRole: actor.role
                     });
@@ -733,42 +914,6 @@ const bulkUploadCreditNotes = async (rows, actor) => {
                         console.error("[CreditNoteService] Rollover customer invoices failed in bulk application:", rollErr.message);
                     }
 
-                    // Generate ledger reversal
-                    try {
-                        let accCode = await AccountingCode.findOne({ code: "4200" });
-                        if (!accCode) {
-                            accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
-                        }
-
-                        if (accCode) {
-                            const customerName = customerDoc.name || "Customer";
-                            const txNote = `Credit Note Applied [${creditNoteNumber}]: ${reason} to Invoice ${invoice.invoiceNumber} for ${customerName}${finalNotes ? ' - ' + finalNotes : ''}`;
-
-                            const transactionData = {
-                                accountingCode: accCode._id,
-                                referenceId: customerDoc._id,
-                                referenceModel: "Customer",
-                                transactionCategory: "INCOME",
-                                transactionType: "DEBIT",
-                                isTaxInclusive: false,
-                                baseAmount: appliedAmount,
-                                totalAmount: appliedAmount,
-                                paymentMethod: "OTHER",
-                                status: "COMPLETED",
-                                paymentDate: creditNoteDate,
-                                notes: txNote,
-                                createdBy: actor.id || actor._id,
-                                creatorRole: actor.role
-                            };
-
-                            const newTransaction = await PaymentTransaction.create(transactionData);
-                            const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
-                            await LedgerService.autoGenerateLedgerEntry(populatedTx);
-                        }
-                    } catch (err) {
-                        console.error("[CreditNoteService] Failed to generate ledger record for Credit Note Segment:", err.message);
-                    }
-
                     remainingAmount -= appliedAmount;
                 }
             }
@@ -784,56 +929,29 @@ const bulkUploadCreditNotes = async (rows, actor) => {
             if (cnExists) {
                 skipped.push(`Row ${origIdx}: Remaining credit note number "${creditNoteNumber}" already exists. Skipping.`);
             } else {
+                const breakdown = calculateBreakdown(remainingAmount);
+
                 await CreditNote.create({
                     creditNoteNumber,
                     customerId: customerDoc._id,
                     driverId: customerDoc.driver || undefined,
                     amount: remainingAmount,
+                    subtotal: breakdown.subtotal,
+                    isTaxInclusive,
+                    taxRate: finalTaxRate,
+                    taxAmount: breakdown.taxAmount,
+                    tax: resolvedTax ? resolvedTax._id : undefined,
+                    adjustment: breakdown.adjustment,
+                    adjustmentAccount: finalAdjustmentAccount,
                     reason,
                     notes: finalNotes,
                     creditNoteDate,
-                    status: 'OPEN',
+                    status: resolvedStatus || 'OPEN',
                     createdBy: actor.id || actor._id,
                     creatorRole: actor.role
                 });
 
                 cnSegmentNumbers.push(creditNoteNumber);
-
-                // Generate ledger reversal
-                try {
-                    let accCode = await AccountingCode.findOne({ code: "4200" });
-                    if (!accCode) {
-                        accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
-                    }
-
-                    if (accCode) {
-                        const customerName = customerDoc.name || "Customer";
-                        const txNote = `Credit Note Issued [${creditNoteNumber}]: ${reason} for ${customerName}${finalNotes ? ' - ' + finalNotes : ''}`;
-
-                        const transactionData = {
-                            accountingCode: accCode._id,
-                            referenceId: customerDoc._id,
-                            referenceModel: "Customer",
-                            transactionCategory: "INCOME",
-                            transactionType: "DEBIT",
-                            isTaxInclusive: false,
-                            baseAmount: remainingAmount,
-                            totalAmount: remainingAmount,
-                            paymentMethod: "OTHER",
-                            status: "COMPLETED",
-                            paymentDate: creditNoteDate,
-                            notes: txNote,
-                            createdBy: actor.id || actor._id,
-                            creatorRole: actor.role
-                        };
-
-                        const newTransaction = await PaymentTransaction.create(transactionData);
-                        const populatedTx = { ...newTransaction.toObject(), accountingCode: accCode };
-                        await LedgerService.autoGenerateLedgerEntry(populatedTx);
-                    }
-                } catch (err) {
-                    console.error("[CreditNoteService] Failed to generate ledger record for Remaining Credit Note:", err.message);
-                }
             }
         }
 

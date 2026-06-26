@@ -45,6 +45,35 @@ const creditnoteSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    subtotal: {
+        type: Number,
+        default: 0
+    },
+    isTaxInclusive: {
+        type: Boolean,
+        default: false
+    },
+    taxRate: {
+        type: Number,
+        default: 0
+    },
+    taxAmount: {
+        type: Number,
+        default: 0
+    },
+    tax: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Tax',
+        required: false
+    },
+    adjustment: {
+        type: Number,
+        default: 0
+    },
+    adjustmentAccount: {
+        type: String,
+        trim: true
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         required: true,
