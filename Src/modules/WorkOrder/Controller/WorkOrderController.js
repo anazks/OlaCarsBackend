@@ -41,6 +41,22 @@ const createWorkOrderHandler = async (req, res) => {
 
         const wo = await WorkOrderRepo.createWorkOrder(data);
 
+        // Auto-save matched/resolved gpsSerialNumber (IMEI) to vehicle if not already present
+        if (data.vehicleId && data.gpsSerialNumber) {
+            try {
+                const VehicleRepo = require("../../Vehicle/Repo/VehicleRepo");
+                const vehicle = await VehicleRepo.getVehicleByIdService(data.vehicleId);
+                if (vehicle && !vehicle.gpsSerialNumber) {
+                    await VehicleRepo.updateVehicleService(data.vehicleId, {
+                        gpsSerialNumber: data.gpsSerialNumber
+                    });
+                    console.log(`[GPS AUTO-SAVE] Saved resolved IMEI ${data.gpsSerialNumber} to vehicle ${data.vehicleId}`);
+                }
+            } catch (err) {
+                console.error("[GPS AUTO-SAVE ERROR] Failed to save IMEI to vehicle:", err.message);
+            }
+        }
+
         return res.status(201).json({ success: true, data: wo });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -59,9 +75,26 @@ const getWorkOrdersHandler = async (req, res) => {
         if (req.query.vehicleId) filters.vehicleId = req.query.vehicleId;
         if (req.query.priority) filters.priority = req.query.priority;
         if (req.query.workOrderType) filters.workOrderType = req.query.workOrderType;
+        if (req.query.page) filters.page = req.query.page;
+        if (req.query.limit) filters.limit = req.query.limit;
+        if (req.query.search) filters.search = req.query.search;
 
-        const workOrders = await WorkOrderRepo.getWorkOrders(filters);
-        return res.status(200).json({ success: true, data: workOrders });
+        const result = await WorkOrderRepo.getWorkOrders(filters);
+
+        if (filters.page && filters.limit) {
+            return res.status(200).json({
+                success: true,
+                data: result.docs,
+                pagination: {
+                    total: result.total,
+                    page: result.page,
+                    limit: result.limit,
+                    totalPages: result.totalPages
+                }
+            });
+        }
+
+        return res.status(200).json({ success: true, data: result });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

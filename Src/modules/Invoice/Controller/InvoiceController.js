@@ -9,7 +9,8 @@ exports.getInvoices = async (req, res) => {
             success: true, 
             message: "Invoices retrieved successfully", 
             data: result.data,
-            pagination: result.pagination
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -23,7 +24,8 @@ exports.getRegistryInvoices = async (req, res) => {
         return res.status(200).json({ 
             success: true, 
             data: result.data,
-            pagination: result.pagination
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -52,7 +54,30 @@ exports.createManualInvoice = async (req, res) => {
     try {
         const createdBy = req.user.id || req.user._id;
         const creatorRole = req.user.role;
-        const result = await InvoiceService.createManualInvoice(req.body, createdBy, creatorRole);
+
+        let invoiceData = { ...req.body };
+
+        // Parse lineItems if it was sent as a string (from FormData)
+        if (typeof invoiceData.lineItems === "string") {
+            try {
+                invoiceData.lineItems = JSON.parse(invoiceData.lineItems);
+            } catch (err) {
+                return res.status(400).json({ success: false, message: "Invalid JSON format for lineItems array." });
+            }
+        }
+
+        // Handle optional file upload
+        if (req.file) {
+            const uploadLocal = require("../../../utils/uploadLocal");
+            const fileUrl = uploadLocal(req.file, "invoices");
+            invoiceData.supportingDocument = {
+                name: req.file.originalname,
+                url: fileUrl,
+                uploadedAt: new Date(),
+            };
+        }
+
+        const result = await InvoiceService.createManualInvoice(invoiceData, createdBy, creatorRole);
         return res.status(201).json({ success: true, message: "Manual invoice created successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -163,7 +188,6 @@ exports.downloadInvoicePdf = async (req, res) => {
             return res.status(404).json({ success: false, message: "Invoice not found" });
         }
 
-        // Set headers to view/stream PDF directly in the browser
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
             "Content-Disposition",
@@ -176,3 +200,42 @@ exports.downloadInvoicePdf = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.getReconfigProgress = async (req, res) => {
+    try {
+        const DriverService = require("../../Driver/Service/DriverService");
+        const progress = DriverService.getReconfigProgress();
+        return res.status(200).json({ success: true, data: progress });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

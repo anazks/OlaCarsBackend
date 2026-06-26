@@ -20,6 +20,7 @@ router.use(authorize(...ACCESS_ROLES));
 
 router.get("/pl", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.getPL);
 router.get("/export/pdf", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.exportPdf);
+router.get("/export/excel", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.exportExcel);
 router.get("/balance-sheet", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.getBalanceSheet);
 router.get("/daily-finance", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.getDailyFinance);
 router.get("/driver-performance", hasPermission("DRIVER_VIEW"), ReportingController.getDriverPerformance);

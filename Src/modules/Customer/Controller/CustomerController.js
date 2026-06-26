@@ -164,8 +164,63 @@ exports.downloadStatementPdf = async (req, res) => {
             `inline; filename="Customer_Statement_${customer.name.replace(/\s+/g, '_')}.pdf"`
         );
 
-        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res);
+        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res, {
+            sortBy: req.query.sortBy,
+            sortOrder: req.query.sortOrder
+        });
     } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.downloadMonthlyStatementPdf = async (req, res) => {
+    try {
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: false }).populate('branch');
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const { Invoice } = require('../../Invoice/Model/InvoiceModel');
+        const PaymentReceived = require('../../PaymentReceived/Model/PaymentReceivedModel');
+        const MonthlyStatementPdfService = require('../Service/MonthlyStatementPdfService');
+
+        const [invoices, payments] = await Promise.all([
+            Invoice.find({ customer: customer._id, isDeleted: false }),
+            PaymentReceived.find({ customerId: customer._id })
+        ]);
+
+        const { month, year, fromDate, toDate } = req.query;
+        let periodName = 'Full';
+        if (fromDate || toDate) {
+            periodName = `${fromDate || 'Start'}_to_${toDate || 'End'}`;
+        } else if (month && year) {
+            const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthIdx = (parseInt(month) || 1) - 1;
+            periodName = `${MONTH_NAMES[monthIdx] || 'Month'}_${year}`;
+        }
+
+        const safeName = (customer.name || 'Customer').replace(/\s+/g, '_');
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader(
+            'Content-Disposition',
+            `inline; filename="Statement_${safeName}_${periodName}.pdf"`
+        );
+
+        MonthlyStatementPdfService.generateMonthlyStatementPdf(customer, invoices, payments, res, {
+            month,
+            year,
+            fromDate,
+            toDate
+        });
+    } catch (error) {
+        console.error('[CustomerController] Monthly statement PDF error:', error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };

@@ -18,7 +18,8 @@ const seedBranchPermissions = async () => {
             "DRIVER_CREATE",
             "DRIVER_EDIT",
             "DRIVER_ONBOARD",
-            "DRIVER_ASSIGN_VEHICLE"
+            "DRIVER_ASSIGN_VEHICLE",
+            "PURCHASE_ORDER_VIEW"
         ];
         const targetRoles = [
             "OPERATIONADMIN",

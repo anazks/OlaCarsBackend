@@ -412,6 +412,14 @@ exports.rolloverOverdueRent = async (driverId) => {
  * - Weekly: Due on every Wednesday.
  */
 exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY' }, session = null) => {
+    // Load existing rent tracking history to preserve it during re-contracting
+    const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
+    const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
+    let maxWeekNum = 0;
+    if (existingTracking.length > 0) {
+        maxWeekNum = Math.max(...existingTracking.map(t => t.weekNumber));
+    }
+
     const installments = [];
     const assignmentDate = new Date();
     assignmentDate.setHours(0, 0, 0, 0);
@@ -447,7 +455,7 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
             dueDate.setDate(1); // Ensure it's always the 1st
         }
         
-        const periodNum = i + 1;
+        const periodNum = maxWeekNum + i + 1;
         installments.push({
             weekNumber: periodNum,
             weekLabel: isWeekly 
@@ -464,9 +472,11 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
         });
     }
 
-    // Replace the entire rentTracking to avoid duplicates on re-assignment
+    // Combine existing installments (past history) and new installments
+    const combinedTracking = [...existingTracking, ...installments];
+
     const updatedDriver = await updateDriverService(driverId, {
-        $set: { rentTracking: installments }
+        $set: { rentTracking: combinedTracking }
     }, session);
 
     // Generate Invoice documents
@@ -546,10 +556,17 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
     return updatedDriver;
 };
 
-/**
- * Reconfigure all pending rent plan installments across all drivers based on a new generation day.
- * Triggered automatically when the Invoice Generation Day is updated in settings.
- */
+let currentReconfigProgress = {
+    inProgress: false,
+    processed: 0,
+    total: 0,
+    percentage: 0
+};
+
+exports.getReconfigProgress = () => {
+    return currentReconfigProgress;
+};
+
 exports.reconfigureAllPendingRentPlans = async (newGenerationDay) => {
     const { Driver } = require("../Model/DriverModel");
     const { Invoice } = require("../../Invoice/Model/InvoiceModel");
@@ -560,52 +577,208 @@ exports.reconfigureAllPendingRentPlans = async (newGenerationDay) => {
         throw new Error("Invalid generation day provided for reconfiguration.");
     }
 
-    const drivers = await Driver.find({ 
+    // Step 1: Query only the IDs to avoid holding document instances in memory
+    const driverIds = await Driver.find({ 
         rentTracking: { $exists: true, $not: { $size: 0 } }
-    });
+    }).select('_id').lean();
+
+    const total = driverIds.length;
+    console.log(`[DriverService] Found ${total} drivers to evaluate for reconfiguration.`);
+
+    currentReconfigProgress = {
+        inProgress: true,
+        processed: 0,
+        total: total,
+        percentage: 0
+    };
 
     let updatedCount = 0;
 
-    for (const driver of drivers) {
-        let rentTrackingUpdated = false;
+    try {
+        // Step 2: Load and save each driver individually to avoid memory overhead and concurrent cursor write locks
+        for (let idx = 0; idx < total; idx++) {
+            const { _id } = driverIds[idx];
+            const driver = await Driver.findById(_id);
+            if (driver) {
+                let rentTrackingUpdated = false;
 
-        // Base date depends on activationDate or creation date
-        const parsedActivationDate = driver.activationDate ? new Date(driver.activationDate) : new Date(driver.createdAt);
-        parsedActivationDate.setHours(0, 0, 0, 0);
+                // Base date depends on activationDate or creation date
+                const parsedActivationDate = driver.activationDate ? new Date(driver.activationDate) : new Date(driver.createdAt);
+                parsedActivationDate.setHours(0, 0, 0, 0);
 
-        let baseDate = new Date(parsedActivationDate);
-        const currentDay = baseDate.getDay();
-        const daysUntilTarget = (targetDay - currentDay + 7) % 7;
-        const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
-        baseDate.setDate(baseDate.getDate() + offset);
+                let baseDate = new Date(parsedActivationDate);
+                const currentDay = baseDate.getDay();
+                const daysUntilTarget = (targetDay - currentDay + 7) % 7;
+                const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
+                baseDate.setDate(baseDate.getDate() + offset);
 
-        // Find the last generated invoice weekNumber for this driver
-        const lastInvoice = await Invoice.findOne({ driver: driver._id, isDeleted: false })
-            .sort({ weekNumber: -1 });
-        const maxGeneratedWeek = lastInvoice ? lastInvoice.weekNumber : 0;
+                // Find the last generated invoice weekNumber for this driver
+                // Sort by dueDate (not weekNumber) to avoid string-sorting corruption bugs
+                const lastInvoice = await Invoice.findOne({ driver: driver._id, isDeleted: false })
+                    .select('weekNumber dueDate')
+                    .sort({ dueDate: -1, _id: -1 })
+                    .lean();
+                const maxGeneratedWeek = lastInvoice ? (Number(lastInvoice.weekNumber) || 0) : 0;
 
-        // Iterate through tracking and update PENDING ones that haven't been invoiced
-        for (const installment of driver.rentTracking) {
-            const weekNum = installment.weekNumber;
-            if (installment.status === 'PENDING' && weekNum > maxGeneratedWeek) {
-                
-                const newDueDate = new Date(baseDate);
-                newDueDate.setDate(baseDate.getDate() + (weekNum - 1) * 7);
+                // Iterate through tracking and update PENDING ones that haven't been invoiced
+                for (const installment of driver.rentTracking) {
+                    const weekNum = Number(installment.weekNumber);
+                    if (installment.status === 'PENDING' && weekNum > maxGeneratedWeek) {
+                        
+                        const newDueDate = new Date(baseDate);
+                        newDueDate.setDate(baseDate.getDate() + (weekNum - 1) * 7);
 
-                if (installment.dueDate?.getTime() !== newDueDate.getTime()) {
-                    installment.dueDate = newDueDate;
-                    installment.weekLabel = `Week ${weekNum} - ${newDueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
-                    rentTrackingUpdated = true;
+                        if (installment.dueDate?.getTime() !== newDueDate.getTime()) {
+                            installment.dueDate = newDueDate;
+                            installment.weekLabel = `Week ${weekNum} - ${newDueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`;
+                            rentTrackingUpdated = true;
+                        }
+                    }
+                }
+
+                if (rentTrackingUpdated) {
+                    driver.markModified('rentTracking');
+                    await driver.save();
+                    updatedCount++;
                 }
             }
-        }
 
-        if (rentTrackingUpdated) {
-            await driver.save();
-            updatedCount++;
+            // Update progress
+            currentReconfigProgress.processed = idx + 1;
+            currentReconfigProgress.percentage = Math.round(((idx + 1) / total) * 100);
         }
+    } finally {
+        currentReconfigProgress.inProgress = false;
     }
 
     console.log(`[DriverService] Reconfigured rent plans for ${updatedCount} drivers.`);
     return updatedCount;
 };
+
+exports.updateDriverRentScheduleForVehicle = async (driverId, vehicleId, newWeeklyRent, session = null) => {
+    const { Driver } = require("../Model/DriverModel");
+    const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+    const Tax = require("../../Tax/Model/TaxModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+
+    const driver = await Driver.findById(driverId).session(session);
+    if (!driver || !driver.rentTracking || driver.rentTracking.length === 0) {
+        return { success: false, message: "Driver has no active rent plan." };
+    }
+
+    const isWeekly = driver.rentTracking.length > 50;
+    const installmentRent = isWeekly ? newWeeklyRent : newWeeklyRent * 4;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const sorted = [...driver.rentTracking].sort((a, b) => a.weekNumber - b.weekNumber);
+
+    // Step 1: Update amounts and statuses for all non-paid installments
+    for (let i = 0; i < sorted.length; i++) {
+        const week = sorted[i];
+        if (week.status !== "PAID") {
+            week.amount = installmentRent;
+            week.carryOver = 0;
+            week.totalDue = week.amount;
+            week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+            if (week.balance === 0) {
+                week.status = "PAID";
+            } else if (week.amountPaid > 0) {
+                week.status = "PARTIAL";
+            } else {
+                week.status = "PENDING";
+            }
+        }
+    }
+
+    // Step 2: Recalculate carryover chronologically
+    let totalCarryOver = 0;
+    for (let i = 0; i < sorted.length; i++) {
+        const week = sorted[i];
+        const dueDate = week.dueDate ? new Date(week.dueDate) : null;
+        const isOverdue = dueDate && dueDate < today;
+
+        if (week.status !== "PAID" && isOverdue) {
+            week.carryOver = 0;
+            week.totalDue = week.amount;
+            week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+            totalCarryOver += week.balance;
+        } else if (week.status !== "PAID" && !isOverdue) {
+            week.carryOver = totalCarryOver;
+            week.totalDue = week.amount + week.carryOver;
+            week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+            if (week.balance === 0) {
+                week.status = "PAID";
+            } else if (week.amountPaid > 0) {
+                week.status = "PARTIAL";
+            } else {
+                week.status = "PENDING";
+            }
+            totalCarryOver = 0; // Carryover consumed
+        }
+    }
+
+    driver.rentTracking = sorted;
+    driver.markModified('rentTracking');
+    await driver.save({ session });
+
+    // Step 3: Update corresponding invoices in DB
+    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false }).session(session);
+    const defaultTaxRate = activeTax ? activeTax.rate : 0;
+
+    const invoices = await Invoice.find({
+        driver: driverId,
+        vehicle: vehicleId,
+        invoiceType: "RENTAL",
+        status: { $ne: "PAID" },
+        isDeleted: false
+    }).session(session);
+
+    for (const invoice of invoices) {
+        const weekNum = Number(invoice.weekNumber);
+        const installment = sorted.find(w => w.weekNumber === weekNum);
+        if (installment) {
+            const taxRate = invoice.taxRate !== undefined ? invoice.taxRate : defaultTaxRate;
+            const baseAmount = taxRate > 0 ? Math.round((installment.amount / (1 + taxRate / 100)) * 100) / 100 : installment.amount;
+            const taxAmount = Math.round((installment.amount - baseAmount) * 100) / 100;
+
+            invoice.baseAmount = baseAmount;
+            invoice.taxAmount = taxAmount;
+            invoice.carryOverAmount = installment.carryOver;
+            invoice.totalAmountDue = installment.amount + installment.carryOver;
+            invoice.balance = Math.max(0, invoice.totalAmountDue - (invoice.amountPaid || 0));
+
+            if (invoice.balance === 0) {
+                invoice.status = "PAID";
+                if (!invoice.paidAt) invoice.paidAt = new Date();
+            } else if (invoice.amountPaid > 0) {
+                invoice.status = "PARTIAL";
+            } else {
+                const invoiceDueDate = invoice.dueDate ? new Date(invoice.dueDate) : null;
+                if (invoiceDueDate && invoiceDueDate < today) {
+                    invoice.status = "OVERDUE";
+                } else {
+                    invoice.status = "PENDING";
+                }
+            }
+
+            await invoice.save({ session });
+
+            // Step 4: Delete old ledger entries and regenerate them for this invoice
+            try {
+                await LedgerEntry.deleteMany({
+                    description: new RegExp(`\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+                }).session(session);
+
+                await LedgerService.generateInvoiceLedgerEntries(invoice);
+            } catch (ledgerErr) {
+                console.error(`[DriverService] Failed to regenerate ledger entries for invoice ${invoice.invoiceNumber}:`, ledgerErr);
+            }
+        }
+    }
+
+    return { success: true };
+};
+

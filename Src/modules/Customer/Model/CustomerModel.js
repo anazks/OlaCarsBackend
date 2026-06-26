@@ -137,7 +137,6 @@ const customerSchema = new mongoose.Schema({
 
 customerSchema.index({ status: 1 });
 customerSchema.index({ branch: 1 });
-customerSchema.index({ customerId: 1 });
 customerSchema.index({ driver: 1 });
 
 module.exports = mongoose.model('Customer', customerSchema);

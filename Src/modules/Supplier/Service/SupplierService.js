@@ -134,7 +134,6 @@ exports.bulkCreate = async (suppliersData, userId, userRole) => {
             const defaultAP = accounts.find(acc => 
                 acc.category === 'Accounts Payable' || 
                 acc.name.toLowerCase() === 'accounts payable' || 
-                acc.code === '2100' ||
                 acc.code === '2.1.01'
             );
             if (defaultAP) {

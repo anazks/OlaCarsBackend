@@ -17,6 +17,7 @@ exports.getProcurementRequests = async (query = {}, options = {}) => {
         filterFields: ["status", "branch", "requestedBy", "approvedBy"],
         searchFields: ["requestNumber", "notes"],
         dateFilterField: "createdAt",
+        defaultSort: { createdAt: -1 },
         ...options
     };
     return await applyQueryFeatures(WorkshopProcurement, query, queryOptions);
@@ -26,8 +27,10 @@ exports.getProcurementRequestById = async (id) => {
     return await WorkshopProcurement.findById(id)
         .populate("part")
         .populate("branch")
-        .populate("requestedBy", "fullName")
+        .populate("requestedBy", "fullName name email role")
+        .populate("approvedBy", "fullName name email role")
         .populate("supplier")
+        .populate("editHistory.editedBy", "fullName name email role")
         .populate({
             path: "ledgerEntries",
             populate: [

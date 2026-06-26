@@ -1,4 +1,4 @@
-const { getSetting, updateSetting } = require("../Repo/SystemSettingsRepo");
+const { getSetting, updateSetting, getAllSettings } = require("../Repo/SystemSettingsRepo");
 
 /**
  * Gets a system setting by key.
@@ -13,6 +13,8 @@ const getSystemSetting = async (req, res) => {
         if (value === null) {
             if (key === "poApprovalThreshold") finalValue = 1000;
             if (key === "hourlyLabourRate") finalValue = 150;
+            if (key === "driver_payment_emails_enabled") finalValue = true;
+            if (key === "invoice_cron_suspended") finalValue = false;
         }
 
         return res.status(200).json({ success: true, key, value: finalValue });

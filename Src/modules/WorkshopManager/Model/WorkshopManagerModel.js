@@ -41,7 +41,7 @@ const workshopManagerSchema = new mongoose.Schema(
     },
     workshopId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Workshop",
+      ref: "Branch",
       required: true,
     },
     branchId: {

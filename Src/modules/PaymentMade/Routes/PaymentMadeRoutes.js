@@ -5,6 +5,7 @@ const { authenticate } = require('../../../shared/middlewares/authMiddleware');
 
 router.use(authenticate);
 
+router.post('/bulk-upload', PaymentMadeController.bulkUploadPaymentsMade);
 router.post('/', PaymentMadeController.createPaymentMade);
 router.get('/', PaymentMadeController.getAllPaymentMades);
 router.get('/:id', PaymentMadeController.getPaymentMadeById);

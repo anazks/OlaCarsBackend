@@ -45,12 +45,12 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
         if (options.dateFilterField && (startDate || endDate)) {
             const dateQuery = {};
             if (startDate) {
-                dateQuery.$gte = new Date(startDate);
+                const startStr = startDate.includes("T") ? startDate : `${startDate}T00:00:00.000Z`;
+                dateQuery.$gte = new Date(startStr);
             }
             if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                dateQuery.$lte = end;
+                const endStr = endDate.includes("T") ? endDate : `${endDate}T23:59:59.999Z`;
+                dateQuery.$lte = new Date(endStr);
             }
 
             // Merge with existing field query if any (though unlikely for createdAt)
@@ -105,7 +105,7 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
         // Execute Query
         const total = await model.countDocuments(query);
         
-        let mongooseQuery = model.find(query).sort(sort).skip(skip).limit(numericLimit);
+        let mongooseQuery = model.find(query).sort(sort).skip(skip).limit(numericLimit).allowDiskUse(true);
 
         if (options.select) {
             mongooseQuery = mongooseQuery.select(options.select);

@@ -322,8 +322,13 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 };
 
 exports.applyExcessToNextInvoice = async (customerId, excessAmount, paymentData) => {
-    // Find the next UNPAID invoice ordered by weekNumber
-    const nextInvoices = await Invoice.find({ customer: customerId, status: { $ne: 'PAID' }, isDeleted: false })
+    // Find the next UNPAID invoice ordered by weekNumber (excluding RENTAL invoices)
+    const nextInvoices = await Invoice.find({ 
+        customer: customerId, 
+        status: { $ne: 'PAID' }, 
+        invoiceType: { $ne: 'RENTAL' },
+        isDeleted: false 
+    })
         .sort({ weekNumber: 1 });
 
     let rem = excessAmount;
@@ -556,7 +561,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const {
         driver: driverId, customer: customerId, vehicle: vehicleId, weekLabel, dueDate, invoiceDate,
         lineItems = [], discountType = 'PERCENTAGE', discountValue = 0,
-        isTaxInclusive = false, notes
+        isTaxInclusive = false, notes, supportingDocument
     } = data;
 
     let finalCustomerId = customerId;
@@ -670,8 +675,9 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
     const taxDoc = firstAppliedTaxDoc;
 
     // Auto-assign weekNumber (next available for this customer)
-    const existingInvoices = await Invoice.find({ customer: finalCustomerId, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
-    const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+    // Sort by dueDate descending (not weekNumber) to avoid string-sorting bugs
+    const existingInvoices = await Invoice.find({ customer: finalCustomerId, isDeleted: false }).sort({ dueDate: -1, _id: -1 }).limit(1);
+    const nextWeekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
 
     // Generate sequential manual invoice number
     const startSeq = await getNextInvoiceNumberVal();
@@ -705,6 +711,7 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
         discountAmount,
         isTaxInclusive: taxInclusiveParsed,
         notes: notes || '',
+        supportingDocument,
         createdBy,
         creatorRole,
     };
@@ -727,6 +734,11 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
 
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice || invoice.status === 'PAID') return;
+
+    if (invoice.invoiceType === 'RENTAL') {
+        console.log(`[InvoiceService] Skipping prepayment application for RENTAL invoice ${invoice.invoiceNumber}`);
+        return;
+    }
 
     // Find all completed PaymentReceived records for this customer
     const payments = await PaymentReceived.find({ customerId: invoice.customer, status: 'COMPLETED' });
@@ -854,12 +866,10 @@ exports.updateGenerationSettings = async (data) => {
         { upsert: true, new: true }
     );
 
-    // Trigger dynamic rent plan update for all drivers
-    try {
-        await DriverService.reconfigureAllPendingRentPlans(generationDay);
-    } catch (err) {
-        console.error("[InvoiceService] Failed to reconfigure pending rent plans:", err);
-    }
+    // Trigger dynamic rent plan update for all drivers in background
+    DriverService.reconfigureAllPendingRentPlans(generationDay).catch(err => {
+        console.error("[InvoiceService] Background rent plan reconfiguration failed:", err);
+    });
 
     return { success: true };
 };
@@ -1384,8 +1394,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         }
 
         // Auto-assign weekNumber (next available for this customer)
-        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
-        const nextWeekNumber = existingInvoices.length > 0 ? (existingInvoices[0].weekNumber + 1) : 1;
+        // Sort by dueDate descending (not weekNumber) to avoid string-sorting bugs
+        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ dueDate: -1, _id: -1 }).limit(1);
+        const nextWeekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
 
         const newInvoiceData = {
             invoiceNumber,

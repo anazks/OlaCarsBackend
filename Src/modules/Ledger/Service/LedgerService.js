@@ -15,7 +15,8 @@ const ALLOWED_CREATE_FIELDS = [
     'createdBy',
     'creatorRole',
     'contact',
-    'transactionType'
+    'transactionType',
+    'transactionId'
 ];
 
 /**
@@ -71,9 +72,9 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
             if (bill) {
                 const supplierName = bill.supplier ? bill.supplier.name : "Unknown Supplier";
 
-                // 1. Find Accounts Payable account (code 2100)
+                // 1. Find Accounts Payable account (code 2.1.01)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
+                const apAccount = await AccountingCode.findOne({ code: "2.1.01", category: "LIABILITY" });
 
                 if (apAccount) {
                     console.log(`[LedgerService] Generating double-entry for Bill Payment: Debit Accounts Payable, Credit Bank/Cash`);
@@ -107,7 +108,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                     console.log(`[LedgerService] Standalone Bill Payment double-entry posted successfully.`);
                     return; // Return early since we fully logged both legs!
                 } else {
-                    console.error("[LedgerService] Accounts Payable account (2100) not found. Falling back to default single entry.");
+                    console.error("[LedgerService] Accounts Payable account (2.1.01) not found. Falling back to default single entry.");
                     description = `Bill Payment to ${supplierName} (Bill: ${bill.billNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
                     branchId = bill.branch;
                 }
@@ -118,9 +119,9 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
             if (pmtMade) {
                 const supplierName = pmtMade.supplier ? pmtMade.supplier.name : "Unknown Supplier";
 
-                // 1. Find Accounts Payable account (code 2100)
+                // 1. Find Accounts Payable account (code 2.1.01)
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                const apAccount = await AccountingCode.findOne({ code: "2100", category: "LIABILITY" });
+                const apAccount = await AccountingCode.findOne({ code: "2.1.01", category: "LIABILITY" });
 
                 if (apAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Made: Debit Accounts Payable, Credit Bank/Cash`);
@@ -154,7 +155,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                     console.log(`[LedgerService] Standalone Payment Made double-entry posted successfully.`);
                     return; // Return early since we fully logged both legs!
                 } else {
-                    console.error("[LedgerService] Accounts Payable account (2100) not found. Falling back to default single entry.");
+                    console.error("[LedgerService] Accounts Payable account (2.1.01) not found. Falling back to default single entry.");
                     description = `Payment Made to ${supplierName} (PMT: ${pmtMade.paymentNumber})${accSuffix}. Notes: ${paymentTransaction.notes || "None"}.`;
                     branchId = pmtMade.branch;
                 }

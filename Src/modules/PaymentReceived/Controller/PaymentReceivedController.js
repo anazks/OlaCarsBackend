@@ -1,8 +1,32 @@
 const PaymentReceived = require('../Model/PaymentReceivedModel');
 
+const parsePaymentDate = (dateInput) => {
+    if (!dateInput) return new Date();
+    
+    let dateStr = typeof dateInput === 'string' ? dateInput : '';
+    if (dateStr) {
+        const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) {
+            const year = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            const day = parseInt(match[3], 10);
+            
+            const hasZeroTime = !dateStr.includes('T') || /T00:00:00/.test(dateStr) || /T00:00:00.000Z/.test(dateStr);
+            if (hasZeroTime) {
+                const dateObj = new Date();
+                dateObj.setFullYear(year, month - 1, day);
+                return dateObj;
+            }
+        }
+    }
+    
+    const parsed = new Date(dateInput);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 exports.createPaymentReceived = async (req, res) => {
     try {
-        const { driverId, customerId, amountReceived, paymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
+        const { driverId, customerId, amountReceived, paymentDate: rawPaymentDate, paymentMethod, referenceNumber, notes, depositedTo, invoices, branch } = req.body;
 
         let finalCustomerId = customerId;
         if (!finalCustomerId && driverId) {
@@ -17,6 +41,7 @@ exports.createPaymentReceived = async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing required fields: customerId (or driverId resolving to a customer), amountReceived, depositedTo are required." });
         }
 
+        const paymentDate = parsePaymentDate(rawPaymentDate);
         const mongoose = require('mongoose');
 
         // 1. Generate sequential PR number
@@ -29,7 +54,7 @@ exports.createPaymentReceived = async (req, res) => {
             customerId: finalCustomerId,
             driverId: driverId || undefined,
             amountReceived,
-            paymentDate: paymentDate || new Date(),
+            paymentDate,
             paymentMethod: paymentMethod || "Cash",
             referenceNumber,
             notes,
@@ -59,7 +84,7 @@ exports.createPaymentReceived = async (req, res) => {
                     // Add payment item to payments array
                     invoice.payments.push({
                         amount: inv.amountApplied,
-                        paidAt: paymentDate || new Date(),
+                        paidAt: paymentDate,
                         paymentMethod: paymentMethod || "Cash",
                         note: notes || `Payment received (PR: ${paymentNumber})`
                     });
@@ -127,7 +152,7 @@ exports.createPaymentReceived = async (req, res) => {
             totalAmount: amountReceived,
             paymentMethod: "CASH",
             status: "COMPLETED",
-            paymentDate: paymentDate || new Date(),
+            paymentDate: paymentDate,
             notes: notes || `Payment received from Customer (PR: ${paymentNumber})`,
             branch,
             createdBy: creatorId,
@@ -208,7 +233,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             ];
         }
 
-        let sort = { createdAt: -1 };
+        let sort = { paymentDate: -1 };
         if (sortBy) {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
         }
@@ -286,46 +311,7 @@ exports.bulkUploadPayments = async (req, res) => {
         const PaymentTransaction = require('../../Payment/Model/PaymentTransactionModel');
         const { autoGenerateLedgerEntry } = require('../../Ledger/Service/LedgerService');
 
-        // 1. Fetch reference collections for fast lookups
-        const customersList = await Customer.find({ isDeleted: false });
-        const customersByName = new Map();
-        const customersById = new Map();
-        for (const c of customersList) {
-            if (c.name) {
-                customersByName.set(c.name.trim().toLowerCase().replace(/\s+/g, ' '), c);
-            }
-            if (c.customerId) {
-                customersById.set(c.customerId.trim().toLowerCase(), c);
-            }
-            if (c.customerNumber) {
-                customersById.set(c.customerNumber.trim().toLowerCase(), c);
-            }
-        }
-
-        const accCodes = await AccountingCode.find({ isDeleted: false, isActive: true });
-        const accCodesByCode = new Map();
-        const accCodesByName = new Map();
-        for (const ac of accCodes) {
-            if (ac.code) {
-                accCodesByCode.set(ac.code.toString().trim().toLowerCase(), ac);
-            }
-            if (ac.name) {
-                accCodesByName.set(ac.name.toString().trim().toLowerCase().replace(/\s+/g, ' '), ac);
-            }
-        }
-
-        const branches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
-        const defaultBranchId = branches[0] ? branches[0]._id : undefined;
-
-        const invoicesList = await Invoice.find({ isDeleted: false });
-        const invoicesByNo = new Map();
-        for (const inv of invoicesList) {
-            if (inv.invoiceNumber) {
-                invoicesByNo.set(inv.invoiceNumber.trim().toLowerCase(), inv);
-            }
-        }
-
-        // Helpers
+        // Helper to extract values dynamically from row keys
         const getRowVal = (r, possibleKeys) => {
             for (const key of possibleKeys) {
                 const cleanKey = key.replace(/^\ufeff/, '').trim().toLowerCase();
@@ -364,9 +350,11 @@ exports.bulkUploadPayments = async (req, res) => {
             return isNaN(parsedDate.getTime()) ? null : parsedDate;
         };
 
-        // 2. Group rows by Payment Number / CustomerPayment ID
+        // 1. Gather referenced invoice numbers and payment numbers upfront
+        const invoiceNumbers = new Set();
         const paymentGroups = new Map();
         let rowCounter = 0;
+
         for (const row of rows) {
             rowCounter++;
             const payNo = getRowVal(row, ["Payment Number", "paymentNumber"]);
@@ -376,6 +364,59 @@ exports.bulkUploadPayments = async (req, res) => {
                 paymentGroups.set(key, []);
             }
             paymentGroups.get(key).push({ row, originalIndex: rowCounter });
+
+            const invNoVal = getRowVal(row, ["Invoice Number", "invoiceNumber"]);
+            if (invNoVal) {
+                invoiceNumbers.add(invNoVal.toString().trim().toLowerCase());
+            }
+        }
+
+        // 2. Fetch existing payments to skip duplicates in one query
+        const payNos = Array.from(paymentGroups.keys()).filter(key => key && !key.startsWith("TEMP-"));
+        const existingPayments = await PaymentReceived.find({ paymentNumber: { $in: payNos } }).select('paymentNumber');
+        const existingPaymentNumbers = new Set(existingPayments.map(p => p.paymentNumber));
+
+        // 3. Pre-fetch reference collections for fast lookups
+        const customersList = await Customer.find({ isDeleted: false });
+        const customersByName = new Map();
+        const customersById = new Map();
+        for (const c of customersList) {
+            if (c.name) {
+                customersByName.set(c.name.trim().toLowerCase().replace(/\s+/g, ' '), c);
+            }
+            if (c.customerId) {
+                customersById.set(c.customerId.trim().toLowerCase(), c);
+            }
+            if (c.customerNumber) {
+                customersById.set(c.customerNumber.trim().toLowerCase(), c);
+            }
+        }
+
+        const accCodes = await AccountingCode.find({ isDeleted: false, isActive: true });
+        const accCodesByCode = new Map();
+        const accCodesByName = new Map();
+        for (const ac of accCodes) {
+            if (ac.code) {
+                accCodesByCode.set(ac.code.toString().trim().toLowerCase(), ac);
+            }
+            if (ac.name) {
+                accCodesByName.set(ac.name.toString().trim().toLowerCase().replace(/\s+/g, ' '), ac);
+            }
+        }
+
+        const branches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
+        const defaultBranchId = branches[0] ? branches[0]._id : undefined;
+
+        // Fetch ONLY invoices referenced in the bulk upload rows
+        const invoicesList = await Invoice.find({ 
+            isDeleted: false,
+            invoiceNumber: { $in: Array.from(invoiceNumbers) }
+        });
+        const invoicesByNo = new Map();
+        for (const inv of invoicesList) {
+            if (inv.invoiceNumber) {
+                invoicesByNo.set(inv.invoiceNumber.trim().toLowerCase(), inv);
+            }
         }
 
         const createdPayments = [];
@@ -402,7 +443,18 @@ exports.bulkUploadPayments = async (req, res) => {
             }
         }
 
-        // 3. Process each group
+        // Containers for bulk/deferred operations
+        const paymentsToInsert = [];
+        const transactionsToInsert = [];
+        const modifiedInvoices = new Map();
+        const invoicesToSyncWithDrivers = [];
+        const customerExcessesMap = new Map();
+        const customersToRollover = new Set();
+
+        // Get initial payment count for sequential number generation offline
+        let currentPRCount = await PaymentReceived.countDocuments();
+
+        // 4. Process each group
         for (const [key, grouped] of paymentGroups.entries()) {
             const headerRowObj = grouped[0];
             const headerRow = headerRowObj.row;
@@ -412,13 +464,10 @@ exports.bulkUploadPayments = async (req, res) => {
             const payNo = (payNoVal || "").toString().trim();
 
             // Check if payment already exists in DB
-            if (payNo && !payNo.startsWith("TEMP-")) {
-                const existingPayment = await PaymentReceived.findOne({ paymentNumber: payNo });
-                if (existingPayment) {
-                    console.log(`[PaymentReceivedController] Payment ${payNo} already exists. Skipping.`);
-                    skipped.push(`Payment group "${key}" (Row ${origIdx}): Payment number "${payNo}" already exists. Skipping upload.`);
-                    continue;
-                }
+            if (payNo && !payNo.startsWith("TEMP-") && existingPaymentNumbers.has(payNo)) {
+                console.log(`[PaymentReceivedController] Payment ${payNo} already exists. Skipping.`);
+                skipped.push(`Payment group "${key}" (Row ${origIdx}): Payment number "${payNo}" already exists. Skipping upload.`);
+                continue;
             }
 
             // Resolve Customer
@@ -518,8 +567,8 @@ exports.bulkUploadPayments = async (req, res) => {
             const referenceNumber = getRowVal(headerRow, ["Reference Number", "referenceNumber"]) || "";
             const notes = getRowVal(headerRow, ["Description", "description", "Notes", "notes"]) || "";
 
-            // Resolve applied invoices (sum amounts if same invoice appears multiple times in the group)
-            const invoiceApplicationsMap = new Map(); // invoiceId -> { invoiceId, invoiceNumber, amountApplied }
+            // Resolve applied invoices in memory
+            const invoiceApplicationsMap = new Map();
 
             for (const itemObj of grouped) {
                 const r = itemObj.row;
@@ -534,7 +583,6 @@ exports.bulkUploadPayments = async (req, res) => {
                         if (!isNaN(amountApplied) && amountApplied > 0) {
                             const invIdStr = invoiceDoc._id.toString();
                             if (invoiceApplicationsMap.has(invIdStr)) {
-                                // Same invoice referenced again in this payment group — sum the amounts
                                 invoiceApplicationsMap.get(invIdStr).amountApplied += amountApplied;
                             } else {
                                 invoiceApplicationsMap.set(invIdStr, {
@@ -549,15 +597,14 @@ exports.bulkUploadPayments = async (req, res) => {
             }
             const invoiceApplications = Array.from(invoiceApplicationsMap.values());
 
-            // Assign payment number
+            // Assign payment number sequentially offline
             let paymentNumber = payNo;
             if (!paymentNumber || paymentNumber.startsWith("TEMP-")) {
-                const count = await PaymentReceived.countDocuments();
-                paymentNumber = `PR-${String(count + 1 + generatedOffset).padStart(5, '0')}`;
+                paymentNumber = `PR-${String(currentPRCount + 1 + generatedOffset).padStart(5, '0')}`;
                 generatedOffset++;
             }
 
-            // Create PaymentReceived document
+            // Create PaymentReceived document in-memory
             const newDoc = new PaymentReceived({
                 paymentNumber,
                 customerId: customerDoc._id,
@@ -573,12 +620,12 @@ exports.bulkUploadPayments = async (req, res) => {
                 status: "COMPLETED"
             });
 
-            const savedDoc = await newDoc.save();
+            paymentsToInsert.push(newDoc);
             createdPayments.push(paymentNumber);
 
-            // Update invoices in DB
+            // Update invoices in memory
             for (const app of invoiceApplications) {
-                const invoice = await Invoice.findById(app.invoiceId);
+                const invoice = invoicesByNo.get(app.invoiceNumber.trim().toLowerCase());
                 if (invoice) {
                     invoice.amountPaid = (invoice.amountPaid || 0) + app.amountApplied;
                     invoice.balance = Math.max(0, invoice.totalAmountDue - invoice.amountPaid);
@@ -594,74 +641,165 @@ exports.bulkUploadPayments = async (req, res) => {
                         paymentMethod,
                         note: notes || `Payment received (PR: ${paymentNumber})`
                     });
-                    await invoice.save();
-                    if (InvoiceService && typeof InvoiceService.syncInvoiceToAdditionalPayments === 'function') {
-                        await InvoiceService.syncInvoiceToAdditionalPayments(invoice);
-                    }
+                    
+                    modifiedInvoices.set(invoice._id.toString(), invoice);
+                    invoicesToSyncWithDrivers.push(invoice);
                 }
             }
 
-            // Apply excess if any
+            // Collect excess overpayments to apply after saving main updates
             const totalApplied = invoiceApplications.reduce((sum, inv) => sum + inv.amountApplied, 0);
             const excessAmount = amountReceived - totalApplied;
             if (excessAmount > 0) {
+                const customerIdStr = customerDoc._id.toString();
+                if (!customerExcessesMap.has(customerIdStr)) {
+                    customerExcessesMap.set(customerIdStr, []);
+                }
+                customerExcessesMap.get(customerIdStr).push({
+                    amount: excessAmount,
+                    details: {
+                        paymentMethod,
+                        referenceNumber,
+                        notes,
+                        createdBy: creatorId,
+                        creatorRole: creatorRole
+                    }
+                });
+            }
+
+            // Mark customer for rollover calculation
+            customersToRollover.add(customerDoc._id.toString());
+
+            // Instantiate PaymentTransaction in-memory
+            const paymentTx = new PaymentTransaction({
+                accountingCode: depositedToDoc._id,
+                referenceId: newDoc._id,
+                referenceModel: "PaymentReceived",
+                transactionCategory: "ASSET",
+                transactionType: "DEBIT",
+                baseAmount: amountReceived,
+                totalAmount: amountReceived,
+                paymentMethod: "CASH",
+                status: "COMPLETED",
+                paymentDate,
+                notes: notes || `Payment received from Customer (PR: ${paymentNumber})`,
+                branch: finalBranchId,
+                createdBy: creatorId,
+                creatorRole: creatorRole
+            });
+
+            const pmUpperTx = paymentMethod.toUpperCase();
+            if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
+            else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
+            else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
+            else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
+            else paymentTx.paymentMethod = "OTHER";
+
+            transactionsToInsert.push(paymentTx);
+        }
+
+        // 5. Execute bulk insertions and concurrent saves
+        if (paymentsToInsert.length > 0) {
+            await PaymentReceived.insertMany(paymentsToInsert);
+        }
+
+        if (transactionsToInsert.length > 0) {
+            await PaymentTransaction.insertMany(transactionsToInsert);
+        }
+
+        if (modifiedInvoices.size > 0) {
+            await Promise.all(Array.from(modifiedInvoices.values()).map(inv => inv.save()));
+        }
+
+        // 6. Sync Driver additional payments (grouped by driver to prevent VersionError write conflicts)
+        if (invoicesToSyncWithDrivers.length > 0) {
+            const Driver = mongoose.model('Driver');
+            const invoicesByDriver = new Map();
+            for (const inv of invoicesToSyncWithDrivers) {
+                if (inv.driver) {
+                    const driverIdStr = inv.driver.toString();
+                    if (!invoicesByDriver.has(driverIdStr)) {
+                        invoicesByDriver.set(driverIdStr, []);
+                    }
+                    invoicesByDriver.get(driverIdStr).push(inv);
+                }
+            }
+
+            for (const [driverId, driverInvoices] of invoicesByDriver.entries()) {
                 try {
-                    if (InvoiceService && typeof InvoiceService.applyExcessToNextInvoice === 'function') {
-                        await InvoiceService.applyExcessToNextInvoice(customerDoc._id, excessAmount, {
-                            paymentMethod,
-                            referenceNumber,
-                            notes,
-                            createdBy: creatorId,
-                            creatorRole: creatorRole
-                        });
+                    const orConditions = [];
+                    for (const inv of driverInvoices) {
+                        if (inv.invoiceNumber) {
+                            orConditions.push({ "additionalPayments.invoiceNumber": inv.invoiceNumber });
+                        }
+                        orConditions.push({ "additionalPayments.invoiceRef": inv._id });
+                    }
+
+                    const driver = await Driver.findOne({
+                        _id: driverId,
+                        $or: orConditions
+                    });
+
+                    if (driver) {
+                        let modified = false;
+                        for (const inv of driverInvoices) {
+                            const paymentItem = driver.additionalPayments.find(p =>
+                                p.invoiceNumber === inv.invoiceNumber ||
+                                (p.invoiceRef && p.invoiceRef.toString() === inv._id.toString())
+                            );
+                            if (paymentItem) {
+                                paymentItem.amountPaid = inv.amountPaid || 0;
+                                paymentItem.balance = inv.balance;
+                                paymentItem.status = inv.status;
+                                paymentItem.paidAt = inv.paidAt;
+                                paymentItem.payments = (inv.payments || []).map(p => ({
+                                    amount: p.amount,
+                                    paidAt: p.paidAt,
+                                    paymentMethod: p.paymentMethod || "Cash",
+                                    transactionId: p.transactionId,
+                                    note: p.note
+                                }));
+                                modified = true;
+                            }
+                        }
+                        if (modified) {
+                            driver.markModified("additionalPayments");
+                            await driver.save();
+                            console.log(`[bulkUploadPayments] Synced ${driverInvoices.length} invoices for driver ${driverId}`);
+                        }
+                    }
+                } catch (syncErr) {
+                    console.error(`[bulkUploadPayments] Failed to sync driver ${driverId} payments:`, syncErr);
+                }
+            }
+        }
+
+        // 7. Apply customer excess overpayments sequentially per customer
+        if (customerExcessesMap.size > 0) {
+            for (const [customerId, excesses] of customerExcessesMap.entries()) {
+                for (const excess of excesses) {
+                    try {
+                        if (InvoiceService && typeof InvoiceService.applyExcessToNextInvoice === 'function') {
+                            await InvoiceService.applyExcessToNextInvoice(customerId, excess.amount, excess.details);
+                        }
+                    } catch (err) {
+                        console.error(`[bulkUploadPayments] Failed to apply excess overpayment for customer ${customerId}:`, err);
+                    }
+                }
+            }
+        }
+
+        // 8. Rollover customer invoices in parallel (safe as customers are independent)
+        if (customersToRollover.size > 0) {
+            await Promise.all(Array.from(customersToRollover).map(async (customerId) => {
+                try {
+                    if (InvoiceService && typeof InvoiceService.rolloverCustomerInvoices === 'function') {
+                        await InvoiceService.rolloverCustomerInvoices(customerId);
                     }
                 } catch (err) {
-                    console.error("[bulkUploadPayments] Failed to apply excess overpayment:", err);
+                    console.error(`[bulkUploadPayments] Rollover customer invoices failed for customer ${customerId}:`, err);
                 }
-            }
-
-            // Rollover customer invoices
-            try {
-                if (InvoiceService && typeof InvoiceService.rolloverCustomerInvoices === 'function') {
-                    await InvoiceService.rolloverCustomerInvoices(customerDoc._id);
-                }
-            } catch (err) {
-                console.error("[bulkUploadPayments] Rollover customer invoices failed:", err);
-            }
-
-            // Create PaymentTransaction & double-entry ledger entries
-            try {
-                const paymentTx = new PaymentTransaction({
-                    accountingCode: depositedToDoc._id,
-                    referenceId: savedDoc._id,
-                    referenceModel: "PaymentReceived",
-                    transactionCategory: "ASSET",
-                    transactionType: "DEBIT",
-                    baseAmount: amountReceived,
-                    totalAmount: amountReceived,
-                    paymentMethod: "CASH",
-                    status: "COMPLETED",
-                    paymentDate,
-                    notes: notes || `Payment received from Customer (PR: ${paymentNumber})`,
-                    branch: finalBranchId,
-                    createdBy: creatorId,
-                    creatorRole: creatorRole
-                });
-
-                const pmUpperTx = paymentMethod.toUpperCase();
-                if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
-                else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
-                else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
-                else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
-                else paymentTx.paymentMethod = "OTHER";
-
-                await paymentTx.save();
-
-                const populatedTx = { ...paymentTx.toObject(), accountingCode: depositedToDoc };
-                await autoGenerateLedgerEntry(populatedTx);
-            } catch (ledgerErr) {
-                console.error(`[bulkUploadPayments] Failed to post ledger for ${paymentNumber}:`, ledgerErr);
-            }
+            }));
         }
 
         res.status(200).json({

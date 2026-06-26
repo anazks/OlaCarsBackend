@@ -104,7 +104,7 @@ exports.loginWorkshopManagerRepo = async (email, password) => {
     if (manager.status !== "ACTIVE") throw new Error("Account not active");
 
     const accessToken = jwt.sign(
-        { id: manager._id, role: manager.role, branchId: manager.branchId },
+        { id: manager._id, role: manager.role, branchId: manager.branchId || manager.workshopId, workshopId: manager.workshopId },
         process.env.JWT_SECRET,
         { expiresIn: jwtConfig.accessTokenExpiry }
     );

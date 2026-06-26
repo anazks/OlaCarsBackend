@@ -352,6 +352,7 @@ driverSchema.index({ branch: 1 });
 driverSchema.index({ "personalInfo.email": 1 }, { sparse: true });
 driverSchema.index({ "drivingLicense.expiryDate": 1 });
 driverSchema.index({ "medicalFitness.expiryDate": 1 });
+driverSchema.index({ createdAt: -1 });
 
 const Driver = mongoose.model("Driver", driverSchema);
 mongoose.model("DRIVER", driverSchema, "drivers");

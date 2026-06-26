@@ -32,6 +32,7 @@ exports.getPurchaseOrdersService = async (queryParams = {}, options = {}) => {
                 { path: "supplier", select: "name contactPerson email" }
             ],
             dateFilterField: "createdAt",
+            defaultSort: { createdAt: 1 },
             ...options
         };
 
@@ -51,8 +52,10 @@ exports.getPurchaseOrderByIdService = async (id) => {
         return await PurchaseOrder.findById(id)
             .populate("branch")
             .populate("supplier", "name contactPerson email")
-            .populate("createdBy", "name email")
-            .populate("items.accountId");
+            .populate("createdBy", "name email fullName")
+            .populate("approvedBy", "name email fullName")
+            .populate("items.accountId")
+            .populate("editHistory.editedBy", "name email fullName role");
     } catch (error) {
         throw error;
     }

@@ -150,8 +150,8 @@ exports.createWorkOrder = async (data) => {
 
 /**
  * Retrieves work orders with optional filters.
- * @param {Object} filters - { status, branchId, vehicleId, priority, workOrderType }
- * @returns {Promise<Array>}
+ * @param {Object} filters - { status, branchId, vehicleId, priority, workOrderType, page, limit }
+ * @returns {Promise<Array|Object>}
  */
 exports.getWorkOrders = async (filters = {}) => {
     try {
@@ -161,6 +161,41 @@ exports.getWorkOrders = async (filters = {}) => {
         if (filters.vehicleId) query.vehicleId = filters.vehicleId;
         if (filters.priority) query.priority = filters.priority;
         if (filters.workOrderType) query.workOrderType = filters.workOrderType;
+
+        if (filters.search && filters.search.trim() !== '') {
+            const searchRegex = new RegExp(filters.search.trim(), 'i');
+            query.$or = [
+                { workOrderNumber: searchRegex },
+                { faultDescription: searchRegex }
+            ];
+        }
+
+        const page = filters.page ? parseInt(filters.page, 10) : null;
+        const limit = filters.limit ? parseInt(filters.limit, 10) : null;
+
+        if (page && limit) {
+            const skip = (page - 1) * limit;
+            const total = await WorkOrder.countDocuments(query);
+            const docs = await WorkOrder.find(query)
+                .populate({
+                    path: "vehicleId",
+                    select: "basicDetails.make basicDetails.model basicDetails.vin status currentDriver",
+                    populate: { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
+                })
+                .populate("branchId", "name")
+                .populate("assignedTechnician", "name email")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit);
+
+            return {
+                docs,
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            };
+        }
 
         return await WorkOrder.find(query)
             .populate({

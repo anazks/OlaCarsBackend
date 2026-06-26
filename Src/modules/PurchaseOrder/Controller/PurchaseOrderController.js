@@ -10,6 +10,7 @@ const Branch = require("../../Branch/Model/BranchModel.js");
 const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js");
 const uploadToS3 = require("../../../utils/uploadToS3");
 const uploadLocal = require("../../../utils/uploadLocal");
+const PurchaseOrderService = require("../Service/PurchaseOrderService.js");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -172,10 +173,14 @@ const getPurchaseOrders = async (req, res) => {
         let baseQuery = {};
 
         // 1. Role-based scoping (Base Query)
-        if (role === ROLES.BRANCHMANAGER) {
+        if ([ROLES.BRANCHMANAGER, ROLES.WORKSHOPMANAGER].includes(role)) {
             baseQuery.branch = req.user.branchId;
         } else if ([ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF].includes(role)) {
-            baseQuery.createdBy = req.user.id;
+            if (req.user.branchId) {
+                baseQuery.branch = req.user.branchId;
+            } else {
+                baseQuery.createdBy = req.user.id;
+            }
         } else if (role === ROLES.COUNTRYMANAGER) {
             if (!req.user.country) {
                 return res.status(400).json({ success: false, message: "Country not assigned to your profile. Contact admin." });
@@ -220,7 +225,28 @@ const getPurchaseOrderById = async (req, res) => {
         if (!po) {
             return res.status(404).json({ success: false, message: "Purchase Order not found" });
         }
-        return res.status(200).json({ success: true, data: po });
+
+        let poObj = po.toObject ? po.toObject() : po;
+
+        try {
+            if (po.purchaseOrderNumber && po.purchaseOrderNumber.startsWith("PO-PR-")) {
+                const prNumber = po.purchaseOrderNumber.replace("PO-PR-", "");
+                const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+                const linkedPR = await WorkshopProcurement.findOne({ requestNumber: prNumber })
+                    .populate("editHistory.editedBy", "fullName name email role")
+                    .populate("part")
+                    .populate("branch")
+                    .populate("requestedBy", "fullName name email role")
+                    .populate("approvedBy", "fullName name email role");
+                if (linkedPR) {
+                    poObj.linkedPR = linkedPR;
+                }
+            }
+        } catch (prErr) {
+            console.error("Failed to lookup linked PR:", prErr);
+        }
+
+        return res.status(200).json({ success: true, data: poObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -427,8 +453,7 @@ const uploadPODocument = async (req, res) => {
 
 const auditPurchaseOrder = async (req, res) => {
     try {
-        const { id } = req.params;
-        const { items, documents } = req.body;
+        const { items, documents, supplierDetails } = req.body;
 
         if (!items || !Array.isArray(items)) {
             return res.status(400).json({ success: false, message: "Items array is required for audit." });
@@ -456,6 +481,15 @@ const auditPurchaseOrder = async (req, res) => {
         po.merchandiserTotalAmount = merchandiserTotalAmount;
         if (documents && Array.isArray(documents)) {
             po.documents = documents;
+        }
+
+        if (supplierDetails) {
+            po.supplierDetails = {
+                name: supplierDetails.name || "",
+                email: supplierDetails.email || "",
+                phone: supplierDetails.phone || "",
+                address: supplierDetails.address || "",
+            };
         }
 
         // Set status to PENDING_FINANCE_APPROVAL
@@ -707,6 +741,20 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
     }
 };
 
+const bulkUploadPurchaseOrders = async (req, res) => {
+    try {
+        const { rows } = req.body;
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+            return res.status(400).json({ success: false, message: "No data rows provided for bulk upload." });
+        }
+        const actor = { id: req.user.id || req.user._id, role: req.user.role };
+        const result = await PurchaseOrderService.bulkUploadPurchaseOrders(rows, actor, req.user.branchId);
+        return res.status(201).json({ success: true, message: "Bulk upload processed", data: result });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
@@ -717,4 +765,5 @@ module.exports = {
     getEligiblePurchaseOrdersForBilling,
     uploadPODocument,
     auditPurchaseOrder,
+    bulkUploadPurchaseOrders,
 };

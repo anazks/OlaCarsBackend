@@ -6,7 +6,21 @@ const CreditNoteService = require('../Service/CreditNoteService');
 exports.createCreditNote = async (req, res) => {
     try {
         const actor = { id: req.user.id, role: req.user.role };
-        const savedDoc = await CreditNoteService.createCreditNote(req.body, actor);
+
+        let creditNoteData = { ...req.body };
+
+        // Handle optional file upload
+        if (req.file) {
+            const uploadLocal = require("../../../utils/uploadLocal");
+            const fileUrl = uploadLocal(req.file, "credit-notes");
+            creditNoteData.supportingDocument = {
+                name: req.file.originalname,
+                url: fileUrl,
+                uploadedAt: new Date(),
+            };
+        }
+
+        const savedDoc = await CreditNoteService.createCreditNote(creditNoteData, actor);
         res.status(201).json({ 
             success: true, 
             message: "Credit Note issued successfully in OPEN status.",

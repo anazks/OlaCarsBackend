@@ -59,6 +59,9 @@ const purchaseOrderSchema = new mongoose.Schema(
         approvalNote: {
             type: String,
         },
+        description: {
+            type: String,
+        },
         purchaseOrderDate: {
             type: Date,
             default: Date.now,
@@ -74,6 +77,12 @@ const purchaseOrderSchema = new mongoose.Schema(
         supplier: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Supplier",
+        },
+        supplierDetails: {
+            name: { type: String },
+            email: { type: String },
+            phone: { type: String },
+            address: { type: String },
         },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

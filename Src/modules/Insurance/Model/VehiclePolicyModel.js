@@ -61,6 +61,5 @@ const vehiclePolicySchema = new mongoose.Schema(
 
 // Performance Indexes
 vehiclePolicySchema.index({ vehicle: 1, status: 1 });
-vehiclePolicySchema.index({ expiryDate: 1 });
 
 module.exports = mongoose.model("VehiclePolicy", vehiclePolicySchema);

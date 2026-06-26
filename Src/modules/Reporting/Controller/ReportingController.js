@@ -1,5 +1,6 @@
 const ReportingService = require("../Service/ReportingService");
 const ReportingPdfService = require("../Service/ReportingPdfService");
+const ReportingExcelService = require("../Service/ReportingExcelService");
 const Branch = require("../../Branch/Model/BranchModel");
 const { ROLES } = require("../../../shared/constants/roles");
 
@@ -165,6 +166,34 @@ exports.exportPdf = async (req, res) => {
 
         // Generate and stream PDF
         ReportingPdfService.generateReportPdf(reportType, reportData, meta, res);
+    } catch (error) {
+        res.status(500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+exports.exportExcel = async (req, res) => {
+    try {
+        const filters = { ...req.query };
+        const user = req.user;
+        const reportType = filters.reportType || "expenses";
+
+        // Apply role-based restrictions
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF || user.role === ROLES.OPERATIONSTAFF) {
+            filters.branch = user.branchId;
+        }
+
+        const { buffer } = await ReportingExcelService.generateExcelReport(reportType, filters);
+
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        const dateStr = new Date().toISOString().split('T')[0];
+        const filename = `${reportType}_report_${dateStr}.xlsx`;
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        res.send(buffer);
     } catch (error) {
         res.status(500).json({
             status: "error",

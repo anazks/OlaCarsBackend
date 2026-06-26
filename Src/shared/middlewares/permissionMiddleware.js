@@ -72,7 +72,9 @@ const hasPermission = (requiredPermissions) => {
           throw new AppError("Invalid user role.", 403);
       }
 
+      console.log(`[Permission DEBUG] Finding user: userId=${userId}, role=${userRole}, model=${Model?.modelName}`);
       const currentUser = await Model.findById(userId).select("permissions status isDeleted");
+      console.log(`[Permission DEBUG] Found user document: ${JSON.stringify(currentUser)}`);
 
       if (!currentUser || currentUser.isDeleted || currentUser.status !== "ACTIVE") {
         throw new AppError("Account not active or found.", 403);

@@ -102,15 +102,19 @@ exports.getDriversService = async (queryParams = {}, options = {}) => {
 
         const queryOptions = {
             searchFields: ["personalInfo.fullName", "personalInfo.email", "driverId", "drivingLicense.licenseNumber", "status"],
-            filterFields: ["status", "branch"],
+            filterFields: ["status", "branch", "currentVehicle"],
             dateFilterField: "createdAt",
             populate: { path: "branch", select: "name code city state country" },
             ...options
         };
 
-        // Handle sensitivity if not explicitly provided in select
-        if (!options.select && !options.includeSensitive) {
-            queryOptions.select = SENSITIVE_FIELDS;
+        // Handle large fields and sensitivity if not explicitly provided in select
+        if (!options.select) {
+            let selectFields = "-rentTracking -additionalPayments";
+            if (!options.includeSensitive) {
+                selectFields += ` ${SENSITIVE_FIELDS}`;
+            }
+            queryOptions.select = selectFields;
         }
 
         return await applyQueryFeatures(Driver, queryParams, queryOptions);

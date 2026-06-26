@@ -15,11 +15,13 @@ exports.createBillFromPO = async (req, res, next) => {
 
 exports.getAllBills = async (req, res, next) => {
     try {
-        const bills = await BillService.getAllBills(req.query);
+        const result = await BillService.getAllBills(req.query);
         res.status(200).json({
             success: true,
-            count: bills.length,
-            data: bills
+            count: result.pagination ? result.pagination.totalItems : result.data.length,
+            data: result.data,
+            pagination: result.pagination,
+            metrics: result.metrics
         });
     } catch (error) {
         next(error);
@@ -79,6 +81,20 @@ exports.createBill = async (req, res, next) => {
             success: true,
             message: "Bill created successfully",
             data: bill
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.bulkUploadBills = async (req, res, next) => {
+    try {
+        const rows = req.body.rows || req.body;
+        const actor = { id: req.user._id || req.user.id, role: req.user.role };
+        const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId);
+        res.status(200).json({
+            success: true,
+            data: result
         });
     } catch (error) {
         next(error);

@@ -12,6 +12,7 @@ const addBranchSchema = {
         country: Joi.string().trim().required(),
         countryManager: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         status: Joi.string().trim().valid("ACTIVE", "INACTIVE").default("ACTIVE"),
+        type: Joi.string().trim().valid("BRANCH", "WORKSHOP").default("BRANCH"),
     }),
 };
 
@@ -28,6 +29,7 @@ const editBranchSchema = {
         country: Joi.string().trim(),
         countryManager: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
         status: Joi.string().trim().valid("ACTIVE", "INACTIVE"),
+        type: Joi.string().trim().valid("BRANCH", "WORKSHOP"),
     }).min(2), // id + at least one field to update
 };
 

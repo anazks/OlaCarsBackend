@@ -33,6 +33,7 @@ const MerchendiseRouter = require("./Src/modules/Merchendise/Routes/MerchendiseR
 
 const PurchaseOrderRouter = require("./Src/modules/PurchaseOrder/Routes/PurchaseOrderRouter");
 const VehicleRouter = require("./Src/modules/Vehicle/Routes/VehicleRouter");
+const FleetRouter = require("./Src/modules/Fleet/Routes/FleetRouter");
 const SupplierRouter = require("./Src/modules/Supplier/Routes/SupplierRouter");
 const AccountingCodeRouter = require("./Src/modules/AccountingCode/Routes/AccountingCodeRouter");
 const TaxRouter = require("./Src/modules/Tax/Routes/TaxRouter");
@@ -73,6 +74,9 @@ const {
 const {
   startFixedAssetCronJob,
 } = require("./Src/modules/FixedAsset/Service/FixedAssetCronService");
+const {
+  startDashboardCronJob,
+} = require("./Src/modules/Dashboard/Service/DashboardCronService");
 const DashboardRouter = require("./Src/modules/Dashboard/Routes/DashboardRouter");
 const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRoutes");
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
@@ -89,6 +93,7 @@ const PaymentMadeRouter = require("./Src/modules/PaymentMade/Routes/PaymentMadeR
 const VendorCreditRouter = require("./Src/modules/VendorCredit/Routes/VendorCreditRoutes");
 const BillRouter = require("./Src/modules/Bill/Routes/BillRoutes");
 const FixedAssetRouter = require("./Src/modules/FixedAsset/Routes/FixedAssetRoutes");
+const GpsRouter = require("./Src/modules/Gps/Routes/GpsRouter");
 const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -196,6 +201,7 @@ app.use("/api/workshop-manager", WorkshopManagerRouter);
 app.use("/api/workshop", WorkshopRouter);
 app.use("/api/purchase-order", PurchaseOrderRouter);
 app.use("/api/vehicle", VehicleRouter);
+app.use("/api/fleet", FleetRouter);
 app.use("/api/supplier", SupplierRouter);
 app.use("/api/accounting-code", AccountingCodeRouter);
 app.use("/api/tax", TaxRouter);
@@ -218,6 +224,7 @@ app.use("/pagofacil/api", PagoFacilRouter);
 app.use("/api/invoices", InvoiceRouter);
 app.use("/api/alerts", AlertRouter);
 app.use("/api/dashboard", DashboardRouter);
+app.use("/api/gps", GpsRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
 app.use("/api/payment-requests", PaymentRequestRouter);
@@ -237,6 +244,8 @@ app.use("/api/payments-made", PaymentMadeRouter);
 app.use("/api/vendor-credits", VendorCreditRouter);
 app.use("/api/bills", BillRouter);
 app.use("/api/fixed-assets", FixedAssetRouter);
+app.use("/api/gps", GpsRouter);
+
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
@@ -299,12 +308,30 @@ const startServer = async () => {
       startInvoiceCronJob();
       initOutboundCallScheduler();
       startFixedAssetCronJob();
+      startDashboardCronJob();
       console.log(
-        "Internal cron schedulers (Alerts, Invoices, Outbound Calls, Fixed Assets) started",
+        "Internal cron schedulers (Alerts, Invoices, Outbound Calls, Fixed Assets, Dashboard Cache) started",
       );
     } else {
       console.log("Internal cron scheduler disabled (using external service)");
     }
+
+    // Start historical precomputation backfill since 2025-01-01 in the background
+    const startHistoricalBackfill = async () => {
+      try {
+        const { precomputeForDateRange } = require("./Src/modules/Dashboard/Service/DashboardPrecomputeService");
+        const moment = require("moment");
+        const startDate = moment("2025-01-01").startOf("day").toDate();
+        const endDate = moment().subtract(1, "day").startOf("day").toDate();
+        console.log("[Dashboard Cache] Starting background historical precomputation backfill since 2025-01-01...");
+        precomputeForDateRange(startDate, endDate).catch(err => {
+          console.error("[Dashboard Cache] Background backfill failed:", err);
+        });
+      } catch (err) {
+        console.error("[Dashboard Cache] Error initiating backfill:", err);
+      }
+    };
+    startHistoricalBackfill();
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
@@ -321,3 +348,5 @@ process.on("SIGINT", () => {
   console.log("Server shutting down...");
   process.exit(0);
 });
+// Trigger nodemon reload after fixing DB URI
+

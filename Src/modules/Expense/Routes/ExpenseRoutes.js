@@ -7,6 +7,11 @@ const { ROLES } = require("../../../shared/constants/roles");
 
 router.use(authenticate);
 
+router.post("/bulk-upload",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    ExpenseController.bulkUploadExpenses
+);
+
 router.post("/", 
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
     ExpenseController.createExpense

@@ -11,17 +11,20 @@ const getLedgerEntries = async (req, res) => {
         if (req.query.manualJournal) query.manualJournal = req.query.manualJournal;
         if (req.query.voucher) query.voucher = req.query.voucher;
         if (req.query.transaction) query.transaction = req.query.transaction;
+        if (req.query.transactionId) query.transactionId = req.query.transactionId;
 
         // Optional Branch Filter
         if (req.query.branch) query.branch = req.query.branch;
 
         if (req.query.startDate || req.query.endDate) {
             query.entryDate = {};
-            if (req.query.startDate) query.entryDate.$gte = new Date(req.query.startDate);
+            if (req.query.startDate) {
+                const startStr = req.query.startDate.includes("T") ? req.query.startDate : `${req.query.startDate}T00:00:00.000Z`;
+                query.entryDate.$gte = new Date(startStr);
+            }
             if (req.query.endDate) {
-                const end = new Date(req.query.endDate);
-                end.setHours(23, 59, 59, 999);
-                query.entryDate.$lte = end;
+                const endStr = req.query.endDate.includes("T") ? req.query.endDate : `${req.query.endDate}T23:59:59.999Z`;
+                query.entryDate.$lte = new Date(endStr);
             }
         }
 
@@ -46,6 +49,7 @@ const getLedgerEntries = async (req, res) => {
             query.$or = [
                 { description: searchRegex },
                 { creatorRole: searchRegex },
+                { transactionId: searchRegex },
                 { accountingCode: { $in: matchingCodes.map(c => c._id) } }
             ];
         }
@@ -63,21 +67,48 @@ const getLedgerEntries = async (req, res) => {
             .populate("transaction", "paymentMethod status transactionCategory transactionType")
             .populate("accountingCode", "code name category")
             .populate("contact", "name email")
-            .sort({ entryDate: -1 })
+            .sort({ entryDate: -1, _id: -1 })
             .skip(skip)
             .limit(limit);
 
-        // Calculate total summary stats for matching query using find + select to leverage Mongoose's schema casting
-        const allMatching = await LedgerEntry.find(query).select("type amount");
+        // Calculate total summary stats using aggregate
+        const buildMatchQuery = (q) => {
+            const match = { ...q };
+            if (match.accountingCode && typeof match.accountingCode === "string" && mongoose.Types.ObjectId.isValid(match.accountingCode)) {
+                match.accountingCode = new mongoose.Types.ObjectId(match.accountingCode);
+            }
+            if (match.branch && typeof match.branch === "string" && mongoose.Types.ObjectId.isValid(match.branch)) {
+                match.branch = new mongoose.Types.ObjectId(match.branch);
+            }
+            if (match.manualJournal && typeof match.manualJournal === "string" && mongoose.Types.ObjectId.isValid(match.manualJournal)) {
+                match.manualJournal = new mongoose.Types.ObjectId(match.manualJournal);
+            }
+            if (match.voucher && typeof match.voucher === "string" && mongoose.Types.ObjectId.isValid(match.voucher)) {
+                match.voucher = new mongoose.Types.ObjectId(match.voucher);
+            }
+            if (match.transaction && typeof match.transaction === "string" && mongoose.Types.ObjectId.isValid(match.transaction)) {
+                match.transaction = new mongoose.Types.ObjectId(match.transaction);
+            }
+            return match;
+        };
+
+        const aggregateQuery = buildMatchQuery(query);
+        const stats = await LedgerEntry.aggregate([
+            { $match: aggregateQuery },
+            {
+                $group: {
+                    _id: "$type",
+                    total: { $sum: "$amount" }
+                }
+            }
+        ]);
+
         let totalDebit = 0;
         let totalCredit = 0;
-        for (const entry of allMatching) {
-            if (entry.type === "DEBIT") {
-                totalDebit += entry.amount || 0;
-            } else if (entry.type === "CREDIT") {
-                totalCredit += entry.amount || 0;
-            }
-        }
+        stats.forEach(s => {
+            if (s._id === "DEBIT") totalDebit = s.total || 0;
+            if (s._id === "CREDIT") totalCredit = s.total || 0;
+        });
 
         return res.status(200).json({ 
             success: true, 
@@ -120,7 +151,78 @@ const getLedgerEntryById = async (req, res) => {
     }
 };
 
+const importLedgerEntries = async (req, res) => {
+    try {
+        const { importFromExcel, importRows } = require("../Service/LedgerImportService");
+        let result;
+
+        const createdBy = req.user._id || req.user.id;
+        const creatorRole = req.user.role ? req.user.role.toUpperCase() : "ADMIN";
+
+        if (req.body.rows && Array.isArray(req.body.rows)) {
+            result = await importRows(req.body.rows, { createdBy, creatorRole });
+        } else if (req.file) {
+            result = await importFromExcel(req.file.buffer, { createdBy, creatorRole });
+        } else {
+            return res.status(400).json({ success: false, message: "No file uploaded or rows provided." });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Import complete: ${result.inserted} entries created, ${result.linked} linked to invoices.`,
+            data: result,
+        });
+    } catch (error) {
+        console.error("[LedgerController] Import failed:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const deleteLedgerJournal = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the ledger entry ID
+        const ManualJournal = require("../Model/ManualJournalModel");
+
+        // Find the ledger entry to get its manualJournal reference
+        const entry = await LedgerEntry.findById(id);
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        if (!entry.manualJournal) {
+            // No parent journal — only delete this single entry
+            await LedgerEntry.deleteOne({ _id: id });
+            return res.status(200).json({
+                success: true,
+                message: "Ledger entry deleted (no parent journal)",
+                deletedEntries: 1,
+                deletedJournals: 0
+            });
+        }
+
+        const journalId = entry.manualJournal;
+
+        // Delete ALL ledger entries for this journal (both DEBIT + CREDIT sides)
+        const delEntries = await LedgerEntry.deleteMany({ manualJournal: journalId });
+
+        // Delete the ManualJournal header
+        await ManualJournal.deleteOne({ _id: journalId });
+
+        return res.status(200).json({
+            success: true,
+            message: `Deleted journal and ${delEntries.deletedCount} ledger entries`,
+            deletedEntries: delEntries.deletedCount,
+            deletedJournals: 1
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
+    importLedgerEntries,
+    deleteLedgerJournal,
 };
+
