@@ -5,6 +5,7 @@ const addFleetSchema = {
         fleetNumber: Joi.string().trim().allow("", null),
         assignedStaff: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
         assignedStaffModel: Joi.string().trim().valid('OperationStaff', 'FinanceStaff').required(),
+        branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).required(),
         description: Joi.string().trim().allow("", null),
         status: Joi.string().trim().valid('ACTIVE', 'INACTIVE').default('ACTIVE')
     })
@@ -18,6 +19,7 @@ const updateFleetSchema = {
         fleetNumber: Joi.string().trim(),
         assignedStaff: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         assignedStaffModel: Joi.string().trim().valid('OperationStaff', 'FinanceStaff'),
+        branchId: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         description: Joi.string().trim().allow("", null),
         status: Joi.string().trim().valid('ACTIVE', 'INACTIVE')
     })

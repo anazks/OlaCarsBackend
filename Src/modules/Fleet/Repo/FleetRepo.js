@@ -69,10 +69,11 @@ exports.getFleets = async (queryParams = {}, options = {}) => {
     try {
         const queryOptions = {
             searchFields: ['fleetNumber', 'description'],
-            filterFields: ['status', 'assignedStaff', 'assignedStaffModel'],
+            filterFields: ['status', 'assignedStaff', 'assignedStaffModel', 'branchId'],
             dateFilterField: 'createdAt',
             populate: [
-                { path: 'assignedStaff', select: 'fullName email phone role branchId' }
+                { path: 'assignedStaff', select: 'fullName email phone role branchId' },
+                { path: 'branchId', select: 'name code city status type' }
             ],
             ...options
         };
@@ -108,7 +109,8 @@ exports.getFleets = async (queryParams = {}, options = {}) => {
 exports.getFleetById = async (id) => {
     try {
         const fleet = await Fleet.findById(id)
-            .populate('assignedStaff', 'fullName email phone role branchId');
+            .populate('assignedStaff', 'fullName email phone role branchId')
+            .populate('branchId', 'name code city status type');
         
         if (!fleet) return null;
 
@@ -147,7 +149,8 @@ exports.updateFleet = async (id, updateData) => {
             id,
             { $set: updateData },
             { new: true, runValidators: true, session }
-        ).populate('assignedStaff', 'fullName email phone role branchId');
+        ).populate('assignedStaff', 'fullName email phone role branchId')
+         .populate('branchId', 'name code city status type');
 
         // Sync staff assignments
         await syncStaffFleetNumbers(
