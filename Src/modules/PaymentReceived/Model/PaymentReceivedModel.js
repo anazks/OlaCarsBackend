@@ -66,4 +66,10 @@ const paymentReceivedSchema = new mongoose.Schema({
     }
 }, { timestamps: true });
 
+paymentReceivedSchema.index({ customerId: 1 });
+paymentReceivedSchema.index({ driverId: 1 });
+paymentReceivedSchema.index({ paymentDate: -1 });
+paymentReceivedSchema.index({ paymentMethod: 1 });
+paymentReceivedSchema.index({ branch: 1 });
+
 module.exports = mongoose.model('PaymentReceived', paymentReceivedSchema);
