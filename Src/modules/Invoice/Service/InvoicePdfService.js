@@ -92,18 +92,26 @@ exports.generateInvoicePdf = (invoice, res) => {
        .text(invoice.weekLabel || "N/A", rightColX + 90, metaY + 48, { align: "right", width: 105 });
 
     // Bill To Details (Left)
+    const customer = invoice.customer || {};
     const driver = invoice.driver || {};
     const personalInfo = driver.personalInfo || {};
+
+    const billingName = customer.name || personalInfo.fullName || "Unresolved Customer";
+    const billingEmail = customer.email || personalInfo.email || "N/A";
+    const billingPhone = customer.phone || personalInfo.phone || "N/A";
+    const billingIdLabel = customer.customerId ? "Customer ID:" : (driver.driverId ? "Operator ID:" : "Customer ID:");
+    const billingIdValue = customer.customerId || driver.driverId || "N/A";
+
     doc.fillColor(secondaryColor)
        .text("BILL TO:", leftMargin, metaY)
        .fillColor(primaryColor)
        .fontSize(11)
-       .text(personalInfo.fullName || "Unresolved Operator", leftMargin, metaY + 14, { bold: true })
+       .text(billingName, leftMargin, metaY + 14, { bold: true })
        .fontSize(9)
        .fillColor(secondaryColor)
-       .text(`Email: ${personalInfo.email || "N/A"}`, leftMargin, metaY + 28)
-       .text(`Phone: ${personalInfo.phone || "N/A"}`, leftMargin, metaY + 40)
-       .text(`Operator ID: ${driver.driverId || "N/A"}`, leftMargin, metaY + 52);
+       .text(`Email: ${billingEmail}`, leftMargin, metaY + 28)
+       .text(`Phone: ${billingPhone}`, leftMargin, metaY + 40)
+       .text(`${billingIdLabel} ${billingIdValue}`, leftMargin, metaY + 52);
 
     // Vehicle Context (If linked)
     if (invoice.vehicle) {
