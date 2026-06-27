@@ -212,7 +212,7 @@ exports.getAllPaymentReceiveds = async (req, res) => {
                 end.setHours(23, 59, 59, 999);
                 query.paymentDate.$lte = end;
             }
-        } else {
+        } else if (!customerId && !driverId) {
             // Default to start of current month to end of today
             const now = new Date();
             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
