@@ -212,6 +212,15 @@ exports.getAllPaymentReceiveds = async (req, res) => {
                 end.setHours(23, 59, 59, 999);
                 query.paymentDate.$lte = end;
             }
+        } else {
+            // Default to start of current month to end of today
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            query.paymentDate = {
+                $gte: startOfMonth,
+                $lte: endOfToday
+            };
         }
 
         if (search) {
@@ -250,69 +259,22 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
         }
 
-        const total = await PaymentReceived.countDocuments(query);
-        const docs = await PaymentReceived.find(query)
-            .populate('customerId', 'name customerId')
-            .populate('driverId', 'personalInfo driverId')
-            .populate('depositedTo', 'name code')
-            .sort(sort)
-            .skip(skip)
-            .limit(parseInt(limit));
-
-        // Calculate unpaginated metrics for dashboard
-        const allMatchingPayments = await PaymentReceived.find(query);
-        const totalReceived = allMatchingPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
-
-        let totalSurplus = 0;
-        for (const p of allMatchingPayments) {
-            const amountAppliedTotal = p.invoices?.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0) || 0;
-            const unappliedAmount = Math.max(0, p.amountReceived - amountAppliedTotal);
-            totalSurplus += unappliedAmount;
-        }
-
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
-        // MTD query
-        const mtdQuery = { ...query };
-        mtdQuery.paymentDate = { $gte: startOfMonth, $lte: endOfMonth };
-        const mtdPayments = await PaymentReceived.find(mtdQuery);
-        const mtdTotal = mtdPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
-
-        // Group by month name for the past 6 months to show trends
-        const monthlyTrends = [];
-        for (let i = 5; i >= 0; i--) {
-            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
-            const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
-            const monthQuery = { ...query };
-            monthQuery.paymentDate = { $gte: monthStart, $lte: monthEnd };
-            const monthPayments = await PaymentReceived.find(monthQuery);
-            const monthSum = monthPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
-            monthlyTrends.push({
-                month: d.toLocaleString('en-US', { month: 'short' }),
-                year: d.getFullYear(),
-                total: monthSum
-            });
-        }
-
-        const methodBreakdown = {};
-        for (const p of allMatchingPayments) {
-            const method = p.paymentMethod || 'Other';
-            methodBreakdown[method] = (methodBreakdown[method] || 0) + (p.amountReceived || 0);
-        }
+        // Run pagination queries in parallel (dashboard metrics query and calculation completely removed to speed up)
+        const [total, docs] = await Promise.all([
+            PaymentReceived.countDocuments(query),
+            PaymentReceived.find(query)
+                .populate('customerId', 'name customerId')
+                .populate('driverId', 'personalInfo driverId')
+                .populate('depositedTo', 'name code')
+                .sort(sort)
+                .skip(skip)
+                .limit(parseInt(limit))
+        ]);
 
         res.status(200).json({
             success: true,
             data: docs,
-            metrics: {
-                totalReceived,
-                totalSurplus,
-                mtdTotal,
-                methodBreakdown,
-                monthlyTrends
-            },
+            metrics: null,
             pagination: {
                 total,
                 page: parseInt(page),
