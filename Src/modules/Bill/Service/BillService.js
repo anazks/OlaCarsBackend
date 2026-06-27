@@ -129,7 +129,7 @@ async function postBillToLedger(bill, userData) {
 }
 
 exports.getAllBills = async (query = {}) => {
-    const page = parseInt(query.page, 10);
+    const page = parseInt(query.page, 10) || 1;
     const limit = parseInt(query.limit, 10);
 
     const mongooseQuery = {};
@@ -235,7 +235,7 @@ exports.getAllBills = async (query = {}) => {
         isFilteredPeriod: hasDateFilter
     };
 
-    if (page && limit) {
+    if (limit) {
         const result = await BillRepo.getAllBillsPaginated(mongooseQuery, page, limit);
         return {
             data: result.data,
