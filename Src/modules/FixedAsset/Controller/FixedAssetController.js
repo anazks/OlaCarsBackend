@@ -2,8 +2,20 @@ const FixedAssetService = require("../Service/FixedAssetService");
 
 exports.getFixedAssets = async (req, res, next) => {
     try {
-        const assets = await FixedAssetService.getFixedAssets(req.query);
-        return res.status(200).json({ success: true, data: assets });
+        const result = await FixedAssetService.getFixedAssets(req.query);
+        if (result && result.docs) {
+            return res.status(200).json({
+                success: true,
+                data: result.docs,
+                pagination: {
+                    total: result.total,
+                    page: result.page,
+                    limit: result.limit,
+                    pages: result.pages
+                }
+            });
+        }
+        return res.status(200).json({ success: true, data: result });
     } catch (err) {
         next(err);
     }
@@ -74,6 +86,30 @@ exports.postDepreciation = async (req, res, next) => {
         }
         const updatedAsset = await FixedAssetService.postDepreciationPeriod(req.params.id, periodIndex, userData);
         return res.status(200).json({ success: true, data: updatedAsset });
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.bulkUploadFixedAssets = async (req, res, next) => {
+    try {
+        const { assets } = req.body;
+        if (!Array.isArray(assets) || assets.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'assets' array." });
+        }
+
+        const userData = {
+            id: req.user.id || req.user._id,
+            role: req.user.role || req.user.creatorRole
+        };
+
+        const result = await FixedAssetService.bulkImportFixedAssets(assets, userData);
+        
+        return res.status(200).json({
+            success: true,
+            message: `Import complete: ${result.created.length} assets created, ${result.duplicates.length} duplicates skipped, ${result.errors.length} errors.`,
+            data: result
+        });
     } catch (err) {
         next(err);
     }

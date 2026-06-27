@@ -185,8 +185,8 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId, customerId } = req.query;
-        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId, customerId });
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId, customerId, startDate, endDate } = req.query;
+        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId, customerId, startDate, endDate });
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const query = {};
@@ -200,6 +200,18 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         if (customerId) {
             query.customerId = customerId;
+        }
+
+        if (startDate || endDate) {
+            query.paymentDate = {};
+            if (startDate) {
+                query.paymentDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.paymentDate.$lte = end;
+            }
         }
 
         if (search) {
@@ -247,9 +259,60 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             .skip(skip)
             .limit(parseInt(limit));
 
+        // Calculate unpaginated metrics for dashboard
+        const allMatchingPayments = await PaymentReceived.find(query);
+        const totalReceived = allMatchingPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
+
+        let totalSurplus = 0;
+        for (const p of allMatchingPayments) {
+            const amountAppliedTotal = p.invoices?.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0) || 0;
+            const unappliedAmount = Math.max(0, p.amountReceived - amountAppliedTotal);
+            totalSurplus += unappliedAmount;
+        }
+
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+        // MTD query
+        const mtdQuery = { ...query };
+        mtdQuery.paymentDate = { $gte: startOfMonth, $lte: endOfMonth };
+        const mtdPayments = await PaymentReceived.find(mtdQuery);
+        const mtdTotal = mtdPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
+
+        // Group by month name for the past 6 months to show trends
+        const monthlyTrends = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+            const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+            const monthQuery = { ...query };
+            monthQuery.paymentDate = { $gte: monthStart, $lte: monthEnd };
+            const monthPayments = await PaymentReceived.find(monthQuery);
+            const monthSum = monthPayments.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
+            monthlyTrends.push({
+                month: d.toLocaleString('en-US', { month: 'short' }),
+                year: d.getFullYear(),
+                total: monthSum
+            });
+        }
+
+        const methodBreakdown = {};
+        for (const p of allMatchingPayments) {
+            const method = p.paymentMethod || 'Other';
+            methodBreakdown[method] = (methodBreakdown[method] || 0) + (p.amountReceived || 0);
+        }
+
         res.status(200).json({
             success: true,
             data: docs,
+            metrics: {
+                totalReceived,
+                totalSurplus,
+                mtdTotal,
+                methodBreakdown,
+                monthlyTrends
+            },
             pagination: {
                 total,
                 page: parseInt(page),
