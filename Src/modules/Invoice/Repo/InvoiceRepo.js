@@ -70,98 +70,26 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         query.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
     }
 
-    const totalCount = await Invoice.countDocuments(query);
-    const totalPages = Math.ceil(totalCount / limit);
-
-    // Calculate metrics (matching filters but without skip/limit pagination)
-    const metricsQuery = { ...baseQuery };
-    if (queryParams.driver && mongoose.Types.ObjectId.isValid(queryParams.driver)) {
-        metricsQuery.driver = new mongoose.Types.ObjectId(queryParams.driver);
+    // Prepare metricsQuery from query (cast string IDs to ObjectIds for MongoDB aggregation compatibility)
+    const metricsQuery = { ...query };
+    if (metricsQuery.driver && typeof metricsQuery.driver === 'string' && mongoose.Types.ObjectId.isValid(metricsQuery.driver)) {
+        metricsQuery.driver = new mongoose.Types.ObjectId(metricsQuery.driver);
     }
-    if (queryParams.customer && mongoose.Types.ObjectId.isValid(queryParams.customer)) {
-        metricsQuery.customer = new mongoose.Types.ObjectId(queryParams.customer);
+    if (metricsQuery.customer && typeof metricsQuery.customer === 'string' && mongoose.Types.ObjectId.isValid(metricsQuery.customer)) {
+        metricsQuery.customer = new mongoose.Types.ObjectId(metricsQuery.customer);
     }
-    if (queryParams.vehicle && mongoose.Types.ObjectId.isValid(queryParams.vehicle)) {
-        metricsQuery.vehicle = new mongoose.Types.ObjectId(queryParams.vehicle);
-    }
-    if (queryParams.status && queryParams.status !== 'ALL') metricsQuery.status = queryParams.status;
-    if (queryParams.weekNumber) metricsQuery.weekNumber = queryParams.weekNumber;
-    if (queryParams.invoiceType) {
-        if (queryParams.invoiceType === 'RENTAL') {
-            metricsQuery.invoiceType = { $in: ['RENTAL', null, undefined] };
-        } else {
-            metricsQuery.invoiceType = queryParams.invoiceType;
-        }
-    }
-    if (queryParams.search) {
-        metricsQuery.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
+    if (metricsQuery.vehicle && typeof metricsQuery.vehicle === 'string' && mongoose.Types.ObjectId.isValid(metricsQuery.vehicle)) {
+        metricsQuery.vehicle = new mongoose.Types.ObjectId(metricsQuery.vehicle);
     }
 
-    if (hasDateFilter) {
-        if (queryParams.startDate || queryParams.endDate) {
-            metricsQuery.dueDate = {};
-            if (queryParams.startDate) metricsQuery.dueDate.$gte = new Date(queryParams.startDate);
-            if (queryParams.endDate) {
-                const end = new Date(queryParams.endDate);
-                end.setHours(23, 59, 59, 999);
-                metricsQuery.dueDate.$lte = end;
-            }
-        }
-        if (queryParams.month || queryParams.year) {
-            const now = new Date();
-            const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
-            if (queryParams.month) {
-                const m = parseInt(queryParams.month) - 1;
-                metricsQuery.generatedAt = {
-                    $gte: new Date(y, m, 1, 0, 0, 0, 0),
-                    $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
-                };
-            } else {
-                metricsQuery.generatedAt = {
-                    $gte: new Date(y, 0, 1, 0, 0, 0, 0),
-                    $lte: new Date(y, 11, 31, 23, 59, 59, 999)
-                };
-            }
-        }
-    } else {
-        // Default to last 30 days of generatedAt
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        thirtyDaysAgo.setHours(0, 0, 0, 0);
-        metricsQuery.generatedAt = { $gte: thirtyDaysAgo };
+    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted
+    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle) {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        query.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
+        metricsQuery.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
     }
-
-    console.log('[InvoiceRepo] metricsQuery:', JSON.stringify(metricsQuery));
-    const allCount = await Invoice.countDocuments({ isDeleted: false });
-    const matchCount = await Invoice.countDocuments(metricsQuery);
-    console.log(`[InvoiceRepo] Total active invoices in DB: ${allCount}, Matched for stats: ${matchCount}`);
-
-    const sampleInvoices = await Invoice.find({ isDeleted: false }).limit(3).select('invoiceNumber generatedAt dueDate').lean();
-    console.log('[InvoiceRepo] Sample invoices in DB:', sampleInvoices);
-
-    const stats = await Invoice.aggregate([
-        { $match: metricsQuery },
-        {
-            $group: {
-                _id: null,
-                totalGrossBilled: { $sum: "$totalAmountDue" },
-                totalNetSettled: { $sum: "$amountPaid" },
-                totalCurrentBalance: { $sum: "$balance" }
-            }
-        }
-    ]);
-
-    const metrics = (stats && stats.length > 0) ? {
-        totalGrossBilled: stats[0].totalGrossBilled || 0,
-        totalNetSettled: stats[0].totalNetSettled || 0,
-        totalCurrentBalance: stats[0].totalCurrentBalance || 0,
-        isFilteredPeriod: hasDateFilter
-    } : {
-        totalGrossBilled: 0,
-        totalNetSettled: 0,
-        totalCurrentBalance: 0,
-        isFilteredPeriod: hasDateFilter
-    };
 
     // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to workshop/weekNumber sorting
     let sortOpt = options.defaultSort;
@@ -178,28 +106,57 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     require("../../Vehicle/Model/VehicleModel");
     require("../../Customer/Model/CustomerModel");
 
-    const data = await Invoice.find(query)
-        .populate({
-            path: "customer",
-            select: "name customerId email phone branch status",
-            populate: { path: "branch", select: "name city country" }
-        })
-        .populate({
-            path: "driver",
-            select: "personalInfo.fullName personalInfo.email personalInfo.phone driverId branch",
-            model: "Driver",
-            populate: { path: "branch", select: "name country" }
-        })
-        .populate({
-            path: "vehicle",
-            select: "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber",
-            model: "Vehicle"
-        })
-        .populate("serviceBill", "billNumber")
-        .sort(sortOpt)
-        .skip(skip)
-        .limit(limit)
-        .lean();
+    // Run pagination query, counts, and metrics aggregation in parallel
+    const [totalCount, stats, data] = await Promise.all([
+        Invoice.countDocuments(query),
+        Invoice.aggregate([
+            { $match: metricsQuery },
+            {
+                $group: {
+                    _id: null,
+                    totalGrossBilled: { $sum: "$totalAmountDue" },
+                    totalNetSettled: { $sum: "$amountPaid" },
+                    totalCurrentBalance: { $sum: "$balance" }
+                }
+            }
+        ]),
+        Invoice.find(query)
+            .populate({
+                path: "customer",
+                select: "name customerId email phone branch status",
+                populate: { path: "branch", select: "name city country" }
+            })
+            .populate({
+                path: "driver",
+                select: "personalInfo.fullName personalInfo.email personalInfo.phone driverId branch",
+                model: "Driver",
+                populate: { path: "branch", select: "name country" }
+            })
+            .populate({
+                path: "vehicle",
+                select: "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber",
+                model: "Vehicle"
+            })
+            .populate("serviceBill", "billNumber")
+            .sort(sortOpt)
+            .skip(skip)
+            .limit(limit)
+            .lean()
+    ]);
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    const metrics = (stats && stats.length > 0) ? {
+        totalGrossBilled: stats[0].totalGrossBilled || 0,
+        totalNetSettled: stats[0].totalNetSettled || 0,
+        totalCurrentBalance: stats[0].totalCurrentBalance || 0,
+        isFilteredPeriod: hasDateFilter
+    } : {
+        totalGrossBilled: 0,
+        totalNetSettled: 0,
+        totalCurrentBalance: 0,
+        isFilteredPeriod: hasDateFilter
+    };
 
     return {
         data,
@@ -230,6 +187,11 @@ exports.getInvoiceByIdService = async (id) => {
             path: "driver",
             select: "driverId personalInfo.fullName personalInfo.email personalInfo.phone branch",
             populate: { path: "branch", select: "name country" }
+        })
+        .populate({
+            path: "customer",
+            select: "name customerId email phone branch status",
+            populate: { path: "branch", select: "name city country" }
         })
         .populate("vehicle", "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber")
         .lean();

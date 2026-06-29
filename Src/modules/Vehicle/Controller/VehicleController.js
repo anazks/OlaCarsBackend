@@ -824,6 +824,12 @@ const bulkAddVehicles = async (req, res) => {
 
         const results = { created: [], errors: [], skipped: [] };
 
+        const isNARegistration = (regNum) => {
+            if (!regNum) return true;
+            const clean = regNum.toString().trim().toUpperCase();
+            return clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED' || clean === 'NA.';
+        };
+
         for (let i = 0; i < vehicles.length; i++) {
             const row = vehicles[i];
             const rowNum = i + 1;
@@ -863,56 +869,106 @@ const bulkAddVehicles = async (req, res) => {
                 }
 
                 const mappedStatus = mapExcelStatus(row.status);
-                // Prepare vehicle structure
-                const vehicleData = {
-                    status: mappedStatus,
-                    createdBy: userId,
-                    creatorRole: userRole,
-                    purchaseDetails: {
-                        branch: branch,
-                        vendorName: row.vendorName ? row.vendorName.trim() : undefined,
-                        purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
-                        purchasePrice: (row.purchasePrice && !isNaN(row.purchasePrice)) ? Number(row.purchasePrice) : undefined,
-                        paymentMethod: row.paymentMethod || undefined,
-                    },
-                    basicDetails: {
-                        make: row.make.trim(),
-                        model: row.model.trim(),
-                        year: Number(row.year),
-                        category: row.category ? row.category.trim() : undefined,
-                        fuelType: row.fuelType ? row.fuelType.trim() : undefined,
-                        transmission: row.transmission || undefined,
-                        colour: row.colour ? row.colour.trim() : undefined,
-                        vin: (() => {
-                            if (!row.vin) return undefined;
-                            const clean = row.vin.toString().trim().toUpperCase();
-                            if (!clean || clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED') {
-                                return undefined;
-                            }
-                            return clean;
-                        })(),
-                        odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
-                        gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
-                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
-                        sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
-                        leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
-                        fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
-                    },
-                    legalDocs: {
-                        registrationNumber: regNumClean,
-                        registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
-                    },
-                    statusHistory: [{
-                        status: mappedStatus,
-                        changedBy: userId,
-                        changedByRole: userRole,
-                        timestamp: new Date(),
-                        notes: "Vehicle created via bulk upload.",
-                    }]
-                };
+                const cleanVin = (() => {
+                    if (!row.vin) return undefined;
+                    const clean = row.vin.toString().trim().toUpperCase();
+                    if (!clean || clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED') {
+                        return undefined;
+                    }
+                    return clean;
+                })();
 
-                const newVehicle = await addVehicleService(vehicleData);
-                results.created.push({ row: rowNum, id: newVehicle._id, vin: newVehicle.basicDetails.vin, make: newVehicle.basicDetails.make, model: newVehicle.basicDetails.model });
+                // Check if vehicle with VIN already exists
+                let existingVehicleByVin = null;
+                if (cleanVin) {
+                    existingVehicleByVin = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
+                }
+
+                if (existingVehicleByVin) {
+                    const currentReg = existingVehicleByVin.legalDocs?.registrationNumber;
+                    if (isNARegistration(currentReg)) {
+                        // Update existing vehicle
+                        const updateData = {
+                            status: mappedStatus,
+                            'basicDetails.make': row.make.trim(),
+                            'basicDetails.model': row.model.trim(),
+                            'basicDetails.year': Number(row.year),
+                            'basicDetails.weeklyRent': (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                            'basicDetails.fleetNumber': row.fleetNumber ? row.fleetNumber.trim() : undefined,
+                            'legalDocs.registrationNumber': row.registrationNumber.trim(),
+                            $push: {
+                                statusHistory: {
+                                    status: mappedStatus,
+                                    changedBy: userId,
+                                    changedByRole: userRole,
+                                    timestamp: new Date(),
+                                    notes: "Vehicle updated via bulk upload (found existing VIN with NA registration).",
+                                }
+                            }
+                        };
+                        const updatedVehicle = await updateVehicleService(existingVehicleByVin._id, updateData);
+                        results.created.push({
+                            row: rowNum,
+                            id: updatedVehicle._id,
+                            vin: updatedVehicle.basicDetails?.vin,
+                            make: updatedVehicle.basicDetails?.make,
+                            model: updatedVehicle.basicDetails?.model,
+                            updated: true
+                        });
+                    } else {
+                        throw new Error("A vehicle with this VIN already exists.", { cause: 409 });
+                    }
+                } else {
+                    // Prepare new vehicle structure
+                    const vehicleData = {
+                        status: mappedStatus,
+                        createdBy: userId,
+                        creatorRole: userRole,
+                        purchaseDetails: {
+                            branch: branch,
+                            vendorName: row.vendorName ? row.vendorName.trim() : undefined,
+                            purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
+                            purchasePrice: (row.purchasePrice && !isNaN(row.purchasePrice)) ? Number(row.purchasePrice) : undefined,
+                            paymentMethod: row.paymentMethod || undefined,
+                        },
+                        basicDetails: {
+                            make: row.make.trim(),
+                            model: row.model.trim(),
+                            year: Number(row.year),
+                            category: row.category ? row.category.trim() : undefined,
+                            fuelType: row.fuelType ? row.fuelType.trim() : undefined,
+                            transmission: row.transmission || undefined,
+                            colour: row.colour ? row.colour.trim() : undefined,
+                            vin: cleanVin,
+                            odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                            gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                            weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                            sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                            leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
+                            fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
+                        },
+                        legalDocs: {
+                            registrationNumber: regNumClean,
+                            registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
+                        },
+                        statusHistory: [{
+                            status: mappedStatus,
+                            changedBy: userId,
+                            changedByRole: userRole,
+                            timestamp: new Date(),
+                            notes: "Vehicle created via bulk upload.",
+                        }]
+                    };
+
+                    const newVehicle = await addVehicleService(vehicleData);
+                    results.created.push({
+                        row: rowNum,
+                        id: newVehicle._id,
+                        vin: newVehicle.basicDetails?.vin,
+                        make: newVehicle.basicDetails?.make,
+                        model: newVehicle.basicDetails?.model
+                    });
+                }
             } catch (err) {
                 results.errors.push({ row: rowNum, message: err.message });
             }

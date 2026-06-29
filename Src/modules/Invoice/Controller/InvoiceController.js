@@ -182,6 +182,7 @@ exports.downloadInvoicePdf = async (req, res) => {
         const { Invoice } = require("../Model/InvoiceModel");
         const invoice = await Invoice.findById(req.params.id)
             .populate("driver", "personalInfo driverId")
+            .populate("customer", "name email phone customerId")
             .populate("vehicle", "plateNumber make model basicDetails legalDocs");
 
         if (!invoice || invoice.isDeleted) {
