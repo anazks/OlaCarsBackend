@@ -127,6 +127,123 @@ const ensureSummariesForRange = async (startMoment, endMoment, branchIds) => {
   }
 };
 
+exports.getKpiStats = async (filters) => {
+  const { country, branch, startDate, endDate } = filters;
+  const branchIds = await getBranchIds(country, branch);
+
+  const start = startDate ? moment(startDate).startOf("day") : moment().subtract(30, "days").startOf("day");
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+
+  const paymentQuery = {
+    status: "COMPLETED",
+    paymentDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  if (branchIds) {
+    paymentQuery.branch = { $in: branchIds };
+  }
+
+  const invoiceMatch = {
+    isDeleted: false,
+    dueDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  
+  const pipeline = [
+    { $match: invoiceMatch }
+  ];
+
+  if (branchIds) {
+    pipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  pipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  let lastMonthEndDate;
+  if (endDate) {
+    lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
+  } else {
+    lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
+  }
+
+  const lastMonthInvoiceMatch = {
+    isDeleted: false,
+    dueDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
+  };
+
+  const lastMonthPipeline = [
+    { $match: lastMonthInvoiceMatch }
+  ];
+
+  if (branchIds) {
+    lastMonthPipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  lastMonthPipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  const [paymentsList, invoiceAggr, lastMonthInvoiceAggr] = await Promise.all([
+    PaymentReceived.find(paymentQuery).lean(),
+    Invoice.aggregate(pipeline),
+    Invoice.aggregate(lastMonthPipeline)
+  ]);
+
+  const monthlyRevenue = paymentsList.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
+  const totalPayables = invoiceAggr.length > 0 ? invoiceAggr[0].totalBalance : 0;
+  const lastMonthBalanceDue = lastMonthInvoiceAggr.length > 0 ? lastMonthInvoiceAggr[0].totalBalance : 0;
+
+  return {
+    stats: {
+      monthlyRevenue,
+      totalPayables,
+      lastMonthBalanceDue
+    }
+  };
+};
+
 exports.getSummaryStats = async (filters) => {
   const { country, branch, startDate, endDate } = filters;
   const branchIds = await getBranchIds(country, branch);
@@ -157,22 +274,12 @@ exports.getSummaryStats = async (filters) => {
     cachedQuery.branch = { $in: branchIds };
   }
 
-  // Define Bill queries (Payables)
-  const billMatch = { status: { $nin: ["PAID", "VOID"] } };
-  if (branchIds) billMatch.branch = { $in: branchIds }; // Fixed branchId -> branch
-
   let lastMonthEndDate;
   if (endDate) {
     lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
   } else {
     lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
   }
-
-  const lastMonthBillMatch = {
-    status: { $nin: ["PAID", "VOID"] },
-    billDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
-  };
-  if (branchIds) lastMonthBillMatch.branch = { $in: branchIds }; // Fixed branchId -> branch
 
   // Define rolling 12 months query
   const twelveMonthsAgo = moment().subtract(12, "months").startOf("day");
@@ -209,17 +316,9 @@ exports.getSummaryStats = async (filters) => {
   };
 
   // Run all database calls and computations in parallel
-  const [cachedDocs, todayDocs, payablesAggr, lastMonthPayablesAggr, l12Aggr] = await Promise.all([
+  const [cachedDocs, todayDocs, l12Aggr] = await Promise.all([
     DashboardSummary.find(cachedQuery).lean(),
     getTodayDocsPromise(),
-    Bill.aggregate([
-      { $match: billMatch },
-      { $group: { _id: null, total: { $sum: "$balanceDue" } } }
-    ]),
-    Bill.aggregate([
-      { $match: lastMonthBillMatch },
-      { $group: { _id: null, total: { $sum: "$balanceDue" } } }
-    ]),
     DashboardSummary.aggregate(l12Query)
   ]);
 
@@ -334,12 +433,7 @@ exports.getSummaryStats = async (filters) => {
   const invoiceAggr = await Invoice.aggregate(pipeline);
   let totalPayables = invoiceAggr.length > 0 ? invoiceAggr[0].totalBalance : 0;
 
-  let lastMonthEndDate;
-  if (endDate) {
-    lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
-  } else {
-    lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
-  }
+
 
   const lastMonthInvoiceMatch = {
     isDeleted: false,

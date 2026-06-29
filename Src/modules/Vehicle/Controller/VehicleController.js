@@ -21,19 +21,19 @@ const addVehicle = async (req, res, next) => {
         vehicleData.createdBy = req.user.id;
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
-        
+
         // Handle Handling Staff and Fleet Number logic
         if (vehicleData.handlingStaff) {
             console.log('[DEBUG] addVehicle - Fetching staff with ID:', vehicleData.handlingStaff);
             const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
             const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
-            
+
             const staff = await FinanceStaff.findById(vehicleData.handlingStaff);
             console.log('[DEBUG] addVehicle - Staff lookup result:', staff ? `Found ${staff.fullName}` : 'NOT FOUND');
             if (staff) {
                 let fleetToAssign = vehicleData.basicDetails?.fleetNumber;
                 console.log('[DEBUG] addVehicle - Incoming fleetNumber:', fleetToAssign);
-                
+
                 if (!fleetToAssign) {
                     fleetToAssign = (staff.fleetNumbers && staff.fleetNumbers.length > 0) ? staff.fleetNumbers[0] : await generateNextFleetNumber();
                     console.log('[DEBUG] addVehicle - Using generated/default fleet:', fleetToAssign);
@@ -48,8 +48,8 @@ const addVehicle = async (req, res, next) => {
                     isDeleted: false
                 });
                 if (otherStaff) {
-                    return res.status(409).json({ 
-                        success: false, 
+                    return res.status(409).json({
+                        success: false,
                         message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
                         errorType: 'DUPLICATE_FLEET'
                     });
@@ -61,7 +61,7 @@ const addVehicle = async (req, res, next) => {
                     await staff.save();
                     console.log('[DEBUG] addVehicle - Staff updated successfully');
                 }
-                
+
                 if (!vehicleData.basicDetails) vehicleData.basicDetails = {};
                 vehicleData.basicDetails.fleetNumber = fleetToAssign;
                 console.log('[DEBUG] addVehicle - Set basicDetails.fleetNumber to:', vehicleData.basicDetails.fleetNumber);
@@ -121,7 +121,7 @@ const addVehicle = async (req, res, next) => {
 const getVehicles = async (req, res, next) => {
     try {
         const queryParams = { ...req.query };
-        
+
         // Map universal 'branch' filter to the specific field in Vehicle schema
         if (queryParams.branch) {
             queryParams['purchaseDetails.branch'] = queryParams.branch;
@@ -132,9 +132,9 @@ const getVehicles = async (req, res, next) => {
             baseQuery: { isDeleted: false },
             defaultSort: { createdAt: -1 }
         });
-        
-        return res.status(200).json({ 
-            success: true, 
+
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
@@ -294,9 +294,9 @@ const getAvailableCars = async (req, res, next) => {
         ];
 
         // Filter by status and branch
-        const baseQuery = { 
+        const baseQuery = {
             status: "ACTIVE — AVAILABLE",
-            isDeleted: false 
+            isDeleted: false
         };
 
         if (branchRoles.includes(req.user.role) && req.user.branchId) {
@@ -309,15 +309,15 @@ const getAvailableCars = async (req, res, next) => {
             baseQuery,
             defaultSort: { createdAt: -1 }
         });
-        
+
         console.log('[DEBUG] getAvailableCars - Found vehicles:', result.data?.length || 0);
         if (result.data && result.data.length > 0) {
             console.log('[DEBUG] getAvailableCars - First Vehicle Status:', result.data[0].status);
             console.log('[DEBUG] getAvailableCars - First Vehicle Branch:', result.data[0].purchaseDetails?.branch?._id || result.data[0].purchaseDetails?.branch);
         }
-        
-        return res.status(200).json({ 
-            success: true, 
+
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
@@ -344,17 +344,17 @@ const assignCarToDriver = async (req, res, next) => {
         session = await mongoose.startSession();
         session.startTransaction();
         console.log('[DEBUG] Starting Vehicle Assignment Transaction...');
-        
+
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
-        const { 
-            durationMonths, 
-            monthlyRent, 
+        const {
+            durationMonths,
+            monthlyRent,
             depositAmount = 0,
-            notes, 
-            agreementVersion, 
-            generatedS3Key, 
-            signedS3Key 
+            notes,
+            agreementVersion,
+            generatedS3Key,
+            signedS3Key
         } = req.body;
 
         if (durationMonths === undefined || monthlyRent === undefined) {
@@ -399,10 +399,10 @@ const assignCarToDriver = async (req, res, next) => {
         }, req.user.id, req.user.role, session);
 
         // 5. Update Vehicle status
-        await updateVehicleService(vehicleId, { 
+        await updateVehicleService(vehicleId, {
             status: "ACTIVE — RENTED",
             currentDriver: driverId,
-            $push: { 
+            $push: {
                 statusHistory: {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
@@ -413,7 +413,7 @@ const assignCarToDriver = async (req, res, next) => {
         }, session);
 
         // 6. Update Driver — link vehicle + add deposit if applicable
-        const driverUpdate = { 
+        const driverUpdate = {
             currentVehicle: vehicleId,
             $push: {
                 statusHistory: {
@@ -497,9 +497,9 @@ const assignCarToDriver = async (req, res, next) => {
         await session.commitTransaction();
         session.endSession();
 
-        return res.status(200).json({ 
-            success: true, 
-            message: "Vehicle successfully assigned to driver and lease record created." 
+        return res.status(200).json({
+            success: true,
+            message: "Vehicle successfully assigned to driver and lease record created."
         });
     } catch (error) {
         console.error('[ERROR] assignCarToDriver Exception:', error);
@@ -508,10 +508,10 @@ const assignCarToDriver = async (req, res, next) => {
             session.endSession();
         }
         const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ 
-            success: false, 
+        return res.status(statusCode).json({
+            success: false,
             message: error.message,
-            stack: error.stack 
+            stack: error.stack
         });
     }
 };
@@ -527,7 +527,7 @@ const updateVehicleLeaseSettings = async (req, res, next) => {
         console.log('[DEBUG] updateVehicleLeaseSettings - Body:', JSON.stringify(req.body, null, 2));
         const vehicleId = req.params.id;
         const { durationWeeks, weeklyRent, sellingValue } = req.body;
-        
+
         if (typeof durationWeeks !== 'number') {
             return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks field." });
         }
@@ -567,7 +567,7 @@ const updateMaintenanceSettings = async (req, res, next) => {
     try {
         const vehicleId = req.params.id;
         const { maintenanceThresholdKm } = req.body;
-        
+
         if (typeof maintenanceThresholdKm !== 'number') {
             return res.status(400).json({ success: false, message: "Invalid or missing maintenanceThresholdKm field." });
         }
@@ -752,7 +752,7 @@ const mapExcelStatus = (excelStatus) => {
     if (matchedValidStatus) {
         return matchedValidStatus;
     }
-    
+
     if (statusStr === "ACTIVE VEHICLES") {
         return "ACTIVE — RENTED";
     }
@@ -822,7 +822,7 @@ const bulkAddVehicles = async (req, res) => {
             }
         }
 
-        const results = { created: [], errors: [] };
+        const results = { created: [], errors: [], skipped: [] };
 
         for (let i = 0; i < vehicles.length; i++) {
             const row = vehicles[i];
@@ -847,6 +847,21 @@ const bulkAddVehicles = async (req, res) => {
             }
 
             try {
+                const regNumClean = row.registrationNumber.trim();
+                const { Vehicle } = require("../Model/VehicleModel");
+                const existingVehicle = await Vehicle.findOne({
+                    "legalDocs.registrationNumber": { $regex: new RegExp(`^${regNumClean.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i') },
+                    isDeleted: false
+                });
+                if (existingVehicle) {
+                    results.skipped.push({
+                        row: rowNum,
+                        registrationNumber: regNumClean,
+                        message: `Vehicle with registration number '${regNumClean}' already exists (skipped).`
+                    });
+                    continue;
+                }
+
                 const mappedStatus = mapExcelStatus(row.status);
                 // Prepare vehicle structure
                 const vehicleData = {
@@ -884,7 +899,7 @@ const bulkAddVehicles = async (req, res) => {
                         fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
                     },
                     legalDocs: {
-                        registrationNumber: row.registrationNumber.trim(),
+                        registrationNumber: regNumClean,
                         registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
                     },
                     statusHistory: [{
@@ -903,10 +918,11 @@ const bulkAddVehicles = async (req, res) => {
             }
         }
 
-        const statusCode = results.created.length > 0 ? 201 : 400;
+        const success = (results.created.length > 0 || results.skipped.length > 0);
+        const statusCode = success ? 201 : 400;
         return res.status(statusCode).json({
-            success: results.created.length > 0,
-            message: `${results.created.length} vehicle(s) created, ${results.errors.length} error(s).`,
+            success,
+            message: `${results.created.length} vehicle(s) created, ${results.skipped.length} skipped, ${results.errors.length} error(s).`,
             data: results,
         });
     } catch (error) {

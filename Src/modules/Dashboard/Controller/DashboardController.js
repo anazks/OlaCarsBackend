@@ -15,6 +15,15 @@ const attachRoleFilters = (user, query) => {
 exports.getFinancialDashboardSummary = async (req, res) => {
     try {
         const filters = attachRoleFilters(req.user, req.query);
+        const { onlyKpi } = req.query;
+
+        if (onlyKpi === "true") {
+            const kpiData = await DashboardService.getKpiStats(filters);
+            return res.status(200).json({
+                status: "success",
+                data: kpiData
+            });
+        }
         
         const [summary, revenueTrend, overduePayments, movement] = await Promise.all([
             DashboardService.getSummaryStats(filters),
