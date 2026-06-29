@@ -98,53 +98,38 @@ function calculateBalance(debit, credit, accountType) {
     }
 }
 
-// Clean date parser
+// Clean date parser — works with string dates to avoid JS Date timezone shifts
 function parseFlexibleDate(val) {
     if (!val) return null;
-    if (val instanceof Date) {
-        if (isNaN(val.getTime())) return null;
-        return new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate()));
-    }
-    if (typeof val === "number") {
-        const d = new Date(Math.round((val - 25569) * 86400 * 1000));
-        if (isNaN(d.getTime())) return null;
-        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    }
     const str = String(val).trim();
     if (!str) return null;
 
-    // YYYY-MM-DD
-    const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    // YYYY-MM-DD (from dateNF formatting or ISO strings)
+    const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
     if (ymdMatch) {
         const d = new Date(Date.UTC(parseInt(ymdMatch[1]), parseInt(ymdMatch[2]) - 1, parseInt(ymdMatch[3])));
         if (!isNaN(d.getTime())) return d;
     }
 
-    // DD/MM/YYYY or MM/DD/YYYY
-    const parts = str.split(/[-/]/);
-    if (parts.length === 3) {
+    // DD/MM/YYYY, MM/DD/YYYY, M/D/YY, DD/MM/YY etc.
+    const parts = str.split(/[-/.]/);
+    if (parts.length >= 3) {
         const p1 = parseInt(parts[0], 10);
         const p2 = parseInt(parts[1], 10);
-        const p3 = parseInt(parts[2], 10);
+        let p3 = parseInt(parts[2], 10);
 
-        if (p3 > 1000) {
-            if (p1 > 12) { // DD/MM/YYYY
-                const d = new Date(Date.UTC(p3, p2 - 1, p1));
-                if (!isNaN(d.getTime())) return d;
-            } else if (p2 > 12) { // MM/DD/YYYY
-                const d = new Date(Date.UTC(p3, p1 - 1, p2));
-                if (!isNaN(d.getTime())) return d;
-            } else {
-                const d = new Date(Date.UTC(p3, p2 - 1, p1));
-                if (!isNaN(d.getTime())) return d;
-            }
+        // Handle 2-digit year (e.g. 23 → 2023)
+        if (p3 < 100) p3 = 2000 + p3;
+
+        if (p3 >= 1900) {
+            // Assume M/D/YYYY — swap if month > 12
+            let month = p1, day = p2;
+            if (month > 12 && day <= 12) { month = p2; day = p1; }
+            const d = new Date(Date.UTC(p3, month - 1, day));
+            if (!isNaN(d.getTime())) return d;
         }
     }
 
-    const nativeParse = new Date(str);
-    if (!isNaN(nativeParse.getTime())) {
-        return new Date(Date.UTC(nativeParse.getFullYear(), nativeParse.getMonth(), nativeParse.getDate()));
-    }
     return null;
 }
 
@@ -213,10 +198,10 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
             });
 
             // 1. Read sheet
-            const workbook = XLSX.read(fileBuffer, { type: "buffer", cellDates: true });
+            const workbook = XLSX.read(fileBuffer, { type: "buffer" });
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
-            const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+            const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "", raw: false, dateNF: "yyyy-mm-dd" });
             const filteredRows = rawRows.filter(row =>
                 Object.values(row).some(val => val !== undefined && val !== null && String(val).trim() !== "")
             );
@@ -274,12 +259,12 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
 
             // Branches Cache
             const branchesList = await Branch.find({
-                name: { $in: Array.from(uniqueBranchNames) },
                 isDeleted: false
             }).lean();
             const branchMap = {};
             branchesList.forEach(b => {
                 branchMap[b.name.toLowerCase().trim()] = b;
+                if (b.code) branchMap[b.code.toLowerCase().trim()] = b;
                 branchMap[b._id.toString()] = b;
             });
 
@@ -340,6 +325,8 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 const branch = getRowValue(row, ["Branch", "branch", "location_name"]);
                 const voucher = getRowValue(row, ["Voucher", "voucher", "transaction_id"]);
                 const tax = getRowValue(row, ["Tax", "tax"]);
+                const transactionIdVal = getRowValue(row, ["Transaction ID", "transaction_id", "transactionId", "Voucher", "voucher"]);
+                const transactionIdStr = transactionIdVal ? String(transactionIdVal).trim() : "";
 
                 // Resolve Type and Amount (supporting both separate Debit/Credit columns or single Type/Amount columns)
                 let type = "DEBIT";
@@ -409,6 +396,9 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 if (!description) {
                     description = "Ledger Import";
                 }
+                if (transactionIdStr) {
+                    description = `${description} - Transaction ID: ${transactionIdStr}`;
+                }
 
                 // --- 6. Transaction Type ---
                 const transactionType = String(txnType || "").trim();
@@ -428,9 +418,17 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 // --- 8. Branch (Optional) ---
                 let resolvedBranch = null;
                 if (branch) {
-                    resolvedBranch = branchMap[String(branch).toLowerCase().trim()];
-                    if (!resolvedBranch && /^[a-fA-F0-9]{24}$/.test(String(branch))) {
-                        resolvedBranch = branchMap[String(branch)];
+                    const branchStr = String(branch).trim();
+                    const branchLower = branchStr.toLowerCase();
+                    if (branchLower === "head office") {
+                        resolvedBranch = branchesList.find(b => b.code === "PANAMA" || (b.name.toLowerCase() === "panama" && b.type === "BRANCH"));
+                    } else if (branchLower === "ola workshop") {
+                        resolvedBranch = branchesList.find(b => b.code === "JUC" || b.type === "WORKSHOP");
+                    } else {
+                        resolvedBranch = branchMap[branchLower];
+                        if (!resolvedBranch && /^[a-fA-F0-9]{24}$/.test(branchStr)) {
+                            resolvedBranch = branchMap[branchStr];
+                        }
                     }
                 }
 
@@ -462,13 +460,13 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 }
 
                 const unusedColsStr = getUnusedColumnsString(row);
-                
+
                 // Combine both unused columns and unresolved references
                 const allMetadata = [
                     ...(unusedColsStr ? [unusedColsStr.replace(/^\[|\]$/g, "")] : []),
                     ...unresolvedParts
                 ];
-                
+
                 const finalDescription = description + (allMetadata.length > 0 ? ` - [${allMetadata.join(" | ")}]` : "");
 
 
@@ -497,6 +495,7 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                     contact: resolvedContact ? resolvedContact._id : undefined,
                     branch: resolvedBranch ? resolvedBranch._id : undefined,
                     voucher: resolvedVoucher ? resolvedVoucher._id : undefined,
+                    transactionId: transactionIdStr || undefined,
                     taxInfo: tax ? { isTaxInclusive: false, taxAmount: 0 } : undefined, // basic placeholder
                     isDuplicate,
                 });
@@ -567,6 +566,7 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                             contact: row.contact,
                             branch: row.branch,
                             voucher: row.voucher,
+                            transactionId: row.transactionId,
                             taxInfo: row.taxInfo,
                             createdBy,
                             creatorRole,

@@ -5,26 +5,41 @@ const Branch = require("../../Branch/Model/BranchModel");
 const { Invoice } = require("../../Invoice/Model/InvoiceModel");
 
 /**
- * Parse a flexible date from Excel (can be a JS serial number, Date object, or string).
+ * Parse a flexible date from a string value (no JS Date timezone pitfalls).
+ * Returns a UTC midnight Date object.
  */
 function parseFlexibleDate(val) {
     if (!val) return null;
-    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
-    if (typeof val === "number") {
-        // Excel serial date
-        const d = new Date((val - 25569) * 86400 * 1000);
-        return isNaN(d.getTime()) ? null : d;
-    }
     const str = String(val).trim();
     if (!str) return null;
-    // Try DD/MM/YYYY or DD-MM-YYYY
-    const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-    if (dmyMatch) {
-        const d = new Date(parseInt(dmyMatch[3]), parseInt(dmyMatch[2]) - 1, parseInt(dmyMatch[1]));
+
+    // YYYY-MM-DD (from dateNF formatting or ISO strings)
+    const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (ymdMatch) {
+        const d = new Date(Date.UTC(parseInt(ymdMatch[1]), parseInt(ymdMatch[2]) - 1, parseInt(ymdMatch[3])));
         if (!isNaN(d.getTime())) return d;
     }
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
+
+    // DD/MM/YYYY, MM/DD/YYYY, M/D/YY, DD/MM/YY etc.
+    const parts = str.split(/[-/.]/);
+    if (parts.length >= 3) {
+        const p1 = parseInt(parts[0], 10);
+        const p2 = parseInt(parts[1], 10);
+        let p3 = parseInt(parts[2], 10);
+
+        // Handle 2-digit year (e.g. 23 → 2023)
+        if (p3 < 100) p3 = 2000 + p3;
+
+        if (p3 >= 1900) {
+            // Assume M/D/YYYY — swap if month > 12
+            let month = p1, day = p2;
+            if (month > 12 && day <= 12) { month = p2; day = p1; }
+            const d = new Date(Date.UTC(p3, month - 1, day));
+            if (!isNaN(d.getTime())) return d;
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -95,7 +110,7 @@ exports.importFromExcel = async (fileBuffer, { createdBy, creatorRole }) => {
     const workbook = XLSX.read(fileBuffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet);
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, dateNF: "yyyy-mm-dd" });
 
     if (!rawRows || rawRows.length === 0) {
         return { inserted: 0, skipped: 0, linked: 0, errors: [{ row: 0, reason: "No data rows found in the Excel file." }] };
@@ -130,6 +145,8 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
     const branchByName = {};
     for (const br of allBranches) {
         if (br.name) branchByName[br.name.toLowerCase().trim()] = br;
+        if (br.code) branchByName[br.code.toLowerCase().trim()] = br;
+        branchByName[br._id.toString()] = br;
     }
 
     // 3. Process each row
@@ -176,27 +193,40 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
             }
 
             // --- Resolve branch from location_name ---
-            const locationName = String(getVal(row, ["location_name", "Location Name"]) || "").trim();
+            const locationName = String(getVal(row, ["location_name", "Location Name", "branch", "Branch"]) || "").trim();
             let branch = null;
             if (locationName) {
-                branch = branchByName[locationName.toLowerCase()];
+                const locationLower = locationName.toLowerCase();
+                if (locationLower === "head office") {
+                    branch = allBranches.find(b => b.code === "PANAMA" || (b.name.toLowerCase() === "panama" && b.type === "BRANCH"));
+                } else if (locationLower === "ola workshop") {
+                    branch = allBranches.find(b => b.code === "JUC" || b.type === "WORKSHOP");
+                } else {
+                    branch = branchByName[locationLower];
+                    if (!branch && /^[a-fA-F0-9]{24}$/.test(locationName)) {
+                        branch = branchByName[locationName];
+                    }
+                }
             }
 
             // --- Resolve contact_id (store as string in description if can't resolve) ---
             const contactId = getVal(row, ["contact_id", "Contact ID"]);
 
             // --- Parse date ---
-            const dateVal = getVal(row, ["date", "Date"]);
+            const dateVal = getVal(row, ["date", "Date", "Entry Date", "entry_date", "entryDate"]);
             const entryDate = parseFlexibleDate(dateVal) || new Date();
 
             // --- Map direct fields ---
-            const transactionId = String(getVal(row, ["transaction_id", "Transaction ID"]) || "").trim() || undefined;
-            const transactionType = String(getVal(row, ["transaction_type", "Transaction Type"]) || "").trim() || undefined;
+            const transactionId = String(getVal(row, ["transaction_id", "Transaction ID", "transactionId", "Voucher", "voucher"]) || "").trim() || undefined;
+            const transactionType = String(getVal(row, ["transaction_type", "Transaction Type", "transactionType"]) || "").trim() || undefined;
 
             // --- Build description with metadata ---
             let description = buildDescription(row);
             if (isNill) {
                 description = (description && description !== "Imported ledger entry") ? `${description} [Value: Nill]` : "value nill";
+            }
+            if (transactionId) {
+                description = `${description} - Transaction ID: ${transactionId}`;
             }
 
             const entry = {

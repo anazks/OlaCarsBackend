@@ -22,10 +22,38 @@ const getBranchIds = async (country, branchId) => {
 
 // In-memory queue to lock dates currently undergoing precomputation
 const precomputeQueue = new Set();
+const backgroundQueue = [];
+let isProcessingQueue = false;
+
+const processBackgroundQueue = async () => {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+
+  while (backgroundQueue.length > 0) {
+    const task = backgroundQueue.shift();
+    try {
+      const { computeMetricsForBranchAndDate } = require("./DashboardPrecomputeService");
+      const metricsDoc = await computeMetricsForBranchAndDate(task.date.toDate(), task.branchId, task.country);
+      await DashboardSummary.findOneAndUpdate(
+        { date: metricsDoc.date, branch: task.branchId },
+        metricsDoc,
+        { upsert: true, new: true }
+      );
+    } catch (err) {
+      console.error(`[DashboardService Cache Self-Heal] Failed background precomputation for ${task.date.format("YYYY-MM-DD")} branch ${task.branchId}:`, err);
+    } finally {
+      precomputeQueue.delete(task.lockKey);
+    }
+    // Yield to the event loop and database connection pool
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  isProcessingQueue = false;
+};
 
 /**
  * Self-healing cache checker: verifies that summaries exist for all target branchIds and dates in the range.
- * If any are missing, they are calculated and saved in the background.
+ * If any are missing, they are queued for background calculation.
  */
 const ensureSummariesForRange = async (startMoment, endMoment, branchIds) => {
   const start = moment(startMoment).startOf("day");
@@ -67,6 +95,7 @@ const ensureSummariesForRange = async (startMoment, endMoment, branchIds) => {
   });
 
   // Check for any missing date/branch combination
+  let queueTriggered = false;
   for (let i = 0; i <= daysDiff; i++) {
     const currentDay = moment(start).add(i, "days");
     const dateStr = currentDay.format("YYYY-MM-DD");
@@ -80,25 +109,139 @@ const ensureSummariesForRange = async (startMoment, endMoment, branchIds) => {
         const country = bObj ? bObj.country : null;
         const actualBranchId = bId === "null" ? null : bId;
 
-        // Spawn background precomputation task (non-blocking)
-        (async () => {
-          try {
-            const { computeMetricsForBranchAndDate } = require("./DashboardPrecomputeService");
-            const metricsDoc = await computeMetricsForBranchAndDate(currentDay.toDate(), actualBranchId, country);
-            await DashboardSummary.findOneAndUpdate(
-              { date: metricsDoc.date, branch: actualBranchId },
-              metricsDoc,
-              { upsert: true, new: true }
-            );
-          } catch (err) {
-            console.error(`[DashboardService Cache Self-Heal] Failed background precomputation for ${dateStr} branch ${bId}:`, err);
-          } finally {
-            precomputeQueue.delete(lockKey);
-          }
-        })();
+        backgroundQueue.push({
+          date: currentDay,
+          branchId: actualBranchId,
+          country,
+          lockKey
+        });
+        queueTriggered = true;
       }
     }
   }
+
+  if (queueTriggered) {
+    processBackgroundQueue().catch(err => {
+      console.error("[Dashboard Cache] processBackgroundQueue error:", err);
+    });
+  }
+};
+
+exports.getKpiStats = async (filters) => {
+  const { country, branch, startDate, endDate } = filters;
+  const branchIds = await getBranchIds(country, branch);
+
+  const start = startDate ? moment(startDate).startOf("day") : moment().subtract(30, "days").startOf("day");
+  const end = endDate ? moment(endDate).endOf("day") : moment().endOf("day");
+
+  const paymentQuery = {
+    status: "COMPLETED",
+    paymentDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  if (branchIds) {
+    paymentQuery.branch = { $in: branchIds };
+  }
+
+  const invoiceMatch = {
+    isDeleted: false,
+    dueDate: { $gte: start.toDate(), $lte: end.toDate() }
+  };
+  
+  const pipeline = [
+    { $match: invoiceMatch }
+  ];
+
+  if (branchIds) {
+    pipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  pipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  let lastMonthEndDate;
+  if (endDate) {
+    lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
+  } else {
+    lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
+  }
+
+  const lastMonthInvoiceMatch = {
+    isDeleted: false,
+    dueDate: { $lte: moment(lastMonthEndDate).endOf('day').toDate() }
+  };
+
+  const lastMonthPipeline = [
+    { $match: lastMonthInvoiceMatch }
+  ];
+
+  if (branchIds) {
+    lastMonthPipeline.push(
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customer",
+          foreignField: "_id",
+          as: "customerDoc"
+        }
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          "customerDoc.branch": { $in: branchIds.map(id => {
+            const mongoose = require("mongoose");
+            return new mongoose.Types.ObjectId(id);
+          })}
+        }
+      }
+    );
+  }
+
+  lastMonthPipeline.push({
+    $group: {
+      _id: null,
+      totalBalance: { $sum: "$balance" }
+    }
+  });
+
+  const [paymentsList, invoiceAggr, lastMonthInvoiceAggr] = await Promise.all([
+    PaymentReceived.find(paymentQuery).lean(),
+    Invoice.aggregate(pipeline),
+    Invoice.aggregate(lastMonthPipeline)
+  ]);
+
+  const monthlyRevenue = paymentsList.reduce((sum, p) => sum + (p.amountReceived || 0), 0);
+  const totalPayables = invoiceAggr.length > 0 ? invoiceAggr[0].totalBalance : 0;
+  const lastMonthBalanceDue = lastMonthInvoiceAggr.length > 0 ? lastMonthInvoiceAggr[0].totalBalance : 0;
+
+  return {
+    stats: {
+      monthlyRevenue,
+      totalPayables,
+      lastMonthBalanceDue
+    }
+  };
 };
 
 exports.getSummaryStats = async (filters) => {
@@ -123,36 +266,61 @@ exports.getSummaryStats = async (filters) => {
     });
   }
 
-  // Fetch cached summaries
+  // Define cached summaries query
   const cachedQuery = {
     date: { $gte: cacheStart.toDate(), $lte: cacheEnd.toDate() }
   };
   if (branchIds) {
     cachedQuery.branch = { $in: branchIds };
   }
-  const cachedDocs = await DashboardSummary.find(cachedQuery).lean();
 
-  // Compute today's metrics live (since they are changing)
-  const todayDocs = [];
-  if (end.isSameOrAfter(todayStart)) {
-    const activeBranches = await Branch.find({ isDeleted: false }).select("_id country").lean();
-    let branchesToCompute = activeBranches;
-    if (branchIds) {
-      branchesToCompute = activeBranches.filter(b => branchIds.map(id => id.toString()).includes(b._id.toString()));
-    }
-    
-    const { computeMetricsForBranchAndDate } = require("./DashboardPrecomputeService");
-    for (const b of branchesToCompute) {
-      const todayMetrics = await computeMetricsForBranchAndDate(todayStart.toDate(), b._id, b.country);
-      todayDocs.push(todayMetrics);
-    }
-    
-    // Also compute unassigned/null branch for today
-    if (!branchIds || branchIds.length === 0) {
-      const todayNullMetrics = await computeMetricsForBranchAndDate(todayStart.toDate(), null, null);
-      todayDocs.push(todayNullMetrics);
-    }
+  let lastMonthEndDate;
+  if (endDate) {
+    lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
+  } else {
+    lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
   }
+
+  // Define rolling 12 months query
+  const twelveMonthsAgo = moment().subtract(12, "months").startOf("day");
+
+  const l12Query = [
+    { $match: {
+        date: { $gte: twelveMonthsAgo.toDate(), $lte: moment().toDate() },
+        ...(branchIds ? { branch: { $in: branchIds } } : {})
+      }
+    },
+    { $group: { _id: null, totalRevenue: { $sum: "$metrics.revenue" } } }
+  ];
+
+  // Start today's live computations (if required)
+  const getTodayDocsPromise = async () => {
+    const todayDocs = [];
+    if (end.isSameOrAfter(todayStart)) {
+      const { computeMetricsForAllBranches } = require("./DashboardPrecomputeService");
+      const allTodayMetrics = await computeMetricsForAllBranches(todayStart.toDate());
+      
+      // Filter by the requested branchIds if any
+      if (branchIds) {
+        const branchIdsSet = new Set(branchIds.map(id => id.toString()));
+        allTodayMetrics.forEach(doc => {
+          if (doc.branch && branchIdsSet.has(doc.branch.toString())) {
+            todayDocs.push(doc);
+          }
+        });
+      } else {
+        todayDocs.push(...allTodayMetrics);
+      }
+    }
+    return todayDocs;
+  };
+
+  // Run all database calls and computations in parallel
+  const [cachedDocs, todayDocs, l12Aggr] = await Promise.all([
+    DashboardSummary.find(cachedQuery).lean(),
+    getTodayDocsPromise(),
+    DashboardSummary.aggregate(l12Query)
+  ]);
 
   const allDocs = [...cachedDocs, ...todayDocs];
 
@@ -265,12 +433,7 @@ exports.getSummaryStats = async (filters) => {
   const invoiceAggr = await Invoice.aggregate(pipeline);
   let totalPayables = invoiceAggr.length > 0 ? invoiceAggr[0].totalBalance : 0;
 
-  let lastMonthEndDate;
-  if (endDate) {
-    lastMonthEndDate = moment(endDate).subtract(1, 'month').endOf('month').toDate();
-  } else {
-    lastMonthEndDate = moment().subtract(1, 'month').endOf('month').toDate();
-  }
+
 
   const lastMonthInvoiceMatch = {
     isDeleted: false,
@@ -315,23 +478,7 @@ exports.getSummaryStats = async (filters) => {
 
   const collectionCompliance = 94;
 
-  // 4. Last 12 months rolling revenue
-  const twelveMonthsAgo = moment().subtract(12, "months").startOf("day");
-  ensureSummariesForRange(twelveMonthsAgo, yesterdayEnd, branchIds).catch(err => {
-    console.error("[Dashboard Cache] Background l12 check error:", err);
-  });
-  
-  const l12Query = {
-    date: { $gte: twelveMonthsAgo.toDate(), $lte: moment().toDate() }
-  };
-  if (branchIds) {
-    l12Query.branch = { $in: branchIds };
-  }
-  const l12Docs = await DashboardSummary.find(l12Query).lean();
-  let realLast12MonthsRevenue = 0;
-  l12Docs.forEach(d => {
-    realLast12MonthsRevenue += d.metrics?.revenue || 0;
-  });
+  const realLast12MonthsRevenue = l12Aggr.length > 0 ? l12Aggr[0].totalRevenue : 0;
 
   return {
     stats: {
@@ -351,6 +498,7 @@ exports.getSummaryStats = async (filters) => {
   };
 };
 
+
 exports.getRevenueOverview = async (filters) => {
   const { country, branch } = filters;
   const branchIds = await getBranchIds(country, branch);
@@ -361,27 +509,35 @@ exports.getRevenueOverview = async (filters) => {
   const startOfPrevYear = moment().year(previousYear).startOf("year");
   const yesterdayEnd = moment().subtract(1, "day").endOf("day");
 
-  // Background check - do NOT await
-  ensureSummariesForRange(startOfPrevYear, yesterdayEnd, branchIds).catch(err => {
-    console.error("[Dashboard Cache] Background revenue check error:", err);
-  });
 
-  const query = {
+
+  const match = {
     date: { $gte: startOfPrevYear.toDate(), $lte: now.toDate() }
   };
   if (branchIds) {
-    query.branch = { $in: branchIds };
+    match.branch = { $in: branchIds };
   }
-  const docs = await DashboardSummary.find(query).lean();
+
+  const docs = await DashboardSummary.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: {
+          year: { $year: "$date" },
+          month: { $month: "$date" }
+        },
+        totalRevenue: { $sum: "$metrics.revenue" }
+      }
+    }
+  ]);
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const chartData = months.map(m => ({ name: m, currentYear: 0, previousYear: 0 }));
 
   docs.forEach(d => {
-    const docDate = moment(d.date);
-    const year = docDate.year();
-    const monthIdx = docDate.month();
-    const rev = d.metrics?.revenue || 0;
+    const year = d._id.year;
+    const monthIdx = d._id.month - 1;
+    const rev = d.totalRevenue || 0;
 
     if (monthIdx >= 0 && monthIdx < 12) {
       if (year === currentYear) {
@@ -405,19 +561,21 @@ exports.getRecentOverduePayments = async (filters) => {
     balance: { $gt: 0 },
     isDeleted: false 
   };
+
+  if (branchIds) {
+    const driversInBranches = await Driver.find({ branch: { $in: branchIds }, isDeleted: false }).select("_id").lean();
+    const driverIds = driversInBranches.map(d => d._id);
+    match.driver = { $in: driverIds };
+  }
   
   let rawInvoices = await Invoice.find(match)
-    .populate({
-      path: "driver",
-      select: "personalInfo branch",
-      match: branchIds ? { branch: { $in: branchIds } } : {}
-    })
+    .populate("driver", "personalInfo branch")
     .populate("vehicle", "legalDocs.registrationNumber")
     .sort({ dueDate: 1 })
-    .limit(20)
+    .limit(8)
     .lean();
 
-  const finalInvoices = rawInvoices.filter(i => i.driver).slice(0, 8);
+  const finalInvoices = rawInvoices;
 
   return finalInvoices.map(i => {
     const days = moment().diff(moment(i.dueDate), "days");
@@ -440,35 +598,35 @@ exports.getVehicleMovement = async (filters) => {
   const ninetyDaysAgo = moment().subtract(90, 'days').startOf('day');
   const yesterdayEnd = moment().subtract(1, "day").endOf("day");
 
-  // Background check - do NOT await
-  ensureSummariesForRange(ninetyDaysAgo, yesterdayEnd, branchIds).catch(err => {
-    console.error("[Dashboard Cache] Background vehicle movement check error:", err);
-  });
 
-  const query = {
+
+  const match = {
     date: { $gte: ninetyDaysAgo.toDate(), $lte: now.toDate() }
   };
   if (branchIds) {
-    query.branch = { $in: branchIds };
+    match.branch = { $in: branchIds };
   }
-  const docs = await DashboardSummary.find(query).lean();
 
-  const movementData = {};
-  docs.forEach(d => {
-    const dateKey = moment(d.date).format("YYYY-MM-DD");
-    if (!movementData[dateKey]) {
-      movementData[dateKey] = { date: dateKey, removed: 0, returned: 0, sale: 0 };
+  const docs = await DashboardSummary.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: "$date",
+        removed: { $sum: "$metrics.vehicleMovement.removed" },
+        returned: { $sum: "$metrics.vehicleMovement.returned" },
+        sale: { $sum: "$metrics.vehicleMovement.sale" }
+      }
     }
-    if (d.metrics?.vehicleMovement) {
-      movementData[dateKey].removed += d.metrics.vehicleMovement.removed || 0;
-      movementData[dateKey].returned += d.metrics.vehicleMovement.returned || 0;
-      movementData[dateKey].sale += d.metrics.vehicleMovement.sale || 0;
-    }
-  });
+  ]);
 
-  const result = Object.values(movementData)
-    .sort((a,b) => moment(a.date).diff(moment(b.date)))
-    .slice(-30); // last 30 active days
+  const result = docs.map(d => ({
+    date: moment(d._id).format("YYYY-MM-DD"),
+    removed: d.removed || 0,
+    returned: d.returned || 0,
+    sale: d.sale || 0
+  }))
+  .sort((a, b) => moment(a.date).diff(moment(b.date)))
+  .slice(-30); // last 30 active days
 
   return result;
 };
@@ -484,20 +642,25 @@ exports.getWorkshopAnalytics = async (filters) => {
   const cacheStart = start.isBefore(yesterdayEnd) ? start : yesterdayEnd;
   const cacheEnd = end.isBefore(yesterdayEnd) ? end : yesterdayEnd;
 
-  if (cacheStart.isSameOrBefore(cacheEnd)) {
-    // Background check - do NOT await
-    ensureSummariesForRange(cacheStart, cacheEnd, branchIds).catch(err => {
-      console.error("[Dashboard Cache] Background workshop check error:", err);
-    });
-  }
 
-  const query = {
+
+  const match = {
     date: { $gte: cacheStart.toDate(), $lte: end.toDate() }
   };
   if (branchIds) {
-    query.branch = { $in: branchIds };
+    match.branch = { $in: branchIds };
   }
-  const docs = await DashboardSummary.find(query).lean();
+
+  const docs = await DashboardSummary.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: "$date",
+        created: { $sum: "$metrics.workshop.createdWorkOrders" },
+        completed: { $sum: "$metrics.workshop.completedWorkOrders" }
+      }
+    }
+  ]);
 
   const numDays = Math.max(1, end.diff(start, 'days') + 1);
   const datesObj = {};
@@ -507,10 +670,10 @@ exports.getWorkshopAnalytics = async (filters) => {
   }
 
   docs.forEach(d => {
-    const dateStr = moment(d.date).format("MMM DD");
-    if (datesObj[dateStr] && d.metrics?.workshop) {
-      datesObj[dateStr].created += d.metrics.workshop.createdWorkOrders || 0;
-      datesObj[dateStr].completed += d.metrics.workshop.completedWorkOrders || 0;
+    const dateStr = moment(d._id).format("MMM DD");
+    if (datesObj[dateStr]) {
+      datesObj[dateStr].created += d.created || 0;
+      datesObj[dateStr].completed += d.completed || 0;
     }
   });
 

@@ -18,7 +18,8 @@ exports.getAllBills = async (query = {}) => {
         .populate("supplier", "name")
         .populate("branch", "name")
         .populate("taxId")
-        .sort({ billDate: -1, createdAt: -1 });
+        .sort({ billDate: -1, createdAt: -1 })
+        .lean();
 };
 
 exports.getAllBillsPaginated = async (query = {}, page = 1, limit = 10) => {
@@ -32,7 +33,8 @@ exports.getAllBillsPaginated = async (query = {}, page = 1, limit = 10) => {
         .populate("taxId")
         .sort({ billDate: -1, createdAt: -1 })
         .skip(skip)
-        .limit(limit);
+        .limit(limit)
+        .lean();
         
     return {
         data,
