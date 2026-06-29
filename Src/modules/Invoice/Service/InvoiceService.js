@@ -1068,12 +1068,14 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
     const LedgerService = require("../../Ledger/Service/LedgerService");
     const Tax = require("../../Tax/Model/TaxModel");
 
-    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
+    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false }).lean();
     const defaultTaxRate = activeTax ? activeTax.rate : 0;
     const startSeq = await exports.getNextInvoiceNumberVal();
 
     // 1. Fetch all drivers, customers, and branches into memory for fast map-based lookups
-    const driversList = await Driver.find({ isDeleted: false });
+    const driversList = await Driver.find({ isDeleted: false })
+        .select("_id personalInfo.fullName driverId currentVehicle")
+        .lean();
     const driversByName = new Map();
     const driversById = new Map();
     for (const d of driversList) {
@@ -1086,7 +1088,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         }
     }
 
-    const customersList = await Customer.find({ isDeleted: false });
+    const customersList = await Customer.find({ isDeleted: false })
+        .select("_id customerId customerNumber name driver")
+        .lean();
     const customersById = new Map();
     const customersByName = new Map();
     const customersByDriverId = new Map();
@@ -1239,13 +1243,22 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const invoiceNumber = invNo || exports.formatInvoiceNumber(startSeq + invoiceIndex);
         invoiceIndex++;
 
+        // 1. Read weekNumber from row if provided, otherwise auto-calculate
+        const weekNoVal = getRowVal(headerRow, ["Week Number", "weekNumber", "week"]);
+        let weekNumber = (weekNoVal !== undefined && weekNoVal !== "") ? Number(weekNoVal) : undefined;
+        
+        if (weekNumber === undefined && (invoiceType === "RENTAL" || !invoiceType)) {
+            const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
+            weekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
+        }
+
+        // 2. Lookup existing invoice by invoiceNumber or by { customer, weekNumber }
+        let existingInv = null;
         if (invNo) {
-            const existingInv = await Invoice.findOne({ invoiceNumber, isDeleted: false });
-            if (existingInv) {
-                console.log(`[InvoiceService] Invoice ${invoiceNumber} already exists. Skipping upload.`);
-                skipped.push(`Invoice group "${key}" (Row ${origIdx}): Invoice number "${invoiceNumber}" already exists. Skipping upload.`);
-                continue;
-            }
+            existingInv = await Invoice.findOne({ invoiceNumber, isDeleted: false });
+        }
+        if (!existingInv && (invoiceType === "RENTAL" || !invoiceType) && weekNumber !== undefined) {
+            existingInv = await Invoice.findOne({ customer: customerDoc._id, weekNumber, invoiceType: "RENTAL", isDeleted: false });
         }
 
         // Parse line items
@@ -1312,6 +1325,71 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             
             const itemTaxAmtVal = getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
             calculatedTaxAmount = Number(itemTaxAmtVal) || (baseAmount * (taxPct / 100));
+        }
+
+        if (existingInv) {
+            let addedItemsCount = 0;
+            const existingNames = new Set(existingInv.lineItems.map(item => item.name.trim().toLowerCase()));
+
+            for (const item of lineItems) {
+                const itemKey = item.name.trim().toLowerCase();
+                if (existingNames.has(itemKey)) {
+                    skipped.push(`Invoice "${invoiceNumber}": Item "${item.name}" already exists. Skipping item.`);
+                } else {
+                    existingInv.lineItems.push(item);
+                    existingNames.add(itemKey);
+                    addedItemsCount++;
+                }
+            }
+
+            if (addedItemsCount > 0) {
+                // Recalculate totals
+                const newSubtotal = existingInv.lineItems.reduce((sum, item) => sum + (item.total || 0), 0);
+                const newTaxAmount = existingInv.lineItems.reduce((sum, item) => sum + (item.taxAmount || 0), 0);
+                
+                let newDiscountAmount = 0;
+                if (existingInv.discountType === 'PERCENTAGE') {
+                    newDiscountAmount = Math.round((newSubtotal * ((existingInv.discountValue || 0) / 100)) * 100) / 100;
+                } else {
+                    newDiscountAmount = Math.min(newSubtotal, existingInv.discountValue || 0);
+                }
+
+                let newTotalAmountDue;
+                if (existingInv.isTaxInclusive) {
+                    newTotalAmountDue = newSubtotal - newDiscountAmount;
+                    existingInv.baseAmount = newTotalAmountDue - newTaxAmount;
+                } else {
+                    existingInv.baseAmount = newSubtotal - newDiscountAmount;
+                    newTotalAmountDue = existingInv.baseAmount + newTaxAmount;
+                }
+
+                existingInv.subtotal = newSubtotal;
+                existingInv.taxAmount = newTaxAmount;
+                existingInv.discountAmount = newDiscountAmount;
+                existingInv.totalAmountDue = newTotalAmountDue;
+                
+                const currentPaid = existingInv.amountPaid || 0;
+                const newBalance = Math.max(0, newTotalAmountDue - currentPaid);
+                existingInv.balance = newBalance;
+
+                if (newBalance <= 0) {
+                    existingInv.status = "PAID";
+                } else if (currentPaid > 0) {
+                    existingInv.status = "PARTIAL";
+                } else {
+                    existingInv.status = "PENDING";
+                }
+
+                try {
+                    await existingInv.save();
+                    createdInvoices.push(existingInv);
+                } catch (err) {
+                    errors.push(`Invoice group "${key}" (Row ${origIdx}): Failed to update invoice - ${err.message}`);
+                }
+            } else {
+                skipped.push(`Invoice group "${key}" (Row ${origIdx}): Invoice number "${invoiceNumber}" already exists and all items are duplicates. Skipping upload.`);
+            }
+            continue;
         }
 
         // Subtotal, Discount & Tax calculations at Invoice level
@@ -1393,18 +1471,13 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             paidAt = dueDate;
         }
 
-        // Auto-assign weekNumber (next available for this customer)
-        // Sort by dueDate descending (not weekNumber) to avoid string-sorting bugs
-        const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ dueDate: -1, _id: -1 }).limit(1);
-        const nextWeekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
-
         const newInvoiceData = {
             invoiceNumber,
             invoiceType: invoiceType || "MANUAL",
             customer: customerDoc._id,
             driver: driver ? driver._id : undefined,
             vehicle: (driver && driver.currentVehicle) || undefined,
-            weekNumber: nextWeekNumber,
+            weekNumber,
             weekLabel: `Bulk Invoice - ${generatedAt.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}`,
             dueDate,
             generatedAt,

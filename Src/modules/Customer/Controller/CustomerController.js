@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Customer = require('../Model/CustomerModel');
 const { getNextCustomerId, getNextDriverId } = require('../../SystemSettings/Model/CounterModel');
 const { addDriverService } = require('../../Driver/Repo/DriverRepo');
@@ -356,7 +357,6 @@ exports.bulkCreateCustomers = async (req, res) => {
                     ? status.toUpperCase() : 'ACTIVE';
 
                 const customerData = {
-                    customerId: await getNextCustomerId(),
                     name,
                     email: email ? email.toLowerCase() : undefined,
                     phone,
@@ -455,25 +455,52 @@ exports.bulkCreateCustomers = async (req, res) => {
                     customerData.country = customerData.billingCountry;
                 }
 
-                // ── 3. Create Customer ──
+                // ── 3. Check for duplicates in DB ──
+                let existingCustomer = null;
+                if (name) {
+                    existingCustomer = await Customer.findOne({
+                        name: { $regex: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") },
+                        isDeleted: false
+                    });
+                }
+
+                if (existingCustomer) {
+                    results.errors.push({ row: rowNum, message: `Duplicate customer: "${name}" already exists in the database.` });
+                    continue;
+                }
+
+                let existingDriver = null;
+                if (name) {
+                    existingDriver = await mongoose.model('Driver').findOne({
+                        "personalInfo.fullName": { $regex: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") },
+                        isDeleted: false
+                    });
+                }
+
+                if (existingDriver) {
+                    results.errors.push({ row: rowNum, message: `Duplicate driver: "${name}" already exists in the database.` });
+                    continue;
+                }
+
+                // ── 4. Create Customer ──
+                customerData.customerId = await getNextCustomerId();
                 const newCustomer = new Customer(customerData);
                 const savedCustomer = await newCustomer.save();
 
                 let driverInfo = null;
                 let vehicleInfo = null;
 
-                // ── 4. If CF.VEHICLE NO exists, create Driver & link Vehicle ──
+                // ── 5. If CF.VEHICLE NO exists, create Driver & link Vehicle ──
                 if (vehicleNo) {
                     try {
-                        // 4a. Find Vehicle by plate number
+                        // Find Vehicle by plate number
                         const plateRegex = new RegExp("^" + vehicleNo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i");
                         const vehicle = await Vehicle.findOne({
                             "legalDocs.registrationNumber": plateRegex,
                             isDeleted: false
                         });
 
-                        // 4b. Create Driver directly via repo (not DriverService.create)
-                        // to avoid its auto-customer-creation which would duplicate our customer
+                        // Create Driver directly via repo (not DriverService.create)
                         const driverData = {
                             driverId: await getNextDriverId(),
                             status: "ACTIVE",
@@ -495,16 +522,16 @@ exports.bulkCreateCustomers = async (req, res) => {
                             }],
                         };
 
-                        const newDriver = await addDriverService(driverData);
-                        driverInfo = { id: newDriver._id, driverId: newDriver.driverId };
+                        const driver = await addDriverService(driverData);
+                        driverInfo = { id: driver._id, driverId: driver.driverId };
 
-                        // 4c. Link Customer → Driver
-                        savedCustomer.driver = newDriver._id;
+                        // Link Customer → Driver
+                        savedCustomer.driver = driver._id;
                         await savedCustomer.save();
 
-                        // 4d. Link Vehicle → Driver (if vehicle found)
+                        // Link Vehicle → Driver (if vehicle found)
                         if (vehicle) {
-                            await Vehicle.findByIdAndUpdate(vehicle._id, { currentDriver: newDriver._id });
+                            await Vehicle.findByIdAndUpdate(vehicle._id, { currentDriver: driver._id });
                             vehicleInfo = {
                                 id: vehicle._id,
                                 registrationNumber: vehicle.legalDocs?.registrationNumber
