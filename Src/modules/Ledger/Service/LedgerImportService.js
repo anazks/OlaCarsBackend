@@ -135,10 +135,8 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
     // 2. Pre-load lookup caches for performance
     const allAccounts = await AccountingCode.find({ isDeleted: { $ne: true } }).lean();
     const accountByCode = {};
-    const accountByName = {};
     for (const acc of allAccounts) {
         if (acc.code) accountByCode[acc.code.toLowerCase().trim()] = acc;
-        if (acc.name) accountByName[acc.name.toLowerCase().trim()] = acc;
     }
 
     const allBranches = await Branch.find({ isDeleted: { $ne: true } }).lean();
@@ -178,17 +176,13 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
 
             // --- Resolve accountingCode ---
             const accountId = String(getVal(row, ["account_id", "Account ID"]) || "").trim();
-            const accountName = String(getVal(row, ["account_name", "Account Name"]) || "").trim();
 
             let accountingCode = null;
             if (accountId) {
                 accountingCode = accountByCode[accountId.toLowerCase()];
             }
-            if (!accountingCode && accountName) {
-                accountingCode = accountByName[accountName.toLowerCase()];
-            }
             if (!accountingCode) {
-                errors.push({ row: rowNum, reason: `Account not found: ID="${accountId}", Name="${accountName}"` });
+                errors.push({ row: rowNum, reason: `Account not found: ID="${accountId}"` });
                 continue;
             }
 
