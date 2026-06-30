@@ -30,9 +30,11 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
         if (options.filterFields) {
             options.filterFields.forEach(field => {
                 if (filters[field] !== undefined && filters[field] !== '') {
-                    // Handle query params that come in as strings "true"/"false"
+                    // Handle query params that come in as strings "true"/"false"/"null"
                     if (filters[field] === 'true') query[field] = true;
                     else if (filters[field] === 'false') query[field] = false;
+                    else if (filters[field] === 'null') query[field] = null;
+                    else if (filters[field] === 'exists') query[field] = { $ne: null };
                     else if (typeof filters[field] === 'string' && filters[field].includes(',')) {
                         query[field] = { $in: filters[field].split(',') };
                     }

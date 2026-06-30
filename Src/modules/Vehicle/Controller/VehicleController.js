@@ -133,9 +133,27 @@ const getVehicles = async (req, res, next) => {
             defaultSort: { createdAt: -1 }
         });
 
+        // Query for drivers assigned to these vehicles
+        const vehicleIds = result.data.map(v => v._id);
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const drivers = await Driver.find({ currentVehicle: { $in: vehicleIds } })
+            .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId currentVehicle");
+
+        // Convert Mongoose documents to plain JS objects to modify them
+        const vehiclesWithDrivers = result.data.map(v => {
+            const vObj = v.toObject ? v.toObject() : v;
+            if (!vObj.currentDriver) {
+                const assignedDriver = drivers.find(d => String(d.currentVehicle) === String(vObj._id));
+                if (assignedDriver) {
+                    vObj.currentDriver = assignedDriver.toObject ? assignedDriver.toObject() : assignedDriver;
+                }
+            }
+            return vObj;
+        });
+
         return res.status(200).json({
             success: true,
-            data: result.data,
+            data: vehiclesWithDrivers,
             pagination: {
                 total: result.total,
                 page: result.page,
@@ -158,7 +176,61 @@ const getVehicleById = async (req, res, next) => {
     try {
         const vehicle = await getVehicleByIdService(req.params.id);
         if (!vehicle) return res.status(404).json({ success: false, message: "Vehicle not found" });
-        return res.status(200).json({ success: true, data: vehicle });
+        
+        const { Vehicle } = require("../Model/VehicleModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const vehicleObj = vehicle.toObject();
+
+        // Ensure currentDriver is populated if missing but driver points to it
+        if (!vehicleObj.currentDriver) {
+            const driver = await Driver.findOne({ currentVehicle: vehicle._id })
+                .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId");
+            if (driver) {
+                vehicleObj.currentDriver = driver.toObject();
+            }
+        }
+
+        // 1. If this vehicle has a driver, find the temp vehicle assigned to its driver
+        if (vehicleObj.currentDriver) {
+            const driverId = vehicleObj.currentDriver._id || vehicleObj.currentDriver;
+            const tempVehicle = await Vehicle.findOne({ tempDriver: driverId, isDeleted: false });
+            if (tempVehicle) {
+                vehicleObj.tempVehicle = tempVehicle.toObject();
+            }
+        }
+
+        // 2. If this is a temporary vehicle (has tempDriver set), find its maintenance assignment details
+        if (vehicleObj.tempDriver) {
+            const driverId = vehicleObj.tempDriver._id || vehicleObj.tempDriver;
+            
+            // Ensure tempDriver details are loaded as an object
+            if (typeof vehicleObj.tempDriver !== "object" || !vehicleObj.tempDriver.personalInfo) {
+                const driver = await Driver.findById(driverId)
+                    .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId");
+                if (driver) {
+                    vehicleObj.tempDriver = driver.toObject();
+                }
+            }
+
+            // Look up the driver's current primary vehicle (maintenance vehicle) from the Driver document
+            let maintenanceVehicle = null;
+            const driverDoc = await Driver.findById(driverId).select("currentVehicle");
+            if (driverDoc && driverDoc.currentVehicle) {
+                maintenanceVehicle = await Vehicle.findOne({ _id: driverDoc.currentVehicle, isDeleted: false });
+            }
+            // Fallback to checking by currentDriver if not found
+            if (!maintenanceVehicle) {
+                maintenanceVehicle = await Vehicle.findOne({ currentDriver: driverId, isDeleted: false });
+            }
+
+            vehicleObj.tempAssignment = {
+                maintenanceVehicleId: maintenanceVehicle ? maintenanceVehicle._id : null,
+                maintenanceVehiclePlate: maintenanceVehicle ? (maintenanceVehicle.legalDocs?.registrationNumber || maintenanceVehicle.basicDetails?.fleetNumber) : "—",
+                tempDriver: vehicleObj.tempDriver
+            };
+        }
+
+        return res.status(200).json({ success: true, data: vehicleObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
