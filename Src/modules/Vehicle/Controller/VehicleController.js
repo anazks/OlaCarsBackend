@@ -879,13 +879,13 @@ const bulkAddVehicles = async (req, res) => {
                 })();
 
                 // Check if vehicle with VIN already exists
-                let existingVehicle = null;
+                let existingVinVehicle = null;
                 if (cleanVin) {
-                    existingVehicle = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
+                    existingVinVehicle = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
                 }
 
-                if (existingVehicle) {
-                    const currentReg = existingVehicle.legalDocs?.registrationNumber;
+                if (existingVinVehicle) {
+                    const currentReg = existingVinVehicle.legalDocs?.registrationNumber;
                     if (isNARegistration(currentReg)) {
                         // Update existing vehicle
                         const updateData = {
@@ -896,6 +896,10 @@ const bulkAddVehicles = async (req, res) => {
                             'basicDetails.weeklyRent': (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
                             'basicDetails.fleetNumber': row.fleetNumber ? row.fleetNumber.trim() : undefined,
                             'legalDocs.registrationNumber': row.registrationNumber.trim(),
+                            'basicDetails.odometer': (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                            'basicDetails.gpsSerialNumber': row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                            'basicDetails.sellingValue': (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                            'basicDetails.leaseDurationWeeks': (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
                             $push: {
                                 statusHistory: {
                                     status: mappedStatus,
@@ -905,23 +909,30 @@ const bulkAddVehicles = async (req, res) => {
                                     notes: "Vehicle updated via bulk upload (found existing VIN with NA registration).",
                                 }
                             }
-                            return clean;
-                        })(),
-                        odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
-                        gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
-                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
-                        sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
-                        leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
-                        fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
-                    },
-                    legalDocs: {
-                        registrationNumber: regNumClean,
-                        registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
-                    },
-                    statusHistory: [{
-                        status: mappedStatus,
+                        };
+
+                        await Vehicle.findByIdAndUpdate(existingVinVehicle._id, updateData);
+                        results.created.push({
+                            row: rowNum,
+                            id: existingVinVehicle._id,
+                            vin: cleanVin,
+                            make: row.make.trim(),
+                            model: row.model.trim(),
+                            updated: true
+                        });
+                    } else {
+                        results.skipped.push({
+                            row: rowNum,
+                            vin: cleanVin,
+                            registrationNumber: regNumClean,
+                            message: `Vehicle with VIN '${cleanVin}' already exists with registration '${currentReg}' (skipped).`
+                        });
+                    }
+                } else {
+                    const vehicleData = {
                         createdBy: userId,
                         creatorRole: userRole,
+                        status: mappedStatus,
                         purchaseDetails: {
                             branch: branch,
                             vendorName: row.vendorName ? row.vendorName.trim() : undefined,
@@ -946,7 +957,7 @@ const bulkAddVehicles = async (req, res) => {
                             fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
                         },
                         legalDocs: {
-                            registrationNumber: row.registrationNumber.trim(),
+                            registrationNumber: regNumClean,
                             registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
                         },
                         statusHistory: [{

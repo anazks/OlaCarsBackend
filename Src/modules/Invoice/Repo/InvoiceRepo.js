@@ -82,8 +82,8 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         metricsQuery.vehicle = new mongoose.Types.ObjectId(metricsQuery.vehicle);
     }
 
-    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted
-    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle) {
+    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted, and not explicitly ignored
+    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && queryParams.ignoreDefaultDates !== 'true') {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
