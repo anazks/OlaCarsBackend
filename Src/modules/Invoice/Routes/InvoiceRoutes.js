@@ -9,6 +9,8 @@ router.use(authenticate);
 
 router.get("/registry", InvoiceController.getRegistryInvoices);
 router.get("/driver/:driverId/pending", InvoiceController.getPendingInvoicesByDriver);
+router.get("/count", InvoiceController.getInvoicesCount);
+router.get("/date-wise", InvoiceController.getDateWiseInvoices);
 router.get("/", InvoiceController.getInvoices);
 router.get("/:id", InvoiceController.getInvoiceById);
 router.get("/:id/pdf", InvoiceController.downloadInvoicePdf);

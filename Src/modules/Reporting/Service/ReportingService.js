@@ -9,6 +9,54 @@ const OperationStaff = require("../../OperationStaff/Model/OperationStaffModel")
 const WorkshopStaff = require("../../WorkshopStaff/Model/WorkshopStaffModel");
 const WorkshopManager = require("../../WorkshopManager/Model/WorkshopManagerModel");
 
+const normalizeCategory = (categoryStr) => {
+    if (!categoryStr) return "";
+    const cat = categoryStr.trim().toLowerCase();
+    switch (cat) {
+        case 'ncome':
+        case 'income':
+        case 'other income':
+        case 'other_income':
+            return 'INCOME';
+        case 'expense':
+        case 'other expense':
+        case 'other_expense':
+        case 'cost of goods sold':
+        case 'cost_of_goods_sold':
+            return 'EXPENSE';
+        case 'equity':
+        case 'stock':
+            return 'EQUITY';
+        case 'liability':
+        case 'other liability':
+        case 'other current liability':
+        case 'other_current_liability':
+        case 'non current liability':
+        case 'non_current_liability':
+        case 'non current liab':
+        case 'accounts payable':
+        case 'accounts_payable':
+        case 'output tax':
+        case 'output_tax':
+            return 'LIABILITY';
+        case 'asset':
+        case 'other asset':
+        case 'other current asset':
+        case 'other_current_asset':
+        case 'fixed asset':
+        case 'fixed_asset':
+        case 'accounts receivable':
+        case 'accounts_receivable':
+        case 'cash':
+        case 'bank':
+        case 'input tax':
+        case 'input_tax':
+            return 'ASSET';
+        default:
+            return categoryStr.toUpperCase();
+    }
+};
+
 exports.getPLReport = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
     
@@ -47,10 +95,11 @@ exports.getPLReport = async (filters) => {
         const amount = entry.amount || 0;
         const type = entry.type;
 
-        if (code.category === "INCOME") {
+        const category = normalizeCategory(code.category);
+        if (category === "INCOME") {
             const val = type === "CREDIT" ? amount : -amount;
             report.income[code.name] = (report.income[code.name] || 0) + val;
-        } else if (code.category === "EXPENSE") {
+        } else if (category === "EXPENSE") {
             const val = type === "DEBIT" ? amount : -amount;
             report.expenses[code.name] = (report.expenses[code.name] || 0) + val;
         }
@@ -106,19 +155,20 @@ exports.getBalanceSheetReport = async (filters) => {
         const amount = entry.amount || 0;
         const type = entry.type;
 
-        if (code.category === "ASSET") {
+        const category = normalizeCategory(code.category);
+        if (category === "ASSET") {
             const val = type === "DEBIT" ? amount : -amount;
             report.assets[code.name] = (report.assets[code.name] || 0) + val;
-        } else if (code.category === "LIABILITY") {
+        } else if (category === "LIABILITY") {
             const val = type === "CREDIT" ? amount : -amount;
             report.liabilities[code.name] = (report.liabilities[code.name] || 0) + val;
-        } else if (code.category === "EQUITY") {
+        } else if (category === "EQUITY") {
             const val = type === "CREDIT" ? amount : -amount;
             report.equity[code.name] = (report.equity[code.name] || 0) + val;
-        } else if (code.category === "INCOME") {
+        } else if (category === "INCOME") {
             // Credit increases income, Debit decreases it
             cumulativeNetIncome += (type === "CREDIT" ? amount : -amount);
-        } else if (code.category === "EXPENSE") {
+        } else if (category === "EXPENSE") {
             // Debit increases expense, Credit decreases it
             cumulativeNetIncome -= (type === "DEBIT" ? amount : -amount);
         }

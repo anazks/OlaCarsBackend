@@ -150,13 +150,15 @@ exports.getAllBills = async (query = {}) => {
     }
 
     // 4. Date Range Filters (billDate)
-    if (query.fromDate || query.toDate) {
+    const fromDateVal = query.fromDate || query.startDate;
+    const toDateVal = query.toDate || query.endDate;
+    if (fromDateVal || toDateVal) {
         mongooseQuery.billDate = {};
-        if (query.fromDate) {
-            mongooseQuery.billDate.$gte = new Date(query.fromDate + 'T00:00:00.000Z');
+        if (fromDateVal) {
+            mongooseQuery.billDate.$gte = new Date(fromDateVal + 'T00:00:00.000Z');
         }
-        if (query.toDate) {
-            mongooseQuery.billDate.$lte = new Date(query.toDate + 'T23:59:59.999Z');
+        if (toDateVal) {
+            mongooseQuery.billDate.$lte = new Date(toDateVal + 'T23:59:59.999Z');
         }
     }
 
@@ -193,7 +195,7 @@ exports.getAllBills = async (query = {}) => {
         ];
     }
 
-    const hasDateFilter = !!(query.fromDate || query.toDate || query.month || query.year);
+    const hasDateFilter = !!(query.fromDate || query.toDate || query.startDate || query.endDate || query.month || query.year);
 
     // Default to start of current month to today's date if no date filters are supplied and no supplier is targeted, and not explicitly ignored
     if (!hasDateFilter && !query.supplier && !query.search && query.ignoreDefaultDates !== 'true') {

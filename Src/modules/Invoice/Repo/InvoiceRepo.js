@@ -37,13 +37,15 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     }
 
     if (queryParams.startDate || queryParams.endDate) {
-        query.dueDate = {};
-        if (queryParams.startDate) query.dueDate.$gte = new Date(queryParams.startDate);
+        const dateQuery = {};
+        if (queryParams.startDate) dateQuery.$gte = new Date(queryParams.startDate);
         if (queryParams.endDate) {
-            const end = new Date(queryParams.endDate);
-            end.setHours(23, 59, 59, 999);
-            query.dueDate.$lte = end;
+            dateQuery.$lte = new Date(queryParams.endDate + 'T23:59:59.999Z');
         }
+        query.$or = [
+            { generatedAt: dateQuery },
+            { createdAt: dateQuery }
+        ];
     }
 
     const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
@@ -90,6 +92,8 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         query.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
         metricsQuery.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
     }
+
+    console.log('[InvoiceRepo] final query:', JSON.stringify(query));
 
     // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to workshop/weekNumber sorting
     let sortOpt = options.defaultSort;

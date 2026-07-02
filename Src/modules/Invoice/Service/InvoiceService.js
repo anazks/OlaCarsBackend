@@ -53,6 +53,15 @@ exports.getById = async (id) => {
     return await getInvoiceByIdService(id);
 };
 
+exports.getDateWise = async (queryParams = {}) => {
+    return await getInvoicesService(queryParams);
+};
+
+exports.getTotalCount = async () => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    return await Invoice.countDocuments({ isDeleted: false });
+};
+
 exports.generateRentInvoices = async (driverId, vehicleId, amount, count, frequency = 'MONTHLY', createdBy, creatorRole, session = null) => {
     const Customer = require("../../Customer/Model/CustomerModel");
     const customerDoc = await Customer.findOne({ driver: driverId }, null, { session });
