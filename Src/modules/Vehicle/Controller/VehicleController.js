@@ -951,13 +951,6 @@ const bulkAddVehicles = async (req, res) => {
                 })();
 
                 // Check if vehicle with VIN already exists
-                let existingVinVehicle = null;
-                if (cleanVin) {
-                    existingVinVehicle = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
-                }
-
-                if (existingVinVehicle) {
-                    const currentReg = existingVinVehicle.legalDocs?.registrationNumber;
                 let existingVehicleByVin = null;
                 if (cleanVin) {
                     existingVehicleByVin = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
@@ -990,13 +983,13 @@ const bulkAddVehicles = async (req, res) => {
                             }
                         };
 
-                        await Vehicle.findByIdAndUpdate(existingVinVehicle._id, updateData);
+                        const updatedVehicle = await updateVehicleService(existingVehicleByVin._id, updateData);
                         results.created.push({
                             row: rowNum,
-                            id: existingVinVehicle._id,
-                            vin: cleanVin,
-                            make: row.make.trim(),
-                            model: row.model.trim(),
+                            id: updatedVehicle._id,
+                            vin: updatedVehicle.basicDetails?.vin || cleanVin,
+                            make: updatedVehicle.basicDetails?.make || row.make.trim(),
+                            model: updatedVehicle.basicDetails?.model || row.model.trim(),
                             updated: true
                         });
                     } else {
@@ -1008,26 +1001,11 @@ const bulkAddVehicles = async (req, res) => {
                         });
                     }
                 } else {
-                    const vehicleData = {
-                        const updatedVehicle = await updateVehicleService(existingVehicleByVin._id, updateData);
-                        results.created.push({
-                            row: rowNum,
-                            id: updatedVehicle._id,
-                            vin: updatedVehicle.basicDetails?.vin,
-                            make: updatedVehicle.basicDetails?.make,
-                            model: updatedVehicle.basicDetails?.model,
-                            updated: true
-                        });
-                    } else {
-                        throw new Error("A vehicle with this VIN already exists.", { cause: 409 });
-                    }
-                } else {
                     // Prepare new vehicle structure
                     const vehicleData = {
                         status: mappedStatus,
                         createdBy: userId,
                         creatorRole: userRole,
-                        status: mappedStatus,
                         purchaseDetails: {
                             branch: branch,
                             vendorName: row.vendorName ? row.vendorName.trim() : undefined,
