@@ -50,6 +50,30 @@ exports.getInvoiceById = async (req, res) => {
     }
 };
 
+exports.getInvoicesCount = async (req, res) => {
+    try {
+        const count = await InvoiceService.getTotalCount();
+        return res.status(200).json({ success: true, count });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getDateWiseInvoices = async (req, res) => {
+    try {
+        const result = await InvoiceService.getDateWise(req.query);
+        console.log(`[InvoiceController] Retrieved ${result.data?.length || 0} date-wise invoices`);
+        return res.status(200).json({ 
+            success: true, 
+            data: result.data,
+            pagination: result.pagination,
+            metrics: result.metrics
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 exports.createManualInvoice = async (req, res) => {
     try {
         const createdBy = req.user.id || req.user._id;

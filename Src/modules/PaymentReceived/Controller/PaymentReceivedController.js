@@ -213,12 +213,13 @@ exports.getAllPaymentReceiveds = async (req, res) => {
                 query.paymentDate.$lte = end;
             }
         } else if (!customerId && !driverId) {
-            // Default to start of current month to end of today
+            // Default to last 30 days
             const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const last30Days = new Date();
+            last30Days.setDate(last30Days.getDate() - 30);
             const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
             query.paymentDate = {
-                $gte: startOfMonth,
+                $gte: last30Days,
                 $lte: endOfToday
             };
         }
