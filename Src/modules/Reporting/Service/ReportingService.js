@@ -155,6 +155,25 @@ exports.getPLReport = async (filters) => {
         netProfit: 0
     };
 
+    // Pre-populate all active Income and Expense accounting codes from Chart of Accounts
+    try {
+        const allActiveCodes = await AccountingCode.find({
+            isActive: true,
+            isDeleted: false
+        }).select('name category accountType code _id').lean();
+
+        allActiveCodes.forEach(code => {
+            const category = normalizeCategory(code.category);
+            if (category === "INCOME") {
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category };
+            } else if (category === "EXPENSE") {
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category };
+            }
+        });
+    } catch (e) {
+        console.error("Error pre-populating P&L codes:", e);
+    }
+
     aggregated.forEach(row => {
         const code = row.codeDetails;
         if (!code) return;
@@ -162,15 +181,33 @@ exports.getPLReport = async (filters) => {
         const category = normalizeCategory(code.category);
         if (category === "INCOME") {
             const val = row.creditSum - row.debitSum;
-            report.income[code.name] = (report.income[code.name] || 0) + val;
+            if (!report.income[code.name]) {
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category };
+            }
+            report.income[code.name].amount = val;
         } else if (category === "EXPENSE") {
             const val = row.debitSum - row.creditSum;
-            report.expenses[code.name] = (report.expenses[code.name] || 0) + val;
+            if (!report.expenses[code.name]) {
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category };
+            }
+            report.expenses[code.name].amount = val;
         }
     });
 
-    const incomeArray = Object.keys(report.income).map(name => ({ name, amount: report.income[name] }));
-    const expenseArray = Object.keys(report.expenses).map(name => ({ name, amount: report.expenses[name] }));
+    const incomeArray = Object.keys(report.income).map(name => ({
+        name,
+        amount: report.income[name].amount,
+        code: report.income[name].code,
+        accountType: report.income[name].accountType,
+        category: report.income[name].category
+    }));
+    const expenseArray = Object.keys(report.expenses).map(name => ({
+        name,
+        amount: report.expenses[name].amount,
+        code: report.expenses[name].code,
+        accountType: report.expenses[name].accountType,
+        category: report.expenses[name].category
+    }));
 
     const totalIncome = incomeArray.reduce((acc, curr) => acc + curr.amount, 0);
     const totalExpense = expenseArray.reduce((acc, curr) => acc + curr.amount, 0);
@@ -183,7 +220,7 @@ exports.getPLReport = async (filters) => {
 };
 
 exports.getBalanceSheetReport = async (filters) => {
-    const { branch, country, endDate } = filters;
+    const { branch, country, startDate, endDate } = filters;
     
     if (!endDate) {
         return {
@@ -291,6 +328,14 @@ exports.getBalanceSheetReport = async (filters) => {
 
 
     let cumulativeNetIncome = 0;
+    if (startDate && endDate) {
+        try {
+            const plReport = await exports.getPLReport({ branch, country, startDate, endDate });
+            cumulativeNetIncome = plReport.netProfit;
+        } catch (plErr) {
+            console.error("Failed to fetch P&L report for Balance Sheet Net Income:", plErr);
+        }
+    }
 
     aggregated.forEach(row => {
         const code = row.codeDetails;
@@ -315,10 +360,12 @@ exports.getBalanceSheetReport = async (filters) => {
                 report.equity[code.name] = { amount: 0, category: code.category, accountType: code.accountType, code: code.code };
             }
             report.equity[code.name].amount += val;
-        } else if (category === "INCOME") {
-            cumulativeNetIncome += (row.creditSum - row.debitSum);
-        } else if (category === "EXPENSE") {
-            cumulativeNetIncome -= (row.debitSum - row.creditSum);
+        } else if (!startDate) {
+            if (category === "INCOME") {
+                cumulativeNetIncome += (row.creditSum - row.debitSum);
+            } else if (category === "EXPENSE") {
+                cumulativeNetIncome -= (row.debitSum - row.creditSum);
+            }
         }
     });
 
