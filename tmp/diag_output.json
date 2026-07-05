@@ -1,0 +1,120 @@
+{
+  "timestamp": "2026-07-04T17:44:23.968Z",
+  "reportType": "PL",
+  "filters": {
+    "branch": "",
+    "startDate": "2026-06-04",
+    "endDate": "2026-07-01",
+    "bankAccount": ""
+  },
+  "query": {
+    "entryDate": {
+      "$gte": "2026-06-04T00:00:00.000Z",
+      "$lte": "2026-07-01T18:29:59.999Z"
+    }
+  },
+  "entriesFound": 8705,
+  "nullCodesCount": 0,
+  "sampleEntries": [
+    {
+      "id": "6a473dea74ecd75354038349",
+      "amount": 95,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a473dee74ecd7535403845a",
+      "amount": 10,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a473e4674ecd753540391e1",
+      "amount": 200,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a473e4a74ecd753540392e2",
+      "amount": 60,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a473ea574ecd7535403aca2",
+      "amount": 100,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a473f9974ecd7535403e48b",
+      "amount": 40,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a4742fc74ecd7535404b07e",
+      "amount": 30,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a47433274ecd7535404c00a",
+      "amount": 50,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a47433674ecd7535404c138",
+      "amount": 280,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    },
+    {
+      "id": "6a47433a74ecd7535404c240",
+      "amount": 20,
+      "type": "DEBIT",
+      "codeName": "Banco General CT 600",
+      "codeCategory": "ASSET",
+      "normalizedCategory": "ASSET",
+      "branch": "6a2819a0dd10033585ef87a4",
+      "entryDate": "2026-06-04T00:00:00.000Z"
+    }
+  ]
+}

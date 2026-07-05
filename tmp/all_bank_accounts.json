@@ -1,0 +1,555 @@
+[
+  {
+    "id": "6a280d594f5923cd64ec3058",
+    "name": "Acumulated Depretiacion of Vehicles/Depreciación Acumulada de Vehículos",
+    "code": "1210-VEH-DEP",
+    "category": "ASSET",
+    "accountType": "fixed asset"
+  },
+  {
+    "id": "6a280d594f5923cd64ec305f",
+    "name": "General Fixed Assets",
+    "code": "1200-GEN",
+    "category": "ASSET",
+    "accountType": "fixed asset"
+  },
+  {
+    "id": "6a280d594f5923cd64ec3062",
+    "name": "Accumulated Depreciation of General Assets",
+    "code": "1210-GEN-DEP",
+    "category": "ASSET",
+    "accountType": "fixed asset"
+  },
+  {
+    "id": "6a280daa4f5923cd64ec315b",
+    "name": "Undeposited Funds/Fondos no Depositados",
+    "code": "C00001",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280daa4f5923cd64ec315e",
+    "name": "Petty Cash",
+    "code": "1.1.01",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280daa4f5923cd64ec3161",
+    "name": "NITZIA-PETTY CASH",
+    "code": "1.1.01.1(A)",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280daa4f5923cd64ec3164",
+    "name": "JODGELY -PETTY CASH",
+    "code": "1.1.01.1 (B)",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280daa4f5923cd64ec3167",
+    "name": "HECTOR-PETTY CASH",
+    "code": "1.1.01.1(C)",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280dab4f5923cd64ec316a",
+    "name": "RODOLFO-PETTY CASH",
+    "code": "1.1.01.1(D)",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280dab4f5923cd64ec316d",
+    "name": "Accounts Receivable/Cuenta por Cobrar",
+    "code": "1.1.03",
+    "category": "ASSET",
+    "accountType": "Accounts Receivable"
+  },
+  {
+    "id": "6a280dab4f5923cd64ec3170",
+    "name": "Furniture And Equipment/Mobiliario y Equipos",
+    "code": "FURNITURE AND EQUIPMENTS",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280dab4f5923cd64ec3173",
+    "name": "Adavance Tax/Impuestos Anticipados",
+    "code": "1.1.05",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280dab4f5923cd64ec318e",
+    "name": "OW BANK INTEREST INCOME / INGRESOS POR INTERESES BANCARIOS",
+    "code": "IN0004",
+    "category": "INCOME",
+    "accountType": "Income"
+  },
+  {
+    "id": "6a280dac4f5923cd64ec319d",
+    "name": "Bank Fees and Charges/Comisiones y cargos bancarios",
+    "code": "6.5.02",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280dad4f5923cd64ec31b5",
+    "name": "Employee Advance",
+    "code": "1.1.06",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280dad4f5923cd64ec31d6",
+    "name": "Prepaid Exprenses",
+    "code": "1.1.07",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280dae4f5923cd64ec31dc",
+    "name": "INPUT TAX",
+    "code": "INPUT TAX",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280dae4f5923cd64ec31df",
+    "name": "Banco General AH  1601",
+    "code": "1.1.02-1",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280dae4f5923cd64ec31e2",
+    "name": "OTHER CURRENT ASSET/OTROS ACTIVOS",
+    "code": "CA0005",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280dae4f5923cd64ec31eb",
+    "name": "Banco General CT  7905",
+    "code": "1.1.02-5",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280dae4f5923cd64ec31ee",
+    "name": "ARRENDADORA OLA CARS, S.A 3010",
+    "code": "B00003",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280daf4f5923cd64ec3212",
+    "name": "UNI BANK LOAN W GROUP 2091.99",
+    "code": "LL0004",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280daf4f5923cd64ec3218",
+    "name": "BANCO DELTA LOAN ACCOUNT 4144.67",
+    "code": "LL0006",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280daf4f5923cd64ec3221",
+    "name": "BANCO GENERAL 40 HONDA LOAN 22784.17",
+    "code": "LL0010",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280db04f5923cd64ec322d",
+    "name": "Banco General AH 2654",
+    "code": "1.1.02-2",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280db04f5923cd64ec3233",
+    "name": "BCT CT 9688",
+    "code": "1.1.02-6",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280db04f5923cd64ec3236",
+    "name": "Acumulated Depretiacion of Vehicles/Depreciación Acumulada de Vehículos",
+    "code": "FA0002",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db04f5923cd64ec3239",
+    "name": "KIA SOLUTO",
+    "code": "FA0006KIASOL0000",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db04f5923cd64ec323c",
+    "name": "JETOUR X70",
+    "code": "FA0012",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db04f5923cd64ec323f",
+    "name": "GEELY OKAVANGO 2026",
+    "code": "FA0014",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db04f5923cd64ec3242",
+    "name": "TIGGO 8 PRO",
+    "code": "FA0015",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db04f5923cd64ec3245",
+    "name": "KIA CARENS",
+    "code": "FA0022",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3248",
+    "name": "HONDA BR-V",
+    "code": "FA0023",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec324b",
+    "name": "JETUR X70 SIGNATURE",
+    "code": "FA0024",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec324e",
+    "name": "JETUR X70 PLUS",
+    "code": "FA0025",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3251",
+    "name": "SOUEAST S07",
+    "code": "FA0026",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3254",
+    "name": "JETUR X70 PLUS E",
+    "code": "FA0027",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3257",
+    "name": "JETOUR X70 FL",
+    "code": "FA0028",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec325a",
+    "name": "FORTHING T5 EVO",
+    "code": "FA0029",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec325d",
+    "name": "CAPTIVA LT 1.5 L CHEVROLET",
+    "code": "FA0030",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3260",
+    "name": "VEHICLES KIA CARENS",
+    "code": "1.2.01",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3263",
+    "name": "VEHICLES JETUR X70 PLUS",
+    "code": "1.2.02",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db14f5923cd64ec3269",
+    "name": "BI BANK LOAN PROCESSING CHARGES",
+    "code": "6.05.03(1)",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db14f5923cd64ec326c",
+    "name": "CANAL BANK LOAN PROCESSING CHARGES",
+    "code": "6.05.03(2)",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db24f5923cd64ec3272",
+    "name": "BANCO GENERAL LOAN PROCESSING CHARGES",
+    "code": "6.5.03(4)",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db24f5923cd64ec3281",
+    "name": "Goods In Transit/Mercancía en Transito",
+    "code": "CA0006",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280db24f5923cd64ec328a",
+    "name": "Banco General (Ola Workshop)  AH 3010",
+    "code": "1.1.02-3",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280db24f5923cd64ec328d",
+    "name": "OFFICE EXPENSE OLA WORKSHOP/GASTOS DE OFICINA TALLER OLA",
+    "code": "FA0016",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db34f5923cd64ec32a2",
+    "name": "Rent Deposit- Deposito de Alquiler",
+    "code": "CA0007",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280db34f5923cd64ec32ae",
+    "name": "Interest on Banco Delta Loan/ Interés sobre Préstamo Banco Delta",
+    "code": "6.5.01.2",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db34f5923cd64ec32b1",
+    "name": "Interest on Unibank Loan/ Interés sobre Préstamo UNIBANK",
+    "code": "6.5.01.3",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db34f5923cd64ec32b4",
+    "name": "Interest on Banco General Loan 40 HONDA/Interés sobre Préstamo Banco General - 40 HONDA",
+    "code": "6.5.01.4",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db44f5923cd64ec32cc",
+    "name": "Interest on Canal Bank Loan 500 K/Interés sobre Préstamo Canal Bank 500K",
+    "code": "6.5.01.11",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db44f5923cd64ec32cf",
+    "name": "INTEREST ON BI BANK LOAN",
+    "code": "6.5.01.16",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280db74f5923cd64ec333b",
+    "name": "BANCO GENERAL 40 GEELY OKAVANGO 703680",
+    "code": "LL0015",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280db74f5923cd64ec3341",
+    "name": "Insurance Receivable/Cuenta por Cobrar Seguro",
+    "code": "CA0001",
+    "category": "ASSET",
+    "accountType": "Other Asset"
+  },
+  {
+    "id": "6a280db74f5923cd64ec3347",
+    "name": "Tyre Changer Machine/Maquina de Cambiar Llantas",
+    "code": "FA0017",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db74f5923cd64ec334a",
+    "name": "Wheel Balancer/Máquina de Balancear Ruedas",
+    "code": "FA0018",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db84f5923cd64ec3350",
+    "name": "Petty Cash workshop",
+    "code": "1.1.02",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280db84f5923cd64ec335f",
+    "name": "Furniture and Equipment/Muebles y Equipos",
+    "code": "FA0001",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280db84f5923cd64ec336e",
+    "name": "INPUT TAX/IMPUESTO DE ENTRADA",
+    "code": "TAX0001",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280db84f5923cd64ec3371",
+    "name": "INPUT TAX 11% - FECI",
+    "code": "IT0001",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280db94f5923cd64ec3374",
+    "name": "ITBMS (INPUT) 7%",
+    "code": "IT0002",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280db94f5923cd64ec3377",
+    "name": "ITBMS(INPUT) 4%",
+    "code": "IT0003",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280db94f5923cd64ec337a",
+    "name": "ITBMS(INPUT) 5%",
+    "code": "IT0004",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280db94f5923cd64ec337d",
+    "name": "Canal Bank CT 4090",
+    "code": "1.1.02-7",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280db94f5923cd64ec338f",
+    "name": "Banco General CT 600",
+    "code": "1.1.02-4",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280dba4f5923cd64ec339e",
+    "name": "Supplier Advances/Anticipo Proveedores",
+    "code": "1.1.04",
+    "category": "ASSET",
+    "accountType": "Other Asset"
+  },
+  {
+    "id": "6a280dbc4f5923cd64ec33f8",
+    "name": "CANAL BANK 500K LOAN ACCOUNT",
+    "code": "LL0019",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280dbc4f5923cd64ec33fe",
+    "name": "BI BANK 100030008383",
+    "code": "1.1.02.8",
+    "category": "ASSET",
+    "accountType": "Bank"
+  },
+  {
+    "id": "6a280dbf4f5923cd64ec3458",
+    "name": "OLA CREDIT",
+    "code": "LC003",
+    "category": "ASSET",
+    "accountType": "Other Current Asset"
+  },
+  {
+    "id": "6a280dbf4f5923cd64ec345b",
+    "name": "DEPRECIATION OF FIXED ASSETS",
+    "code": "FA0019",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280dbf4f5923cd64ec345e",
+    "name": "Computer And Software/Computadora y Software",
+    "code": "FA0020",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280dbf4f5923cd64ec3464",
+    "name": "GPS",
+    "code": "FA0021",
+    "category": "ASSET",
+    "accountType": "Fixed Asset"
+  },
+  {
+    "id": "6a280dc04f5923cd64ec348b",
+    "name": "YULEIMY -PETTY CASH",
+    "code": "1.1.01.1(E)",
+    "category": "ASSET",
+    "accountType": "Cash"
+  },
+  {
+    "id": "6a280dc04f5923cd64ec348e",
+    "name": "BI BANK LOAN 10251426134165",
+    "code": "LL0020",
+    "category": "LIABILITY",
+    "accountType": "Non Current Liability"
+  },
+  {
+    "id": "6a280dc04f5923cd64ec3491",
+    "name": "OW BANK CHARGES/COMISIÓN BANCARIA",
+    "code": "EXP0011",
+    "category": "EXPENSE",
+    "accountType": "Expense"
+  },
+  {
+    "id": "6a280dc04f5923cd64ec3494",
+    "name": "OTI 6%(OTHER TAX EXPENSES)/Otros Tributos de Impuestos",
+    "code": "IT0005",
+    "category": "ASSET",
+    "accountType": "Input Tax"
+  },
+  {
+    "id": "6a280dc54f5923cd64ec34f7",
+    "name": "Vehicles/Vehículos",
+    "code": "1200-VEH",
+    "category": "ASSET",
+    "accountType": "fixed asset"
+  }
+]
