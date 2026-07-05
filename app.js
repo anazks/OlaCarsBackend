@@ -100,6 +100,16 @@ const mongoose = require("mongoose");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+setTimeout(() => {
+  const http = require('http');
+  console.log("[DIAGNOSTICS] Requesting /api/reporting/diag-bg-public to trigger debug dump...");
+  http.get('http://localhost:3000/api/reporting/diag-bg-public', (res) => {
+    console.log("[DIAGNOSTICS] Public endpoint hit status:", res.statusCode);
+  }).on('error', (e) => {
+    console.error("[DIAGNOSTICS] Self-request failed:", e.message);
+  });
+}, 10000);
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -250,6 +260,114 @@ app.use("/api/fixed-assets", FixedAssetRouter);
 app.use("/api/fixed-asset-types", FixedAssetTypeRouter);
 app.use("/api/gps", GpsRouter);
 
+app.get("/diag-test", async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const AccountingCode = mongoose.model('AccountingCode');
+    const LedgerEntry = mongoose.model('LedgerEntry');
+
+    const allCodes = await AccountingCode.find({
+      $or: [
+        { accountType: { $in: ['Cash', 'Bank'] } },
+        { name: /cash|bank|banco/i },
+        { category: 'ASSET' }
+      ]
+    });
+
+    const bgAccount = await AccountingCode.findOne({
+      $or: [
+        { name: /2654/ },
+        { code: /2654/ }
+      ]
+    });
+
+    let details = {};
+    if (bgAccount) {
+      const bgEntries = await LedgerEntry.find({ accountingCode: bgAccount._id }).sort({ entryDate: 1, createdAt: 1 });
+      
+      let systemBal = 0;
+      const seen = new Set();
+      const uniqueEntries = [];
+      const duplicateEntries = [];
+
+      const bgMapped = bgEntries.map(e => {
+        const amt = e.amount || 0;
+        const sign = e.type === 'DEBIT' ? 1 : -1;
+        systemBal += (amt * sign);
+        
+        // Define a unique key for duplicate detection
+        const dateStr = new Date(e.entryDate).toISOString().split('T')[0];
+        const uniqueKey = `${dateStr}_${e.type}_${amt}_${(e.description || '').toLowerCase().trim()}`;
+        
+        const isDup = seen.has(uniqueKey);
+        const mappedEntry = {
+          id: e._id,
+          entryDate: e.entryDate,
+          type: e.type,
+          amount: e.amount,
+          description: e.description,
+          createdAt: e.createdAt,
+          isDuplicate: isDup
+        };
+
+        if (isDup) {
+          duplicateEntries.push(mappedEntry);
+        } else {
+          seen.add(uniqueKey);
+          uniqueEntries.push(mappedEntry);
+        }
+
+        return mappedEntry;
+      });
+
+      // Calculate running balance on unique entries only
+      let uniqueBal = 0;
+      const uniqueMapped = uniqueEntries.map(e => {
+        const amt = e.amount || 0;
+        const sign = e.type === 'DEBIT' ? 1 : -1;
+        uniqueBal += (amt * sign);
+        return {
+          ...e,
+          runningBalance: uniqueBal
+        };
+      });
+
+      details = {
+        account: bgAccount,
+        systemBalance: systemBal,
+        uniqueBalance: uniqueBal,
+        totalEntriesCount: bgEntries.length,
+        uniqueEntriesCount: uniqueEntries.length,
+        duplicatesCount: duplicateEntries.length,
+        duplicateEntriesSample: duplicateEntries.slice(0, 10),
+        uniqueEntriesWithRunningBalance: uniqueMapped
+      };
+      
+      fs.writeFileSync(path.join(__dirname, 'tmp/banco_general_debug.json'), JSON.stringify(details, null, 2));
+    } else {
+      details = {
+        error: "Account containing 2654 not found",
+        allCodesFound: allCodes.map(c => c.name)
+      };
+      fs.writeFileSync(path.join(__dirname, 'tmp/banco_general_debug.json'), JSON.stringify(details, null, 2));
+    }
+
+    res.status(200).json({
+      status: bgAccount ? "success" : "error",
+      account: bgAccount,
+      balance: bgAccount ? uniqueBal : 0,
+      entries: bgAccount ? uniqueMapped : [],
+      allBankCodes: allCodes.map(c => ({ id: c._id, name: c.name, code: c.code })),
+      message: bgAccount ? undefined : "Account containing 2654 not found",
+      success: true,
+      bgAccountDetails: details
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
@@ -341,6 +459,7 @@ const startServer = async () => {
     };
     startHistoricalBackfill();
 
+    // Run Startup Diagnostics
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });

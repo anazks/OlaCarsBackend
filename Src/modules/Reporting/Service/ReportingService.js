@@ -45,6 +45,7 @@ const normalizeCategory = (categoryStr) => {
     if (
         cat.includes('liability') || 
         cat.includes('liabilities') || 
+        cat.includes('liab') || 
         cat.includes('payable') || 
         cat.includes('output tax') || 
         cat.includes('output_tax') ||
@@ -122,26 +123,15 @@ exports.getPLReport = async (filters) => {
         { $match: query },
         {
             $group: {
-                _id: {
-                    accountingCode: "$accountingCode",
-                    entryDate: { $dateToString: { format: "%Y-%m-%d", date: "$entryDate" } },
-                    type: "$type",
-                    amount: "$amount",
-                    description: "$description"
-                }
-            }
-        },
-        {
-            $group: {
-                _id: "$_id.accountingCode",
+                _id: "$accountingCode",
                 debitSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$_id.type", "DEBIT"] }, "$_id.amount", 0 ]
+                        $cond: [ { $eq: ["$type", "DEBIT"] }, "$amount", 0 ]
                     }
                 },
                 creditSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$_id.type", "CREDIT"] }, "$_id.amount", 0 ]
+                        $cond: [ { $eq: ["$type", "CREDIT"] }, "$amount", 0 ]
                     }
                 }
             }
@@ -225,26 +215,15 @@ exports.getBalanceSheetReport = async (filters) => {
         { $match: query },
         {
             $group: {
-                _id: {
-                    accountingCode: "$accountingCode",
-                    entryDate: { $dateToString: { format: "%Y-%m-%d", date: "$entryDate" } },
-                    type: "$type",
-                    amount: "$amount",
-                    description: "$description"
-                }
-            }
-        },
-        {
-            $group: {
-                _id: "$_id.accountingCode",
+                _id: "$accountingCode",
                 debitSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$_id.type", "DEBIT"] }, "$_id.amount", 0 ]
+                        $cond: [ { $eq: ["$type", "DEBIT"] }, "$amount", 0 ]
                     }
                 },
                 creditSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$_id.type", "CREDIT"] }, "$_id.amount", 0 ]
+                        $cond: [ { $eq: ["$type", "CREDIT"] }, "$amount", 0 ]
                     }
                 }
             }
@@ -268,28 +247,48 @@ exports.getBalanceSheetReport = async (filters) => {
         equity: {}
     };
 
-    // Pre-populate all active Cash and Bank accounts so they always appear in the report
+    // Pre-populate ALL active Chart of Accounts so every account appears in the report
+    // (even those with zero activity). Ledger aggregation below will overwrite with real balances.
     try {
-        const cashBankAccounts = await AccountingCode.find({
-            $or: [
-                { accountType: { $in: ['Cash', 'Bank'] } },
-                { name: /cash|bank|banco|caja|petty|bct/i }
-            ],
+        const allActiveCodes = await AccountingCode.find({
             isActive: true,
             isDeleted: false
+        }).select('name category accountType code _id').lean();
+
+        allActiveCodes.forEach(acc => {
+            const normalizedCat = normalizeCategory(acc.category);
+            // Income and Expense accounts never appear on the Balance Sheet
+            if (normalizedCat === 'INCOME' || normalizedCat === 'EXPENSE') return;
+            if (normalizedCat === 'ASSET') {
+                report.assets[acc.name] = {
+                    amount: 0,
+                    category: acc.category,
+                    accountType: acc.accountType,
+                    code: acc.code,
+                    _id: acc._id
+                };
+            } else if (normalizedCat === 'LIABILITY') {
+                report.liabilities[acc.name] = {
+                    amount: 0,
+                    category: acc.category,
+                    accountType: acc.accountType,
+                    code: acc.code,
+                    _id: acc._id
+                };
+            } else if (normalizedCat === 'EQUITY') {
+                report.equity[acc.name] = {
+                    amount: 0,
+                    category: acc.category,
+                    accountType: acc.accountType,
+                    code: acc.code,
+                    _id: acc._id
+                };
+            }
         });
-        cashBankAccounts.forEach(acc => {
-            report.assets[acc.name] = {
-                amount: 0,
-                category: acc.category,
-                accountType: acc.accountType,
-                code: acc.code,
-                _id: acc._id
-            };
-        });
-    } catch (cbErr) {
-        console.error("Failed to pre-populate cash/bank accounts:", cbErr);
+    } catch (prepopErr) {
+        console.error("Failed to pre-populate Chart of Accounts:", prepopErr);
     }
+
 
     let cumulativeNetIncome = 0;
 
@@ -398,18 +397,78 @@ exports.getBalanceSheetReport = async (filters) => {
         report.equity["Retained Earnings (Current Period)"].amount += cumulativeNetIncome;
     }
 
+    // Map raw DB category → proper accountType label for display
+    const resolveAssetAccountType = (rawCategory, existingAccountType) => {
+        // If a specific, meaningful accountType already exists, use it
+        if (existingAccountType && existingAccountType !== 'Asset' && existingAccountType !== 'ASSET') {
+            return existingAccountType;
+        }
+        const cat = (rawCategory || '').toLowerCase().trim();
+        if (cat === 'cash') return 'Cash';
+        if (cat === 'bank') return 'Bank';
+        if (cat === 'accounts receivable') return 'Accounts Receivable';
+        if (cat === 'fixed asset') return 'Fixed Asset';
+        if (cat === 'input tax' || cat === 'input_tax') return 'Other Current Asset';
+        if (cat === 'other current asset') return 'Other Current Asset';
+        if (cat === 'other asset') return 'Other Asset';
+        if (cat === 'asset' || cat === 'assets') return 'Other Current Asset';
+        // Fallback: return the raw category as-is, or default
+        return existingAccountType || 'Other Current Asset';
+    };
+
     const assetsArray = Object.keys(report.assets).map(name => ({
         name,
         amount: report.assets[name].amount,
         category: report.assets[name].category,
-        accountType: report.assets[name].accountType,
+        accountType: resolveAssetAccountType(report.assets[name].category, report.assets[name].accountType),
         code: report.assets[name].code
     }));
+    // Map raw DB category → proper accountType label for liabilities
+    const resolveLiabilityAccountType = (rawCategory, existingAccountType) => {
+        const type = (existingAccountType || '').toLowerCase().trim();
+        const cat = (rawCategory || '').toLowerCase().trim();
+        
+        // Output Tax is grouped under Other Current Liability per user request
+        if (type === 'output tax' || type === 'output_tax' || cat === 'output tax' || cat === 'output_tax') {
+            return 'Other Current Liability';
+        }
+
+        if (type === 'accounts payable' || cat === 'accounts payable' || type === 'payable' || cat === 'payable') {
+            return 'Accounts Payable';
+        }
+
+        if (
+            type.includes('non current') || 
+            type.includes('non-current') || 
+            type.includes('non_current') || 
+            cat.includes('non current') || 
+            cat.includes('non-current') || 
+            cat.includes('non_current') || 
+            cat === 'non current liab'
+        ) {
+            return 'Non Current Liability';
+        }
+
+        if (type.includes('other current') || cat.includes('other current')) {
+            return 'Other Current Liability';
+        }
+
+        if (type.includes('other liability') || type.includes('other liabilities') || cat.includes('other liability') || cat.includes('other liabilities')) {
+            return 'Other Liability';
+        }
+        
+        if (existingAccountType && existingAccountType !== 'Liability' && existingAccountType !== 'LIABILITY') {
+            return existingAccountType;
+        }
+        
+        return existingAccountType || 'Other Current Liability';
+    };
+
     const liabilitiesArray = Object.keys(report.liabilities).map(name => ({
         name,
         amount: report.liabilities[name].amount,
         category: report.liabilities[name].category,
-        accountType: report.liabilities[name].accountType,
+        accountType: resolveLiabilityAccountType(report.liabilities[name].category, report.liabilities[name].accountType),
         code: report.liabilities[name].code
     }));
     const equityArray = Object.keys(report.equity).map(name => ({

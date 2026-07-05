@@ -249,12 +249,14 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
 
             // Accounts Cache
             const accountsList = await AccountingCode.find({
-                name: { $in: Array.from(uniqueAccountNames) },
                 isDeleted: false
             }).lean();
             const accountMap = {};
             accountsList.forEach(a => {
                 accountMap[a.name.toLowerCase().trim()] = a;
+                if (a.code) {
+                    accountMap[a.code.toLowerCase().trim()] = a;
+                }
             });
 
             // Branches Cache
@@ -318,6 +320,7 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 const rowNum = i + 2; // header line + 1-indexed
 
                 const accName = getRowValue(row, ["Account Name", "account_name", "accountName", "Account"]);
+                const accCode = getRowValue(row, ["accountingCode", "Accounting Code", "accounting_code", "Account Code", "Account ID", "account_id"]);
                 const dateVal = getRowValue(row, ["Entry Date", "entry_date", "entryDate", "date"]);
                 const desc = getRowValue(row, ["Description", "description", "memo", "transaction_details"]);
                 const txnType = getRowValue(row, ["Transaction Type", "transaction_type", "transactionType"]);
@@ -337,18 +340,24 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 const debitVal = getRowValue(row, ["debit", "debit_amount", "dr"]);
                 const creditVal = getRowValue(row, ["credit", "credit_amount", "cr"]);
 
-                if (debitVal !== undefined && debitVal !== null && debitVal !== "") {
-                    const parsed = parseFloat(debitVal);
-                    if (!isNaN(parsed)) {
-                        type = "DEBIT";
-                        amount = parsed;
-                    }
-                } else if (creditVal !== undefined && creditVal !== null && creditVal !== "") {
-                    const parsed = parseFloat(creditVal);
-                    if (!isNaN(parsed)) {
-                        type = "CREDIT";
-                        amount = parsed;
-                    }
+                const parsedDebit = (debitVal !== undefined && debitVal !== null && debitVal !== "") ? parseFloat(debitVal) : NaN;
+                const parsedCredit = (creditVal !== undefined && creditVal !== null && creditVal !== "") ? parseFloat(creditVal) : NaN;
+
+                if (!isNaN(parsedDebit) && parsedDebit > 0) {
+                    type = "DEBIT";
+                    amount = parsedDebit;
+                } else if (!isNaN(parsedCredit) && parsedCredit > 0) {
+                    type = "CREDIT";
+                    amount = parsedCredit;
+                } else if (!isNaN(parsedDebit) && !isNaN(parsedCredit)) {
+                    type = "DEBIT";
+                    amount = 0;
+                } else if (!isNaN(parsedDebit)) {
+                    type = "DEBIT";
+                    amount = parsedDebit;
+                } else if (!isNaN(parsedCredit)) {
+                    type = "CREDIT";
+                    amount = parsedCredit;
                 } else if (amountStr !== undefined && amountStr !== null && amountStr !== "") {
                     const parsed = parseFloat(amountStr);
                     amount = isNaN(parsed) ? 0 : parsed;
@@ -366,13 +375,42 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
 
                 const rowErrors = [];
 
-                // --- 1. Account Name ---
-                if (!accName) {
-                    rowErrors.push("Account Name is required.");
+                // --- 1. Account Name / Code ---
+                let resolvedAccount = null;
+                if (accName) {
+                    const searchKey = String(accName).toLowerCase().trim();
+                    resolvedAccount = accountMap[searchKey];
+                    if (!resolvedAccount) {
+                        const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                        resolvedAccount = accountsList.find(acc => {
+                            const nameLower = (acc.name || "").toLowerCase().trim();
+                            const nameNorm = nameLower.replace(/[^a-z0-9]/g, "");
+                            return nameLower === searchKey || (nameNorm && searchKeyNorm && nameNorm === searchKeyNorm);
+                        });
+                    }
                 }
-                const resolvedAccount = accName ? accountMap[String(accName).toLowerCase().trim()] : null;
-                if (accName && !resolvedAccount) {
-                    rowErrors.push(`Account "${accName}" not found.`);
+
+                if (!resolvedAccount && accCode) {
+                    const searchKey = String(accCode).toLowerCase().trim();
+                    resolvedAccount = accountMap[searchKey];
+                    if (!resolvedAccount) {
+                        const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                        resolvedAccount = accountsList.find(acc => {
+                            const codeLower = (acc.code || "").toLowerCase().trim();
+                            const codeNorm = codeLower.replace(/[^a-z0-9]/g, "");
+                            return codeLower === searchKey || (codeNorm && codeNorm === searchKeyNorm);
+                        });
+                    }
+                }
+
+                if (!resolvedAccount) {
+                    if (accName) {
+                        rowErrors.push(`Account "${accName}" not found.`);
+                    } else if (accCode) {
+                        rowErrors.push(`Account with code "${accCode}" not found.`);
+                    } else {
+                        rowErrors.push("Account accountingCode or Name is required.");
+                    }
                 }
 
                 // --- 2. Amount ---

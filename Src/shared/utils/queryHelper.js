@@ -66,7 +66,8 @@ const applyQueryFeatures = async (model, queryParams, options = {}) => {
             const words = search.trim().split(/\s+/).filter(Boolean);
             if (words.length > 0) {
                 const wordQueries = words.map(word => {
-                    const searchRegex = { $regex: word, $options: 'i' };
+                    const escapedWord = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                    const searchRegex = { $regex: escapedWord, $options: 'i' };
                     return {
                         $or: options.searchFields.map(field => ({
                             [field]: searchRegex
