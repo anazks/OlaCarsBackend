@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -42,20 +43,18 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
     const rightMargin = 545;
     const printableWidth = rightMargin - leftMargin;
 
-    // Header section
-    doc.fillColor(primaryColor)
-       .fontSize(22)
-       .font("Helvetica-Bold")
-       .text("OLA CARS", leftMargin, 50)
-       .fontSize(9)
-       .fillColor(secondaryColor)
-       .font("Helvetica")
-       .text("Logistics Finance Division", leftMargin, 75);
+    // Logo image integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(14)
        .fillColor(primaryColor)
        .font("Helvetica-Bold")
-       .text(reportTitle, 250, 50, { align: "right", width: 295 });
+       .text(reportTitle, 250, 58, { align: "right", width: 295 });
 
     doc.moveTo(leftMargin, 95)
        .lineTo(rightMargin, 95)
@@ -406,31 +405,6 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Equity", leftMargin, currentY);
         doc.text(`$${formatCurrency(reportData.equityTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
         currentY += 40;
-
-        // Accounting Equation Check Card
-        ensureSpace(60);
-        const assetsTotalVal = reportData.assetsTotal || 0;
-        const liabilitiesPlusEquityVal = (reportData.liabilitiesTotal || 0) + (reportData.equityTotal || 0);
-
-        doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(borderMain)
-           .lineWidth(1)
-           .stroke();
-        currentY += 12;
-
-        doc.fillColor("#F3F4F6")
-           .rect(leftMargin, currentY, printableWidth, 40)
-           .fill();
-
-        doc.fillColor(primaryColor)
-           .fontSize(9)
-           .font("Helvetica-Bold")
-           .text("ACCOUNTING EQUALITY CHECK", leftMargin + 15, currentY + 14)
-           .font("Helvetica")
-           .text(`Assets: $${formatCurrency(assetsTotalVal)}`, leftMargin + 200, currentY + 14)
-           .text(`=`, leftMargin + 340, currentY + 14)
-           .text(`Liabilities + Equity: $${formatCurrency(liabilitiesPlusEquityVal)}`, leftMargin + 365, currentY + 14);
     }
 
     // Footnotes / Stamp

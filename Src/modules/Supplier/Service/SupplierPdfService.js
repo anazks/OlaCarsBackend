@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe date formatter
 const formatDate = (val) => {
@@ -36,17 +37,17 @@ exports.generateSupplierPdf = (supplier, res) => {
     const rightMargin = 545;
     const rightColX = 350;
 
-    // Header
-    doc.fillColor(primaryColor)
-       .fontSize(22)
-       .text("OLA CARS", leftMargin, 50, { bold: true })
-       .fontSize(9)
-       .fillColor(secondaryColor)
-       .text("Logistics Procurement & Supplier Registry", leftMargin, 75);
+    // Logo integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(18)
        .fillColor(primaryColor)
-       .text("SUPPLIER CARD", rightColX - 50, 50, { align: "right", width: 245, bold: true });
+       .text("SUPPLIER CARD", rightColX - 50, 58, { align: "right", width: 245, bold: true });
 
     doc.moveTo(leftMargin, 95)
        .lineTo(rightMargin, 95)
