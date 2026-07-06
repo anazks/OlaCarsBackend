@@ -968,6 +968,10 @@ const bulkAddVehicles = async (req, res) => {
                             'basicDetails.weeklyRent': (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
                             'basicDetails.fleetNumber': row.fleetNumber ? row.fleetNumber.trim() : undefined,
                             'legalDocs.registrationNumber': row.registrationNumber.trim(),
+                            'basicDetails.odometer': (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                            'basicDetails.gpsSerialNumber': row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                            'basicDetails.sellingValue': (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                            'basicDetails.leaseDurationWeeks': (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
                             $push: {
                                 statusHistory: {
                                     status: mappedStatus,
@@ -978,17 +982,23 @@ const bulkAddVehicles = async (req, res) => {
                                 }
                             }
                         };
+
                         const updatedVehicle = await updateVehicleService(existingVehicleByVin._id, updateData);
                         results.created.push({
                             row: rowNum,
                             id: updatedVehicle._id,
-                            vin: updatedVehicle.basicDetails?.vin,
-                            make: updatedVehicle.basicDetails?.make,
-                            model: updatedVehicle.basicDetails?.model,
+                            vin: updatedVehicle.basicDetails?.vin || cleanVin,
+                            make: updatedVehicle.basicDetails?.make || row.make.trim(),
+                            model: updatedVehicle.basicDetails?.model || row.model.trim(),
                             updated: true
                         });
                     } else {
-                        throw new Error("A vehicle with this VIN already exists.", { cause: 409 });
+                        results.skipped.push({
+                            row: rowNum,
+                            vin: cleanVin,
+                            registrationNumber: regNumClean,
+                            message: `Vehicle with VIN '${cleanVin}' already exists with registration '${currentReg}' (skipped).`
+                        });
                     }
                 } else {
                     // Prepare new vehicle structure

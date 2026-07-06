@@ -426,7 +426,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 exports.getBankTransactions = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { page = 1, limit = 25, type, startDate, endDate, search } = req.query;
+        const { page = 1, limit = 25, type, startDate, endDate, search, sort = "desc", balance } = req.query;
 
         const BankAccount = require("../Model/BankAccountModel");
         const BankTransaction = require("../Model/BankTransactionModel");
@@ -452,11 +452,25 @@ exports.getBankTransactions = async (req, res, next) => {
             }
         }
 
+        if (balance) {
+            const balNum = parseFloat(balance);
+            if (!isNaN(balNum)) {
+                query.runningBalance = { $gte: balNum - 0.01, $lte: balNum + 0.01 };
+            }
+        }
+
         if (search) {
-            query.$or = [
+            const searchConditions = [
                 { description: { $regex: search, $options: "i" } },
                 { transactionId: { $regex: search, $options: "i" } }
             ];
+            const searchNum = parseFloat(search);
+            if (!isNaN(searchNum)) {
+                searchConditions.push({
+                    runningBalance: { $gte: searchNum - 0.01, $lte: searchNum + 0.01 }
+                });
+            }
+            query.$or = searchConditions;
         }
 
         const pageNum = parseInt(page, 10);
@@ -464,8 +478,9 @@ exports.getBankTransactions = async (req, res, next) => {
         const skip = (pageNum - 1) * limitNum;
 
         const total = await BankTransaction.countDocuments(query);
+        const sortOrder = sort === "asc" ? 1 : -1;
         const transactions = await BankTransaction.find(query)
-            .sort({ entryDate: -1, createdAt: -1 })
+            .sort({ entryDate: sortOrder, createdAt: sortOrder })
             .skip(skip)
             .limit(limitNum);
 

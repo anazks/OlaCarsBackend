@@ -8,35 +8,69 @@ const { Invoice } = require("../../Invoice/Model/InvoiceModel");
  * Parse a flexible date from a string value (no JS Date timezone pitfalls).
  * Returns a UTC midnight Date object.
  */
+function swapIfBothUnder12(date) {
+    if (!date || isNaN(date.getTime())) return date;
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    const day = date.getUTCDate();
+    if (month <= 12 && day <= 12) {
+        return new Date(Date.UTC(year, day - 1, month));
+    }
+    return date;
+}
+
 function parseFlexibleDate(val) {
-    if (!val) return null;
+    if (val === undefined || val === null || val === "") return null;
+
+    // 0. If it's already a JS Date object, use it directly!
+    if (val instanceof Date && !isNaN(val.getTime())) {
+        return swapIfBothUnder12(new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate())));
+    }
+
+    // 1. Support Excel serial date numbers (e.g. 45658)
+    const num = Number(val);
+    if (!isNaN(num) && num > 30000 && num < 60000) {
+        // Excel base date starts at 1899-12-30 due to a leap year bug in Lotus 1-2-3
+        const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+        if (!isNaN(date.getTime())) {
+            // Normalize to UTC midnight
+            return swapIfBothUnder12(new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())));
+        }
+    }
+
     const str = String(val).trim();
     if (!str) return null;
 
-    // YYYY-MM-DD (from dateNF formatting or ISO strings)
+    // 2. YYYY-MM-DD (from dateNF formatting or ISO strings)
     const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
     if (ymdMatch) {
         const d = new Date(Date.UTC(parseInt(ymdMatch[1]), parseInt(ymdMatch[2]) - 1, parseInt(ymdMatch[3])));
-        if (!isNaN(d.getTime())) return d;
+        if (!isNaN(d.getTime())) return swapIfBothUnder12(d);
     }
 
-    // DD/MM/YYYY, MM/DD/YYYY, M/D/YY, DD/MM/YY etc.
+    // 3. DD/MM/YYYY, MM/DD/YYYY, M/D/YY, DD/MM/YY etc.
     const parts = str.split(/[-/.]/);
     if (parts.length >= 3) {
         const p1 = parseInt(parts[0], 10);
         const p2 = parseInt(parts[1], 10);
-        let p3 = parseInt(parts[2], 10);
+        let p3 = parseInt(parts[2], 10); // this could parse "2025 05:30 AM" as 2025
 
         // Handle 2-digit year (e.g. 23 → 2023)
         if (p3 < 100) p3 = 2000 + p3;
 
         if (p3 >= 1900) {
-            // Assume M/D/YYYY — swap if month > 12
-            let month = p1, day = p2;
-            if (month > 12 && day <= 12) { month = p2; day = p1; }
+            // Assume DD/MM/YYYY — swap if month (p2) is > 12
+            let day = p1, month = p2;
+            if (month > 12 && day <= 12) { month = p1; day = p2; }
             const d = new Date(Date.UTC(p3, month - 1, day));
             if (!isNaN(d.getTime())) return d;
         }
+    }
+
+    // 4. Fallback to native parsing
+    const parsedNative = new Date(str);
+    if (!isNaN(parsedNative.getTime())) {
+        return swapIfBothUnder12(new Date(Date.UTC(parsedNative.getFullYear(), parsedNative.getMonth(), parsedNative.getDate())));
     }
 
     return null;
@@ -134,6 +168,9 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
 
     // 2. Pre-load lookup caches for performance
     const allAccounts = await AccountingCode.find({ isDeleted: { $ne: true } }).lean();
+    
+
+
     const accountByCode = {};
     for (const acc of allAccounts) {
         if (acc.code) accountByCode[acc.code.toLowerCase().trim()] = acc;
@@ -175,14 +212,58 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
             }
 
             // --- Resolve accountingCode ---
-            const accountId = String(getVal(row, ["account_id", "Account ID"]) || "").trim();
+            const getRowVal = (keys) => {
+                for (const k of keys) {
+                    const val = String(row[k] !== undefined && row[k] !== null ? row[k] : "").trim();
+                    if (val !== "") return val;
+                }
+                return "";
+            };
+
+            const accName = getRowVal(["account_name", "Account Name", "account", "Account"]);
+            const accCode = getRowVal(["accountingCode", "accounting_code", "Accounting Code", "account_code", "Account Code", "account_id", "Account ID"]);
 
             let accountingCode = null;
-            if (accountId) {
-                accountingCode = accountByCode[accountId.toLowerCase()];
+
+            // 1. Try matching by EXACT name first if provided (exact or alphanumeric exact match)
+            if (accName) {
+                const searchKey = accName.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = allAccounts.find(acc => {
+                    const nameLower = (acc.name || "").toLowerCase().trim();
+                    const nameNorm = nameLower.replace(/[^a-z0-9]/g, "");
+                    return nameLower === searchKey || (nameNorm && searchKeyNorm && nameNorm === searchKeyNorm);
+                });
             }
+
+            // 2. If name check failed/not provided, try matching by code if provided
+            if (!accountingCode && accCode) {
+                const searchKey = accCode.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = accountByCode[searchKey];
+                if (!accountingCode) {
+                    accountingCode = allAccounts.find(acc => {
+                        const codeLower = (acc.code || "").toLowerCase().trim();
+                        const codeNorm = codeLower.replace(/[^a-z0-9]/g, "");
+                        return codeLower === searchKey || (codeNorm && codeNorm === searchKeyNorm);
+                    });
+                }
+            }
+
+            // 3. Fallback to LOOSE name matching only if still not found
+            if (!accountingCode && accName) {
+                const searchKey = accName.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = allAccounts.find(acc => {
+                    const nameLower = (acc.name || "").toLowerCase().trim();
+                    const nameNorm = nameLower.replace(/[^a-z0-9]/g, "");
+                    return (nameNorm && searchKeyNorm && nameNorm.includes(searchKeyNorm)) || 
+                           (searchKeyNorm && nameNorm && searchKeyNorm.includes(nameNorm));
+                });
+            }
+
             if (!accountingCode) {
-                errors.push({ row: rowNum, reason: `Account not found: ID="${accountId}"` });
+                errors.push({ row: rowNum, reason: `Account not found: Name="${accName}" Code="${accCode}"` });
                 continue;
             }
 
@@ -275,15 +356,19 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
         }
 
         // Update ledger entries that matched an invoice — set the transaction field
+        const matchedTxnIds = [];
         for (const { transactionId } of transactionIdsToLink) {
             const invoice = invoiceByExternalId[transactionId];
             if (invoice) {
-                await LedgerEntry.updateMany(
-                    { transactionId, createdBy },
-                    { $set: { description: undefined } } // noop, we just want to confirm the link exists
-                );
+                matchedTxnIds.push(transactionId);
                 linkedCount++;
             }
+        }
+        if (matchedTxnIds.length > 0) {
+            await LedgerEntry.updateMany(
+                { transactionId: { $in: matchedTxnIds }, createdBy },
+                { $set: { description: undefined } } // noop, we just want to confirm the link exists
+            );
         }
 
         // Log the linking results

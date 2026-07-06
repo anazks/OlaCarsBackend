@@ -16,6 +16,8 @@ const addAccountingCode = async (req, res) => {
 const getAccountingCodes = async (req, res) => {
     try {
         const result = await AccountingCodeService.getAll(req.query);
+
+
         return res.status(200).json({ 
             success: true, 
             data: result.data,
