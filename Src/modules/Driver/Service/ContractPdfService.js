@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -41,17 +42,17 @@ exports.generateContractPdf = (driver, vehicle, res) => {
     const rightMargin = 545;
     const rightColX = 350;
 
-    // Header
-    doc.fillColor(primaryColor)
-       .fontSize(20)
-       .text("OLA CARS LOGISTICS", leftMargin, 50, { bold: true })
-       .fontSize(9)
-       .fillColor(secondaryColor)
-       .text("Fleet Operations & Legal Registry", leftMargin, 75);
+    // Logo integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(16)
        .fillColor(primaryColor)
-       .text("VEHICLE LEASE AGREEMENT", rightColX - 100, 50, { align: "right", width: 295, bold: true });
+       .text("VEHICLE LEASE AGREEMENT", rightColX - 100, 58, { align: "right", width: 295, bold: true });
 
     doc.moveTo(leftMargin, 95)
        .lineTo(rightMargin, 95)

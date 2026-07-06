@@ -118,6 +118,23 @@ const getMappedValue = (row, targetField, fieldMap) => {
     return undefined;
 };
 
+const mapLimit = async (array, limit, fn) => {
+    const results = [];
+    const executing = [];
+    for (const item of array) {
+        const p = Promise.resolve().then(() => fn(item));
+        results.push(p);
+        if (limit <= array.length) {
+            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+            executing.push(e);
+            if (executing.length >= limit) {
+                await Promise.race(executing);
+            }
+        }
+    }
+    return Promise.all(results);
+};
+
 /**
  * Main reconciliation service for Payment Received bulk upload.
  */
@@ -257,12 +274,21 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
 
             const pNoKey = paymentNumber.toString().trim();
             if (!paymentGroups.has(pNoKey)) {
+                const rawPaymentMethod = getMappedValue(row, 'paymentMethod', fieldMap) || 'Cash';
+                let normalizedPaymentMethod = 'Cash';
+                const cleanPm = rawPaymentMethod.toString().toLowerCase().trim();
+                if (cleanPm.includes('cash')) normalizedPaymentMethod = 'Cash';
+                else if (cleanPm.includes('bank') || cleanPm.includes('transfer')) normalizedPaymentMethod = 'Bank Transfer';
+                else if (cleanPm.includes('card') || cleanPm.includes('visa') || cleanPm.includes('master')) normalizedPaymentMethod = 'Card';
+                else if (cleanPm.includes('mobile') || cleanPm.includes('nequi') || cleanPm.includes('yappy')) normalizedPaymentMethod = 'Mobile Money';
+                else normalizedPaymentMethod = 'Other';
+
                 paymentGroups.set(pNoKey, {
                     paymentNumber: pNoKey,
                     customer: resolvedCust,
                     rowAmount: parseFloat(amountReceivedVal),
                     paymentDate: parseFlexibleDate(paymentDateVal),
-                    paymentMethod: getMappedValue(row, 'paymentMethod', fieldMap) || 'Cash',
+                    paymentMethod: normalizedPaymentMethod,
                     referenceNumber: getMappedValue(row, 'referenceNumber', fieldMap) || '',
                     notes: getMappedValue(row, 'notes', fieldMap) || '',
                     depositTo: getMappedValue(row, 'depositTo', fieldMap),
@@ -294,258 +320,263 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
         const modifiedInvoicesSet = new Set();
         let sequentialPRCounter = await PaymentReceived.countDocuments().session(session);
 
+        // Assign final payment numbers synchronously first to avoid race conditions on sequentialPRCounter
         for (const [paymentNumber, group] of paymentGroups.entries()) {
-            try {
-                // Resolve Deposit To Account
-            let depositToDoc = null;
-            if (group.depositTo) {
-                depositToDoc = accCodesMap.get(cleanString(group.depositTo));
-            }
-            if (!depositToDoc) {
-                depositToDoc = accCodesMap.get(cleanString("1020")) ||
-                    accCodesMap.get(cleanString("1030")) ||
-                    accCodes.find(ac => ac.category === "ASSET");
-            }
-            if (!depositToDoc) {
-                summary.errorCount++;
-                summary.errors.push(`Payment ${paymentNumber}: No valid asset deposit account found.`);
-                continue;
-            }
-
-            // Resolve Branch
-            let resolvedBranch = null;
-            if (group.branchVal) {
-                const cleanBr = cleanString(group.branchVal);
-                resolvedBranch = branches.find(b => cleanString(b.name) === cleanBr || cleanString(b.code) === cleanBr);
-            }
-            if (!resolvedBranch && group.customer) {
-                resolvedBranch = branches.find(b => b._id.toString() === group.customer.branch.toString());
-            }
-            resolvedBranch = resolvedBranch || defaultBranch;
-
-            // Generate payment number if temporary
             let finalPaymentNumber = paymentNumber;
             const isGenerated = paymentNumber.startsWith("TEMP-PR-");
             if (isGenerated) {
                 sequentialPRCounter++;
                 finalPaymentNumber = `PR-${String(sequentialPRCounter).padStart(5, '0')}`;
             }
+            group.finalPaymentNumber = finalPaymentNumber;
+        }
 
-            // Filter out rows that are ALREADY saved on the specified invoices
-            const activeApplications = [];
-
-            // Fetch or create PaymentReceived
-            let payDoc = existingPaymentsMap.get(finalPaymentNumber);
-            const isExisting = !!payDoc;
-
-            const newInvoicesList = [];
-            if (isExisting && payDoc.invoices) {
-                newInvoicesList.push(...payDoc.invoices);
-            }
-
-            for (const item of group.rows) {
-                const invoiceDoc = item.invoiceDoc;
-                const amtAppliedVal = getMappedValue(item.row, 'amountApplied', fieldMap);
-                let amountApplied = parseFloat(amtAppliedVal);
-
-                if (isNaN(amountApplied) || amountApplied <= 0) {
-                    const invPaid = invoiceDoc.payments.reduce((sum, p) => sum + p.amount, 0);
-                    const invBal = Math.max(0, invoiceDoc.totalAmountDue - invPaid);
-                    amountApplied = Math.min(group.rowAmount, invBal);
+        const groupsArray = Array.from(paymentGroups.entries());
+        await mapLimit(groupsArray, 15, async ([paymentNumber, group]) => {
+            try {
+                // Resolve Deposit To Account
+                let depositToDoc = null;
+                if (group.depositTo) {
+                    depositToDoc = accCodesMap.get(cleanString(group.depositTo));
+                }
+                if (!depositToDoc) {
+                    depositToDoc = accCodesMap.get(cleanString("1020")) ||
+                        accCodesMap.get(cleanString("1030")) ||
+                        accCodes.find(ac => ac.category === "ASSET");
+                }
+                if (!depositToDoc) {
+                    summary.errorCount++;
+                    summary.errors.push(`Payment ${paymentNumber}: No valid asset deposit account found.`);
+                    return;
                 }
 
-                // Check if this payment number is already saved on this invoice
-                const alreadySaved = invoiceDoc.payments.some(p =>
-                    p.transactionId === finalPaymentNumber ||
-                    (p.note && p.note.includes(finalPaymentNumber))
-                );
+                // Resolve Branch
+                let resolvedBranch = null;
+                if (group.branchVal) {
+                    const cleanBr = cleanString(group.branchVal);
+                    resolvedBranch = branches.find(b => cleanString(b.name) === cleanBr || cleanString(b.code) === cleanBr);
+                }
+                if (!resolvedBranch && group.customer) {
+                    resolvedBranch = branches.find(b => b._id.toString() === group.customer.branch.toString());
+                }
+                resolvedBranch = resolvedBranch || defaultBranch;
 
-                if (alreadySaved) {
-                    // Check if it is missing from PaymentReceived invoices list (broken link/inconsistency)
+                const finalPaymentNumber = group.finalPaymentNumber;
+
+                // Filter out rows that are ALREADY saved on the specified invoices
+                const activeApplications = [];
+
+                // Fetch or create PaymentReceived
+                let payDoc = existingPaymentsMap.get(finalPaymentNumber);
+                const isExisting = !!payDoc;
+
+                const newInvoicesList = [];
+                if (isExisting && payDoc.invoices) {
+                    newInvoicesList.push(...payDoc.invoices);
+                }
+
+                for (const item of group.rows) {
+                    const invoiceDoc = item.invoiceDoc;
+                    const amtAppliedVal = getMappedValue(item.row, 'amountApplied', fieldMap);
+                    let amountApplied = parseFloat(amtAppliedVal);
+
+                    if (isNaN(amountApplied) || amountApplied <= 0) {
+                        const invPaid = invoiceDoc.payments.reduce((sum, p) => sum + p.amount, 0);
+                        const invBal = Math.max(0, invoiceDoc.totalAmountDue - invPaid);
+                        amountApplied = Math.min(group.rowAmount, invBal);
+                    }
+
+                    // Check if this payment number is already saved on this invoice
+                    const alreadySaved = invoiceDoc.payments.some(p =>
+                        p.transactionId === finalPaymentNumber ||
+                        (p.note && p.note.includes(finalPaymentNumber))
+                    );
+
+                    if (alreadySaved) {
+                        // Check if it is missing from PaymentReceived invoices list (broken link/inconsistency)
+                        const existsInPayDoc = newInvoicesList.some(inv => inv.invoiceId.toString() === invoiceDoc._id.toString());
+                        if (!existsInPayDoc) {
+                            const matchingPaymentEntry = invoiceDoc.payments.find(p =>
+                                p.transactionId === finalPaymentNumber ||
+                                (p.note && p.note.includes(finalPaymentNumber))
+                            );
+                            const actualAmount = matchingPaymentEntry ? matchingPaymentEntry.amount : amountApplied;
+
+                            newInvoicesList.push({
+                                invoiceId: invoiceDoc._id,
+                                invoiceNumber: invoiceDoc.invoiceNumber,
+                                amountApplied: actualAmount
+                            });
+
+                            activeApplications.push({
+                                invoiceDoc,
+                                amountApplied: actualAmount,
+                                rowIndex: item.rowIndex,
+                                isRepairOnly: true
+                            });
+                        } else {
+                            summary.skippedCount++;
+                            summary.skipped.push(`Row ${item.rowIndex}: Payment "${finalPaymentNumber}" is already connected to Invoice "${invoiceDoc.invoiceNumber}". Leaving it as is.`);
+                        }
+                        continue;
+                    }
+
+                    activeApplications.push({
+                        invoiceDoc,
+                        amountApplied,
+                        rowIndex: item.rowIndex,
+                        isRepairOnly: false
+                    });
+                }
+
+                // If all applications for this payment are skipped, skip this group entirely
+                if (activeApplications.length === 0) {
+                    return;
+                }
+
+                const nonRepairCount = activeApplications.filter(a => !a.isRepairOnly).length;
+                summary.processedCount += nonRepairCount;
+
+                // Apply payments to the Invoice documents
+                const paymentMethodStr = group.paymentMethod || "Cash";
+
+                for (const app of activeApplications) {
+                    const invoiceDoc = app.invoiceDoc;
+
+                    if (!app.isRepairOnly) {
+                        // Push new payment entry to Invoice
+                        invoiceDoc.payments.push({
+                            amount: app.amountApplied,
+                            paidAt: group.paymentDate,
+                            paymentMethod: paymentMethodStr,
+                            transactionId: finalPaymentNumber,
+                            note: group.notes || `Payment received (PR: ${finalPaymentNumber})`
+                        });
+
+                        modifiedInvoicesSet.add(invoiceDoc._id.toString());
+                    }
+
+                    // Add to PaymentReceived invoices array if not already present
                     const existsInPayDoc = newInvoicesList.some(inv => inv.invoiceId.toString() === invoiceDoc._id.toString());
                     if (!existsInPayDoc) {
-                        const matchingPaymentEntry = invoiceDoc.payments.find(p =>
-                            p.transactionId === finalPaymentNumber ||
-                            (p.note && p.note.includes(finalPaymentNumber))
-                        );
-                        const actualAmount = matchingPaymentEntry ? matchingPaymentEntry.amount : amountApplied;
-
                         newInvoicesList.push({
                             invoiceId: invoiceDoc._id,
                             invoiceNumber: invoiceDoc.invoiceNumber,
-                            amountApplied: actualAmount
-                        });
-
-                        activeApplications.push({
-                            invoiceDoc,
-                            amountApplied: actualAmount,
-                            rowIndex: item.rowIndex,
-                            isRepairOnly: true
+                            amountApplied: app.amountApplied
                         });
                     } else {
-                        summary.skippedCount++;
-                        summary.skipped.push(`Row ${item.rowIndex}: Payment "${finalPaymentNumber}" is already connected to Invoice "${invoiceDoc.invoiceNumber}". Leaving it as is.`);
+                        // Update amount
+                        const idx = newInvoicesList.findIndex(inv => inv.invoiceId.toString() === invoiceDoc._id.toString());
+                        newInvoicesList[idx].amountApplied = app.amountApplied;
                     }
-                    continue;
                 }
 
-                activeApplications.push({
-                    invoiceDoc,
-                    amountApplied,
-                    rowIndex: item.rowIndex,
-                    isRepairOnly: false
-                });
-            }
+                // Save PaymentReceived document
+                const totalApplied = newInvoicesList.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0);
+                const amountReceived = Math.max(group.rowAmount || 0, totalApplied);
 
-            // If all applications for this payment are skipped, skip this group entirely
-            if (activeApplications.length === 0) {
-                continue;
-            }
-
-            const nonRepairCount = activeApplications.filter(a => !a.isRepairOnly).length;
-            summary.processedCount += nonRepairCount;
-
-            // Apply payments to the Invoice documents
-            const paymentMethodStr = group.paymentMethod || "Cash";
-
-            for (const app of activeApplications) {
-                const invoiceDoc = app.invoiceDoc;
-
-                if (!app.isRepairOnly) {
-                    // Push new payment entry to Invoice
-                    invoiceDoc.payments.push({
-                        amount: app.amountApplied,
-                        paidAt: group.paymentDate,
-                        paymentMethod: paymentMethodStr,
-                        transactionId: finalPaymentNumber,
-                        note: group.notes || `Payment received (PR: ${finalPaymentNumber})`
-                    });
-
-                    modifiedInvoicesSet.add(invoiceDoc._id.toString());
+                const extraAmount = Math.max(0, amountReceived - totalApplied);
+                if (extraAmount > 0) {
+                    summary.extraCount = (summary.extraCount || 0) + 1;
+                    summary.totalExtraAmount = (summary.totalExtraAmount || 0) + extraAmount;
                 }
 
-                // Add to PaymentReceived invoices array if not already present
-                const existsInPayDoc = newInvoicesList.some(inv => inv.invoiceId.toString() === invoiceDoc._id.toString());
-                if (!existsInPayDoc) {
-                    newInvoicesList.push({
-                        invoiceId: invoiceDoc._id,
-                        invoiceNumber: invoiceDoc.invoiceNumber,
-                        amountApplied: app.amountApplied
-                    });
+                if (isExisting) {
+                    payDoc.invoices = newInvoicesList;
+                    payDoc.amountReceived = amountReceived;
+                    payDoc.paymentDate = group.paymentDate;
+                    payDoc.paymentMethod = group.paymentMethod;
+                    payDoc.referenceNumber = group.referenceNumber;
+                    payDoc.notes = group.notes;
+                    payDoc.depositedTo = depositToDoc._id;
+                    payDoc.branch = resolvedBranch ? resolvedBranch._id : undefined;
+
+                    await payDoc.save({ session });
+                    summary.updatedCount++;
                 } else {
-                    // Update amount
-                    const idx = newInvoicesList.findIndex(inv => inv.invoiceId.toString() === invoiceDoc._id.toString());
-                    newInvoicesList[idx].amountApplied = app.amountApplied;
+                    payDoc = new PaymentReceived({
+                        paymentNumber: finalPaymentNumber,
+                        customerId: group.customer._id,
+                        driverId: group.customer.driver || undefined,
+                        amountReceived,
+                        paymentDate: group.paymentDate,
+                        paymentMethod: group.paymentMethod,
+                        referenceNumber: group.referenceNumber,
+                        notes: group.notes,
+                        depositedTo: depositToDoc._id,
+                        branch: resolvedBranch ? resolvedBranch._id : undefined,
+                        invoices: newInvoicesList,
+                        status: "COMPLETED"
+                    });
+
+                    await payDoc.save({ session });
+                    summary.createdCount++;
                 }
-            }
 
-            // Save PaymentReceived document
-            const totalApplied = newInvoicesList.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0);
-            const amountReceived = Math.max(group.rowAmount || 0, totalApplied);
-
-            const extraAmount = Math.max(0, amountReceived - totalApplied);
-            if (extraAmount > 0) {
-                summary.extraCount = (summary.extraCount || 0) + 1;
-                summary.totalExtraAmount = (summary.totalExtraAmount || 0) + extraAmount;
-            }
-
-            if (isExisting) {
-                payDoc.invoices = newInvoicesList;
-                payDoc.amountReceived = amountReceived;
-                payDoc.paymentDate = group.paymentDate;
-                payDoc.paymentMethod = group.paymentMethod;
-                payDoc.referenceNumber = group.referenceNumber;
-                payDoc.notes = group.notes;
-                payDoc.depositedTo = depositToDoc._id;
-                payDoc.branch = resolvedBranch ? resolvedBranch._id : undefined;
-
-                await payDoc.save({ session });
-                summary.updatedCount++;
-            } else {
-                payDoc = new PaymentReceived({
-                    paymentNumber: finalPaymentNumber,
-                    customerId: group.customer._id,
-                    driverId: group.customer.driver || undefined,
-                    amountReceived,
-                    paymentDate: group.paymentDate,
-                    paymentMethod: group.paymentMethod,
-                    referenceNumber: group.referenceNumber,
-                    notes: group.notes,
-                    depositedTo: depositToDoc._id,
-                    branch: resolvedBranch ? resolvedBranch._id : undefined,
-                    invoices: newInvoicesList,
-                    status: "COMPLETED"
-                });
-
-                await payDoc.save({ session });
-                summary.createdCount++;
-            }
-
-            // Sync with double-entry Ledger
-            let paymentTx = await PaymentTransaction.findOne({
-                referenceId: payDoc._id,
-                referenceModel: "PaymentReceived"
-            }).session(session);
-
-            if (paymentTx) {
-                paymentTx.baseAmount = payDoc.amountReceived;
-                paymentTx.totalAmount = payDoc.amountReceived;
-                paymentTx.paymentDate = payDoc.paymentDate;
-                paymentTx.notes = payDoc.notes || `Payment received from Customer (PR: ${payDoc.paymentNumber})`;
-                paymentTx.accountingCode = depositToDoc._id;
-                paymentTx.branch = resolvedBranch ? resolvedBranch._id : undefined;
-
-                const pmUpperTx = paymentMethodStr.toUpperCase();
-                if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
-                else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
-                else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
-                else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
-                else paymentTx.paymentMethod = "OTHER";
-
-                await paymentTx.save({ session });
-            } else {
-                paymentTx = new PaymentTransaction({
-                    accountingCode: depositToDoc._id,
+                // Sync with double-entry Ledger
+                let paymentTx = await PaymentTransaction.findOne({
                     referenceId: payDoc._id,
-                    referenceModel: "PaymentReceived",
-                    transactionCategory: "ASSET",
-                    transactionType: "DEBIT",
-                    baseAmount: payDoc.amountReceived,
-                    totalAmount: payDoc.amountReceived,
-                    paymentMethod: "CASH",
-                    status: "COMPLETED",
-                    paymentDate: payDoc.paymentDate,
-                    notes: payDoc.notes || `Payment received from Customer (PR: ${payDoc.paymentNumber})`,
-                    branch: resolvedBranch ? resolvedBranch._id : undefined,
-                    createdBy: creatorId,
-                    creatorRole: creatorRole
-                });
+                    referenceModel: "PaymentReceived"
+                }).session(session);
 
-                const pmUpperTx = paymentMethodStr.toUpperCase();
-                if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
-                else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
-                else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
-                else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
-                else paymentTx.paymentMethod = "OTHER";
+                if (paymentTx) {
+                    paymentTx.baseAmount = payDoc.amountReceived;
+                    paymentTx.totalAmount = payDoc.amountReceived;
+                    paymentTx.paymentDate = payDoc.paymentDate;
+                    paymentTx.notes = payDoc.notes || `Payment received from Customer (PR: ${payDoc.paymentNumber})`;
+                    paymentTx.accountingCode = depositToDoc._id;
+                    paymentTx.branch = resolvedBranch ? resolvedBranch._id : undefined;
 
-                await paymentTx.save({ session });
-            }
+                    const pmUpperTx = paymentMethodStr.toUpperCase();
+                    if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
+                    else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
+                    else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
+                    else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
+                    else paymentTx.paymentMethod = "OTHER";
 
-            await LedgerEntry.deleteMany({ transaction: paymentTx._id }).session(session);
-            const populatedTx = { ...paymentTx.toObject(), accountingCode: depositToDoc };
-            await autoGenerateLedgerEntry(populatedTx);
+                    await paymentTx.save({ session });
+                } else {
+                    paymentTx = new PaymentTransaction({
+                        accountingCode: depositToDoc._id,
+                        referenceId: payDoc._id,
+                        referenceModel: "PaymentReceived",
+                        transactionCategory: "ASSET",
+                        transactionType: "DEBIT",
+                        baseAmount: payDoc.amountReceived,
+                        totalAmount: payDoc.amountReceived,
+                        paymentMethod: "CASH",
+                        status: "COMPLETED",
+                        paymentDate: payDoc.paymentDate,
+                        notes: payDoc.notes || `Payment received from Customer (PR: ${payDoc.paymentNumber})`,
+                        branch: resolvedBranch ? resolvedBranch._id : undefined,
+                        createdBy: creatorId,
+                        creatorRole: creatorRole
+                    });
+
+                    const pmUpperTx = paymentMethodStr.toUpperCase();
+                    if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
+                    else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
+                    else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
+                    else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
+                    else paymentTx.paymentMethod = "OTHER";
+
+                    await paymentTx.save({ session });
+                }
+
+                await LedgerEntry.deleteMany({ transaction: paymentTx._id }).session(session);
+                // Ledger entries are disabled for bulk import reconciliation as per user request.
             } catch (groupError) {
                 console.error(`Error processing payment group ${paymentNumber}:`, groupError);
                 summary.errorCount += group.rows.length;
                 summary.errors.push(`Payment Group ${paymentNumber}: ${groupError.message}`);
             }
-        }
+        });
 
         // --- PHASE 5: Recalculate Invoice Statuses, Balances & Sync ---
         const customersToRollover = new Set();
         const invoicesToSyncWithDrivers = [];
 
-        for (const invoiceId of modifiedInvoicesSet) {
+        await mapLimit(Array.from(modifiedInvoicesSet), 15, async (invoiceId) => {
             try {
                 const invoiceDoc = invoicesList.find(inv => inv._id.toString() === invoiceId);
                 if (invoiceDoc) {
@@ -591,7 +622,7 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
                 console.error(`[PaymentImportService] Failed to sync/save invoice ${invoiceId}:`, invErr);
                 summary.errors.push(`Invoice Sync Error (${invoiceId}): ${invErr.message}`);
             }
-        }
+        });
 
         // --- PHASE 6: Sync Drivers & Carryover/Rollovers ---
         if (invoicesToSyncWithDrivers.length > 0) {
@@ -608,7 +639,7 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
                     }
                 }
 
-                for (const [driverId, driverInvoices] of invoicesByDriver.entries()) {
+                await mapLimit(Array.from(invoicesByDriver.entries()), 10, async ([driverId, driverInvoices]) => {
                     try {
                         const orConditions = [];
                         for (const inv of driverInvoices) {
@@ -654,7 +685,7 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
                         console.error(`[PaymentImportService] Failed to sync driver ${driverId}:`, driverErr);
                         summary.errors.push(`Driver Sync Error (${driverId}): ${driverErr.message}`);
                     }
-                }
+                });
             } catch (driverSyncErr) {
                 console.error(`[PaymentImportService] Driver list processing failed:`, driverSyncErr);
                 summary.errors.push(`Driver list processing failed: ${driverSyncErr.message}`);
@@ -663,13 +694,13 @@ exports.importAndReconcilePayments = async ({ rows, fieldMap, user }) => {
 
         // Roll-overs
         if (customersToRollover.size > 0 && InvoiceService && typeof InvoiceService.rolloverCustomerInvoices === 'function') {
-            for (const custId of customersToRollover) {
+            await mapLimit(Array.from(customersToRollover), 10, async (custId) => {
                 try {
                     await InvoiceService.rolloverCustomerInvoices(custId);
                 } catch (rolloverErr) {
                     console.error(`[Reconciliation] Rollover customer invoices failed for customer ${custId}:`, rolloverErr);
                 }
-            }
+            });
         }
 
         if (isTransactionActive) {
