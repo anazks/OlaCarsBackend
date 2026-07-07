@@ -25,7 +25,7 @@ exports.createCustomer = async (req, res) => {
 
 exports.getAllCustomers = async (req, res) => {
     try {
-        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc', startDate, endDate } = req.query;
         const query = { isDeleted: false };
 
         if (status && status !== 'ALL') {
@@ -46,12 +46,27 @@ exports.getAllCustomers = async (req, res) => {
             ];
         }
 
+        // Date range filter on createdAt
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
         const pageInt = parseInt(page, 10);
         const limitInt = parseInt(limit, 10);
         const skip = (pageInt - 1) * limitInt;
 
+        // Whitelist sortable fields to prevent injection
+        const allowedSortFields = ['createdAt', 'name', 'customerId', 'status', 'updatedAt'];
+        const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+
         const sort = {};
-        sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+        sort[safeSortBy] = sortOrder === 'asc' ? 1 : -1;
 
         const docs = await Customer.find(query)
             .populate('branch')

@@ -416,6 +416,12 @@ exports.getBalanceSheetReport = async (filters) => {
             });
 
             for (const code of cashBankCodes) {
+                // Only override in the ASSETS bucket if this account truly belongs there.
+                // Accounts whose name matches /bank|banco/ but whose category is LIABILITY
+                // (e.g. bank loans) must NOT appear under Assets.
+                const codeNormalizedCat = normalizeCategory(code.category);
+                if (codeNormalizedCat !== 'ASSET') continue;
+
                 const bal = balanceMap[code._id.toString()] || { debit: 0, credit: 0 };
                 const closingBalance = bal.debit - bal.credit;
                 
@@ -463,13 +469,20 @@ exports.getBalanceSheetReport = async (filters) => {
         return existingAccountType || 'Other Current Asset';
     };
 
-    const assetsArray = Object.keys(report.assets).map(name => ({
-        name,
-        amount: report.assets[name].amount,
-        category: report.assets[name].category,
-        accountType: resolveAssetAccountType(report.assets[name].category, report.assets[name].accountType),
-        code: report.assets[name].code
-    }));
+    // Build assets array — exclude any entry whose category resolves to LIABILITY or EQUITY
+    // (safety guard in case a mis-categorised account slipped into report.assets)
+    const assetsArray = Object.keys(report.assets)
+        .map(name => ({
+            name,
+            amount: report.assets[name].amount,
+            category: report.assets[name].category,
+            accountType: resolveAssetAccountType(report.assets[name].category, report.assets[name].accountType),
+            code: report.assets[name].code
+        }))
+        .filter(item => {
+            const cat = normalizeCategory(item.category);
+            return cat === 'ASSET' || cat === '';
+        });
     // Map raw DB category → proper accountType label for liabilities
     const resolveLiabilityAccountType = (rawCategory, existingAccountType) => {
         const type = (existingAccountType || '').toLowerCase().trim();
@@ -518,13 +531,46 @@ exports.getBalanceSheetReport = async (filters) => {
         accountType: resolveLiabilityAccountType(report.liabilities[name].category, report.liabilities[name].accountType),
         code: report.liabilities[name].code
     }));
-    const equityArray = Object.keys(report.equity).map(name => ({
+    const rawEquityArray = Object.keys(report.equity).map(name => ({
         name,
-        amount: report.equity[name].amount,
+        amount: report.equity[name].amount || 0,
         category: report.equity[name].category,
-        accountType: report.equity[name].accountType,
+        accountType: report.equity[name].accountType || 'Equity',
         code: report.equity[name].code
     }));
+
+    // Find the Current Period Results
+    const currentPeriodItem = rawEquityArray.find(e => e.code === "RE-CURRENT" || e.name.includes("Current Period"));
+    const resultsOfTheExercise = currentPeriodItem ? currentPeriodItem.amount : 0;
+
+    // Filter database equity to exclude current period and any matching retained earnings/utilidades retenidas
+    const databaseEquity = rawEquityArray.filter(e => 
+        e.code !== "RE-CURRENT" && 
+        !e.name.includes("Current Period") && 
+        !e.name.toLowerCase().includes("retained earnings") && 
+        !e.name.toLowerCase().includes("utilidades retenidas")
+    );
+
+    const staticRetainedEarnings = 258789.00;
+
+    const equityArray = [
+        ...databaseEquity,
+        {
+            name: "Retained Earnings / Utilidades Retenidas",
+            amount: staticRetainedEarnings,
+            category: "Equity",
+            accountType: "Equity",
+            code: "RE-STATIC"
+        },
+        {
+            name: "Results of the exercise / Resultado del ejercicio",
+            amount: resultsOfTheExercise,
+            category: "Equity",
+            accountType: "Equity",
+            code: "RE-CURRENT"
+        }
+    ];
+
 
     const assetsTotal = assetsArray.reduce((acc, curr) => acc + curr.amount, 0);
     const liabilitiesTotal = liabilitiesArray.reduce((acc, curr) => acc + curr.amount, 0);

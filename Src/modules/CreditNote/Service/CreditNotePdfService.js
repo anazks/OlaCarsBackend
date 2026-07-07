@@ -43,6 +43,11 @@ exports.generateCreditNotePdf = (creditNote, res) => {
     const rightMargin = 545;
     const rightColX = 350;
 
+    // Header
+    doc.fillColor(primaryColor)
+       .fontSize(22)
+       .text("OLA CARS", leftMargin, 50, { bold: true });
+
     // Logo image integration
     try {
         const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
