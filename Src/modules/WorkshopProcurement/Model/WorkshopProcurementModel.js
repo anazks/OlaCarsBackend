@@ -19,7 +19,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["PENDING", "PENDING_FINANCE_APPROVAL", "APPROVED", "COST_APPROVED", "IN_TRANSIT", "RECEIVED", "REJECTED", "CONVERTED_TO_PO"],
+            enum: ["PENDING", "PENDING_FINANCE_APPROVAL", "APPROVED", "COST_APPROVED", "IN_TRANSIT", "RECEIVED", "REJECTED", "CONVERTED_TO_PO", "WAITING_QUOTATION"],
             default: "PENDING",
         },
         branch: {
@@ -51,6 +51,12 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         supplier: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Supplier",
+        },
+        supplierDetails: {
+            name: { type: String },
+            email: { type: String },
+            phone: { type: String },
+            address: { type: String },
         },
         notes: {
             type: String,
@@ -102,7 +108,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         editHistory: [
             {
                 editedAt: { type: Date, default: Date.now },
-                editedBy: { type: mongoose.Schema.Types.ObjectId },
+                editedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "editHistory.editorRole" },
                 editorRole: { type: String },
                 previousStatus: { type: String },
                 changesSummary: { type: String },

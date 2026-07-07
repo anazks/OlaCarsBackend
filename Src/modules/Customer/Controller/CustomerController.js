@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Customer = require('../Model/CustomerModel');
 const { getNextCustomerId, getNextDriverId } = require('../../SystemSettings/Model/CounterModel');
 const { addDriverService } = require('../../Driver/Repo/DriverRepo');
@@ -24,7 +25,7 @@ exports.createCustomer = async (req, res) => {
 
 exports.getAllCustomers = async (req, res) => {
     try {
-        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc', startDate, endDate } = req.query;
         const query = { isDeleted: false };
 
         if (status && status !== 'ALL') {
@@ -45,12 +46,27 @@ exports.getAllCustomers = async (req, res) => {
             ];
         }
 
+        // Date range filter on createdAt
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
         const pageInt = parseInt(page, 10);
         const limitInt = parseInt(limit, 10);
         const skip = (pageInt - 1) * limitInt;
 
+        // Whitelist sortable fields to prevent injection
+        const allowedSortFields = ['createdAt', 'name', 'customerId', 'status', 'updatedAt'];
+        const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+
         const sort = {};
-        sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+        sort[safeSortBy] = sortOrder === 'asc' ? 1 : -1;
 
         const docs = await Customer.find(query)
             .populate('branch')
@@ -164,8 +180,63 @@ exports.downloadStatementPdf = async (req, res) => {
             `inline; filename="Customer_Statement_${customer.name.replace(/\s+/g, '_')}.pdf"`
         );
 
-        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res);
+        StatementPdfService.generateStatementPdf(customerAsDriver, invoices, payments, creditNotes, res, {
+            sortBy: req.query.sortBy,
+            sortOrder: req.query.sortOrder
+        });
     } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.downloadMonthlyStatementPdf = async (req, res) => {
+    try {
+        const mongoose = require('mongoose');
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: false }).populate('branch');
+        if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        const { Invoice } = require('../../Invoice/Model/InvoiceModel');
+        const PaymentReceived = require('../../PaymentReceived/Model/PaymentReceivedModel');
+        const MonthlyStatementPdfService = require('../Service/MonthlyStatementPdfService');
+
+        const [invoices, payments] = await Promise.all([
+            Invoice.find({ customer: customer._id, isDeleted: false }),
+            PaymentReceived.find({ customerId: customer._id })
+        ]);
+
+        const { month, year, fromDate, toDate } = req.query;
+        let periodName = 'Full';
+        if (fromDate || toDate) {
+            periodName = `${fromDate || 'Start'}_to_${toDate || 'End'}`;
+        } else if (month && year) {
+            const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthIdx = (parseInt(month) || 1) - 1;
+            periodName = `${MONTH_NAMES[monthIdx] || 'Month'}_${year}`;
+        }
+
+        const safeName = (customer.name || 'Customer').replace(/\s+/g, '_');
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader(
+            'Content-Disposition',
+            `inline; filename="Statement_${safeName}_${periodName}.pdf"`
+        );
+
+        MonthlyStatementPdfService.generateMonthlyStatementPdf(customer, invoices, payments, res, {
+            month,
+            year,
+            fromDate,
+            toDate
+        });
+    } catch (error) {
+        console.error('[CustomerController] Monthly statement PDF error:', error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -301,7 +372,6 @@ exports.bulkCreateCustomers = async (req, res) => {
                     ? status.toUpperCase() : 'ACTIVE';
 
                 const customerData = {
-                    customerId: await getNextCustomerId(),
                     name,
                     email: email ? email.toLowerCase() : undefined,
                     phone,
@@ -400,25 +470,52 @@ exports.bulkCreateCustomers = async (req, res) => {
                     customerData.country = customerData.billingCountry;
                 }
 
-                // ── 3. Create Customer ──
+                // ── 3. Check for duplicates in DB ──
+                let existingCustomer = null;
+                if (name) {
+                    existingCustomer = await Customer.findOne({
+                        name: { $regex: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") },
+                        isDeleted: false
+                    });
+                }
+
+                if (existingCustomer) {
+                    results.errors.push({ row: rowNum, message: `Duplicate customer: "${name}" already exists in the database.` });
+                    continue;
+                }
+
+                let existingDriver = null;
+                if (name) {
+                    existingDriver = await mongoose.model('Driver').findOne({
+                        "personalInfo.fullName": { $regex: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i") },
+                        isDeleted: false
+                    });
+                }
+
+                if (existingDriver) {
+                    results.errors.push({ row: rowNum, message: `Duplicate driver: "${name}" already exists in the database.` });
+                    continue;
+                }
+
+                // ── 4. Create Customer ──
+                customerData.customerId = await getNextCustomerId();
                 const newCustomer = new Customer(customerData);
                 const savedCustomer = await newCustomer.save();
 
                 let driverInfo = null;
                 let vehicleInfo = null;
 
-                // ── 4. If CF.VEHICLE NO exists, create Driver & link Vehicle ──
+                // ── 5. If CF.VEHICLE NO exists, create Driver & link Vehicle ──
                 if (vehicleNo) {
                     try {
-                        // 4a. Find Vehicle by plate number
+                        // Find Vehicle by plate number
                         const plateRegex = new RegExp("^" + vehicleNo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "$", "i");
                         const vehicle = await Vehicle.findOne({
                             "legalDocs.registrationNumber": plateRegex,
                             isDeleted: false
                         });
 
-                        // 4b. Create Driver directly via repo (not DriverService.create)
-                        // to avoid its auto-customer-creation which would duplicate our customer
+                        // Create Driver directly via repo (not DriverService.create)
                         const driverData = {
                             driverId: await getNextDriverId(),
                             status: "ACTIVE",
@@ -440,16 +537,16 @@ exports.bulkCreateCustomers = async (req, res) => {
                             }],
                         };
 
-                        const newDriver = await addDriverService(driverData);
-                        driverInfo = { id: newDriver._id, driverId: newDriver.driverId };
+                        const driver = await addDriverService(driverData);
+                        driverInfo = { id: driver._id, driverId: driver.driverId };
 
-                        // 4c. Link Customer → Driver
-                        savedCustomer.driver = newDriver._id;
+                        // Link Customer → Driver
+                        savedCustomer.driver = driver._id;
                         await savedCustomer.save();
 
-                        // 4d. Link Vehicle → Driver (if vehicle found)
+                        // Link Vehicle → Driver (if vehicle found)
                         if (vehicle) {
-                            await Vehicle.findByIdAndUpdate(vehicle._id, { currentDriver: newDriver._id });
+                            await Vehicle.findByIdAndUpdate(vehicle._id, { currentDriver: driver._id });
                             vehicleInfo = {
                                 id: vehicle._id,
                                 registrationNumber: vehicle.legalDocs?.registrationNumber

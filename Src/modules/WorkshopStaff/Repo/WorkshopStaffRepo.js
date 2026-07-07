@@ -103,7 +103,7 @@ exports.loginWorkshopStaff = async (email, password) => {
   if (staff.status !== "ACTIVE") throw new Error("Account not active");
 
   const accessToken = jwt.sign(
-    { id: staff._id, role: staff.role, branchId: staff.branchId },
+    { id: staff._id, role: staff.role, branchId: staff.branchId || staff.workshopId, workshopId: staff.workshopId },
     process.env.JWT_SECRET,
     { expiresIn: jwtConfig.accessTokenExpiry },
   );

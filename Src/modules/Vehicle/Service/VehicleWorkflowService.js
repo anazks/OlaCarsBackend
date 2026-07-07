@@ -136,7 +136,7 @@ const STATUS_RULES = {
         }
     },
     "ACTIVE — AVAILABLE": {
-        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED", "W. GROUP ACTIVE"],
+        allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED", "W. GROUP ACTIVE", "RETIRED", "PRE-BOOKED"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
@@ -150,8 +150,8 @@ const STATUS_RULES = {
         }
     },
     "ACTIVE — RENTED": {
-        allowedFrom: ["ACTIVE — AVAILABLE"],
-        allowedRoles: [], // System triggered by booking
+        allowedFrom: ["ACTIVE — AVAILABLE", "ACTIVE — MAINTENANCE"],
+        allowedRoles: [ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER], // Allowed manual return from maintenance
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
             const today = new Date();
@@ -224,6 +224,11 @@ const STATUS_RULES = {
         allowedFrom: ["BRANCH MANAGER APPROVAL", "ACTIVE — AVAILABLE", "ACTIVE — RENTED", "ACTIVE — MAINTENANCE", "TRANSFER COMPLETE", "SUSPENDED"],
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
+    },
+    "PRE-BOOKED": {
+        allowedFrom: ["ACTIVE — AVAILABLE"],
+        allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
+        minHierarchy: ROLES.ADMIN,
     }
 };
 
@@ -264,11 +269,18 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
     }
 
     const rule = STATUS_RULES[targetStatus];
+    // NOTE: All transition restrictions temporarily bypassed per user request.
+    // The original checks (allowedFrom, role auth, system status, decision perms, gate validators)
+    // are commented out below and can be re-enabled when needed.
+
+    /*
     if (!rule) {
         throw new Error("Invalid target status configuration.", { cause: 500 });
     }
 
-    if (SYSTEM_STATUSES.includes(targetStatus) && !checkRoleAuth(user.role, [], ROLES.ADMIN)) {
+    const isSystemStatus = SYSTEM_STATUSES.includes(targetStatus);
+    const isReturningFromMaintenanceToRented = targetStatus === "ACTIVE — RENTED" && currentVehicle.status === "ACTIVE — MAINTENANCE";
+    if (isSystemStatus && !isReturningFromMaintenanceToRented && !checkRoleAuth(user.role, [], ROLES.ADMIN)) {
         throw new Error(`Manual transition to system status '${targetStatus}' is blocked.`, { cause: 403 });
     }
 
@@ -300,6 +312,7 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
             throw new Error(`Access denied. You do not have the 'VEHICLE_APPROVE' permission required to ${action} this vehicle.`, { cause: 403 });
         }
     }
+    */
 
     const payload = { ...updateData };
     
@@ -313,12 +326,14 @@ const processVehicleProgress = async (vehicleId, targetStatus, updateData, user)
         payload.inspection.status = hasMandatoryFail ? "Failed" : "Passed";
     }
 
-    if (rule.gateValidator) {
+    /* Gate validators also bypassed
+    if (rule && rule.gateValidator) {
         const errorMsg = rule.gateValidator(currentVehicle, payload);
         if (errorMsg) {
             throw new Error(errorMsg, { cause: 400 });
         }
     }
+    */
 
     // --- Pre-transition logic ---
 

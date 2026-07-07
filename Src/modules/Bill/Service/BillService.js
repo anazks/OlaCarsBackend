@@ -129,7 +129,7 @@ async function postBillToLedger(bill, userData) {
 }
 
 exports.getAllBills = async (query = {}) => {
-    const page = parseInt(query.page, 10);
+    const page = parseInt(query.page, 10) || 1;
     const limit = parseInt(query.limit, 10);
 
     const mongooseQuery = {};
@@ -150,13 +150,15 @@ exports.getAllBills = async (query = {}) => {
     }
 
     // 4. Date Range Filters (billDate)
-    if (query.fromDate || query.toDate) {
+    const fromDateVal = query.fromDate || query.startDate;
+    const toDateVal = query.toDate || query.endDate;
+    if (fromDateVal || toDateVal) {
         mongooseQuery.billDate = {};
-        if (query.fromDate) {
-            mongooseQuery.billDate.$gte = new Date(query.fromDate + 'T00:00:00.000Z');
+        if (fromDateVal) {
+            mongooseQuery.billDate.$gte = new Date(fromDateVal + 'T00:00:00.000Z');
         }
-        if (query.toDate) {
-            mongooseQuery.billDate.$lte = new Date(query.toDate + 'T23:59:59.999Z');
+        if (toDateVal) {
+            mongooseQuery.billDate.$lte = new Date(toDateVal + 'T23:59:59.999Z');
         }
     }
 
@@ -193,40 +195,21 @@ exports.getAllBills = async (query = {}) => {
         ];
     }
 
-    // Determine if we have custom date filters
-    const hasDateFilter = !!(query.fromDate || query.toDate || query.month || query.year);
+    const hasDateFilter = !!(query.fromDate || query.toDate || query.startDate || query.endDate || query.month || query.year);
 
-    // Build query specifically for metrics
-    const metricsQuery = { ...mongooseQuery };
-    if (!hasDateFilter) {
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        thirtyDaysAgo.setHours(0, 0, 0, 0);
-        metricsQuery.billDate = { $gte: thirtyDaysAgo };
+    // Default to start of current month to today's date if no date filters are supplied and no supplier is targeted, and not explicitly ignored
+    if (!hasDateFilter && !query.supplier && !query.search && query.ignoreDefaultDates !== 'true') {
+        const now = new Date();
+        const startOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0));
+        const endOfToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));
+        mongooseQuery.billDate = {
+            $gte: startOfMonth,
+            $lte: endOfToday
+        };
     }
 
-    const stats = await Bill.aggregate([
-        { $match: metricsQuery },
-        {
-            $group: {
-                _id: null,
-                totalBilled: { $sum: "$totalAmount" },
-                totalBalanceDue: { $sum: "$balanceDue" },
-                openCount: { $sum: { $cond: [{ $eq: ["$status", "OPEN"] }, 1, 0] } },
-                partialCount: { $sum: { $cond: [{ $eq: ["$status", "PARTIALLY_PAID"] }, 1, 0] } },
-                paidCount: { $sum: { $cond: [{ $eq: ["$status", "PAID"] }, 1, 0] } }
-            }
-        }
-    ]);
-
-    const metrics = (stats && stats.length > 0) ? {
-        totalBilled: stats[0].totalBilled || 0,
-        totalBalanceDue: stats[0].totalBalanceDue || 0,
-        openCount: stats[0].openCount || 0,
-        partialCount: stats[0].partialCount || 0,
-        paidCount: stats[0].paidCount || 0,
-        isFilteredPeriod: hasDateFilter
-    } : {
+    // Skip heavy aggregation since dashboard metrics calculation is bypassed for speed/optimization
+    const metrics = {
         totalBilled: 0,
         totalBalanceDue: 0,
         openCount: 0,
@@ -235,7 +218,7 @@ exports.getAllBills = async (query = {}) => {
         isFilteredPeriod: hasDateFilter
     };
 
-    if (page && limit) {
+    if (limit) {
         const result = await BillRepo.getAllBillsPaginated(mongooseQuery, page, limit);
         return {
             data: result.data,

@@ -38,7 +38,8 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
                 "status", 
                 "purchaseDetails.branch", 
                 "basicDetails.category", 
-                "basicDetails.fuelType"
+                "basicDetails.fuelType",
+                "tempDriver"
             ],
             dateFilterField: "createdAt",
             populate: [
@@ -46,7 +47,9 @@ exports.getVehiclesService = async (queryParams = {}, options = {}) => {
                 { path: "purchaseDetails.purchaseOrder" },
                 { path: "statusHistory.changedBy", select: "fullName email role" },
                 { path: "handlingStaff", select: "fullName email phone fleetNumbers" },
-                { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone personalInfo.email driverId" }
+                { path: "fleet", select: "fleetNumber status" },
+                { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone personalInfo.email driverId" },
+                { path: "tempDriver", select: "personalInfo.fullName personalInfo.phone personalInfo.email driverId" }
             ],
             ...options
         };
@@ -76,7 +79,9 @@ exports.getVehicleByIdService = async (id) => {
             .populate("purchaseDetails.purchaseOrder")
             .populate("statusHistory.changedBy", "fullName email role")
             .populate("handlingStaff", "fullName email phone fleetNumbers")
-            .populate("currentDriver", "personalInfo.fullName personalInfo.phone personalInfo.email driverId");
+            .populate("fleet", "fleetNumber status")
+            .populate("currentDriver", "personalInfo.fullName personalInfo.phone personalInfo.email driverId")
+            .populate("tempDriver", "personalInfo.fullName personalInfo.phone personalInfo.email driverId");
         
         if (vehicle) {
             console.log('[DEBUG] getVehicleByIdService - handlingStaff:', vehicle.handlingStaff);

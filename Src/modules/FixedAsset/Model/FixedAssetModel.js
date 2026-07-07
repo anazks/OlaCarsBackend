@@ -64,9 +64,9 @@ const fixedAssetSchema = new mongoose.Schema(
             type: Date,
         },
         fixedAssetType: {
-            type: String,
-            trim: true,
-            default: "Vehicles",
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "FixedAssetType",
+            required: false,
         },
         computationType: {
             type: String,

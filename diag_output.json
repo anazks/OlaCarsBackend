@@ -1,0 +1,97 @@
+{
+  "timestamp": "2026-07-02T14:23:38.635Z",
+  "ledgerCount": 310446,
+  "codesCount": 287,
+  "sampleEntries": [
+    {
+      "id": "6a422bad16f1f250e1bd55bb",
+      "amount": 2.8,
+      "type": "CREDIT",
+      "codeName": "Accounts Payable",
+      "codeCategory": "LIABILITY",
+      "codeIdExists": true,
+      "entryDate": "2023-09-01T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd55bc",
+      "amount": 2.8,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-09-01T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd55c5",
+      "amount": 240,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-11-17T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd561f",
+      "amount": 34,
+      "type": "CREDIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5620",
+      "amount": 0.37,
+      "type": "CREDIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5621",
+      "amount": 35,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5622",
+      "amount": 240,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5623",
+      "amount": 120,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5624",
+      "amount": 240,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    },
+    {
+      "id": "6a422bad16f1f250e1bd5625",
+      "amount": 280,
+      "type": "DEBIT",
+      "codeName": "Banco General AH  1601",
+      "codeCategory": "ASSET",
+      "codeIdExists": true,
+      "entryDate": "2023-12-07T00:00:00.000Z"
+    }
+  ]
+}

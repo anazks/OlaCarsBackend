@@ -13,7 +13,7 @@ const creditnoteSchema = new mongoose.Schema({
     },
     driverId: { 
         type: mongoose.Schema.Types.ObjectId, 
-        ref: 'Driver', 
+        ref: 'Driver',
         required: false 
     },
     invoiceId: { 
@@ -52,6 +52,11 @@ const creditnoteSchema = new mongoose.Schema({
     notes: {
         type: String,
         trim: true
+    },
+    supportingDocument: {
+        name: { type: String },
+        url: { type: String },
+        uploadedAt: { type: Date }
     },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,

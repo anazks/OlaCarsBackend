@@ -179,10 +179,10 @@ exports.deletePart = async (id) => {
 exports.reserveStock = async (partId, qty) => {
     // Atomic check: (onHand - reserved) >= qty
     const updated = await InventoryPart.findOneAndUpdate(
-        { 
+        {
             _id: partId,
-            $expr: { 
-                $gte: [{ $subtract: ["$quantityOnHand", "$quantityReserved"] }, qty] 
+            $expr: {
+                $gte: [{ $subtract: ["$quantityOnHand", "$quantityReserved"] }, qty]
             }
         },
         { $inc: { quantityReserved: qty } },
@@ -226,8 +226,8 @@ exports.releaseStock = async (partId, qty) => {
  */
 exports.deductStock = async (partId, qty) => {
     const updated = await InventoryPart.findOneAndUpdate(
-        { 
-            _id: partId, 
+        {
+            _id: partId,
             quantityOnHand: { $gte: qty },
             quantityReserved: { $gte: qty }
         },
@@ -250,8 +250,8 @@ exports.deductStock = async (partId, qty) => {
  */
 exports.deductStockDirectly = async (partId, qty) => {
     const updated = await InventoryPart.findOneAndUpdate(
-        { 
-            _id: partId, 
+        {
+            _id: partId,
             quantityOnHand: { $gte: qty }
         },
         { $inc: { quantityOnHand: -qty } },
@@ -326,17 +326,17 @@ function pick(row, ...keys) {
 function pickNum(row, ...keys) {
     const val = pick(row, ...keys);
     if (val === undefined) return undefined;
-    
+
     // Clean string from letters, whitespace, and currency symbols
     let cleaned = String(val).replace(/[A-Za-z\$\€\£\¥\s]/g, '');
-    
+
     // Standardize decimal and thousands separators
     if (cleaned.includes(',') && cleaned.includes('.')) {
         cleaned = cleaned.replace(/,/g, '');
     } else if (cleaned.includes(',')) {
         cleaned = cleaned.replace(/,/g, '.');
     }
-    
+
     const n = Number(cleaned);
     return isNaN(n) ? undefined : n;
 }
@@ -356,15 +356,15 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
         const taxes = await Tax.find({ isDeleted: false, isActive: true });
 
         // Caching standard defaults
-        const defaultPurchaseAcc = accounts.find(acc => acc.code === "CGS0001") || 
-                                   accounts.find(acc => (acc.category || '').toUpperCase() === "COST OF GOODS SOLD" || (acc.category || '').toUpperCase() === "EXPENSE");
-        const defaultIncomeAcc = accounts.find(acc => acc.code === "IN0008") || 
-                                 accounts.find(acc => (acc.category || '').toUpperCase() === "INCOME") ||
-                                 accounts.find(acc => (acc.name || '').toLowerCase().includes("income"));
-        const defaultInvAcc = accounts.find(acc => acc.code === "INV0001") || 
-                              accounts.find(acc => acc.code === "AST0001") || 
-                              accounts.find(acc => (acc.name || '').toLowerCase().includes("inventory")) ||
-                              accounts.find(acc => (acc.category || '').toUpperCase() === "ASSET" || (acc.category || '').toUpperCase() === "EQUITY");
+        const defaultPurchaseAcc = accounts.find(acc => acc.code === "CGS0001") ||
+            accounts.find(acc => (acc.category || '').toUpperCase() === "COST OF GOODS SOLD" || (acc.category || '').toUpperCase() === "EXPENSE");
+        const defaultIncomeAcc = accounts.find(acc => acc.code === "IN0008") ||
+            accounts.find(acc => (acc.category || '').toUpperCase() === "INCOME") ||
+            accounts.find(acc => (acc.name || '').toLowerCase().includes("income"));
+        const defaultInvAcc = accounts.find(acc => acc.code === "INV0001") ||
+            accounts.find(acc => acc.code === "AST0001") ||
+            accounts.find(acc => (acc.name || '').toLowerCase().includes("inventory")) ||
+            accounts.find(acc => (acc.category || '').toUpperCase() === "ASSET" || (acc.category || '').toUpperCase() === "EQUITY");
         const defaultTax = taxes.find(t => t.name === "ITBMS") || taxes[0];
 
         const results = { created: [], errors: [] };
@@ -412,7 +412,7 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
 
             try {
                 // 1. Resolve Part Name
-                const partName = pick(row, 'Item Name', 'CF.Item Name', 'item name', 'partName', 'part name', 'ItemName');
+                const partName = pick(row, 'Item Name', 'CF.Item Name', 'item name', 'partName', 'part name', 'ItemName', 'Name', 'name');
                 if (!partName) {
                     results.errors.push({ row: rowNum, message: "Missing required field: Item Name" });
                     continue;
@@ -427,20 +427,19 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 partNumber = partNumber.toUpperCase();
 
                 // 3. Resolve Category
-                const categoryVal = pick(row, 'category', 'Category', 'Item Type', 'ItemType', 'Product Type', 'ProductType');
-                const category = mapCategory(categoryVal);
+                const category = "Parts";
 
                 // 4. Resolve Rate (selling price)
-                const rateVal = pickNum(row, 'Rate', 'rate', 'selling price', 'Selling Price', 'unitCost');
+                const rateVal = pickNum(row, 'Rate', 'rate', 'selling price', 'Selling Price', 'Selling Rate', 'selling rate', 'unitCost');
                 if (rateVal === undefined) {
                     results.errors.push({ row: rowNum, message: "Missing or invalid selling Rate (must be a number)" });
                     continue;
                 }
 
                 // 5. Resolve Stock
-                const quantityOnHand = pickNum(row, 'Stock On Hand', 'Opening Stock', 'StockOnHand', 'OpeningStock', 'quantityOnHand') || 0;
-                const reorderLevel = pickNum(row, 'Reorder Point', 'ReorderPoint', 'reorderLevel', 'reorder level') || 5;
-                const unitVal = pick(row, 'Usage unit', 'Unit Name', 'UnitName', 'unit', 'Unit');
+                const quantityOnHand = pickNum(row, 'Stock On Hand', 'Opening Stock', 'StockOnHand', 'OpeningStock', 'quantityOnHand', 'Stock on Hand', 'stock on hand') || 0;
+                const reorderLevel = pickNum(row, 'Reorder Point', 'ReorderPoint', 'reorderLevel', 'reorder level', 'Reorder Level', 'reorder level') || 5;
+                const unitVal = pick(row, 'Usage unit', 'Unit Name', 'UnitName', 'unit', 'Unit', 'Usage Unit', 'usage unit');
                 const unit = mapUnit(unitVal);
 
                 // 6. Resolve Branch
@@ -448,8 +447,8 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const branchVal = pick(row, 'Location Name', 'LocationName', 'branch', 'Branch', 'location');
                 if (branchVal) {
                     const cleanBranch = branchVal.toLowerCase();
-                    const matchedBranch = branches.find(b => 
-                        b.name.toLowerCase() === cleanBranch || 
+                    const matchedBranch = branches.find(b =>
+                        b.name.toLowerCase() === cleanBranch ||
                         b.code.toLowerCase() === cleanBranch
                     );
                     if (matchedBranch) {
@@ -469,8 +468,8 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const supplierVal = pick(row, 'Vendor', 'vendor', 'Supplier', 'supplier', 'Vendor Number', 'vendorNumber');
                 if (supplierVal) {
                     const cleanSup = supplierVal.toLowerCase();
-                    const matchedSup = suppliers.find(s => 
-                        s.name.toLowerCase() === cleanSup || 
+                    const matchedSup = suppliers.find(s =>
+                        s.name.toLowerCase() === cleanSup ||
                         (s.vendorNumber && s.vendorNumber.toLowerCase() === cleanSup)
                     );
                     if (matchedSup) {
@@ -484,8 +483,8 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const incomeAccVal = pick(row, 'Account Code', 'AccountCode', 'Account', 'account');
                 if (incomeAccVal) {
                     const cleanCode = incomeAccVal.toLowerCase();
-                    const matchedAcc = accounts.find(acc => 
-                        acc.code.toLowerCase() === cleanCode || 
+                    const matchedAcc = accounts.find(acc =>
+                        acc.code.toLowerCase() === cleanCode ||
                         acc.name.toLowerCase() === cleanCode
                     );
                     if (matchedAcc) {
@@ -501,8 +500,8 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const purchaseAccVal = pick(row, 'Purchase Account Code', 'PurchaseAccountCode', 'Purchase Account', 'purchaseAccount');
                 if (purchaseAccVal) {
                     const cleanCode = purchaseAccVal.toLowerCase();
-                    const matchedAcc = accounts.find(acc => 
-                        acc.code.toLowerCase() === cleanCode || 
+                    const matchedAcc = accounts.find(acc =>
+                        acc.code.toLowerCase() === cleanCode ||
                         acc.name.toLowerCase() === cleanCode
                     );
                     if (matchedAcc) {
@@ -518,8 +517,8 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const inventoryAccVal = pick(row, 'Inventory Account Code', 'InventoryAccountCode', 'Inventory Account', 'inventoryAccount');
                 if (inventoryAccVal) {
                     const cleanCode = inventoryAccVal.toLowerCase();
-                    const matchedAcc = accounts.find(acc => 
-                        acc.code.toLowerCase() === cleanCode || 
+                    const matchedAcc = accounts.find(acc =>
+                        acc.code.toLowerCase() === cleanCode ||
                         acc.name.toLowerCase() === cleanCode
                     );
                     if (matchedAcc) {
@@ -540,7 +539,7 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                 const taxNameVal = pick(row, 'Tax Name', 'TaxName', 'tax name');
                 const taxPctVal = pickNum(row, 'Tax Percentage', 'TaxPercentage', 'tax percentage');
                 if (taxNameVal || taxPctVal !== undefined) {
-                    const matchedTax = taxes.find(t => 
+                    const matchedTax = taxes.find(t =>
                         (taxNameVal && t.name.toLowerCase() === taxNameVal.toLowerCase()) ||
                         (taxPctVal !== undefined && t.rate === taxPctVal)
                     );
@@ -574,10 +573,14 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                     creatorRole: userRole
                 };
 
-                const existingPart = await InventoryPart.findOne({ partNumber, isActive: true });
+                const existingPart = await InventoryPart.findOne({
+                    partName: { $regex: new RegExp("^" + partName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + "$", "i") },
+                    isActive: true
+                });
                 if (existingPart) {
                     // Update existing part (upsert)
-                    // If we're updating, we overwrite with Excel values
+                    // Change its category to "Parts"
+                    partData.category = "Parts";
                     Object.assign(existingPart, partData);
                     const updated = await existingPart.save();
                     results.created.push({
@@ -589,6 +592,18 @@ exports.bulkExcelUploadParts = async (partsData, userId, userRole, defaultBranch
                     });
                 } else {
                     // Create new part
+                    // Ensure the partNumber is unique to avoid Mongo unique index constraint
+                    let uniquePartNumber = partNumber;
+                    const conflictingPart = await InventoryPart.findOne({ partNumber: uniquePartNumber, isActive: true });
+                    if (conflictingPart) {
+                        let suffix = 1;
+                        while (await InventoryPart.findOne({ partNumber: `${uniquePartNumber}-${suffix}`, isActive: true })) {
+                            suffix++;
+                        }
+                        uniquePartNumber = `${uniquePartNumber}-${suffix}`;
+                    }
+                    partData.partNumber = uniquePartNumber;
+
                     const created = await InventoryPart.create(partData);
                     results.created.push({
                         row: rowNum,

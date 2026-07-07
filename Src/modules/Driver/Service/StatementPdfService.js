@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -11,10 +12,13 @@ const formatDate = (val) => {
     if (!val) return "N/A";
     const d = new Date(val);
     if (isNaN(d.getTime())) return "N/A";
-    return d.toLocaleDateString("en-US", { dateStyle: "medium" });
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
 };
 
-exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) => {
+exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res, options = {}) => {
     if (!driver) {
         throw new Error("No driver data provided");
     }
@@ -46,20 +50,18 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
 
     // Helper to draw Header & Metadata on the first page
     const drawHeader = () => {
-        // Logo and Title
-        doc.fillColor(primaryColor)
-           .fontSize(18)
-           .font("Helvetica-Bold")
-           .text("OLA CARS LOGISTICS", leftMargin, 40)
-           .fontSize(8.5)
-           .fillColor(secondaryColor)
-           .font("Helvetica")
-           .text("Finance & Accounts Department", leftMargin, 60);
+        // Logo integration
+        try {
+            const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+            doc.image(logoPath, leftMargin, 30, { height: 35 });
+        } catch (err) {
+            console.error("Failed to load logo image in PDF generation:", err);
+        }
 
         doc.fontSize(14)
            .fillColor(primaryColor)
            .font("Helvetica-Bold")
-           .text("STATEMENT OF ACCOUNT", 500, 40, { align: "right", width: 302 });
+           .text("STATEMENT OF ACCOUNT", 500, 42, { align: "right", width: 302 });
 
         doc.moveTo(leftMargin, 75)
            .lineTo(rightMargin, 75)
@@ -129,10 +131,36 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
     // Consolidate all transactions: Invoices, Payments, Credit Notes
     const txList = [];
 
+    // Parse filters
+    let fromDateLimit = null;
+    let toDateLimit = null;
+    if (options.fromDate) {
+        fromDateLimit = new Date(options.fromDate);
+        fromDateLimit.setHours(0, 0, 0, 0);
+    }
+    if (options.toDate) {
+        toDateLimit = new Date(options.toDate);
+        toDateLimit.setHours(23, 59, 59, 999);
+    }
+
+    let allowedStatuses = [];
+    if (options.statuses) {
+        if (Array.isArray(options.statuses)) {
+            allowedStatuses = options.statuses.map(s => s.trim().toUpperCase());
+        } else if (typeof options.statuses === 'string') {
+            allowedStatuses = options.statuses.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+        }
+    }
+
     // Add Invoices
     invoices.forEach(inv => {
+        const date = new Date(inv.dueDate || inv.generatedAt || inv.createdAt || new Date());
+        if (fromDateLimit && date < fromDateLimit) return;
+        if (toDateLimit && date > toDateLimit) return;
+        if (allowedStatuses.length > 0 && !allowedStatuses.includes((inv.status || '').toUpperCase())) return;
+
         txList.push({
-            date: new Date(inv.dueDate || inv.generatedAt || new Date()),
+            date,
             type: 'Invoice',
             refNumber: inv.invoiceNumber || '—',
             description: inv.weekLabel ? `Rental Charge: ${inv.weekLabel}` : 'Rental Charge',
@@ -145,8 +173,12 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
     // Add Payments
     payments.forEach(pmt => {
         if (pmt.status === 'VOID') return; // Ignore voided payments
+        const date = new Date(pmt.paymentDate || pmt.createdAt || new Date());
+        if (fromDateLimit && date < fromDateLimit) return;
+        if (toDateLimit && date > toDateLimit) return;
+
         txList.push({
-            date: new Date(pmt.paymentDate || new Date()),
+            date,
             type: 'Payment',
             refNumber: pmt.paymentNumber || '—',
             description: `Payment via ${pmt.paymentMethod || 'Other'}`,
@@ -158,8 +190,12 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
 
     // Add Credit Notes
     creditNotes.forEach(cn => {
+        const date = new Date(cn.creditNoteDate || cn.createdAt || new Date());
+        if (fromDateLimit && date < fromDateLimit) return;
+        if (toDateLimit && date > toDateLimit) return;
+
         txList.push({
-            date: new Date(cn.creditNoteDate || new Date()),
+            date,
             type: 'Credit Note',
             refNumber: cn.creditNoteNumber || '—',
             description: cn.reason ? `Credit Note: ${cn.reason}` : 'Credit Note Issued',
@@ -169,20 +205,43 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         });
     });
 
-    // Sort transactions chronologically
+    // Sort transactions chronologically to calculate running balances
     txList.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    let runningBalance = 0;
+    txList.forEach((tx) => {
+        runningBalance += tx.debit - tx.credit;
+        tx.runningBalance = runningBalance;
+    });
+
+    const sortBy = options.sortBy || 'date';
+    const sortOrder = options.sortOrder || 'desc';
+
+    // Now sort according to selection for PDF rendering
+    txList.sort((a, b) => {
+        if (sortBy === 'status') {
+            const statusA = a.status || '';
+            const statusB = b.status || '';
+            const cmp = statusA.localeCompare(statusB);
+            if (cmp !== 0) {
+                return sortOrder === 'asc' ? cmp : -cmp;
+            }
+        }
+        
+        // Default to date sorting
+        const timeA = a.date.getTime();
+        const timeB = b.date.getTime();
+        return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+    });
 
     // Draw First Page Header and Table Headers
     let currentY = drawHeader();
     currentY = drawTableHeaders(currentY);
 
-    let runningBalance = 0;
     let isStripe = false;
 
     // Draw Rows
     txList.forEach((tx) => {
-        runningBalance += tx.debit - tx.credit;
-
         // Page break check (A4 Landscape is 595pt high, we break at 515pt)
         if (currentY > 515) {
             doc.addPage();
@@ -204,7 +263,7 @@ exports.generateStatementPdf = (driver, invoices, payments, creditNotes, res) =>
         const dateStr = formatDate(tx.date);
         const debitStr = tx.debit > 0 ? formatCurrency(tx.debit) : "—";
         const creditStr = tx.credit > 0 ? formatCurrency(tx.credit) : "—";
-        const balanceStr = formatCurrency(runningBalance);
+        const balanceStr = formatCurrency(tx.runningBalance);
 
         doc.text(dateStr, 40, currentY, { width: 55, ellipsis: true })
            .text(tx.type, 105, currentY, { width: 65, ellipsis: true })

@@ -7,7 +7,7 @@ const getLedgerEntries = async (req, res) => {
 
         // Allowed filters
         if (req.query.accountingCode) query.accountingCode = req.query.accountingCode;
-        if (req.query.type) query.type = req.query.type; 
+        if (req.query.type) query.type = req.query.type;
         if (req.query.manualJournal) query.manualJournal = req.query.manualJournal;
         if (req.query.voucher) query.voucher = req.query.voucher;
         if (req.query.transaction) query.transaction = req.query.transaction;
@@ -16,14 +16,17 @@ const getLedgerEntries = async (req, res) => {
         // Optional Branch Filter
         if (req.query.branch) query.branch = req.query.branch;
 
-        if (req.query.startDate || req.query.endDate) {
+        const startVal = req.query.startDate && req.query.startDate !== "undefined" && req.query.startDate !== "null" ? req.query.startDate : null;
+        const endVal = req.query.endDate && req.query.endDate !== "undefined" && req.query.endDate !== "null" ? req.query.endDate : null;
+
+        if (startVal || endVal) {
             query.entryDate = {};
-            if (req.query.startDate) {
-                const startStr = req.query.startDate.includes("T") ? req.query.startDate : `${req.query.startDate}T00:00:00.000Z`;
+            if (startVal) {
+                const startStr = startVal.includes("T") ? startVal : `${startVal}T00:00:00.000Z`;
                 query.entryDate.$gte = new Date(startStr);
             }
-            if (req.query.endDate) {
-                const endStr = req.query.endDate.includes("T") ? req.query.endDate : `${req.query.endDate}T23:59:59.999Z`;
+            if (endVal) {
+                const endStr = endVal.includes("T") ? endVal : `${endVal}T23:59:59.999Z`;
                 query.entryDate.$lte = new Date(endStr);
             }
         }
@@ -36,7 +39,7 @@ const getLedgerEntries = async (req, res) => {
             } else {
                 searchRegex = new RegExp(req.query.search, "i");
             }
-            
+
             // Query matching accounting codes first
             const AccountingCode = mongoose.model("AccountingCode");
             const matchingCodes = await AccountingCode.find({
@@ -63,33 +66,158 @@ const getLedgerEntries = async (req, res) => {
         const total = await LedgerEntry.countDocuments(query);
         const pages = Math.ceil(total / limit);
 
+        const sortParam = req.query.sort === "asc" ? 1 : -1;
         const entries = await LedgerEntry.find(query)
             .populate("transaction", "paymentMethod status transactionCategory transactionType")
             .populate("accountingCode", "code name category")
             .populate("contact", "name email")
-            .sort({ entryDate: -1, _id: -1 })
+            .sort({ entryDate: sortParam, _id: sortParam })
             .skip(skip)
             .limit(limit);
 
-        // Calculate total summary stats for matching query using find + select to leverage Mongoose's schema casting
-        const allMatching = await LedgerEntry.find(query).select("type amount");
+        // Calculate total summary stats using aggregate
+        const buildMatchQuery = (q) => {
+            const match = { ...q };
+            if (match.accountingCode && typeof match.accountingCode === "string" && mongoose.Types.ObjectId.isValid(match.accountingCode)) {
+                match.accountingCode = new mongoose.Types.ObjectId(match.accountingCode);
+            }
+            if (match.branch && typeof match.branch === "string" && mongoose.Types.ObjectId.isValid(match.branch)) {
+                match.branch = new mongoose.Types.ObjectId(match.branch);
+            }
+            if (match.manualJournal && typeof match.manualJournal === "string" && mongoose.Types.ObjectId.isValid(match.manualJournal)) {
+                match.manualJournal = new mongoose.Types.ObjectId(match.manualJournal);
+            }
+            if (match.voucher && typeof match.voucher === "string" && mongoose.Types.ObjectId.isValid(match.voucher)) {
+                match.voucher = new mongoose.Types.ObjectId(match.voucher);
+            }
+            if (match.transaction && typeof match.transaction === "string" && mongoose.Types.ObjectId.isValid(match.transaction)) {
+                match.transaction = new mongoose.Types.ObjectId(match.transaction);
+            }
+            return match;
+        };
+
+        const aggregateQuery = buildMatchQuery(query);
+        const stats = await LedgerEntry.aggregate([
+            { $match: aggregateQuery },
+            {
+                $group: {
+                    _id: "$type",
+                    total: { $sum: "$amount" }
+                }
+            }
+        ]);
+
         let totalDebit = 0;
         let totalCredit = 0;
-        for (const entry of allMatching) {
-            if (entry.type === "DEBIT") {
-                totalDebit += entry.amount || 0;
-            } else if (entry.type === "CREDIT") {
-                totalCredit += entry.amount || 0;
+        stats.forEach(s => {
+            if (s._id === "DEBIT") totalDebit = s.total || 0;
+            if (s._id === "CREDIT") totalCredit = s.total || 0;
+        });
+
+        let openingBalance = 0;
+        let closingBalance = 0;
+
+        if (req.query.accountingCode) {
+            const AccountingCode = mongoose.model("AccountingCode");
+            const codeDoc = await AccountingCode.findById(req.query.accountingCode);
+            if (codeDoc) {
+                const category = codeDoc.category ? codeDoc.category.toUpperCase() : "ASSET";
+                const isDebitIncrease = 
+                    category.includes("ASSET") || category.includes("ACTIVO") || 
+                    category.includes("EXPENSE") || category.includes("GASTO") || category.includes("EGRESO") || 
+                    category.includes("INVENTORY") || category.includes("INVENTARIO") || 
+                    category.includes("CASH") || category.includes("CAJA") || category.includes("EFECTIVO") || 
+                    category.includes("BANK") || category.includes("BANCO");
+
+                let openingDebit = 0;
+                let openingCredit = 0;
+
+                // Inherit all filters (branch, search, code etc.) for opening/closing balances
+                let baseOpeningQuery = { ...aggregateQuery };
+                delete baseOpeningQuery.entryDate;
+
+                if (startVal) {
+                    const startStr = startVal.includes("T") ? startVal : `${startVal}T00:00:00.000Z`;
+                    const startLimit = new Date(startStr);
+                    baseOpeningQuery.entryDate = { $lt: startLimit };
+
+                    const openingStats = await LedgerEntry.aggregate([
+                        { $match: baseOpeningQuery },
+                        {
+                            $group: {
+                                _id: "$type",
+                                total: { $sum: "$amount" }
+                            }
+                        }
+                    ]);
+
+                    openingStats.forEach(s => {
+                        if (s._id === "DEBIT") openingDebit = s.total || 0;
+                        if (s._id === "CREDIT") openingCredit = s.total || 0;
+                    });
+
+                    openingBalance = isDebitIncrease ? (openingDebit - openingCredit) : (openingCredit - openingDebit);
+                } else {
+                    openingBalance = 0;
+                }
+
+                let baseClosingQuery = { ...aggregateQuery };
+                delete baseClosingQuery.entryDate;
+
+                if (endVal || startVal) {
+                    if (endVal) {
+                        const endStr = endVal.includes("T") ? endVal : `${endVal}T23:59:59.999Z`;
+                        baseClosingQuery.entryDate = { $lte: new Date(endStr) };
+                    }
+
+                    const closingStats = await LedgerEntry.aggregate([
+                        { $match: baseClosingQuery },
+                        {
+                            $group: {
+                                _id: "$type",
+                                total: { $sum: "$amount" }
+                            }
+                        }
+                    ]);
+
+                    let closingDebit = 0;
+                    let closingCredit = 0;
+                    closingStats.forEach(s => {
+                        if (s._id === "DEBIT") closingDebit = s.total || 0;
+                        if (s._id === "CREDIT") closingCredit = s.total || 0;
+                    });
+
+                    closingBalance = isDebitIncrease ? (closingDebit - closingCredit) : (closingCredit - closingDebit);
+                } else {
+                    const allStats = await LedgerEntry.aggregate([
+                        { $match: baseClosingQuery },
+                        {
+                            $group: {
+                                _id: "$type",
+                                total: { $sum: "$amount" }
+                            }
+                        }
+                    ]);
+                    let totalDebitAll = 0;
+                    let totalCreditAll = 0;
+                    allStats.forEach(s => {
+                        if (s._id === "DEBIT") totalDebitAll = s.total || 0;
+                        if (s._id === "CREDIT") totalCreditAll = s.total || 0;
+                    });
+                    closingBalance = isDebitIncrease ? (totalDebitAll - totalCreditAll) : (totalCreditAll - totalDebitAll);
+                }
             }
         }
 
-        return res.status(200).json({ 
-            success: true, 
+        return res.status(200).json({
+            success: true,
             data: entries,
             summary: {
                 totalDebit,
                 totalCredit,
-                netMovement: Math.abs(totalCredit - totalDebit)
+                netMovement: Math.abs(totalCredit - totalDebit),
+                openingBalance,
+                closingBalance
             },
             pagination: {
                 total,
@@ -192,10 +320,53 @@ const deleteLedgerJournal = async (req, res) => {
     }
 };
 
+const clearLedgerByCode = async (req, res) => {
+    try {
+        const { accountingCode } = req.params;
+        if (!accountingCode || !mongoose.Types.ObjectId.isValid(accountingCode)) {
+            return res.status(400).json({ success: false, message: "Invalid accounting code ID" });
+        }
+
+        let query = { accountingCode: new mongoose.Types.ObjectId(accountingCode) };
+
+        const startVal = req.query.startDate && req.query.startDate !== "undefined" && req.query.startDate !== "null" ? req.query.startDate : null;
+        const endVal = req.query.endDate && req.query.endDate !== "undefined" && req.query.endDate !== "null" ? req.query.endDate : null;
+
+        if (startVal || endVal) {
+            query.entryDate = {};
+            if (startVal) {
+                const startStr = startVal.includes("T") ? startVal : `${startVal}T00:00:00.000Z`;
+                query.entryDate.$gte = new Date(startStr);
+            }
+            if (endVal) {
+                const endStr = endVal.includes("T") ? endVal : `${endVal}T23:59:59.999Z`;
+                query.entryDate.$lte = new Date(endStr);
+            }
+        }
+
+        const count = await LedgerEntry.countDocuments(query);
+        const result = await LedgerEntry.deleteMany(query);
+
+        let dateRangeMsg = "";
+        if (startVal || endVal) {
+            dateRangeMsg = ` from ${startVal || 'inception'} to ${endVal || 'present'}`;
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully cleared all ${result.deletedCount} ledger entries for this account code${dateRangeMsg}.`,
+            deletedCount: result.deletedCount
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
     importLedgerEntries,
     deleteLedgerJournal,
+    clearLedgerByCode,
 };
 

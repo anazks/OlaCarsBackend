@@ -10,7 +10,9 @@ const ALLOWED_ROLES = [
     ROLES.FINANCEADMIN, 
     ROLES.OPERATIONADMIN, 
     ROLES.COUNTRYMANAGER, 
-    ROLES.BRANCHMANAGER
+    ROLES.BRANCHMANAGER,
+    ROLES.WORKSHOPSTAFF,
+    ROLES.WORKSHOPMANAGER
 ];
 
 /**
@@ -104,5 +106,12 @@ router.get("/live-stream", authenticate, authorize(...ALLOWED_ROLES), GpsControl
  *         description: Failed to retrieve media event URL
  */
 router.get("/media-event", authenticate, authorize(...ALLOWED_ROLES), GpsController.getDeviceMediaEvent);
+router.get("/trips-report", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsTripsReport);
+router.get("/mileage", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsMileage);
+router.get("/track", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsTrackList);
+router.get("/notifications", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsNotifications);
+router.post("/webhook", GpsController.receiveGpsNotification);
+router.get("/obd", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsObdData);
 
 module.exports = router;
+

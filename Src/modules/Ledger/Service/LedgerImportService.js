@@ -5,26 +5,75 @@ const Branch = require("../../Branch/Model/BranchModel");
 const { Invoice } = require("../../Invoice/Model/InvoiceModel");
 
 /**
- * Parse a flexible date from Excel (can be a JS serial number, Date object, or string).
+ * Parse a flexible date from a string value (no JS Date timezone pitfalls).
+ * Returns a UTC midnight Date object.
  */
-function parseFlexibleDate(val) {
-    if (!val) return null;
-    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
-    if (typeof val === "number") {
-        // Excel serial date
-        const d = new Date((val - 25569) * 86400 * 1000);
-        return isNaN(d.getTime()) ? null : d;
+function swapIfBothUnder12(date) {
+    if (!date || isNaN(date.getTime())) return date;
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    const day = date.getUTCDate();
+    if (month <= 12 && day <= 12) {
+        return new Date(Date.UTC(year, day - 1, month));
     }
+    return date;
+}
+
+function parseFlexibleDate(val) {
+    if (val === undefined || val === null || val === "") return null;
+
+    // 0. If it's already a JS Date object, use it directly!
+    if (val instanceof Date && !isNaN(val.getTime())) {
+        return swapIfBothUnder12(new Date(Date.UTC(val.getFullYear(), val.getMonth(), val.getDate())));
+    }
+
+    // 1. Support Excel serial date numbers (e.g. 45658)
+    const num = Number(val);
+    if (!isNaN(num) && num > 30000 && num < 60000) {
+        // Excel base date starts at 1899-12-30 due to a leap year bug in Lotus 1-2-3
+        const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+        if (!isNaN(date.getTime())) {
+            // Normalize to UTC midnight
+            return swapIfBothUnder12(new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())));
+        }
+    }
+
     const str = String(val).trim();
     if (!str) return null;
-    // Try DD/MM/YYYY or DD-MM-YYYY
-    const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-    if (dmyMatch) {
-        const d = new Date(parseInt(dmyMatch[3]), parseInt(dmyMatch[2]) - 1, parseInt(dmyMatch[1]));
-        if (!isNaN(d.getTime())) return d;
+
+    // 2. YYYY-MM-DD (from dateNF formatting or ISO strings)
+    const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (ymdMatch) {
+        const d = new Date(Date.UTC(parseInt(ymdMatch[1]), parseInt(ymdMatch[2]) - 1, parseInt(ymdMatch[3])));
+        if (!isNaN(d.getTime())) return swapIfBothUnder12(d);
     }
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
+
+    // 3. DD/MM/YYYY, MM/DD/YYYY, M/D/YY, DD/MM/YY etc.
+    const parts = str.split(/[-/.]/);
+    if (parts.length >= 3) {
+        const p1 = parseInt(parts[0], 10);
+        const p2 = parseInt(parts[1], 10);
+        let p3 = parseInt(parts[2], 10); // this could parse "2025 05:30 AM" as 2025
+
+        // Handle 2-digit year (e.g. 23 → 2023)
+        if (p3 < 100) p3 = 2000 + p3;
+
+        if (p3 >= 1900) {
+            // Assume DD/MM/YYYY — swap if month (p2) is > 12
+            let day = p1, month = p2;
+            if (month > 12 && day <= 12) { month = p1; day = p2; }
+            const d = new Date(Date.UTC(p3, month - 1, day));
+            if (!isNaN(d.getTime())) return d;
+        }
+    }
+
+    // 4. Fallback to native parsing
+    const parsedNative = new Date(str);
+    if (!isNaN(parsedNative.getTime())) {
+        return swapIfBothUnder12(new Date(Date.UTC(parsedNative.getFullYear(), parsedNative.getMonth(), parsedNative.getDate())));
+    }
+
+    return null;
 }
 
 /**
@@ -95,7 +144,7 @@ exports.importFromExcel = async (fileBuffer, { createdBy, creatorRole }) => {
     const workbook = XLSX.read(fileBuffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet);
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { raw: false, dateNF: "yyyy-mm-dd" });
 
     if (!rawRows || rawRows.length === 0) {
         return { inserted: 0, skipped: 0, linked: 0, errors: [{ row: 0, reason: "No data rows found in the Excel file." }] };
@@ -119,17 +168,20 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
 
     // 2. Pre-load lookup caches for performance
     const allAccounts = await AccountingCode.find({ isDeleted: { $ne: true } }).lean();
+    
+
+
     const accountByCode = {};
-    const accountByName = {};
     for (const acc of allAccounts) {
         if (acc.code) accountByCode[acc.code.toLowerCase().trim()] = acc;
-        if (acc.name) accountByName[acc.name.toLowerCase().trim()] = acc;
     }
 
     const allBranches = await Branch.find({ isDeleted: { $ne: true } }).lean();
     const branchByName = {};
     for (const br of allBranches) {
         if (br.name) branchByName[br.name.toLowerCase().trim()] = br;
+        if (br.code) branchByName[br.code.toLowerCase().trim()] = br;
+        branchByName[br._id.toString()] = br;
     }
 
     // 3. Process each row
@@ -160,43 +212,96 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
             }
 
             // --- Resolve accountingCode ---
-            const accountId = String(getVal(row, ["account_id", "Account ID"]) || "").trim();
-            const accountName = String(getVal(row, ["account_name", "Account Name"]) || "").trim();
+            const getRowVal = (keys) => {
+                for (const k of keys) {
+                    const val = String(row[k] !== undefined && row[k] !== null ? row[k] : "").trim();
+                    if (val !== "") return val;
+                }
+                return "";
+            };
+
+            const accName = getRowVal(["account_name", "Account Name", "account", "Account"]);
+            const accCode = getRowVal(["accountingCode", "accounting_code", "Accounting Code", "account_code", "Account Code", "account_id", "Account ID"]);
 
             let accountingCode = null;
-            if (accountId) {
-                accountingCode = accountByCode[accountId.toLowerCase()];
+
+            // 1. Try matching by EXACT name first if provided (exact or alphanumeric exact match)
+            if (accName) {
+                const searchKey = accName.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = allAccounts.find(acc => {
+                    const nameLower = (acc.name || "").toLowerCase().trim();
+                    const nameNorm = nameLower.replace(/[^a-z0-9]/g, "");
+                    return nameLower === searchKey || (nameNorm && searchKeyNorm && nameNorm === searchKeyNorm);
+                });
             }
-            if (!accountingCode && accountName) {
-                accountingCode = accountByName[accountName.toLowerCase()];
+
+            // 2. If name check failed/not provided, try matching by code if provided
+            if (!accountingCode && accCode) {
+                const searchKey = accCode.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = accountByCode[searchKey];
+                if (!accountingCode) {
+                    accountingCode = allAccounts.find(acc => {
+                        const codeLower = (acc.code || "").toLowerCase().trim();
+                        const codeNorm = codeLower.replace(/[^a-z0-9]/g, "");
+                        return codeLower === searchKey || (codeNorm && codeNorm === searchKeyNorm);
+                    });
+                }
             }
+
+            // 3. Fallback to LOOSE name matching only if still not found
+            if (!accountingCode && accName) {
+                const searchKey = accName.toLowerCase().trim();
+                const searchKeyNorm = searchKey.replace(/[^a-z0-9]/g, "");
+                accountingCode = allAccounts.find(acc => {
+                    const nameLower = (acc.name || "").toLowerCase().trim();
+                    const nameNorm = nameLower.replace(/[^a-z0-9]/g, "");
+                    return (nameNorm && searchKeyNorm && nameNorm.includes(searchKeyNorm)) || 
+                           (searchKeyNorm && nameNorm && searchKeyNorm.includes(nameNorm));
+                });
+            }
+
             if (!accountingCode) {
-                errors.push({ row: rowNum, reason: `Account not found: ID="${accountId}", Name="${accountName}"` });
+                errors.push({ row: rowNum, reason: `Account not found: Name="${accName}" Code="${accCode}"` });
                 continue;
             }
 
             // --- Resolve branch from location_name ---
-            const locationName = String(getVal(row, ["location_name", "Location Name"]) || "").trim();
+            const locationName = String(getVal(row, ["location_name", "Location Name", "branch", "Branch"]) || "").trim();
             let branch = null;
             if (locationName) {
-                branch = branchByName[locationName.toLowerCase()];
+                const locationLower = locationName.toLowerCase();
+                if (locationLower === "head office") {
+                    branch = allBranches.find(b => b.code === "PANAMA" || (b.name.toLowerCase() === "panama" && b.type === "BRANCH"));
+                } else if (locationLower === "ola workshop") {
+                    branch = allBranches.find(b => b.code === "JUC" || b.type === "WORKSHOP");
+                } else {
+                    branch = branchByName[locationLower];
+                    if (!branch && /^[a-fA-F0-9]{24}$/.test(locationName)) {
+                        branch = branchByName[locationName];
+                    }
+                }
             }
 
             // --- Resolve contact_id (store as string in description if can't resolve) ---
             const contactId = getVal(row, ["contact_id", "Contact ID"]);
 
             // --- Parse date ---
-            const dateVal = getVal(row, ["date", "Date"]);
+            const dateVal = getVal(row, ["date", "Date", "Entry Date", "entry_date", "entryDate"]);
             const entryDate = parseFlexibleDate(dateVal) || new Date();
 
             // --- Map direct fields ---
-            const transactionId = String(getVal(row, ["transaction_id", "Transaction ID"]) || "").trim() || undefined;
-            const transactionType = String(getVal(row, ["transaction_type", "Transaction Type"]) || "").trim() || undefined;
+            const transactionId = String(getVal(row, ["transaction_id", "Transaction ID", "transactionId", "Voucher", "voucher"]) || "").trim() || undefined;
+            const transactionType = String(getVal(row, ["transaction_type", "Transaction Type", "transactionType"]) || "").trim() || undefined;
 
             // --- Build description with metadata ---
             let description = buildDescription(row);
             if (isNill) {
                 description = (description && description !== "Imported ledger entry") ? `${description} [Value: Nill]` : "value nill";
+            }
+            if (transactionId) {
+                description = `${description} - Transaction ID: ${transactionId}`;
             }
 
             const entry = {
@@ -251,15 +356,19 @@ exports.importRows = async (rawRows, { createdBy, creatorRole }) => {
         }
 
         // Update ledger entries that matched an invoice — set the transaction field
+        const matchedTxnIds = [];
         for (const { transactionId } of transactionIdsToLink) {
             const invoice = invoiceByExternalId[transactionId];
             if (invoice) {
-                await LedgerEntry.updateMany(
-                    { transactionId, createdBy },
-                    { $set: { description: undefined } } // noop, we just want to confirm the link exists
-                );
+                matchedTxnIds.push(transactionId);
                 linkedCount++;
             }
+        }
+        if (matchedTxnIds.length > 0) {
+            await LedgerEntry.updateMany(
+                { transactionId: { $in: matchedTxnIds }, createdBy },
+                { $set: { description: undefined } } // noop, we just want to confirm the link exists
+            );
         }
 
         // Log the linking results

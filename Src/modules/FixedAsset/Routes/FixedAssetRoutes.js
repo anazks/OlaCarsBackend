@@ -7,7 +7,8 @@ const {
     updateFixedAsset,
     deleteFixedAsset,
     previewDepreciationSchedule,
-    postDepreciation
+    postDepreciation,
+    bulkUploadFixedAssets
 } = require("../Controller/FixedAssetController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -23,11 +24,12 @@ router.use(authenticate);
 router.use(authorize(...AUTHORIZED_ROLES));
 
 router.get("/", getFixedAssets);
+router.post("/bulk", bulkUploadFixedAssets);
+router.post("/calculate-depreciation-schedule", previewDepreciationSchedule);
 router.get("/:id", getFixedAssetById);
 router.post("/", addFixedAsset);
 router.put("/:id", updateFixedAsset);
 router.delete("/:id", deleteFixedAsset);
-router.post("/calculate-depreciation-schedule", previewDepreciationSchedule);
 router.post("/:id/post-depreciation", postDepreciation);
 
 module.exports = router;

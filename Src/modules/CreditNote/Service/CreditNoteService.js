@@ -9,7 +9,7 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
  * Creates a new Credit Note and processes adjustments.
  */
 const createCreditNote = async (data, actor) => {
-    const { driverId, customerId, invoiceId, invoices, taxId, amount, reason, notes, creditNoteDate } = data;
+    const { driverId, customerId, invoiceId, invoices, taxId, amount, reason, notes, creditNoteDate, supportingDocument } = data;
 
     if ((amount === undefined || amount === null) || !reason) {
         throw new Error("Missing required Credit Note fields: amount and reason are mandatory.");
@@ -53,6 +53,7 @@ const createCreditNote = async (data, actor) => {
         notes,
         creditNoteDate: creditNoteDate || new Date(),
         status: 'OPEN',
+        supportingDocument,
         createdBy: actor.id || actor._id,
         creatorRole: actor.role
     });

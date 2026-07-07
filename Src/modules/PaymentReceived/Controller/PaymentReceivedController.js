@@ -185,8 +185,8 @@ exports.createPaymentReceived = async (req, res) => {
 
 exports.getAllPaymentReceiveds = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId, customerId } = req.query;
-        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId, customerId });
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, driverId, customerId, startDate, endDate } = req.query;
+        console.log('PaymentReceived Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, driverId, customerId, startDate, endDate });
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const query = {};
@@ -200,6 +200,28 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         if (customerId) {
             query.customerId = customerId;
+        }
+
+        if (startDate || endDate) {
+            query.paymentDate = {};
+            if (startDate) {
+                query.paymentDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.paymentDate.$lte = end;
+            }
+        } else if (!customerId && !driverId) {
+            // Default to last 30 days
+            const now = new Date();
+            const last30Days = new Date();
+            last30Days.setDate(last30Days.getDate() - 30);
+            const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            query.paymentDate = {
+                $gte: last30Days,
+                $lte: endOfToday
+            };
         }
 
         if (search) {
@@ -233,23 +255,27 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             ];
         }
 
-        let sort = { createdAt: -1 };
+        let sort = { paymentDate: -1 };
         if (sortBy) {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
         }
 
-        const total = await PaymentReceived.countDocuments(query);
-        const docs = await PaymentReceived.find(query)
-            .populate('customerId', 'name customerId')
-            .populate('driverId', 'personalInfo driverId')
-            .populate('depositedTo', 'name code')
-            .sort(sort)
-            .skip(skip)
-            .limit(parseInt(limit));
+        // Run pagination queries in parallel (dashboard metrics query and calculation completely removed to speed up)
+        const [total, docs] = await Promise.all([
+            PaymentReceived.countDocuments(query),
+            PaymentReceived.find(query)
+                .populate('customerId', 'name customerId')
+                .populate('driverId', 'personalInfo driverId')
+                .populate('depositedTo', 'name code')
+                .sort(sort)
+                .skip(skip)
+                .limit(parseInt(limit))
+        ]);
 
         res.status(200).json({
             success: true,
             data: docs,
+            metrics: null,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -297,406 +323,34 @@ exports.deletePaymentReceived = async (req, res) => {
 
 exports.bulkUploadPayments = async (req, res) => {
     try {
-        const { rows } = req.body;
+        const { rows, fieldMap } = req.body;
         if (!rows || !Array.isArray(rows) || rows.length === 0) {
             return res.status(400).json({ success: false, message: "No data rows provided." });
         }
 
-        const mongoose = require('mongoose');
-        const Customer = require('../../Customer/Model/CustomerModel');
-        const AccountingCode = require('../../AccountingCode/Model/AccountingCodeModel');
-        const Branch = require('../../Branch/Model/BranchModel');
-        const { Invoice } = require('../../Invoice/Model/InvoiceModel');
-        const InvoiceService = require('../../Invoice/Service/InvoiceService');
-        const PaymentTransaction = require('../../Payment/Model/PaymentTransactionModel');
-        const { autoGenerateLedgerEntry } = require('../../Ledger/Service/LedgerService');
+        const PaymentImportService = require('../Service/PaymentImportService');
+        const result = await PaymentImportService.importAndReconcilePayments({
+            rows,
+            fieldMap,
+            user: req.user
+        });
 
-        // 1. Fetch reference collections for fast lookups
-        const customersList = await Customer.find({ isDeleted: false });
-        const customersByName = new Map();
-        const customersById = new Map();
-        for (const c of customersList) {
-            if (c.name) {
-                customersByName.set(c.name.trim().toLowerCase().replace(/\s+/g, ' '), c);
-            }
-            if (c.customerId) {
-                customersById.set(c.customerId.trim().toLowerCase(), c);
-            }
-            if (c.customerNumber) {
-                customersById.set(c.customerNumber.trim().toLowerCase(), c);
-            }
-        }
-
-        const accCodes = await AccountingCode.find({ isDeleted: false, isActive: true });
-        const accCodesByCode = new Map();
-        const accCodesByName = new Map();
-        for (const ac of accCodes) {
-            if (ac.code) {
-                accCodesByCode.set(ac.code.toString().trim().toLowerCase(), ac);
-            }
-            if (ac.name) {
-                accCodesByName.set(ac.name.toString().trim().toLowerCase().replace(/\s+/g, ' '), ac);
-            }
-        }
-
-        const branches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
-        const defaultBranchId = branches[0] ? branches[0]._id : undefined;
-
-        const invoicesList = await Invoice.find({ isDeleted: false });
-        const invoicesByNo = new Map();
-        for (const inv of invoicesList) {
-            if (inv.invoiceNumber) {
-                invoicesByNo.set(inv.invoiceNumber.trim().toLowerCase(), inv);
-            }
-        }
-
-        // Helpers
-        const getRowVal = (r, possibleKeys) => {
-            for (const key of possibleKeys) {
-                const cleanKey = key.replace(/^\ufeff/, '').trim().toLowerCase();
-                if (r[key] !== undefined) return r[key];
-                for (const k of Object.keys(r)) {
-                    const cleanK = k.replace(/^\ufeff/, '').trim().toLowerCase();
-                    if (cleanK === cleanKey) {
-                        return r[k];
-                    }
-                }
-            }
-            return undefined;
-        };
-
-        const parseFlexibleDate = (dateStr) => {
-            if (!dateStr) return null;
-            if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
-            if (typeof dateStr === 'number') {
-                const date = new Date((dateStr - 25569) * 86400 * 1000);
-                return isNaN(date.getTime()) ? null : date;
-            }
-            const str = dateStr.toString().trim();
-            if (!str) return null;
-            const dmyRegex = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/;
-            const match = str.match(dmyRegex);
-            if (match) {
-                const day = parseInt(match[1], 10);
-                const month = parseInt(match[2], 10) - 1;
-                const year = parseInt(match[3], 10);
-                const date = new Date(year, month, day);
-                if (date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) {
-                    return date;
-                }
-            }
-            const parsedDate = new Date(str);
-            return isNaN(parsedDate.getTime()) ? null : parsedDate;
-        };
-
-        // 2. Group rows by Payment Number / CustomerPayment ID
-        const paymentGroups = new Map();
-        let rowCounter = 0;
-        for (const row of rows) {
-            rowCounter++;
-            const payNo = getRowVal(row, ["Payment Number", "paymentNumber"]);
-            const payId = getRowVal(row, ["CustomerPayment ID", "customerPaymentId"]);
-            const key = (payNo || payId || `TEMP-${Date.now()}-${rowCounter}`).toString().trim();
-            if (!paymentGroups.has(key)) {
-                paymentGroups.set(key, []);
-            }
-            paymentGroups.get(key).push({ row, originalIndex: rowCounter });
-        }
-
-        const createdPayments = [];
-        const errors = [];
-        const skipped = [];
-        let generatedOffset = 0;
-
-        let creatorId = req.user ? (req.user.id || req.user._id) : null;
-        let creatorRole = req.user && req.user.role ? req.user.role.toUpperCase() : "ADMIN";
-        if (!creatorId) {
-            try {
-                const User = mongoose.model('User');
-                const anyUser = await User.findOne({});
-                if (anyUser) {
-                    creatorId = anyUser._id;
-                    creatorRole = anyUser.role ? anyUser.role.toUpperCase() : "ADMIN";
-                } else {
-                    creatorId = new mongoose.Types.ObjectId();
-                    creatorRole = "ADMIN";
-                }
-            } catch (e) {
-                creatorId = new mongoose.Types.ObjectId();
-                creatorRole = "ADMIN";
-            }
-        }
-
-        // 3. Process each group
-        for (const [key, grouped] of paymentGroups.entries()) {
-            const headerRowObj = grouped[0];
-            const headerRow = headerRowObj.row;
-            const origIdx = headerRowObj.originalIndex;
-
-            const payNoVal = getRowVal(headerRow, ["Payment Number", "paymentNumber"]);
-            const payNo = (payNoVal || "").toString().trim();
-
-            // Check if payment already exists in DB
-            if (payNo && !payNo.startsWith("TEMP-")) {
-                const existingPayment = await PaymentReceived.findOne({ paymentNumber: payNo });
-                if (existingPayment) {
-                    console.log(`[PaymentReceivedController] Payment ${payNo} already exists. Skipping.`);
-                    skipped.push(`Payment group "${key}" (Row ${origIdx}): Payment number "${payNo}" already exists. Skipping upload.`);
-                    continue;
-                }
-            }
-
-            // Resolve Customer
-            const customerNameVal = getRowVal(headerRow, ["Customer Name", "customerName", "customer"]);
-            const customerNameInput = (customerNameVal || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
-
-            let customerDoc = null;
-            if (customerNameInput) {
-                customerDoc = customersByName.get(customerNameInput);
-                if (!customerDoc) {
-                    for (const [dbName, dbCust] of customersByName.entries()) {
-                        const cleanDb = dbName.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
-                        const cleanInput = customerNameInput.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim().replace(/\s+/g, ' ');
-                        if (cleanDb === cleanInput || cleanDb.includes(cleanInput) || cleanInput.includes(cleanDb)) {
-                            customerDoc = dbCust;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (!customerDoc) {
-                const customerIdVal = getRowVal(headerRow, ["Customer ID", "customerId", "customerNumber"]);
-                const customerNumberVal = getRowVal(headerRow, ["Customer Number", "customerNumber"]);
-                if (customerIdVal) {
-                    customerDoc = customersById.get(customerIdVal.toString().trim().toLowerCase());
-                }
-                if (!customerDoc && customerNumberVal) {
-                    customerDoc = customersById.get(customerNumberVal.toString().trim().toLowerCase());
-                }
-            }
-
-            if (!customerDoc) {
-                errors.push(`Payment group "${key}" (Row ${origIdx}): Customer Name "${customerNameVal || ''}" not found in database.`);
-                continue;
-            }
-
-            const driverId = customerDoc.driver || undefined;
-
-            // Resolve Deposit To Account
-            const depToVal = getRowVal(headerRow, ["Deposit To", "depositTo"]);
-            const depToCodeVal = getRowVal(headerRow, ["Deposit To Account Code", "depositToAccountCode"]);
-
-            let depositedToDoc = null;
-            if (depToCodeVal) {
-                depositedToDoc = accCodesByCode.get(depToCodeVal.toString().trim().toLowerCase());
-            }
-            if (!depositedToDoc && depToVal) {
-                const cleanDepTo = depToVal.toString().trim().toLowerCase().replace(/\s+/g, ' ');
-                depositedToDoc = accCodesByName.get(cleanDepTo);
-                if (!depositedToDoc) {
-                    for (const [dbName, dbAc] of accCodesByName.entries()) {
-                        if (dbName.includes(cleanDepTo) || cleanDepTo.includes(dbName)) {
-                            depositedToDoc = dbAc;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (!depositedToDoc) {
-                errors.push(`Payment group "${key}" (Row ${origIdx}): Deposit To account "${depToVal || depToCodeVal || ''}" not found in database.`);
-                continue;
-            }
-
-            // Resolve Branch
-            let branchDoc = branches.find(b => b.name.toLowerCase().includes("panama"));
-            if (!branchDoc) {
-                const branchNameVal = getRowVal(headerRow, ["Location Name", "locationName", "Branch ID", "branchId"]);
-                if (branchNameVal) {
-                    const cleanBranch = branchNameVal.toString().trim().toLowerCase();
-                    branchDoc = branches.find(b => b.name.toLowerCase().includes(cleanBranch) || b.code.toLowerCase() === cleanBranch);
-                }
-            }
-            const finalBranchId = branchDoc ? branchDoc._id : defaultBranchId;
-
-            // Resolve dates & amount
-            const dateVal = getRowVal(headerRow, ["Date", "date", "Created Time", "createdTime"]);
-            const paymentDate = parseFlexibleDate(dateVal) || new Date();
-
-            const amountVal = getRowVal(headerRow, ["Amount", "amount"]);
-            const amountReceived = parseFloat(amountVal || 0);
-            if (isNaN(amountReceived) || amountReceived <= 0) {
-                errors.push(`Payment group "${key}" (Row ${origIdx}): Invalid payment amount "${amountVal || ''}".`);
-                continue;
-            }
-
-            const paymentMethodVal = getRowVal(headerRow, ["Mode", "mode", "Payment Type", "paymentType"]) || "Cash";
-            let paymentMethod = "Cash";
-            const pmUpper = paymentMethodVal.toString().toUpperCase();
-            if (pmUpper.includes("CASH")) paymentMethod = "Cash";
-            else if (pmUpper.includes("BANK") || pmUpper.includes("TRANSFER")) paymentMethod = "Bank Transfer";
-            else if (pmUpper.includes("CARD")) paymentMethod = "Card";
-            else if (pmUpper.includes("MOBILE") || pmUpper.includes("MONEY")) paymentMethod = "Mobile Money";
-            else paymentMethod = "Other";
-
-            const referenceNumber = getRowVal(headerRow, ["Reference Number", "referenceNumber"]) || "";
-            const notes = getRowVal(headerRow, ["Description", "description", "Notes", "notes"]) || "";
-
-            // Resolve applied invoices (sum amounts if same invoice appears multiple times in the group)
-            const invoiceApplicationsMap = new Map(); // invoiceId -> { invoiceId, invoiceNumber, amountApplied }
-
-            for (const itemObj of grouped) {
-                const r = itemObj.row;
-                const invNoVal = getRowVal(r, ["Invoice Number", "invoiceNumber"]);
-                const amtAppliedVal = getRowVal(r, ["Amount Applied to Invoice", "amountAppliedToInvoice", "Amount Applied", "amountApplied"]);
-
-                if (invNoVal) {
-                    const invNoClean = invNoVal.toString().trim().toLowerCase();
-                    const invoiceDoc = invoicesByNo.get(invNoClean);
-                    if (invoiceDoc) {
-                        const amountApplied = parseFloat(amtAppliedVal || 0);
-                        if (!isNaN(amountApplied) && amountApplied > 0) {
-                            const invIdStr = invoiceDoc._id.toString();
-                            if (invoiceApplicationsMap.has(invIdStr)) {
-                                // Same invoice referenced again in this payment group — sum the amounts
-                                invoiceApplicationsMap.get(invIdStr).amountApplied += amountApplied;
-                            } else {
-                                invoiceApplicationsMap.set(invIdStr, {
-                                    invoiceId: invoiceDoc._id,
-                                    invoiceNumber: invoiceDoc.invoiceNumber,
-                                    amountApplied
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            const invoiceApplications = Array.from(invoiceApplicationsMap.values());
-
-            // Assign payment number
-            let paymentNumber = payNo;
-            if (!paymentNumber || paymentNumber.startsWith("TEMP-")) {
-                const count = await PaymentReceived.countDocuments();
-                paymentNumber = `PR-${String(count + 1 + generatedOffset).padStart(5, '0')}`;
-                generatedOffset++;
-            }
-
-            // Create PaymentReceived document
-            const newDoc = new PaymentReceived({
-                paymentNumber,
-                customerId: customerDoc._id,
-                driverId,
-                amountReceived,
-                paymentDate,
-                paymentMethod,
-                referenceNumber,
-                notes,
-                depositedTo: depositedToDoc._id,
-                branch: finalBranchId,
-                invoices: invoiceApplications,
-                status: "COMPLETED"
+        if (!result.success) {
+            return res.status(400).json({
+                success: false,
+                message: result.message || "Failed to process bulk payments.",
+                errors: result.summary ? result.summary.errors : []
             });
-
-            const savedDoc = await newDoc.save();
-            createdPayments.push(paymentNumber);
-
-            // Update invoices in DB
-            for (const app of invoiceApplications) {
-                const invoice = await Invoice.findById(app.invoiceId);
-                if (invoice) {
-                    invoice.amountPaid = (invoice.amountPaid || 0) + app.amountApplied;
-                    invoice.balance = Math.max(0, invoice.totalAmountDue - invoice.amountPaid);
-                    if (invoice.balance <= 0) {
-                        invoice.status = "PAID";
-                        invoice.paidAt = new Date();
-                    } else {
-                        invoice.status = "PARTIAL";
-                    }
-                    invoice.payments.push({
-                        amount: app.amountApplied,
-                        paidAt: paymentDate,
-                        paymentMethod,
-                        note: notes || `Payment received (PR: ${paymentNumber})`
-                    });
-                    await invoice.save();
-                    if (InvoiceService && typeof InvoiceService.syncInvoiceToAdditionalPayments === 'function') {
-                        await InvoiceService.syncInvoiceToAdditionalPayments(invoice);
-                    }
-                }
-            }
-
-            // Apply excess if any
-            const totalApplied = invoiceApplications.reduce((sum, inv) => sum + inv.amountApplied, 0);
-            const excessAmount = amountReceived - totalApplied;
-            if (excessAmount > 0) {
-                try {
-                    if (InvoiceService && typeof InvoiceService.applyExcessToNextInvoice === 'function') {
-                        await InvoiceService.applyExcessToNextInvoice(customerDoc._id, excessAmount, {
-                            paymentMethod,
-                            referenceNumber,
-                            notes,
-                            createdBy: creatorId,
-                            creatorRole: creatorRole
-                        });
-                    }
-                } catch (err) {
-                    console.error("[bulkUploadPayments] Failed to apply excess overpayment:", err);
-                }
-            }
-
-            // Rollover customer invoices
-            try {
-                if (InvoiceService && typeof InvoiceService.rolloverCustomerInvoices === 'function') {
-                    await InvoiceService.rolloverCustomerInvoices(customerDoc._id);
-                }
-            } catch (err) {
-                console.error("[bulkUploadPayments] Rollover customer invoices failed:", err);
-            }
-
-            // Create PaymentTransaction & double-entry ledger entries
-            try {
-                const paymentTx = new PaymentTransaction({
-                    accountingCode: depositedToDoc._id,
-                    referenceId: savedDoc._id,
-                    referenceModel: "PaymentReceived",
-                    transactionCategory: "ASSET",
-                    transactionType: "DEBIT",
-                    baseAmount: amountReceived,
-                    totalAmount: amountReceived,
-                    paymentMethod: "CASH",
-                    status: "COMPLETED",
-                    paymentDate,
-                    notes: notes || `Payment received from Customer (PR: ${paymentNumber})`,
-                    branch: finalBranchId,
-                    createdBy: creatorId,
-                    creatorRole: creatorRole
-                });
-
-                const pmUpperTx = paymentMethod.toUpperCase();
-                if (pmUpperTx.includes("CASH")) paymentTx.paymentMethod = "CASH";
-                else if (pmUpperTx.includes("BANK") || pmUpperTx.includes("TRANSFER")) paymentTx.paymentMethod = "BANK_TRANSFER";
-                else if (pmUpperTx.includes("CARD")) paymentTx.paymentMethod = "CREDIT_CARD";
-                else if (pmUpperTx.includes("CHEQUE")) paymentTx.paymentMethod = "CHEQUE";
-                else paymentTx.paymentMethod = "OTHER";
-
-                await paymentTx.save();
-
-                const populatedTx = { ...paymentTx.toObject(), accountingCode: depositedToDoc };
-                await autoGenerateLedgerEntry(populatedTx);
-            } catch (ledgerErr) {
-                console.error(`[bulkUploadPayments] Failed to post ledger for ${paymentNumber}:`, ledgerErr);
-            }
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
-            successCount: createdPayments.length,
-            errorCount: errors.length,
-            skippedCount: skipped.length,
-            errors,
-            skipped,
-            createdPayments
+            successCount: result.summary.createdCount + result.summary.updatedCount,
+            errorCount: result.summary.errorCount,
+            skippedCount: result.summary.skippedCount,
+            errors: result.summary.errors,
+            skipped: result.summary.skipped,
+            summary: result.summary
         });
     } catch (error) {
         console.error("[PaymentReceivedController] Error in bulkUploadPayments:", error);

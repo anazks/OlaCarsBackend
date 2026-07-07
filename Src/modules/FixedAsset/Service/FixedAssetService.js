@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const FixedAsset = require("../Model/FixedAssetModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const LedgerService = require("../../Ledger/Service/LedgerService");
@@ -223,8 +224,22 @@ exports.createFixedAsset = async (data, userData) => {
     }
 
     const generatedCode = data.code || `FA-${Date.now()}`;
+    
+    // Resolve fixedAssetType if passed as string name
+    let resolvedType = data.fixedAssetType;
+    if (resolvedType && typeof resolvedType === "string" && !mongoose.Types.ObjectId.isValid(resolvedType)) {
+        const FixedAssetType = require("../Model/FixedAssetTypeModel");
+        const match = await FixedAssetType.findOne({ name: { $regex: new RegExp(`^${resolvedType.trim()}$`, "i") } });
+        if (match) {
+            resolvedType = match._id;
+        } else {
+            resolvedType = undefined;
+        }
+    }
+
     const newAsset = new FixedAsset({
         ...data,
+        fixedAssetType: resolvedType,
         code: generatedCode,
         createdBy: userData.id || userData._id,
         creatorRole: finalCreatorRole,
@@ -242,6 +257,21 @@ exports.createFixedAsset = async (data, userData) => {
 exports.updateFixedAsset = async (id, data, userData) => {
     const asset = await FixedAsset.findById(id);
     if (!asset) throw new AppError("Fixed Asset not found", 404);
+
+    // Resolve fixedAssetType if passed as string name
+    if (data.fixedAssetType !== undefined) {
+        let resolvedType = data.fixedAssetType;
+        if (resolvedType && typeof resolvedType === "string" && !mongoose.Types.ObjectId.isValid(resolvedType)) {
+            const FixedAssetType = require("../Model/FixedAssetTypeModel");
+            const match = await FixedAssetType.findOne({ name: { $regex: new RegExp(`^${resolvedType.trim()}$`, "i") } });
+            if (match) {
+                resolvedType = match._id;
+            } else {
+                resolvedType = undefined;
+            }
+        }
+        data.fixedAssetType = resolvedType;
+    }
 
     // Apply updates
     Object.keys(data).forEach(key => {
@@ -270,19 +300,37 @@ exports.getFixedAssets = async (query = {}) => {
         ];
     }
 
-    return await FixedAsset.find(filter)
+    const page = parseInt(query.page) || 1;
+    const limit = parseInt(query.limit) || 25;
+    const skip = (page - 1) * limit;
+
+    const total = await FixedAsset.countDocuments(filter);
+    const docs = await FixedAsset.find(filter)
+        .select("-depreciationSchedule")
+        .populate("fixedAssetType", "name description isActive")
         .populate("fixedAssetAccount", "code name")
         .populate("accumulatedDepreciationAccount", "code name")
         .populate("depreciationExpenseAccount", "code name")
         .populate("linkedVehicle", "basicDetails.make basicDetails.model basicDetails.year legalDocs.registrationNumber")
         .populate("originalBill", "billNumber")
         .populate("originalPO", "purchaseOrderNumber")
-        .sort({ createdAt: -1 });
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit);
+    
+    return {
+        docs,
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+    };
 };
 
 // 5. Get Fixed Asset By ID
 exports.getFixedAssetById = async (id) => {
     const asset = await FixedAsset.findById(id)
+        .populate("fixedAssetType", "name description isActive")
         .populate("fixedAssetAccount", "code name")
         .populate("accumulatedDepreciationAccount", "code name")
         .populate("depreciationExpenseAccount", "code name")
@@ -509,7 +557,329 @@ exports.postDepreciationPeriod = async (assetId, periodIndex, userData) => {
     scheduleEntry.status = "Posted";
     scheduleEntry.ledgerEntry = debitEntry._id;
     scheduleEntry.postedDate = new Date();
+    asset.currentValue = scheduleEntry.bookValue;
 
     await asset.save();
     return asset;
+};
+
+exports.bulkImportFixedAssets = async (rawAssets, userData) => {
+    const createdBy = userData.id || userData._id || "507f1f77bcf86cd799439011";
+    let finalCreatorRole = (userData.role || "ADMIN").toUpperCase();
+    if (finalCreatorRole === "FINANCE-ADMIN" || finalCreatorRole === "FINANCIAL-ADMIN" || finalCreatorRole === "FINANCIALADMIN") {
+        finalCreatorRole = "FINANCEADMIN";
+    } else if (finalCreatorRole === "OPERATION-ADMIN" || finalCreatorRole === "OPERATIONALADMIN" || finalCreatorRole === "OPERATIONAL-ADMIN") {
+        finalCreatorRole = "OPERATIONADMIN";
+    }
+    const { ROLES } = require("../../../shared/constants/roles");
+    if (!Object.values(ROLES).includes(finalCreatorRole)) {
+        finalCreatorRole = "ADMIN";
+    }
+
+    const FixedAssetType = require("../Model/FixedAssetTypeModel");
+    const Branch = require("../../Branch/Model/BranchModel");
+
+    // 1. Preload caches for fast lookups
+    const allAccounts = await AccountingCode.find({ isDeleted: { $ne: true } }).lean();
+    const accountByCode = {};
+    const accountByName = {};
+    for (const acc of allAccounts) {
+        if (acc.code) accountByCode[acc.code.toLowerCase().trim()] = acc;
+        if (acc.name) accountByName[acc.name.toLowerCase().trim()] = acc;
+    }
+
+    const allBranches = await Branch.find({ isDeleted: { $ne: true } }).lean();
+    const branchByName = {};
+    for (const br of allBranches) {
+        if (br.name) branchByName[br.name.toLowerCase().trim()] = br;
+    }
+
+    const allVehicles = await Vehicle.find({}).select("_id legalDocs.registrationNumber").lean();
+    const vehicleByReg = {};
+    for (const v of allVehicles) {
+        if (v.legalDocs && v.legalDocs.registrationNumber) {
+            vehicleByReg[v.legalDocs.registrationNumber.toLowerCase().trim()] = v;
+        }
+    }
+
+    const allAssetTypes = await FixedAssetType.find({}).lean();
+    const assetTypeByName = {};
+    for (const t of allAssetTypes) {
+        if (t.name) assetTypeByName[t.name.toLowerCase().trim()] = t;
+    }
+
+    // Helper functions
+    function parseFlexibleDate(val) {
+        if (!val) return null;
+        if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+        if (typeof val === "number") {
+            // Excel serial date
+            const d = new Date((val - 25569) * 86400 * 1000);
+            return isNaN(d.getTime()) ? null : d;
+        }
+        const str = String(val).trim();
+        if (!str) return null;
+        // Try DD/MM/YYYY or DD-MM-YYYY
+        const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+        if (dmyMatch) {
+            const d = new Date(parseInt(dmyMatch[3]), parseInt(dmyMatch[2]) - 1, parseInt(dmyMatch[1]));
+            if (!isNaN(d.getTime())) return d;
+        }
+        const d = new Date(str);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function getVal(row, keys) {
+        for (const key of keys) {
+            if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+        }
+        
+        const normalize = (s) => String(s).toLowerCase().replace(/[\s_-]/g, "");
+        const normalizedKeys = keys.map(normalize);
+        
+        for (const k of Object.keys(row)) {
+            const normalizedK = normalize(k);
+            if (normalizedKeys.includes(normalizedK)) {
+                if (row[k] !== undefined && row[k] !== null && row[k] !== "") return row[k];
+            }
+        }
+        return undefined;
+    }
+
+    const created = [];
+    const duplicates = [];
+    const errors = [];
+
+    for (let i = 0; i < rawAssets.length; i++) {
+        const row = rawAssets[i];
+        const rowNum = i + 2; // Excel row (1-indexed header + 1-indexed data)
+
+        try {
+            // --- Extract Fixed Asset Number (code) and check duplicates ---
+            const codeRaw = getVal(row, ["fixed_asset_number", "Fixed Asset Number", "code", "Code"]);
+            if (!codeRaw) {
+                errors.push({ row: rowNum, reason: "Missing required field: Fixed Asset Number" });
+                continue;
+            }
+            const code = String(codeRaw).trim();
+
+            const existingAsset = await FixedAsset.findOne({ code });
+            if (existingAsset) {
+                duplicates.push({ row: rowNum, code, name: getVal(row, ["fixed_asset_name", "Fixed Asset Name", "name", "Name"]) });
+                continue;
+            }
+
+            // --- Extract Name ---
+            const nameRaw = getVal(row, ["fixed_asset_name", "Fixed Asset Name", "name", "Name"]);
+            if (!nameRaw) {
+                errors.push({ row: rowNum, reason: "Missing required field: Fixed Asset Name", code });
+                continue;
+            }
+            const name = String(nameRaw).trim();
+
+            // --- Resolve accounts ---
+            const faAccName = String(getVal(row, ["fixed_asset_account", "Fixed Asset Account", "fixedAssetAccount"]) || "").trim();
+            const expAccName = String(getVal(row, ["expense_account", "Expense Account", "depreciationExpenseAccount", "depreciation_expense_account", "expenseAccount"]) || "").trim();
+            const depAccName = String(getVal(row, ["depreciation_account", "Depreciation Account", "accumulatedDepreciationAccount", "accumulated_depreciation_account", "depreciationAccount"]) || "").trim();
+
+            if (!faAccName) {
+                errors.push({ row: rowNum, reason: "Missing required field: Fixed Asset Account", code, name });
+                continue;
+            }
+            if (!expAccName) {
+                errors.push({ row: rowNum, reason: "Missing required field: Expense Account", code, name });
+                continue;
+            }
+            if (!depAccName) {
+                errors.push({ row: rowNum, reason: "Missing required field: Depreciation Account", code, name });
+                continue;
+            }
+
+            const fixedAssetAccount = accountByName[faAccName.toLowerCase()] || accountByCode[faAccName.toLowerCase()];
+            const depreciationExpenseAccount = accountByName[expAccName.toLowerCase()] || accountByCode[expAccName.toLowerCase()];
+            const accumulatedDepreciationAccount = accountByName[depAccName.toLowerCase()] || accountByCode[depAccName.toLowerCase()];
+
+            if (!fixedAssetAccount) {
+                errors.push({ row: rowNum, reason: `Fixed Asset Account not found in chart of accounts: "${faAccName}"`, code, name });
+                continue;
+            }
+            if (!depreciationExpenseAccount) {
+                errors.push({ row: rowNum, reason: `Expense Account not found in chart of accounts: "${expAccName}"`, code, name });
+                continue;
+            }
+            if (!accumulatedDepreciationAccount) {
+                errors.push({ row: rowNum, reason: `Depreciation Account not found in chart of accounts: "${depAccName}"`, code, name });
+                continue;
+            }
+
+            // --- Resolve Fixed Asset Type ---
+            const typeNameRaw = String(getVal(row, ["fixed_asset_type", "Fixed Asset Type"]) || "").trim();
+            let fixedAssetType = undefined;
+            if (typeNameRaw) {
+                const typeKey = typeNameRaw.toLowerCase();
+                let typeDoc = assetTypeByName[typeKey];
+                if (!typeDoc) {
+                    // Create Fixed Asset Type on-the-fly
+                    const newTypeDoc = await FixedAssetType.create({
+                        name: typeNameRaw,
+                        description: `Auto-created during bulk import of asset: ${name}`,
+                        createdBy,
+                        creatorRole: finalCreatorRole
+                    });
+                    assetTypeByName[typeKey] = newTypeDoc.toObject();
+                    typeDoc = newTypeDoc;
+                }
+                fixedAssetType = typeDoc._id;
+            }
+
+            // --- Map vehicle if registrationNumber matches Fixed Asset Name ---
+            let linkedVehicle = undefined;
+            const nameLower = name.toLowerCase();
+            const matchedVehicle = vehicleByReg[nameLower];
+            if (matchedVehicle) {
+                linkedVehicle = matchedVehicle._id;
+            }
+
+            // --- Map location/branch ---
+            const locNameRaw = String(getVal(row, ["location_name", "Location Name"]) || "").trim();
+            let location = "Head Office"; // default
+            if (locNameRaw) {
+                const branchDoc = branchByName[locNameRaw.toLowerCase()];
+                if (branchDoc) {
+                    location = branchDoc.name;
+                } else {
+                    // Fallback to branch containing Panama
+                    const panamaBranch = Object.values(branchByName).find(b => b.name.toLowerCase().includes("panama"));
+                    if (panamaBranch) {
+                        location = panamaBranch.name;
+                    } else {
+                        location = locNameRaw;
+                    }
+                }
+            } else {
+                // If Location Name is not in row, check Panama fallback
+                const panamaBranch = Object.values(branchByName).find(b => b.name.toLowerCase().includes("panama"));
+                if (panamaBranch) {
+                    location = panamaBranch.name;
+                }
+            }
+
+            // --- Parse dates ---
+            const purchaseDateVal = getVal(row, ["purchase_date", "Purchase Date"]);
+            const purchaseDate = parseFlexibleDate(purchaseDateVal);
+            if (!purchaseDate) {
+                errors.push({ row: rowNum, reason: "Missing or invalid field: Purchase Date", code, name });
+                continue;
+            }
+
+            const depStartDateVal = getVal(row, ["depreciation_start_date", "Depreciation Start Date"]);
+            const depreciationStartDate = parseFlexibleDate(depStartDateVal) || purchaseDate;
+
+            const warrantyExpVal = getVal(row, ["warranty_expiry_date", "Warranty Expiry Date", "warrantyExpirationDate", "warranty_expiration_date"]);
+            const warrantyExpirationDate = parseFlexibleDate(warrantyExpVal) || undefined;
+
+            // --- Parse numbers ---
+            const purchasePrice = Number(getVal(row, ["purchase_value", "Purchase Value", "purchasePrice", "Purchase Price"]) || 0);
+            const purchaseQuantity = Number(getVal(row, ["purchase_quantity", "Purchase Quantity"]) || 1);
+            const currentQuantity = Number(getVal(row, ["current_quantity", "Current Quantity"]) || 1);
+            const currentValue = Number(getVal(row, ["current_value", "Current Value"]) !== undefined ? getVal(row, ["current_value", "Current Value"]) : purchasePrice);
+            const disposalValue = Number(getVal(row, ["disposal_value", "Disposal Value"]) || 0);
+
+            // --- Parse useful life ---
+            const assetLife = Number(getVal(row, ["asset_life", "Asset Life"]) || 60);
+            const assetLifeBasis = String(getVal(row, ["asset_life_basis", "Asset Life Basis", "assetLifeUnit"]) || "Months").trim();
+            const assetLifeUnit = (assetLifeBasis.toLowerCase().startsWith("year")) ? "Years" : "Months";
+            const usefulLifeYears = (assetLifeUnit === "Months") ? Math.ceil(assetLife / 12) : assetLife;
+
+            // --- Status ---
+            const statusRaw = String(getVal(row, ["status", "Status"]) || "Active").trim().toLowerCase();
+            let status = "Active";
+            if (statusRaw === "draft") {
+                status = "Draft";
+            } else if (statusRaw === "pending") {
+                status = "Pending";
+            } else if (statusRaw === "inactive" || statusRaw === "written off" || statusRaw === "written_off" || statusRaw === "disposed" || statusRaw === "retired") {
+                status = "Inactive";
+            } else {
+                status = "Active";
+            }
+
+            // --- Method & Interval ---
+            const depMethodRaw = String(getVal(row, ["depreciation_method", "Depreciation Method"]) || "Straight-Line").trim();
+            const depreciationMethod = depMethodRaw.replace(/\s+/g, "") === "StraightLine" ? "Straight-Line" : "Straight-Line"; // Only Straight-Line supported
+            
+            const depreciationInterval = String(getVal(row, ["depreciation_frequency", "Depreciation Frequency", "depreciationInterval", "depreciation_interval"]) || "Monthly").trim().toLowerCase().startsWith("year") ? "Yearly" : "Monthly";
+
+            const computationType = String(getVal(row, ["computation_type", "Computation Type"]) || "Prorata Basis").trim();
+            const notes = String(getVal(row, ["notes", "Notes", "description", "Description"]) || "").trim();
+            const serialNumber = String(getVal(row, ["serial_number", "Serial Number"]) || "").trim();
+
+            const assetData = {
+                name,
+                code,
+                purchaseDate,
+                purchasePrice,
+                residualValue: disposalValue, // residual value maps to disposal/salvage
+                usefulLifeYears,
+                location,
+                purchaseQuantity,
+                serialNumber,
+                currentQuantity,
+                currentValue,
+                disposalValue,
+                warrantyExpirationDate,
+                fixedAssetType,
+                computationType,
+                depreciationStartDate,
+                assetLife,
+                assetLifeUnit,
+                notes,
+                depreciationMethod,
+                depreciationInterval,
+                status,
+                fixedAssetAccount: fixedAssetAccount._id,
+                accumulatedDepreciationAccount: accumulatedDepreciationAccount._id,
+                depreciationExpenseAccount: depreciationExpenseAccount._id,
+                linkedVehicle,
+                createdBy,
+                creatorRole: finalCreatorRole,
+            };
+
+            // Create fixed asset
+            const newAsset = new FixedAsset(assetData);
+            if (newAsset.status === "Active") {
+                newAsset.depreciationSchedule = calculateDepreciationSchedule(newAsset);
+                
+                // Auto-post past depreciation periods (periodDate <= now)
+                const now = new Date();
+                let latestPostedBookValue = null;
+                
+                if (newAsset.depreciationSchedule && newAsset.depreciationSchedule.length > 0) {
+                    for (const period of newAsset.depreciationSchedule) {
+                        const pDate = new Date(period.periodDate);
+                        if (pDate <= now) {
+                            period.status = "Posted";
+                            period.postedDate = now;
+                            latestPostedBookValue = period.bookValue;
+                        }
+                    }
+                }
+                
+                if (latestPostedBookValue !== null) {
+                    newAsset.currentValue = latestPostedBookValue;
+                }
+            }
+
+            await newAsset.save();
+            created.push(newAsset);
+        } catch (err) {
+            errors.push({ row: rowNum, reason: err.message, code: getVal(row, ["fixed_asset_number", "Fixed Asset Number", "code", "Code"]), name: getVal(row, ["fixed_asset_name", "Fixed Asset Name", "name", "Name"]) });
+        }
+    }
+
+    return {
+        created,
+        duplicates,
+        errors
+    };
 };

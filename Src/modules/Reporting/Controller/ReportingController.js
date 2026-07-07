@@ -4,6 +4,140 @@ const ReportingExcelService = require("../Service/ReportingExcelService");
 const Branch = require("../../Branch/Model/BranchModel");
 const { ROLES } = require("../../../shared/constants/roles");
 
+const mongoose = require("mongoose");
+
+exports.getDiag = async (req, res) => {
+    try {
+        const LedgerEntry = mongoose.model("LedgerEntry");
+        const accountCodeId = '6a280dab4f5923cd64ec316d';
+        
+        // Group all entries by formatted date to see exactly where they landed
+        const dateGroups = await LedgerEntry.aggregate([
+            {
+                $match: {
+                    accountingCode: new mongoose.Types.ObjectId(accountCodeId)
+                }
+            },
+            {
+                $group: {
+                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$entryDate" } },
+                    count: { $sum: 1 },
+                    totalDebit: {
+                        $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0] }
+                    },
+                    totalCredit: {
+                        $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0] }
+                    }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const fs = require('fs');
+        const path = require('path');
+        fs.writeFileSync(
+            path.join(__dirname, '../../../../tmp/diag_output.json'),
+            JSON.stringify({
+                timestamp: new Date().toISOString(),
+                accountCodeId,
+                totalCount: dateGroups.reduce((acc, g) => acc + g.count, 0),
+                dateGroups
+            }, null, 2)
+        );
+        
+        res.status(200).json({
+            status: "success",
+            totalCount: dateGroups.reduce((acc, g) => acc + g.count, 0),
+            dateGroups
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.getBgDiagPublic = async (req, res) => {
+    try {
+        const AccountingCode = mongoose.model("AccountingCode");
+        const LedgerEntry = mongoose.model("LedgerEntry");
+
+        const allCodes = await AccountingCode.find({
+            $or: [
+                { accountType: { $in: ['Cash', 'Bank'] } },
+                { name: /cash|bank|banco/i },
+                { category: 'ASSET' }
+            ]
+        });
+
+        const bgAccount = await AccountingCode.findOne({
+            $or: [
+                { name: /2654/ },
+                { code: /2654/ }
+            ]
+        });
+
+        if (bgAccount) {
+            const bgEntries = await LedgerEntry.find({ accountingCode: bgAccount._id }).sort({ entryDate: 1, _id: 1 });
+            let bal = 0;
+            const bgMapped = bgEntries.map(e => {
+                const amt = e.amount || 0;
+                const sign = e.type === 'DEBIT' ? 1 : -1;
+                bal += (amt * sign);
+                return {
+                    id: e._id,
+                    entryDate: e.entryDate,
+                    type: e.type,
+                    amount: e.amount,
+                    runningBalance: bal,
+                    description: e.description,
+                    createdAt: e.createdAt
+                };
+            });
+
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                fs.writeFileSync(path.join(__dirname, '../../../../tmp/banco_general_debug.json'), JSON.stringify({
+                    status: "success",
+                    account: bgAccount,
+                    balance: bal,
+                    entriesCount: bgMapped.length,
+                    entries: bgMapped
+                }, null, 2));
+            } catch (fErr) {
+                console.error("Failed writing debug json:", fErr);
+            }
+
+            return res.status(200).json({
+                status: "success",
+                account: bgAccount,
+                balance: bal,
+                entriesCount: bgMapped.length,
+                entries: bgMapped
+            });
+        } else {
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                fs.writeFileSync(path.join(__dirname, '../../../../tmp/banco_general_debug.json'), JSON.stringify({
+                    status: "error",
+                    message: "Account containing 2654 not found",
+                    allBankCodes: allCodes.map(c => ({ id: c._id, name: c.name, code: c.code, category: c.category, accountType: c.accountType }))
+                }, null, 2));
+            } catch (fErr) {
+                console.error("Failed writing error debug json:", fErr);
+            }
+
+            return res.status(404).json({
+                status: "error",
+                message: "Account containing 2654 not found",
+                allBankCodes: allCodes.map(c => ({ id: c._id, name: c.name, code: c.code, category: c.category, accountType: c.accountType }))
+            });
+        }
+    } catch (err) {
+        return res.status(500).json({ error: err.message });
+    }
+};
+
 exports.getPL = async (req, res) => {
     try {
         const filters = { ...req.query };
@@ -194,6 +328,31 @@ exports.exportExcel = async (req, res) => {
         const filename = `${reportType}_report_${dateStr}.xlsx`;
         res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
         res.send(buffer);
+    } catch (error) {
+        res.status(500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+exports.getBankBalanceSheet = async (req, res) => {
+    try {
+        const filters = { ...req.query };
+        const user = req.user;
+
+        // Apply role-based restrictions
+        if (user.role === ROLES.COUNTRYMANAGER) {
+            filters.country = user.country;
+        } else if (user.role === ROLES.BRANCHMANAGER || user.role === ROLES.FINANCESTAFF) {
+            filters.branch = user.branchId;
+        }
+
+        const report = await ReportingService.getBankBalanceSheetReport(filters);
+        res.status(200).json({
+            status: "success",
+            data: report
+        });
     } catch (error) {
         res.status(500).json({
             status: "error",

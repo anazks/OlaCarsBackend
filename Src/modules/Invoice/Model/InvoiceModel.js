@@ -55,7 +55,7 @@ const invoiceSchema = new mongoose.Schema({
         ref: "ServiceBill",
     },
     weekNumber: {
-        type: String,
+        type: Number,
         required: function() { return this.invoiceType === 'RENTAL'; },
     },
     weekLabel: {
@@ -100,6 +100,11 @@ const invoiceSchema = new mongoose.Schema({
     },
     pdfS3Key: {
         type: String
+    },
+    supportingDocument: {
+        name: { type: String },
+        url: { type: String },
+        uploadedAt: { type: Date }
     },
 
     // Manual invoice fields
@@ -148,6 +153,8 @@ invoiceSchema.index({ customer: 1 });
 invoiceSchema.index({ driver: 1 });
 invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
+invoiceSchema.index({ generatedAt: -1 });
+invoiceSchema.index({ isDeleted: 1 });
 
 module.exports = {
     Invoice: mongoose.model("Invoice", invoiceSchema)

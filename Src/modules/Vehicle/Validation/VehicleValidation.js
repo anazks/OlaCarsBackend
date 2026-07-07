@@ -17,6 +17,7 @@ const VEHICLE_STATUSES = [
     "TRANSFER PENDING",
     "TRANSFER COMPLETE",
     "RETIRED",
+    "PRE-BOOKED",
     "W. GROUP ACTIVE",
 ];
 

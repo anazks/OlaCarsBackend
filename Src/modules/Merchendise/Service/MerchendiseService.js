@@ -7,12 +7,13 @@ const filterBody = require('../../../shared/utils/filterBody.js');
 const validatePassword = require('../../../shared/utils/passwordValidator.js');
 const { applyQueryFeatures } = require('../../../shared/utils/queryHelper');
 
-const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'password', 'permissions'];
+const ALLOWED_UPDATE_FIELDS = ['fullName', 'email', 'phone', 'status', 'password', 'permissions', 'supplier'];
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME_MS = 30 * 60 * 1000;
 
 exports.loginService = async (email, password) => {
-    const user = await Merchendise.findOne({ email: email.toLowerCase(), isDeleted: false });
+    const user = await Merchendise.findOne({ email: email.toLowerCase(), isDeleted: false })
+        .populate('supplier');
     if (!user) throw new AppError('Invalid credentials', 401);
 
     if (user.lockUntil && user.lockUntil > Date.now()) {
@@ -59,7 +60,9 @@ exports.loginService = async (email, password) => {
 };
 
 exports.getById = async (id) => {
-    const user = await Merchendise.findOne({ _id: id, isDeleted: false }).select('-passwordHash -refreshToken');
+    const user = await Merchendise.findOne({ _id: id, isDeleted: false })
+        .select('-passwordHash -refreshToken')
+        .populate('supplier', 'name email phone address');
     if (!user) throw new AppError('Merchendise user not found', 404);
     return user;
 };
@@ -78,6 +81,7 @@ exports.create = async (data) => {
         fullName: data.fullName,
         email: data.email.toLowerCase(),
         phone: data.phone,
+        supplier: data.supplier || undefined,
         passwordHash: hashedPassword,
         status: data.status || 'ACTIVE',
         permissions: data.permissions || [],
@@ -124,6 +128,7 @@ exports.getAll = async (queryParams = {}, options = {}) => {
             searchFields: ["fullName", "email"],
             filterFields: ["status"],
             dateFilterField: "createdAt",
+            populate: { path: 'supplier', select: 'name email' },
             ...options
         };
         return await applyQueryFeatures(Merchendise, queryParams, queryOptions);

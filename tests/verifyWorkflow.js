@@ -10,6 +10,7 @@ module.constructor.prototype.require = function (id) {
         const Schema = function (def, opts) { this.paths = {}; };
         Schema.Types = { ObjectId: "ObjectId" };
         Schema.prototype.index = function () { };
+        Schema.prototype.pre = function () { };
         return { Schema, model: (n, s) => ({ modelName: n, schema: s }) };
     }
     return originalRequire.apply(this, arguments);

@@ -70,7 +70,7 @@ exports.getBranchesService = async (queryParams = {}, options = {}) => {
     try {
         const queryOptions = {
             searchFields: ["name", "code", "city", "state"],
-            filterFields: ["status", "country"],
+            filterFields: ["status", "country", "type"],
             dateFilterField: "createdAt",
             populate: [
                 { path: "countryManager", select: "fullName country" },

@@ -21,19 +21,19 @@ const addVehicle = async (req, res, next) => {
         vehicleData.createdBy = req.user.id;
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
-        
+
         // Handle Handling Staff and Fleet Number logic
         if (vehicleData.handlingStaff) {
             console.log('[DEBUG] addVehicle - Fetching staff with ID:', vehicleData.handlingStaff);
             const FinanceStaff = require("../../FinanceStaff/Model/FinanceStaffModel");
             const { generateNextFleetNumber } = require("../../FinanceStaff/Service/FinanceStaffService");
-            
+
             const staff = await FinanceStaff.findById(vehicleData.handlingStaff);
             console.log('[DEBUG] addVehicle - Staff lookup result:', staff ? `Found ${staff.fullName}` : 'NOT FOUND');
             if (staff) {
                 let fleetToAssign = vehicleData.basicDetails?.fleetNumber;
                 console.log('[DEBUG] addVehicle - Incoming fleetNumber:', fleetToAssign);
-                
+
                 if (!fleetToAssign) {
                     fleetToAssign = (staff.fleetNumbers && staff.fleetNumbers.length > 0) ? staff.fleetNumbers[0] : await generateNextFleetNumber();
                     console.log('[DEBUG] addVehicle - Using generated/default fleet:', fleetToAssign);
@@ -48,8 +48,8 @@ const addVehicle = async (req, res, next) => {
                     isDeleted: false
                 });
                 if (otherStaff) {
-                    return res.status(409).json({ 
-                        success: false, 
+                    return res.status(409).json({
+                        success: false,
                         message: `Duplicate Key Found: Fleet ${fleetToAssign} is already assigned to ${otherStaff.fullName}.`,
                         errorType: 'DUPLICATE_FLEET'
                     });
@@ -61,7 +61,7 @@ const addVehicle = async (req, res, next) => {
                     await staff.save();
                     console.log('[DEBUG] addVehicle - Staff updated successfully');
                 }
-                
+
                 if (!vehicleData.basicDetails) vehicleData.basicDetails = {};
                 vehicleData.basicDetails.fleetNumber = fleetToAssign;
                 console.log('[DEBUG] addVehicle - Set basicDetails.fleetNumber to:', vehicleData.basicDetails.fleetNumber);
@@ -121,7 +121,7 @@ const addVehicle = async (req, res, next) => {
 const getVehicles = async (req, res, next) => {
     try {
         const queryParams = { ...req.query };
-        
+
         // Map universal 'branch' filter to the specific field in Vehicle schema
         if (queryParams.branch) {
             queryParams['purchaseDetails.branch'] = queryParams.branch;
@@ -132,10 +132,28 @@ const getVehicles = async (req, res, next) => {
             baseQuery: { isDeleted: false },
             defaultSort: { createdAt: -1 }
         });
-        
-        return res.status(200).json({ 
-            success: true, 
-            data: result.data,
+
+        // Query for drivers assigned to these vehicles
+        const vehicleIds = result.data.map(v => v._id);
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const drivers = await Driver.find({ currentVehicle: { $in: vehicleIds } })
+            .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId currentVehicle");
+
+        // Convert Mongoose documents to plain JS objects to modify them
+        const vehiclesWithDrivers = result.data.map(v => {
+            const vObj = v.toObject ? v.toObject() : v;
+            if (!vObj.currentDriver) {
+                const assignedDriver = drivers.find(d => String(d.currentVehicle) === String(vObj._id));
+                if (assignedDriver) {
+                    vObj.currentDriver = assignedDriver.toObject ? assignedDriver.toObject() : assignedDriver;
+                }
+            }
+            return vObj;
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: vehiclesWithDrivers,
             pagination: {
                 total: result.total,
                 page: result.page,
@@ -158,7 +176,61 @@ const getVehicleById = async (req, res, next) => {
     try {
         const vehicle = await getVehicleByIdService(req.params.id);
         if (!vehicle) return res.status(404).json({ success: false, message: "Vehicle not found" });
-        return res.status(200).json({ success: true, data: vehicle });
+        
+        const { Vehicle } = require("../Model/VehicleModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const vehicleObj = vehicle.toObject();
+
+        // Ensure currentDriver is populated if missing but driver points to it
+        if (!vehicleObj.currentDriver) {
+            const driver = await Driver.findOne({ currentVehicle: vehicle._id })
+                .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId");
+            if (driver) {
+                vehicleObj.currentDriver = driver.toObject();
+            }
+        }
+
+        // 1. If this vehicle has a driver, find the temp vehicle assigned to its driver
+        if (vehicleObj.currentDriver) {
+            const driverId = vehicleObj.currentDriver._id || vehicleObj.currentDriver;
+            const tempVehicle = await Vehicle.findOne({ tempDriver: driverId, isDeleted: false });
+            if (tempVehicle) {
+                vehicleObj.tempVehicle = tempVehicle.toObject();
+            }
+        }
+
+        // 2. If this is a temporary vehicle (has tempDriver set), find its maintenance assignment details
+        if (vehicleObj.tempDriver) {
+            const driverId = vehicleObj.tempDriver._id || vehicleObj.tempDriver;
+            
+            // Ensure tempDriver details are loaded as an object
+            if (typeof vehicleObj.tempDriver !== "object" || !vehicleObj.tempDriver.personalInfo) {
+                const driver = await Driver.findById(driverId)
+                    .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId");
+                if (driver) {
+                    vehicleObj.tempDriver = driver.toObject();
+                }
+            }
+
+            // Look up the driver's current primary vehicle (maintenance vehicle) from the Driver document
+            let maintenanceVehicle = null;
+            const driverDoc = await Driver.findById(driverId).select("currentVehicle");
+            if (driverDoc && driverDoc.currentVehicle) {
+                maintenanceVehicle = await Vehicle.findOne({ _id: driverDoc.currentVehicle, isDeleted: false });
+            }
+            // Fallback to checking by currentDriver if not found
+            if (!maintenanceVehicle) {
+                maintenanceVehicle = await Vehicle.findOne({ currentDriver: driverId, isDeleted: false });
+            }
+
+            vehicleObj.tempAssignment = {
+                maintenanceVehicleId: maintenanceVehicle ? maintenanceVehicle._id : null,
+                maintenanceVehiclePlate: maintenanceVehicle ? (maintenanceVehicle.legalDocs?.registrationNumber || maintenanceVehicle.basicDetails?.fleetNumber) : "—",
+                tempDriver: vehicleObj.tempDriver
+            };
+        }
+
+        return res.status(200).json({ success: true, data: vehicleObj });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -294,9 +366,9 @@ const getAvailableCars = async (req, res, next) => {
         ];
 
         // Filter by status and branch
-        const baseQuery = { 
+        const baseQuery = {
             status: "ACTIVE — AVAILABLE",
-            isDeleted: false 
+            isDeleted: false
         };
 
         if (branchRoles.includes(req.user.role) && req.user.branchId) {
@@ -309,15 +381,15 @@ const getAvailableCars = async (req, res, next) => {
             baseQuery,
             defaultSort: { createdAt: -1 }
         });
-        
+
         console.log('[DEBUG] getAvailableCars - Found vehicles:', result.data?.length || 0);
         if (result.data && result.data.length > 0) {
             console.log('[DEBUG] getAvailableCars - First Vehicle Status:', result.data[0].status);
             console.log('[DEBUG] getAvailableCars - First Vehicle Branch:', result.data[0].purchaseDetails?.branch?._id || result.data[0].purchaseDetails?.branch);
         }
-        
-        return res.status(200).json({ 
-            success: true, 
+
+        return res.status(200).json({
+            success: true,
             data: result.data,
             pagination: {
                 total: result.total,
@@ -344,17 +416,17 @@ const assignCarToDriver = async (req, res, next) => {
         session = await mongoose.startSession();
         session.startTransaction();
         console.log('[DEBUG] Starting Vehicle Assignment Transaction...');
-        
+
         const vehicleId = req.params.id;
         const driverId = req.params.driverId;
-        const { 
-            durationMonths, 
-            monthlyRent, 
+        const {
+            durationMonths,
+            monthlyRent,
             depositAmount = 0,
-            notes, 
-            agreementVersion, 
-            generatedS3Key, 
-            signedS3Key 
+            notes,
+            agreementVersion,
+            generatedS3Key,
+            signedS3Key
         } = req.body;
 
         if (durationMonths === undefined || monthlyRent === undefined) {
@@ -399,10 +471,10 @@ const assignCarToDriver = async (req, res, next) => {
         }, req.user.id, req.user.role, session);
 
         // 5. Update Vehicle status
-        await updateVehicleService(vehicleId, { 
+        await updateVehicleService(vehicleId, {
             status: "ACTIVE — RENTED",
             currentDriver: driverId,
-            $push: { 
+            $push: {
                 statusHistory: {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
@@ -413,7 +485,7 @@ const assignCarToDriver = async (req, res, next) => {
         }, session);
 
         // 6. Update Driver — link vehicle + add deposit if applicable
-        const driverUpdate = { 
+        const driverUpdate = {
             currentVehicle: vehicleId,
             $push: {
                 statusHistory: {
@@ -497,9 +569,9 @@ const assignCarToDriver = async (req, res, next) => {
         await session.commitTransaction();
         session.endSession();
 
-        return res.status(200).json({ 
-            success: true, 
-            message: "Vehicle successfully assigned to driver and lease record created." 
+        return res.status(200).json({
+            success: true,
+            message: "Vehicle successfully assigned to driver and lease record created."
         });
     } catch (error) {
         console.error('[ERROR] assignCarToDriver Exception:', error);
@@ -508,10 +580,10 @@ const assignCarToDriver = async (req, res, next) => {
             session.endSession();
         }
         const statusCode = error.statusCode || 500;
-        return res.status(statusCode).json({ 
-            success: false, 
+        return res.status(statusCode).json({
+            success: false,
             message: error.message,
-            stack: error.stack 
+            stack: error.stack
         });
     }
 };
@@ -527,7 +599,7 @@ const updateVehicleLeaseSettings = async (req, res, next) => {
         console.log('[DEBUG] updateVehicleLeaseSettings - Body:', JSON.stringify(req.body, null, 2));
         const vehicleId = req.params.id;
         const { durationWeeks, weeklyRent, sellingValue } = req.body;
-        
+
         if (typeof durationWeeks !== 'number') {
             return res.status(400).json({ success: false, message: "Invalid or missing durationWeeks field." });
         }
@@ -567,7 +639,7 @@ const updateMaintenanceSettings = async (req, res, next) => {
     try {
         const vehicleId = req.params.id;
         const { maintenanceThresholdKm } = req.body;
-        
+
         if (typeof maintenanceThresholdKm !== 'number') {
             return res.status(400).json({ success: false, message: "Invalid or missing maintenanceThresholdKm field." });
         }
@@ -752,7 +824,7 @@ const mapExcelStatus = (excelStatus) => {
     if (matchedValidStatus) {
         return matchedValidStatus;
     }
-    
+
     if (statusStr === "ACTIVE VEHICLES") {
         return "ACTIVE — RENTED";
     }
@@ -822,7 +894,13 @@ const bulkAddVehicles = async (req, res) => {
             }
         }
 
-        const results = { created: [], errors: [] };
+        const results = { created: [], errors: [], skipped: [] };
+
+        const isNARegistration = (regNum) => {
+            if (!regNum) return true;
+            const clean = regNum.toString().trim().toUpperCase();
+            return clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED' || clean === 'NA.';
+        };
 
         for (let i = 0; i < vehicles.length; i++) {
             const row = vehicles[i];
@@ -847,67 +925,240 @@ const bulkAddVehicles = async (req, res) => {
             }
 
             try {
-                const mappedStatus = mapExcelStatus(row.status);
-                // Prepare vehicle structure
-                const vehicleData = {
-                    status: mappedStatus,
-                    createdBy: userId,
-                    creatorRole: userRole,
-                    purchaseDetails: {
-                        branch: branch,
-                        vendorName: row.vendorName ? row.vendorName.trim() : undefined,
-                        purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
-                        purchasePrice: (row.purchasePrice && !isNaN(row.purchasePrice)) ? Number(row.purchasePrice) : undefined,
-                        paymentMethod: row.paymentMethod || undefined,
-                    },
-                    basicDetails: {
-                        make: row.make.trim(),
-                        model: row.model.trim(),
-                        year: Number(row.year),
-                        category: row.category ? row.category.trim() : undefined,
-                        fuelType: row.fuelType ? row.fuelType.trim() : undefined,
-                        transmission: row.transmission || undefined,
-                        colour: row.colour ? row.colour.trim() : undefined,
-                        vin: (() => {
-                            if (!row.vin) return undefined;
-                            const clean = row.vin.toString().trim().toUpperCase();
-                            if (!clean || clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED') {
-                                return undefined;
-                            }
-                            return clean;
-                        })(),
-                        odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
-                        gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
-                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
-                        sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
-                        leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
-                        fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
-                    },
-                    legalDocs: {
-                        registrationNumber: row.registrationNumber.trim(),
-                        registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
-                    },
-                    statusHistory: [{
-                        status: mappedStatus,
-                        changedBy: userId,
-                        changedByRole: userRole,
-                        timestamp: new Date(),
-                        notes: "Vehicle created via bulk upload.",
-                    }]
-                };
+                const regNumClean = row.registrationNumber.trim();
+                const { Vehicle } = require("../Model/VehicleModel");
+                const existingVehicle = await Vehicle.findOne({
+                    "legalDocs.registrationNumber": { $regex: new RegExp(`^${regNumClean.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`, 'i') },
+                    isDeleted: false
+                });
+                if (existingVehicle) {
+                    results.skipped.push({
+                        row: rowNum,
+                        registrationNumber: regNumClean,
+                        message: `Vehicle with registration number '${regNumClean}' already exists (skipped).`
+                    });
+                    continue;
+                }
 
-                const newVehicle = await addVehicleService(vehicleData);
-                results.created.push({ row: rowNum, id: newVehicle._id, vin: newVehicle.basicDetails.vin, make: newVehicle.basicDetails.make, model: newVehicle.basicDetails.model });
+                const mappedStatus = mapExcelStatus(row.status);
+                const cleanVin = (() => {
+                    if (!row.vin) return undefined;
+                    const clean = row.vin.toString().trim().toUpperCase();
+                    if (!clean || clean === 'N/A' || clean === 'NA' || clean === '-' || clean === '—' || clean === 'NULL' || clean === 'UNDEFINED') {
+                        return undefined;
+                    }
+                    return clean;
+                })();
+
+                // Check if vehicle with VIN already exists
+                let existingVehicleByVin = null;
+                if (cleanVin) {
+                    existingVehicleByVin = await Vehicle.findOne({ 'basicDetails.vin': cleanVin, isDeleted: false });
+                }
+
+                if (existingVehicleByVin) {
+                    const currentReg = existingVehicleByVin.legalDocs?.registrationNumber;
+                    if (isNARegistration(currentReg)) {
+                        // Update existing vehicle
+                        const updateData = {
+                            status: mappedStatus,
+                            'basicDetails.make': row.make.trim(),
+                            'basicDetails.model': row.model.trim(),
+                            'basicDetails.year': Number(row.year),
+                            'basicDetails.weeklyRent': (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                            'basicDetails.fleetNumber': row.fleetNumber ? row.fleetNumber.trim() : undefined,
+                            'legalDocs.registrationNumber': row.registrationNumber.trim(),
+                            'basicDetails.odometer': (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                            'basicDetails.gpsSerialNumber': row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                            'basicDetails.sellingValue': (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                            'basicDetails.leaseDurationWeeks': (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
+                            $push: {
+                                statusHistory: {
+                                    status: mappedStatus,
+                                    changedBy: userId,
+                                    changedByRole: userRole,
+                                    timestamp: new Date(),
+                                    notes: "Vehicle updated via bulk upload (found existing VIN with NA registration).",
+                                }
+                            }
+                        };
+
+                        const updatedVehicle = await updateVehicleService(existingVehicleByVin._id, updateData);
+                        results.created.push({
+                            row: rowNum,
+                            id: updatedVehicle._id,
+                            vin: updatedVehicle.basicDetails?.vin || cleanVin,
+                            make: updatedVehicle.basicDetails?.make || row.make.trim(),
+                            model: updatedVehicle.basicDetails?.model || row.model.trim(),
+                            updated: true
+                        });
+                    } else {
+                        results.skipped.push({
+                            row: rowNum,
+                            vin: cleanVin,
+                            registrationNumber: regNumClean,
+                            message: `Vehicle with VIN '${cleanVin}' already exists with registration '${currentReg}' (skipped).`
+                        });
+                    }
+                } else {
+                    // Prepare new vehicle structure
+                    const vehicleData = {
+                        status: mappedStatus,
+                        createdBy: userId,
+                        creatorRole: userRole,
+                        purchaseDetails: {
+                            branch: branch,
+                            vendorName: row.vendorName ? row.vendorName.trim() : undefined,
+                            purchaseDate: row.purchaseDate ? new Date(row.purchaseDate) : undefined,
+                            purchasePrice: (row.purchasePrice && !isNaN(row.purchasePrice)) ? Number(row.purchasePrice) : undefined,
+                            paymentMethod: row.paymentMethod || undefined,
+                        },
+                        basicDetails: {
+                            make: row.make.trim(),
+                            model: row.model.trim(),
+                            year: Number(row.year),
+                            category: row.category ? row.category.trim() : undefined,
+                            fuelType: row.fuelType ? row.fuelType.trim() : undefined,
+                            transmission: row.transmission || undefined,
+                            colour: row.colour ? row.colour.trim() : undefined,
+                            vin: cleanVin,
+                            odometer: (row.odometer && !isNaN(row.odometer)) ? Number(row.odometer) : 0,
+                            gpsSerialNumber: row.gpsSerialNumber ? row.gpsSerialNumber.trim() : undefined,
+                            weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                            sellingValue: (row.sellingValue && !isNaN(row.sellingValue)) ? Number(row.sellingValue) : undefined,
+                            leaseDurationWeeks: (row.leaseDurationWeeks && !isNaN(row.leaseDurationWeeks)) ? Number(row.leaseDurationWeeks) : 260,
+                            fleetNumber: row.fleetNumber ? row.fleetNumber.trim() : undefined,
+                        },
+                        legalDocs: {
+                            registrationNumber: regNumClean,
+                            registrationExpiry: row.registrationExpiry ? new Date(row.registrationExpiry) : undefined,
+                        },
+                        statusHistory: [{
+                            status: mappedStatus,
+                            changedBy: userId,
+                            changedByRole: userRole,
+                            timestamp: new Date(),
+                            notes: "Vehicle created via bulk upload.",
+                        }]
+                    };
+
+                    const newVehicle = await addVehicleService(vehicleData);
+                    results.created.push({
+                        row: rowNum,
+                        id: newVehicle._id,
+                        vin: newVehicle.basicDetails?.vin,
+                        make: newVehicle.basicDetails?.make,
+                        model: newVehicle.basicDetails?.model
+                    });
+                }
             } catch (err) {
                 results.errors.push({ row: rowNum, message: err.message });
             }
         }
 
-        const statusCode = results.created.length > 0 ? 201 : 400;
+        const success = (results.created.length > 0 || results.skipped.length > 0);
+        const statusCode = success ? 201 : 400;
         return res.status(statusCode).json({
-            success: results.created.length > 0,
-            message: `${results.created.length} vehicle(s) created, ${results.errors.length} error(s).`,
+            success,
+            message: `${results.created.length} vehicle(s) created, ${results.skipped.length} skipped, ${results.errors.length} error(s).`,
             data: results,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const bulkUpdateVehicleRent = async (req, res) => {
+    try {
+        const { updates } = req.body;
+        if (!updates || !Array.isArray(updates)) {
+            return res.status(400).json({ success: false, message: "Invalid payload. 'updates' must be an array of objects." });
+        }
+
+        const { Vehicle } = require("../Model/VehicleModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const DriverService = require("../../Driver/Service/DriverService");
+
+        const results = { updated: [], errors: [] };
+
+        for (let i = 0; i < updates.length; i++) {
+            const row = updates[i];
+            const rowNum = i + 1;
+
+            // Map keys flexibly (supporting spaces, underscores, casing)
+            const registrationNumberRaw = row["Vehicle No"] || row["Vehicle_No"] || row["VehicleNo"] || row["registrationNumber"] || row["RegistrationNumber"] || row["registration_number"];
+            const vinRaw = row["VIN Number"] || row["VIN_Number"] || row["VINNumber"] || row["vin"] || row["VIN"] || row["vinNumber"];
+            const weeklyRentRaw = row["Weekly Rent"] || row["Weekly_Rent"] || row["WeeklyRent"] || row["weeklyRent"] || row["Weeklyrent"] || row["weekly_rent"];
+
+            const registrationNumber = registrationNumberRaw ? registrationNumberRaw.toString().trim() : "";
+            const vin = vinRaw ? vinRaw.toString().trim().toUpperCase() : "";
+            const weeklyRent = weeklyRentRaw !== undefined ? Number(weeklyRentRaw) : NaN;
+
+            if (!registrationNumber) {
+                results.errors.push({ row: rowNum, message: "Missing required column: Vehicle No" });
+                continue;
+            }
+            if (!vin) {
+                results.errors.push({ row: rowNum, message: "Missing required column: VIN Number" });
+                continue;
+            }
+            if (isNaN(weeklyRent) || weeklyRent < 0) {
+                results.errors.push({ row: rowNum, message: "Missing or invalid Weekly Rent value" });
+                continue;
+            }
+
+            try {
+                // Find matching vehicle
+                const vehicle = await Vehicle.findOne({
+                    "legalDocs.registrationNumber": { $regex: new RegExp(`^${registrationNumber}$`, "i") },
+                    "basicDetails.vin": { $regex: new RegExp(`^${vin}$`, "i") },
+                    isDeleted: false
+                });
+
+                if (!vehicle) {
+                    results.errors.push({ row: rowNum, message: `Vehicle not found matching Vehicle No: "${registrationNumber}" and VIN: "${vin}"` });
+                    continue;
+                }
+
+                // Update vehicle basicDetails.weeklyRent
+                vehicle.basicDetails.weeklyRent = weeklyRent;
+                await vehicle.save();
+
+                // Check for associated driver
+                let driverId = vehicle.currentDriver;
+                if (!driverId) {
+                    const driverDoc = await Driver.findOne({ currentVehicle: vehicle._id, isDeleted: false });
+                    if (driverDoc) driverId = driverDoc._id;
+                }
+
+                let driverUpdated = false;
+                if (driverId) {
+                    const scheduleRes = await DriverService.updateDriverRentScheduleForVehicle(driverId, vehicle._id, weeklyRent);
+                    if (scheduleRes.success) {
+                        driverUpdated = true;
+                        // Run rollover to ensure overdue rent ledger consistency
+                        await DriverService.rolloverOverdueRent(driverId);
+                    }
+                }
+
+                results.updated.push({
+                    row: rowNum,
+                    id: vehicle._id,
+                    vin: vehicle.basicDetails.vin,
+                    registrationNumber: vehicle.legalDocs.registrationNumber,
+                    weeklyRent: weeklyRent,
+                    driverUpdated
+                });
+            } catch (rowErr) {
+                results.errors.push({ row: rowNum, message: rowErr.message });
+            }
+        }
+
+        const statusCode = results.updated.length > 0 ? 200 : 400;
+        return res.status(statusCode).json({
+            success: results.updated.length > 0,
+            message: `${results.updated.length} vehicle(s) rent updated, ${results.errors.length} error(s).`,
+            data: results
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -927,4 +1178,5 @@ module.exports = {
     updateVehicle,
     getVehiclesDueForService,
     bulkAddVehicles,
+    bulkUpdateVehicleRent,
 };

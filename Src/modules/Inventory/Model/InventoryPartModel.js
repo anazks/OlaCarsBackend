@@ -14,6 +14,7 @@ const PART_CATEGORIES = [
     "Cooling",
     "Exhaust",
     "Interior",
+    "Parts",
     "Other",
 ];
 

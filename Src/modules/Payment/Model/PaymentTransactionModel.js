@@ -85,4 +85,6 @@ const paymentTransactionSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
+paymentTransactionSchema.index({ referenceId: 1, referenceModel: 1 });
+
 module.exports = mongoose.model("PaymentTransaction", paymentTransactionSchema);

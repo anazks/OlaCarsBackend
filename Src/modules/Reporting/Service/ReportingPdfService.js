@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -46,16 +47,20 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
     doc.fillColor(primaryColor)
        .fontSize(22)
        .font("Helvetica-Bold")
-       .text("OLA CARS", leftMargin, 50)
-       .fontSize(9)
-       .fillColor(secondaryColor)
-       .font("Helvetica")
-       .text("Logistics Finance Division", leftMargin, 75);
+       .text("OLA CARS", leftMargin, 50);
+
+    // Logo image integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(14)
        .fillColor(primaryColor)
        .font("Helvetica-Bold")
-       .text(reportTitle, 250, 50, { align: "right", width: 295 });
+       .text(reportTitle, 250, 58, { align: "right", width: 295 });
 
     doc.moveTo(leftMargin, 95)
        .lineTo(rightMargin, 95)
@@ -87,24 +92,55 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
 
     let currentY = 180;
 
+    const ensureSpace = (neededHeight, sectionHeaderFn) => {
+        if (currentY + neededHeight > 730) {
+            doc.addPage();
+            currentY = 50;
+            
+            // Draw running header on new pages
+            doc.fontSize(8)
+               .fillColor(secondaryColor)
+               .font("Helvetica-Bold")
+               .text(`OLA CARS  |  ${reportTitle.toUpperCase()} (CONTINUED)`, leftMargin, currentY)
+               .fontSize(8)
+               .text(`Period: ${dateRangeStr}`, rightMargin - 200, currentY, { align: "right", width: 200 });
+            
+            doc.moveTo(leftMargin, currentY + 12)
+               .lineTo(rightMargin, currentY + 12)
+               .strokeColor(borderMain)
+               .lineWidth(0.5)
+               .stroke();
+            
+            currentY += 25;
+            
+            if (sectionHeaderFn) {
+                sectionHeaderFn();
+            }
+        }
+    };
+
     if (isPL) {
         // --- profit & loss layout ---
         // Income section
+        ensureSpace(40);
         doc.fontSize(12).font("Helvetica-Bold").fillColor(accentColor).text("INCOME", leftMargin, currentY);
         currentY += 20;
 
         // Table Header for Income
-        doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold");
-        doc.text("Category", leftMargin, currentY);
-        doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 14;
-        
-        doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(primaryColor)
-           .lineWidth(1)
-           .stroke();
-        currentY += 8;
+        const printIncomeHeader = () => {
+            doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold");
+            doc.text("Category", leftMargin, currentY);
+            doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
+            currentY += 14;
+            
+            doc.moveTo(leftMargin, currentY)
+               .lineTo(rightMargin, currentY)
+               .strokeColor(primaryColor)
+               .lineWidth(1)
+               .stroke();
+            currentY += 8;
+        };
+        printIncomeHeader();
 
         // Income Rows
         doc.font("Helvetica").fontSize(9);
@@ -113,11 +149,13 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         let isStripe = false;
 
         if (incomeList.length === 0) {
+            ensureSpace(20);
             doc.fillColor(secondaryColor).text("No income transactions recorded in this period.", leftMargin + 10, currentY);
             currentY += 20;
         } else {
             incomeList.forEach(item => {
                 totalIncome += item.amount;
+                ensureSpace(18, printIncomeHeader);
                 if (isStripe) {
                     doc.fillColor(stripeBg).rect(leftMargin, currentY - 2, printableWidth, 16).fill();
                 }
@@ -129,6 +167,7 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         }
 
         // Income Total
+        ensureSpace(20);
         doc.moveTo(leftMargin, currentY - 4)
            .lineTo(rightMargin, currentY - 4)
            .strokeColor(borderMain)
@@ -140,21 +179,25 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         currentY += 35;
 
         // Expenses section
+        ensureSpace(40);
         doc.fontSize(12).font("Helvetica-Bold").fillColor("#EF4444").text("EXPENSES", leftMargin, currentY);
         currentY += 20;
 
         // Table Header for Expenses
-        doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold");
-        doc.text("Category", leftMargin, currentY);
-        doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 14;
+        const printExpensesHeader = () => {
+            doc.fillColor(primaryColor).fontSize(9).font("Helvetica-Bold");
+            doc.text("Category", leftMargin, currentY);
+            doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
+            currentY += 14;
 
-        doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(primaryColor)
-           .lineWidth(1)
-           .stroke();
-        currentY += 8;
+            doc.moveTo(leftMargin, currentY)
+               .lineTo(rightMargin, currentY)
+               .strokeColor(primaryColor)
+               .lineWidth(1)
+               .stroke();
+            currentY += 8;
+        };
+        printExpensesHeader();
 
         // Expense Rows
         doc.font("Helvetica").fontSize(9);
@@ -163,11 +206,13 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         isStripe = false;
 
         if (expenseList.length === 0) {
+            ensureSpace(20);
             doc.fillColor(secondaryColor).text("No expense transactions recorded in this period.", leftMargin + 10, currentY);
             currentY += 20;
         } else {
             expenseList.forEach(item => {
                 totalExpenses += item.amount;
+                ensureSpace(18, printExpensesHeader);
                 if (isStripe) {
                     doc.fillColor(stripeBg).rect(leftMargin, currentY - 2, printableWidth, 16).fill();
                 }
@@ -179,6 +224,7 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         }
 
         // Expense Total
+        ensureSpace(20);
         doc.moveTo(leftMargin, currentY - 4)
            .lineTo(rightMargin, currentY - 4)
            .strokeColor(borderMain)
@@ -189,13 +235,8 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         doc.text(`$${formatCurrency(totalExpenses)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
         currentY += 40;
 
-        // Page break if net profit falls too low on the page
-        if (currentY > 700) {
-            doc.addPage();
-            currentY = 50;
-        }
-
         // Net Profit Summary Card
+        ensureSpace(60);
         const netProfit = reportData.netProfit ?? (totalIncome - totalExpenses);
         const isNetLoss = netProfit < 0;
 
@@ -218,156 +259,287 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
            .text(`$${formatCurrency(netProfit)}`, rightMargin - 200, currentY + 14, { width: 185, align: "right" });
 
     } else {
-        // --- Balance Sheet layout ---
-        // We will split the A4 page layout into sections.
-        // Let's print Assets first, then Liabilities and Equity in a clean layout.
-        
-        // Assets section
-        doc.fontSize(11).font("Helvetica-Bold").fillColor(accentColor).text("ASSETS", leftMargin, currentY);
-        currentY += 16;
+        // --- Balance Sheet layout (grouped by account type) ---
 
-        doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold");
-        doc.text("Account / Class", leftMargin, currentY);
-        doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 12;
+        const classifyAsset = (a) => {
+            const cat = (a.category || "").toLowerCase().trim();
+            const type = (a.accountType || "").toLowerCase().trim();
+            const name = (a.name || "").toLowerCase().trim();
+            if (type === 'cash' || name.includes('cash') || name.includes('caja') || name.includes('petty')) {
+                return 'cash';
+            }
+            if (type === 'bank' || name.includes('bank') || name.includes('banco') || name.includes('bct')) {
+                return 'bank';
+            }
+            if (type === 'accounts receivable' || type === 'accounts_receivable' || cat === 'accounts receivable' || cat === 'accounts_receivable') {
+                return 'ar';
+            }
+            if (type === 'input tax' || type === 'input_tax' || cat === 'input tax' || cat === 'input_tax') {
+                return 'input_tax';
+            }
+            if (type === 'other asset' || cat === 'other asset') {
+                return 'other_asset';
+            }
+            if (type === 'fixed asset' || cat === 'fixed asset') {
+                return 'fixed';
+            }
+            return 'other';
+        };
 
-        doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(primaryColor)
-           .lineWidth(0.8)
-           .stroke();
-        currentY += 6;
+        const renderGroupHeader = (title) => {
+            ensureSpace(28);
+            doc.fontSize(8).font("Helvetica-Bold").fillColor(secondaryColor)
+               .text(title.toUpperCase(), leftMargin + 4, currentY);
+            doc.moveTo(leftMargin + 4, currentY + 11)
+               .lineTo(rightMargin, currentY + 11)
+               .strokeColor(borderMain)
+               .lineWidth(0.5)
+               .stroke();
+            currentY += 16;
 
-        doc.font("Helvetica").fontSize(8.5);
+            // Column headers
+            doc.fontSize(7.5).font("Helvetica-Bold").fillColor(secondaryColor);
+            doc.text("Account Name", leftMargin + 10, currentY);
+            doc.text("Code", leftMargin + 260, currentY);
+            doc.text("Amount (USD)", rightMargin - 130, currentY, { width: 130, align: "right" });
+            currentY += 11;
+        };
+
+        const renderGroupRows = (items) => {
+            let isStripe = false;
+            items.forEach(item => {
+                ensureSpace(15);
+                if (isStripe) {
+                    doc.fillColor(stripeBg).rect(leftMargin + 4, currentY - 1, printableWidth - 4, 14).fill();
+                }
+                doc.fontSize(8.5).font("Helvetica").fillColor(primaryColor)
+                   .text(item.name, leftMargin + 10, currentY, { width: 240, ellipsis: true });
+                doc.fillColor(secondaryColor)
+                   .text(item.code || "—", leftMargin + 260, currentY);
+                doc.fillColor(primaryColor)
+                   .text(`$${formatCurrency(item.amount)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
+                currentY += 14;
+                isStripe = !isStripe;
+            });
+        };
+
+        const renderSubtotalRow = (label, value, color = secondaryColor, isBold = false) => {
+            ensureSpace(18);
+            doc.moveTo(leftMargin + 4, currentY)
+               .lineTo(rightMargin, currentY)
+               .strokeColor(borderMain)
+               .lineWidth(0.6)
+               .stroke();
+            currentY += 3;
+            doc.fontSize(8.5).font(isBold ? "Helvetica-Bold" : "Helvetica-Bold").fillColor(color)
+               .text(label, leftMargin + 10, currentY);
+            doc.fillColor(color)
+               .text(`$${formatCurrency(value)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
+            currentY += 14;
+        };
+
+        // Helper: group an array of items by their accountType field (for Liabilities/Equity)
+        const groupByAccountType = (items) => {
+            const groups = {};
+            (items || []).forEach(item => {
+                const key = item.accountType || 'Other';
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(item);
+            });
+            return groups;
+        };
+
+        // Helper: render one grouped section (for LIABILITIES / EQUITY)
+        const renderGroupedSection = (sectionTitle, sectionColor, items, totalLabel, totalValue) => {
+            ensureSpace(30);
+            doc.rect(leftMargin, currentY - 2, printableWidth, 20).fill(sectionColor);
+            doc.fontSize(10.5).font("Helvetica-Bold").fillColor("#FFFFFF")
+               .text(sectionTitle, leftMargin + 8, currentY + 3);
+            currentY += 24;
+
+            if (!items || items.length === 0) {
+                ensureSpace(20);
+                doc.fontSize(8.5).font("Helvetica").fillColor(secondaryColor)
+                   .text(`No ${sectionTitle.toLowerCase()} recorded.`, leftMargin + 10, currentY);
+                currentY += 16;
+            } else {
+                const groups = groupByAccountType(items);
+                const groupNames = Object.keys(groups);
+
+                groupNames.forEach((groupName, gIndex) => {
+                    const groupItems = groups[groupName];
+                    const groupTotal = groupItems.reduce((sum, i) => sum + (i.amount || 0), 0);
+
+                    renderGroupHeader(groupName);
+                    renderGroupRows(groupItems);
+                    renderSubtotalRow(`Total ${groupName}`, groupTotal, sectionColor);
+                    currentY += (gIndex < groupNames.length - 1) ? 18 : 14;
+                });
+            }
+
+            ensureSpace(26);
+            doc.moveTo(leftMargin, currentY)
+               .lineTo(rightMargin, currentY)
+               .strokeColor(sectionColor)
+               .lineWidth(1)
+               .stroke();
+            currentY += 4;
+
+            doc.rect(leftMargin, currentY, printableWidth, 20).fill("#F9FAFB");
+            doc.fontSize(9).font("Helvetica-Bold").fillColor(primaryColor)
+               .text(totalLabel.toUpperCase(), leftMargin + 8, currentY + 5);
+            doc.fontSize(9.5).font("Helvetica-Bold").fillColor(sectionColor)
+               .text(`$${formatCurrency(totalValue)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
+            currentY += 30;
+        };
+
+        // ── ASSETS RENDERING ──────────────────────────────────────────────────
+        ensureSpace(30);
+        doc.rect(leftMargin, currentY - 2, printableWidth, 20).fill(accentColor);
+        doc.fontSize(10.5).font("Helvetica-Bold").fillColor("#FFFFFF")
+           .text("ASSETS", leftMargin + 8, currentY + 3);
+        currentY += 24;
+
         const assetsList = reportData.assets || [];
-        let isStripe = false;
-        if (assetsList.length === 0) {
-            doc.fillColor(secondaryColor).text("No assets assets recorded.", leftMargin + 10, currentY);
-            currentY += 16;
-        } else {
-            assetsList.forEach(item => {
-                if (isStripe) {
-                    doc.fillColor(stripeBg).rect(leftMargin, currentY - 2, printableWidth, 14).fill();
-                }
-                doc.fillColor(primaryColor).text(item.name, leftMargin + 5, currentY);
-                doc.text(`$${formatCurrency(item.amount)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-                currentY += 15;
-                isStripe = !isStripe;
-            });
+        const cashAccounts = assetsList.filter(a => classifyAsset(a) === 'cash');
+        const bankAccounts = assetsList.filter(a => classifyAsset(a) === 'bank');
+        const arAccounts = assetsList.filter(a => classifyAsset(a) === 'ar');
+        const inputTaxAccounts = assetsList.filter(a => classifyAsset(a) === 'input_tax');
+        const otherCurrentAccounts = assetsList.filter(a => classifyAsset(a) === 'other');
+        const fixedAccounts = assetsList.filter(a => classifyAsset(a) === 'fixed');
+        const otherAssetAccounts = assetsList.filter(a => classifyAsset(a) === 'other_asset');
+
+        const cashTotal = cashAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const bankTotal = bankAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const cashAndEquivalentsTotal = cashTotal + bankTotal;
+        const arTotal = arAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const inputTaxTotal = inputTaxAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const otherCurrentTotal = otherCurrentAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const currentAssetsTotal = cashAndEquivalentsTotal + arTotal + inputTaxTotal + otherCurrentTotal;
+        const fixedTotal = fixedAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const otherAssetTotal = otherAssetAccounts.reduce((sum, a) => sum + (a.amount || 0), 0);
+        const nonCurrentAssetsTotal = fixedTotal + otherAssetTotal;
+
+        // Current Assets Header
+        ensureSpace(20);
+        doc.fontSize(9.5).font("Helvetica-Bold").fillColor(primaryColor)
+           .text("Current Assets", leftMargin + 2, currentY);
+        currentY += 14;
+
+        // Cash Group
+        if (cashAccounts.length > 0) {
+            renderGroupHeader("Cash");
+            renderGroupRows(cashAccounts);
+            renderSubtotalRow("Total for Cash", cashTotal);
+            currentY += 6;
         }
 
-        doc.moveTo(leftMargin, currentY - 2)
-           .lineTo(rightMargin, currentY - 2)
-           .strokeColor(borderMain)
-           .lineWidth(0.8)
-           .stroke();
+        // Bank Group
+        if (bankAccounts.length > 0) {
+            renderGroupHeader("Bank");
+            renderGroupRows(bankAccounts);
+            renderSubtotalRow("Total for Bank", bankTotal);
+            currentY += 6;
+        }
 
-        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Assets", leftMargin, currentY);
-        doc.text(`$${formatCurrency(reportData.assetsTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 30;
+        // Cash & Cash Equivalents Summary Row
+        if (cashAccounts.length > 0 || bankAccounts.length > 0) {
+            renderSubtotalRow("Total for Cash and Cash Equivalents", cashAndEquivalentsTotal, primaryColor, true);
+            currentY += 8;
+        }
 
-        // Liabilities section
-        doc.fontSize(11).font("Helvetica-Bold").fillColor("#EF4444").text("LIABILITIES", leftMargin, currentY);
+        // Accounts Receivable Group
+        if (arAccounts.length > 0) {
+            renderGroupHeader("Accounts Receivable");
+            renderGroupRows(arAccounts);
+            renderSubtotalRow("Total for Accounts Receivable", arTotal, primaryColor, true);
+            currentY += 8;
+        }
+
+        // Input Tax Group (kept separate)
+        if (inputTaxAccounts.length > 0) {
+            renderGroupHeader("Input Tax");
+            renderGroupRows(inputTaxAccounts);
+            renderSubtotalRow("Total for Input Tax", inputTaxTotal, primaryColor, true);
+            currentY += 8;
+        }
+
+        // Other Current Assets Group (kept separate)
+        if (otherCurrentAccounts.length > 0) {
+            renderGroupHeader("Other Current Assets");
+            renderGroupRows(otherCurrentAccounts);
+            renderSubtotalRow("Total for Other Current Assets", otherCurrentTotal, primaryColor, true);
+            currentY += 8;
+        }
+
+        // Grand Total Current Assets Row
+        renderSubtotalRow("Total for Current Assets", currentAssetsTotal, accentColor, true);
+        currentY += 18;
+
+        // Non Current Assets Header
+        ensureSpace(20);
+        doc.fontSize(9.5).font("Helvetica-Bold").fillColor(primaryColor)
+           .text("Non Current Assets", leftMargin + 2, currentY);
+        currentY += 14;
+
+        // Fixed Assets Group
+        if (fixedAccounts.length > 0) {
+            renderGroupHeader("Fixed Assets");
+            renderGroupRows(fixedAccounts);
+            renderSubtotalRow("Total for Fixed Assets", fixedTotal, primaryColor, true);
+            currentY += 8;
+        }
+
+        // Other Assets Group
+        if (otherAssetAccounts.length > 0) {
+            renderGroupHeader("Other Assets");
+            renderGroupRows(otherAssetAccounts);
+            renderSubtotalRow("Total for Other Assets", otherAssetTotal, primaryColor, true);
+            currentY += 8;
+        }
+
+        // Total Non Current Assets Row
+        renderSubtotalRow("Total for Non Current Assets", nonCurrentAssetsTotal, primaryColor, true);
         currentY += 16;
 
-        doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold");
-        doc.text("Account / Class", leftMargin, currentY);
-        doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 12;
 
+        // Grand Total ASSETS Bar
+        ensureSpace(26);
         doc.moveTo(leftMargin, currentY)
            .lineTo(rightMargin, currentY)
-           .strokeColor(primaryColor)
-           .lineWidth(0.8)
+           .strokeColor(accentColor)
+           .lineWidth(1.2)
            .stroke();
-        currentY += 6;
+        currentY += 4;
 
-        doc.font("Helvetica").fontSize(8.5);
-        const liabilitiesList = reportData.liabilities || [];
-        isStripe = false;
-        if (liabilitiesList.length === 0) {
-            doc.fillColor(secondaryColor).text("No liabilities recorded.", leftMargin + 10, currentY);
-            currentY += 16;
-        } else {
-            liabilitiesList.forEach(item => {
-                if (isStripe) {
-                    doc.fillColor(stripeBg).rect(leftMargin, currentY - 2, printableWidth, 14).fill();
-                }
-                doc.fillColor(primaryColor).text(item.name, leftMargin + 5, currentY);
-                doc.text(`$${formatCurrency(item.amount)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-                currentY += 15;
-                isStripe = !isStripe;
-            });
-        }
-
-        doc.moveTo(leftMargin, currentY - 2)
-           .lineTo(rightMargin, currentY - 2)
-           .strokeColor(borderMain)
-           .lineWidth(0.8)
-           .stroke();
-
-        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Liabilities", leftMargin, currentY);
-        doc.text(`$${formatCurrency(reportData.liabilitiesTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
+        doc.rect(leftMargin, currentY, printableWidth, 20).fill("#F9FAFB");
+        doc.fontSize(9).font("Helvetica-Bold").fillColor(primaryColor)
+           .text("TOTAL ASSETS", leftMargin + 8, currentY + 5);
+        doc.fontSize(9.5).font("Helvetica-Bold").fillColor(accentColor)
+           .text(`$${formatCurrency(reportData.assetsTotal || 0)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
         currentY += 30;
 
-        // Check if Equity fits, else page break
-        if (currentY > 620) {
-            doc.addPage();
-            currentY = 50;
-        }
+        // ── LIABILITIES RENDERING ─────────────────────────────────────────────
+        renderGroupedSection(
+            "LIABILITIES",
+            "#EF4444",
+            reportData.liabilities || [],
+            "Total Liabilities",
+            reportData.liabilitiesTotal || 0
+        );
 
-        // Equity section
-        doc.fontSize(11).font("Helvetica-Bold").fillColor("#3B82F6").text("EQUITY", leftMargin, currentY);
-        currentY += 16;
+        // ── EQUITY RENDERING ──────────────────────────────────────────────────
+        renderGroupedSection(
+            "EQUITY",
+            "#3B82F6",
+            reportData.equity || [],
+            "Total Equity",
+            reportData.equityTotal || 0
+        );
 
-        doc.fillColor(primaryColor).fontSize(8.5).font("Helvetica-Bold");
-        doc.text("Account / Class", leftMargin, currentY);
-        doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 12;
 
-        doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(primaryColor)
-           .lineWidth(0.8)
-           .stroke();
-        currentY += 6;
-
-        doc.font("Helvetica").fontSize(8.5);
-        const equityList = reportData.equity || [];
-        isStripe = false;
-        if (equityList.length === 0) {
-            doc.fillColor(secondaryColor).text("No equity accounts recorded.", leftMargin + 10, currentY);
-            currentY += 16;
-        } else {
-            equityList.forEach(item => {
-                if (isStripe) {
-                    doc.fillColor(stripeBg).rect(leftMargin, currentY - 2, printableWidth, 14).fill();
-                }
-                doc.fillColor(primaryColor).text(item.name, leftMargin + 5, currentY);
-                doc.text(`$${formatCurrency(item.amount)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-                currentY += 15;
-                isStripe = !isStripe;
-            });
-        }
-
-        doc.moveTo(leftMargin, currentY - 2)
-           .lineTo(rightMargin, currentY - 2)
-           .strokeColor(borderMain)
-           .lineWidth(0.8)
-           .stroke();
-
-        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Equity", leftMargin, currentY);
-        doc.text(`$${formatCurrency(reportData.equityTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 40;
-
-        // Page break if equation check falls off
-        if (currentY > 720) {
-            doc.addPage();
-            currentY = 50;
-        }
-
-        // Accounting Equation Check Card
-        const assetsTotalVal = reportData.assetsTotal || 0;
+        // ── TOTAL LIABILITIES + EQUITY summary bar ────────────────────────────
+        ensureSpace(40);
         const liabilitiesPlusEquityVal = (reportData.liabilitiesTotal || 0) + (reportData.equityTotal || 0);
 
         doc.moveTo(leftMargin, currentY)
@@ -375,20 +547,27 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
            .strokeColor(borderMain)
            .lineWidth(1)
            .stroke();
-        currentY += 12;
+        currentY += 10;
 
-        doc.fillColor("#F3F4F6")
-           .rect(leftMargin, currentY, printableWidth, 40)
+        doc.fillColor("#111827")
+           .rect(leftMargin, currentY, printableWidth, 36)
            .fill();
 
-        doc.fillColor(primaryColor)
+        doc.fillColor("#FFFFFF")
            .fontSize(9)
            .font("Helvetica-Bold")
-           .text("ACCOUNTING EQUALITY CHECK", leftMargin + 15, currentY + 14)
-           .font("Helvetica")
-           .text(`Assets: $${formatCurrency(assetsTotalVal)}`, leftMargin + 200, currentY + 14)
-           .text(`=`, leftMargin + 340, currentY + 14)
-           .text(`Liabilities + Equity: $${formatCurrency(liabilitiesPlusEquityVal)}`, leftMargin + 365, currentY + 14);
+           .text("TOTAL FOR LIABILITIES + EQUITY", leftMargin + 15, currentY + 12);
+
+        doc.fontSize(11)
+           .font("Helvetica-Bold")
+           .text(`$${formatCurrency(liabilitiesPlusEquityVal)}`, rightMargin - 165, currentY + 10, { width: 165, align: "right" });
+
+        currentY += 36;
+    } // end Balance Sheet else block
+
+        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Equity", leftMargin, currentY);
+        doc.text(`$${formatCurrency(reportData.equityTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
+        currentY += 40;
     }
 
     // Footnotes / Stamp

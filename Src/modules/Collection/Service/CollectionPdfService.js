@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -50,21 +51,24 @@ exports.generateLedgerPdf = (listType, items, meta, res) => {
     const rightMargin = 802;
     const printableWidth = rightMargin - leftMargin;
 
-    // Helper to draw the header on a page
     const drawPageHeader = (pageNum) => {
         doc.fillColor(primaryColor)
            .fontSize(18)
            .font("Helvetica-Bold")
-           .text("OLA CARS", leftMargin, 30)
-           .fontSize(8)
-           .fillColor(secondaryColor)
-           .font("Helvetica")
-           .text("Logistics Finance Division", leftMargin, 50);
+           .text("OLA CARS", leftMargin, 30);
+
+
+        try {
+            const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+            doc.image(logoPath, leftMargin, 20, { height: 35 });
+        } catch (err) {
+            console.error("Failed to load logo image in PDF generation:", err);
+        }
 
         doc.fontSize(12)
            .fillColor(primaryColor)
            .font("Helvetica-Bold")
-           .text(reportTitle, 500, 30, { align: "right", width: 302 });
+           .text(reportTitle, 500, 32, { align: "right", width: 302 });
 
         doc.moveTo(leftMargin, 65)
            .lineTo(rightMargin, 65)
