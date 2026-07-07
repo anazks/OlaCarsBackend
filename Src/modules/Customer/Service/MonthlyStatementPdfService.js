@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -191,21 +192,19 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
     // ═══════════════════════════════════════════════════
 
     const drawHeader = () => {
-        // Company Header
-        doc.fillColor(primaryColor)
-           .fontSize(16)
-           .font("Helvetica-Bold")
-           .text("OLA CARS LOGISTICS", leftMargin, 40)
-           .fontSize(8)
-           .fillColor(secondaryColor)
-           .font("Helvetica")
-           .text("Finance & Accounts Department", leftMargin, 58);
+        // Logo integration
+        try {
+            const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+            doc.image(logoPath, leftMargin, 30, { height: 35 });
+        } catch (err) {
+            console.error("Failed to load logo image in PDF generation:", err);
+        }
 
         // Statement Title
         doc.fontSize(12)
            .fillColor(primaryColor)
            .font("Helvetica-Bold")
-           .text("STATEMENT OF ACCOUNT", rightMargin - 200, 40, { width: 200, align: "right" });
+           .text("STATEMENT OF ACCOUNT", rightMargin - 200, 42, { width: 200, align: "right" });
 
         doc.moveTo(leftMargin, 72)
            .lineTo(rightMargin, 72)

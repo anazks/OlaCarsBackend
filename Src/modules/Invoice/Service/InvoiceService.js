@@ -14,8 +14,8 @@ const { Driver } = require("../../Driver/Model/DriverModel");
 const Tax = require("../../Tax/Model/TaxModel");
 
 const getNextInvoiceNumberVal = async () => {
-    const lastInvoice = await Invoice.findOne({ 
-        invoiceNumber: /^INV-\d{6}$/ 
+    const lastInvoice = await Invoice.findOne({
+        invoiceNumber: /^INV-\d{6}$/
     }).sort({ invoiceNumber: -1 });
 
     let nextNum = 1;
@@ -332,11 +332,11 @@ exports.payInvoice = async (invoiceId, paymentData) => {
 
 exports.applyExcessToNextInvoice = async (customerId, excessAmount, paymentData) => {
     // Find the next UNPAID invoice ordered by weekNumber (excluding RENTAL invoices)
-    const nextInvoices = await Invoice.find({ 
-        customer: customerId, 
-        status: { $ne: 'PAID' }, 
+    const nextInvoices = await Invoice.find({
+        customer: customerId,
+        status: { $ne: 'PAID' },
         invoiceType: { $ne: 'RENTAL' },
-        isDeleted: false 
+        isDeleted: false
     })
         .sort({ weekNumber: 1 });
 
@@ -527,9 +527,9 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             }
 
             if (cashBankAccount) {
-            
 
-                
+
+
                 // 5. Create a PaymentTransaction referencing the PaymentReceived record
                 // This is transactionType: "DEBIT" on the Cash/Bank Asset Account, 
                 // which LedgerService will process as: Debit Cash/Bank, Credit Accounts Receivable (1200).
@@ -549,11 +549,11 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
                     createdBy,
                     creatorRole: finalCreatorRole
                 };
-                
+
                 console.log(`[InvoiceService] Creating PaymentTransaction for amount ${amount}`);
                 const prNewTransaction = await PaymentTransaction.create(prTransactionData);
                 console.log(`[InvoiceService] PaymentTransaction created: ${prNewTransaction._id}`);
-                
+
                 const prPopulatedTx = { ...prNewTransaction.toObject(), accountingCode: cashBankAccount };
                 await LedgerService.autoGenerateLedgerEntry(prPopulatedTx);
                 console.log(`[InvoiceService] Ledger entry generation triggered for ${prNewTransaction._id}`);
@@ -938,7 +938,7 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const PaymentTransaction = require("../../Payment/Model/PaymentTransactionModel");
         const LedgerService = require("../../Ledger/Service/LedgerService");
-        
+
         // Find sales account code "IN0002" (or fallback/use 4100)
         const accCode = await AccountingCode.findOne({ code: "IN0002" }) || await AccountingCode.findOne({ code: "4100" });
         console.log(`[InvoiceService] AccountingCode found: ${accCode ? accCode.code : 'none'}`);
@@ -1052,11 +1052,11 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
                     createdBy,
                     creatorRole: finalCreatorRole
                 };
-                
+
                 console.log(`[InvoiceService] Creating Debit PaymentTransaction for amount ${amount}`);
                 const prNewTransaction = await PaymentTransaction.create(prTransactionData);
                 console.log(`[InvoiceService] Debit PaymentTransaction created: ${prNewTransaction._id}`);
-                
+
                 const prPopulatedTx = { ...prNewTransaction.toObject(), accountingCode: cashBankAccount };
                 await LedgerService.autoGenerateLedgerEntry(prPopulatedTx);
                 console.log(`[InvoiceService] Ledger entry generation triggered for ${prNewTransaction._id}`);
@@ -1255,7 +1255,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         // 1. Read weekNumber from row if provided, otherwise auto-calculate
         const weekNoVal = getRowVal(headerRow, ["Week Number", "weekNumber", "week"]);
         let weekNumber = (weekNoVal !== undefined && weekNoVal !== "") ? Number(weekNoVal) : undefined;
-        
+
         if (weekNumber === undefined && (invoiceType === "RENTAL" || !invoiceType)) {
             const existingInvoices = await Invoice.find({ customer: customerDoc._id, isDeleted: false }).sort({ weekNumber: -1 }).limit(1);
             weekNumber = existingInvoices.length > 0 ? (Number(existingInvoices[0].weekNumber) || 0) + 1 : 1;
@@ -1323,7 +1323,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 total: baseAmount
             });
             calculatedSubtotal = baseAmount;
-            
+
             let taxPct = defaultTaxRate;
             const itemTaxPctVal = getRowVal(headerRow, ["Item Tax %", "itemTaxPct", "taxRate"]);
             if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
@@ -1331,7 +1331,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 if (taxPct > 0 && taxPct < 1) taxPct = taxPct * 100;
             }
             itemTaxRate = taxPct;
-            
+
             const itemTaxAmtVal = getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
             calculatedTaxAmount = Number(itemTaxAmtVal) || (baseAmount * (taxPct / 100));
         }
@@ -1355,7 +1355,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 // Recalculate totals
                 const newSubtotal = existingInv.lineItems.reduce((sum, item) => sum + (item.total || 0), 0);
                 const newTaxAmount = existingInv.lineItems.reduce((sum, item) => sum + (item.taxAmount || 0), 0);
-                
+
                 let newDiscountAmount = 0;
                 if (existingInv.discountType === 'PERCENTAGE') {
                     newDiscountAmount = Math.round((newSubtotal * ((existingInv.discountValue || 0) / 100)) * 100) / 100;
@@ -1376,7 +1376,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 existingInv.taxAmount = newTaxAmount;
                 existingInv.discountAmount = newDiscountAmount;
                 existingInv.totalAmountDue = newTotalAmountDue;
-                
+
                 const currentPaid = existingInv.amountPaid || 0;
                 const newBalance = Math.max(0, newTotalAmountDue - currentPaid);
                 existingInv.balance = newBalance;
@@ -1404,20 +1404,20 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         // Subtotal, Discount & Tax calculations at Invoice level
         const discountType = getRowVal(headerRow, ["Discount Type", "discountType"]) === "Percentage" ? "PERCENTAGE" : "FIXED";
         const discountValue = Number(getRowVal(headerRow, ["Entity Discount Percent", "entityDiscountPercent", "Discount", "discount"])) || 0;
-        const discountAmount = Number(getRowVal(headerRow, ["Entity Discount Amount", "entityDiscountAmount"])) || 
-                               Number(getRowVal(headerRow, ["Discount Amount", "discountAmount"])) || 0;
+        const discountAmount = Number(getRowVal(headerRow, ["Entity Discount Amount", "entityDiscountAmount"])) ||
+            Number(getRowVal(headerRow, ["Discount Amount", "discountAmount"])) || 0;
 
         // Is Inclusive Tax check (case-insensitive)
         const isInclusiveTaxVal = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
-        const taxInclusiveParsed = isInclusiveTaxVal !== undefined && 
+        const taxInclusiveParsed = isInclusiveTaxVal !== undefined &&
             (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1');
 
         const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal"])) || calculatedSubtotal;
         const taxAmount = calculatedTaxAmount; // Always sum of line items tax amounts
-        
+
         let baseAmount;
         let totalAmountDue;
-        
+
         if (taxInclusiveParsed) {
             totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (subtotal - discountAmount);
             baseAmount = totalAmountDue - taxAmount;
@@ -1608,9 +1608,9 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
                 newTotalDue = Math.round((newBaseAmount + newTaxAmount) * 100) / 100;
             }
         }
-        
+
         const newBalance = Math.max(0, newTotalDue - invoice.amountPaid);
-        
+
         let newStatus = invoice.status;
         if (newStatus !== 'DRAFT') {
             if (newBalance <= 0) newStatus = 'PAID';

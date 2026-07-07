@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -48,11 +49,18 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
        .font("Helvetica-Bold")
        .text("OLA CARS", leftMargin, 50);
 
+    // Logo image integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(14)
        .fillColor(primaryColor)
        .font("Helvetica-Bold")
-       .text(reportTitle, 250, 50, { align: "right", width: 295 });
+       .text(reportTitle, 250, 58, { align: "right", width: 295 });
 
     doc.moveTo(leftMargin, 95)
        .lineTo(rightMargin, 95)
@@ -557,6 +565,10 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         currentY += 36;
     } // end Balance Sheet else block
 
+        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Equity", leftMargin, currentY);
+        doc.text(`$${formatCurrency(reportData.equityTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
+        currentY += 40;
+    }
 
     // Footnotes / Stamp
     const footerY = 740;

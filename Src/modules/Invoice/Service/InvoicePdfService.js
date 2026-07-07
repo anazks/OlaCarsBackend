@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe currency formatter
 const formatCurrency = (val) => {
@@ -53,11 +54,18 @@ exports.generateInvoicePdf = (invoice, res) => {
        .fontSize(22)
        .text("OLA CARS", leftMargin, 50, { bold: true });
 
+    // Logo image integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, 50, 45, { height: 40 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     // "INVOICE" Title
     doc.fontSize(20)
        .fillColor(primaryColor)
-       .text("INVOICE", rightColX, 50, { align: "right", width: 195 });
+       .text("INVOICE", rightColX, 58, { align: "right", width: 195 });
 
     // Separator line
     doc.moveTo(leftMargin, 95)
