@@ -34,6 +34,9 @@ exports.getAll = async (query = {}) => {
     return await getLedgerEntriesService(query);
 };
 
+let cachedArAccount = null;
+let cachedAdvanceAccount = null;
+
 /**
  * Automatically generates a Ledger Entry from a completed PaymentTransaction.
  * This ensures immutable double-entry style tracking.
@@ -179,12 +182,18 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
 
                 // Find Accounts Receivable (AR) and Advance Received accounts
                 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
-                    || await AccountingCode.findOne({ code: "1100" })
-                    || await AccountingCode.findOne({ code: "1200" });
+                if (!cachedArAccount) {
+                    cachedArAccount = await AccountingCode.findOne({ code: "1.1.03" })
+                        || await AccountingCode.findOne({ code: "1100" })
+                        || await AccountingCode.findOne({ code: "1200" });
+                }
+                const arAccount = cachedArAccount;
 
-                const advanceAccount = await AccountingCode.findOne({ code: "2.1.02" })
-                    || await AccountingCode.findOne({ name: /Advance Received From Customer/i });
+                if (!cachedAdvanceAccount) {
+                    cachedAdvanceAccount = await AccountingCode.findOne({ code: "2.1.02" })
+                        || await AccountingCode.findOne({ name: /Advance Received From Customer/i });
+                }
+                const advanceAccount = cachedAdvanceAccount;
 
                 if (arAccount && advanceAccount) {
                     console.log(`[LedgerService] Generating double-entry for Payment Received: Debit Bank/Cash, Credit Accounts Receivable and/or Advance Received`);

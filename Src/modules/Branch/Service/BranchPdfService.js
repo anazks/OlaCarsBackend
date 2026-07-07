@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const path = require("path");
 
 // Safe date formatter
 const formatDate = (val) => {
@@ -38,20 +39,18 @@ exports.generateBranchPdf = (branchDetails, filters, res) => {
     const rightMargin = 555;
     const printableWidth = rightMargin - leftMargin;
 
-    // Header section
-    doc.fillColor(primaryColor)
-       .fontSize(20)
-       .font("Helvetica-Bold")
-       .text("OLA CARS", leftMargin, 40)
-       .fontSize(8.5)
-       .fillColor(secondaryColor)
-       .font("Helvetica")
-       .text("Logistics Operations Division", leftMargin, 62);
+    // Logo integration
+    try {
+        const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
+        doc.image(logoPath, leftMargin, 30, { height: 35 });
+    } catch (err) {
+        console.error("Failed to load logo image in PDF generation:", err);
+    }
 
     doc.fontSize(12)
        .fillColor(primaryColor)
        .font("Helvetica-Bold")
-       .text("BRANCH PERFORMANCE REPORT", 250, 40, { align: "right", width: 305 });
+       .text("BRANCH PERFORMANCE REPORT", 250, 42, { align: "right", width: 305 });
 
     doc.moveTo(leftMargin, 80)
        .lineTo(rightMargin, 80)
