@@ -565,11 +565,6 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         currentY += 36;
     } // end Balance Sheet else block
 
-        doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Equity", leftMargin, currentY);
-        doc.text(`$${formatCurrency(reportData.equityTotal || 0)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
-        currentY += 40;
-    }
-
     // Footnotes / Stamp
     const footerY = 740;
     doc.moveTo(leftMargin, footerY - 10)
