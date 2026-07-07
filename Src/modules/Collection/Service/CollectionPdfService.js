@@ -50,16 +50,13 @@ exports.generateLedgerPdf = (listType, items, meta, res) => {
     const rightMargin = 802;
     const printableWidth = rightMargin - leftMargin;
 
-    // Helper to draw the header on a page
     const drawPageHeader = (pageNum) => {
         doc.fillColor(primaryColor)
            .fontSize(18)
            .font("Helvetica-Bold")
-           .text("OLA CARS", leftMargin, 30)
-           .fontSize(8)
-           .fillColor(secondaryColor)
-           .font("Helvetica")
-           .text("Logistics Finance Division", leftMargin, 50);
+           .text("OLA CARS", leftMargin, 30);
+
+
 
         doc.fontSize(12)
            .fillColor(primaryColor)

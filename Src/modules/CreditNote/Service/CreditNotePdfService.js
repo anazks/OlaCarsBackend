@@ -45,10 +45,8 @@ exports.generateCreditNotePdf = (creditNote, res) => {
     // Header
     doc.fillColor(primaryColor)
        .fontSize(22)
-       .text("OLA CARS", leftMargin, 50, { bold: true })
-       .fontSize(9)
-       .fillColor(secondaryColor)
-       .text("Logistics Finance Division", leftMargin, 75);
+       .text("OLA CARS", leftMargin, 50, { bold: true });
+
 
     doc.fontSize(18)
        .fillColor(primaryColor)
