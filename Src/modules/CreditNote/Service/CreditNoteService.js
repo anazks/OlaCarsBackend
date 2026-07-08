@@ -199,8 +199,14 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
     // Date Range Filtering
     if (pagination.startDate || pagination.endDate) {
         filter.creditNoteDate = {};
-        if (pagination.startDate) filter.creditNoteDate.$gte = new Date(pagination.startDate);
-        if (pagination.endDate) filter.creditNoteDate.$lte = new Date(pagination.endDate);
+        if (pagination.startDate) {
+            filter.creditNoteDate.$gte = new Date(pagination.startDate);
+        }
+        if (pagination.endDate) {
+            const end = new Date(pagination.endDate);
+            end.setHours(23, 59, 59, 999);
+            filter.creditNoteDate.$lte = end;
+        }
     }
 
     if (pagination.search) {

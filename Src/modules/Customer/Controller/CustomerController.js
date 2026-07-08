@@ -25,7 +25,7 @@ exports.createCustomer = async (req, res) => {
 
 exports.getAllCustomers = async (req, res) => {
     try {
-        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+        const { page = 1, limit = 25, search, status, branch, sortBy = 'createdAt', sortOrder = 'desc', startDate, endDate } = req.query;
         const query = { isDeleted: false };
 
         if (status && status !== 'ALL') {
@@ -34,6 +34,18 @@ exports.getAllCustomers = async (req, res) => {
 
         if (branch && branch !== 'ALL') {
             query.branch = branch;
+        }
+
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) {
+                query.createdAt.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
         }
 
         if (search && search.trim() !== '') {

@@ -29,6 +29,7 @@ const WORK_ORDER_TYPES = [
     "RECALL",
     "SAFETY_PREP",
     "WEAR_ITEM",
+    "OTHER",
 ];
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
