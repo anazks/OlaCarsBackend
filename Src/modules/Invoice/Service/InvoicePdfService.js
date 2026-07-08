@@ -49,6 +49,11 @@ exports.generateInvoicePdf = (invoice, res) => {
     const rightMargin = 545; // A4 width (595) - margin (50)
     const rightColX = 350;
 
+    // ─── Header Section ───────────────────────────────────────────
+    doc.fillColor(primaryColor)
+       .fontSize(22)
+       .text("OLA CARS", leftMargin, 50, { bold: true });
+
     // Logo image integration
     try {
         const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");

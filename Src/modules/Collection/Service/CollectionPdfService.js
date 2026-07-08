@@ -51,8 +51,13 @@ exports.generateLedgerPdf = (listType, items, meta, res) => {
     const rightMargin = 802;
     const printableWidth = rightMargin - leftMargin;
 
-    // Helper to draw the header on a page
     const drawPageHeader = (pageNum) => {
+        doc.fillColor(primaryColor)
+           .fontSize(18)
+           .font("Helvetica-Bold")
+           .text("OLA CARS", leftMargin, 30);
+
+
         try {
             const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
             doc.image(logoPath, leftMargin, 20, { height: 35 });
