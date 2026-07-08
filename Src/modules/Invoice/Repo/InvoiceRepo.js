@@ -22,6 +22,9 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const baseQuery = options.baseQuery || { isDeleted: false };
     const query = { ...baseQuery };
 
+    const cleanSearch = queryParams.search ? queryParams.search.trim() : '';
+    const isFullInvoice = /^INV-\d{6}$/i.test(cleanSearch) || /^WRK-\d{6,8}-\d{4}$/i.test(cleanSearch);
+
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.customer) query.customer = queryParams.customer;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
@@ -36,7 +39,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
 
-    if (queryParams.startDate || queryParams.endDate) {
+    if ((queryParams.startDate || queryParams.endDate) && !isFullInvoice) {
         const dateQuery = {};
         if (queryParams.startDate) dateQuery.$gte = new Date(queryParams.startDate);
         if (queryParams.endDate) {
@@ -50,7 +53,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
     const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
 
-    if (queryParams.month || queryParams.year) {
+    if ((queryParams.month || queryParams.year) && !isFullInvoice) {
         const now = new Date();
         const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
         if (queryParams.month) {
@@ -67,9 +70,14 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
 
-    if (queryParams.search) {
-        // Simple search by invoice number if searching
-        query.invoiceNumber = { $regex: queryParams.search, $options: 'i' };
+    if (cleanSearch) {
+        if (isFullInvoice) {
+            // Case-insensitive exact match
+            query.invoiceNumber = { $regex: `^${cleanSearch}$`, $options: 'i' };
+        } else {
+            // Partial match
+            query.invoiceNumber = { $regex: cleanSearch, $options: 'i' };
+        }
     }
 
     // Prepare metricsQuery from query (cast string IDs to ObjectIds for MongoDB aggregation compatibility)
@@ -84,8 +92,8 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         metricsQuery.vehicle = new mongoose.Types.ObjectId(metricsQuery.vehicle);
     }
 
-    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted, and not explicitly ignored
-    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && queryParams.ignoreDefaultDates !== 'true') {
+    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted, and not explicitly ignored (and not searching for a full invoice)
+    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && !isFullInvoice && queryParams.ignoreDefaultDates !== 'true') {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
