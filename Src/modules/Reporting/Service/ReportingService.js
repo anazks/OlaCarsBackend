@@ -160,14 +160,14 @@ exports.getPLReport = async (filters) => {
         const allActiveCodes = await AccountingCode.find({
             isActive: true,
             isDeleted: false
-        }).select('name category accountType code _id').lean();
+        }).select('name category accountType code _id parentAccount').lean();
 
         allActiveCodes.forEach(code => {
             const category = normalizeCategory(code.category);
             if (category === "INCOME") {
-                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id };
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
             } else if (category === "EXPENSE") {
-                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id };
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
             }
         });
     } catch (e) {
@@ -182,13 +182,13 @@ exports.getPLReport = async (filters) => {
         if (category === "INCOME") {
             const val = row.creditSum - row.debitSum;
             if (!report.income[code.name]) {
-                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id };
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
             }
             report.income[code.name].amount = val;
         } else if (category === "EXPENSE") {
             const val = row.debitSum - row.creditSum;
             if (!report.expenses[code.name]) {
-                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id };
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
             }
             report.expenses[code.name].amount = val;
         }
@@ -200,7 +200,8 @@ exports.getPLReport = async (filters) => {
         code: report.income[name].code,
         accountType: report.income[name].accountType,
         category: report.income[name].category,
-        id: report.income[name].id
+        id: report.income[name].id,
+        parentAccount: report.income[name].parentAccount || null
     }));
     const expenseArray = Object.keys(report.expenses).map(name => ({
         name,
@@ -208,7 +209,8 @@ exports.getPLReport = async (filters) => {
         code: report.expenses[name].code,
         accountType: report.expenses[name].accountType,
         category: report.expenses[name].category,
-        id: report.expenses[name].id
+        id: report.expenses[name].id,
+        parentAccount: report.expenses[name].parentAccount || null
     }));
 
     const totalIncome = incomeArray.reduce((acc, curr) => acc + curr.amount, 0);
