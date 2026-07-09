@@ -29,6 +29,7 @@ const WORK_ORDER_TYPES = [
     "RECALL",
     "SAFETY_PREP",
     "WEAR_ITEM",
+    "OTHER",
 ];
 
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
@@ -160,6 +161,8 @@ const workOrderSchema = new mongoose.Schema(
         // Cost Estimates vs Actuals
         estimatedLabourHours: { type: Number, default: 0 },
         actualLabourHours: { type: Number, default: 0 },
+        workStartTime: { type: Date },
+        workEndTime: { type: Date },
         estimatedPartsCost: { type: Number, default: 0 },
         actualPartsCost: { type: Number, default: 0 },
         estimatedTotalCost: { type: Number, default: 0 },

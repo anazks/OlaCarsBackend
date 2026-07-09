@@ -83,10 +83,6 @@ const addPart = async (woId, partData, user) => {
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
     if (partData.inventoryPartId) {
-        const { 
-            confirmInstallation,
-            confirmDirectInstallation 
-        } = require("../../Inventory/Service/InventoryService");
         const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
 
         const inventoryPart = await getPartById(partData.inventoryPartId);
@@ -97,17 +93,8 @@ const addPart = async (woId, partData, user) => {
         partData.partNumber = inventoryPart.partNumber;
         if (!partData.unitCost) partData.unitCost = inventoryPart.unitCost;
 
-        // Check available stock
-        const available = inventoryPart.quantityOnHand - inventoryPart.quantityReserved;
-        if (available >= partData.quantity) {
-            // Sufficient stock → deduct immediately and mark INSTALLED
-            // USE DIRECT DEDUCTION (skips reservation check)
-            await confirmDirectInstallation(partData.inventoryPartId, partData.quantity, user, woId);
-            partData.status = "INSTALLED";
-        } else {
-            // Out of stock → mark as REQUESTED (needs manager approval)
-            partData.status = "REQUESTED";
-        }
+        // Always add in REQUESTED status first (to list them first for manual installation/approval)
+        partData.status = "REQUESTED";
     }
 
     // Auto-calculate totalCost
@@ -115,8 +102,10 @@ const addPart = async (woId, partData, user) => {
 
     wo.parts.push(partData);
 
-    // Recalculate actualPartsCost
-    wo.actualPartsCost = wo.parts.reduce((sum, p) => sum + (p.totalCost || 0), 0);
+    // Recalculate actualPartsCost (only INSTALLED parts)
+    wo.actualPartsCost = wo.parts
+        .filter(p => p.status === "INSTALLED")
+        .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
     await wo.save();
     return wo;
@@ -177,8 +166,8 @@ const updatePart = async (woId, partId, updates, user) => {
             }
             await confirmInstallation(part.inventoryPartId, part.quantity, user, woId);
         }
-        // INSTALLED -> RETURNED (return to stock)
-        else if (oldStatus === "INSTALLED" && newStatus === "RETURNED") {
+        // INSTALLED -> non-INSTALLED (return to stock)
+        else if (oldStatus === "INSTALLED" && newStatus !== "INSTALLED") {
             await confirmReturn(part.inventoryPartId, part.quantity, user, woId);
         }
     }
@@ -193,8 +182,10 @@ const updatePart = async (woId, partId, updates, user) => {
     // Recalculate totalCost for this part
     part.totalCost = (part.quantity || 0) * (part.unitCost || 0);
 
-    // Recalculate actualPartsCost across all parts
-    wo.actualPartsCost = wo.parts.reduce((sum, p) => sum + (p.totalCost || 0), 0);
+    // Recalculate actualPartsCost across all parts (only INSTALLED parts)
+    wo.actualPartsCost = wo.parts
+        .filter(p => p.status === "INSTALLED")
+        .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
     await wo.save();
     return wo;
@@ -228,7 +219,9 @@ const removePart = async (woId, partId, user) => {
     }
 
     wo.parts.pull(partId);
-    wo.actualPartsCost = wo.parts.reduce((sum, p) => sum + (p.totalCost || 0), 0);
+    wo.actualPartsCost = wo.parts
+        .filter(p => p.status === "INSTALLED")
+        .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
     await wo.save();
     return wo;

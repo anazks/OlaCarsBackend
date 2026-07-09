@@ -77,7 +77,7 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const lineItems = [];
 
     for (const part of wo.parts || []) {
-        if (part.status === "INSTALLED" || part.status === "RECEIVED") {
+        if (part.status === "INSTALLED") {
             lineItems.push({
                 type: "PART",
                 description: `${part.partName}${part.partNumber ? ` (${part.partNumber})` : ""}`,

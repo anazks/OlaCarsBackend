@@ -36,6 +36,18 @@ exports.getAllCustomers = async (req, res) => {
             query.branch = branch;
         }
 
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) {
+                query.createdAt.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
         if (search && search.trim() !== '') {
             const searchRegex = new RegExp(search.trim(), 'i');
             query.$or = [
