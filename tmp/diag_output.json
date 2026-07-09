@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-07-06T12:46:18.245Z",
+  "timestamp": "2026-07-07T13:32:45.559Z",
   "accountCodeId": "6a280dab4f5923cd64ec316d",
-  "totalCount": 34060,
+  "totalCount": 34061,
   "dateGroups": [
     {
       "_id": "2026-01-01",
@@ -998,6 +998,12 @@
       "count": 120,
       "totalDebit": 2039.57,
       "totalCredit": 14698.39
+    },
+    {
+      "_id": "2026-07-07",
+      "count": 1,
+      "totalDebit": 22.04,
+      "totalCredit": 0
     }
   ]
 }
