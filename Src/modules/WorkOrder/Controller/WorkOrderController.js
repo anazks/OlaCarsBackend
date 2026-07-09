@@ -276,14 +276,47 @@ const removePartHandler = async (req, res) => {
  * @route POST /api/work-orders/:id/labour
  */
 const logLabourHandler = async (req, res) => {
-    try {
-        const entry = req.body;
-        if (!entry.technicianId) {
-            entry.technicianId = req.user.id;
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '../../../../debug_labour.log');
+    
+    const writeLog = (msg) => {
+        try {
+            fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+        } catch (e) {
+            console.error('Failed to write to log file:', e);
         }
-        const wo = await logLabourEntry(req.params.id, entry);
-        return res.status(201).json({ success: true, data: wo });
+    };
+
+    try {
+        writeLog(`Called for WO: ${req.params.id} | Body: ${JSON.stringify(req.body)}`);
+        const { workStartTime, workEndTime } = req.body;
+        if (!workStartTime || !workEndTime) {
+            writeLog(`ERROR: Missing workStartTime or workEndTime`);
+            return res.status(400).json({ success: false, message: "workStartTime and workEndTime are required" });
+        }
+        const start = new Date(workStartTime);
+        const end = new Date(workEndTime);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            writeLog(`ERROR: Invalid date format | start: ${workStartTime} | end: ${workEndTime}`);
+            return res.status(400).json({ success: false, message: "Invalid date format for workStartTime or workEndTime" });
+        }
+        if (end < start) {
+            writeLog(`ERROR: End time before start time | start: ${start.toISOString()} | end: ${end.toISOString()}`);
+            return res.status(400).json({ success: false, message: "Work end time must be after work start time" });
+        }
+        const actualLabourHours = Math.round(((end - start) / (3600 * 1000)) * 100) / 100;
+        writeLog(`Calculated actualLabourHours: ${actualLabourHours}`);
+        
+        const wo = await WorkOrderRepo.updateWorkOrder(req.params.id, {
+            workStartTime: start,
+            workEndTime: end,
+            actualLabourHours: actualLabourHours
+        });
+        writeLog(`Saved WO. actualLabourHours: ${wo?.actualLabourHours} | workStartTime: ${wo?.workStartTime?.toISOString()} | workEndTime: ${wo?.workEndTime?.toISOString()}`);
+        return res.status(200).json({ success: true, data: wo });
     } catch (error) {
+        writeLog(`EXCEPTION ERROR: ${error.message} | Stack: ${error.stack}`);
         const statusCode = error.cause || 500;
         return res.status(statusCode).json({ success: false, message: error.message });
     }

@@ -135,6 +135,15 @@ const addWorkOrderPhoto = async (woId, photoData) => {
 
     if (!wo.photos) wo.photos = [];
 
+    // Overwrite existing photo if caption matches a task/part photo or required photo label
+    if (photoData.caption) {
+        const isTaskOrPart = photoData.caption.startsWith("TASK_") || photoData.caption.startsWith("PART_");
+        const isRequiredPhoto = wo.requiredPhotos && wo.requiredPhotos.some(rp => rp.label === photoData.caption);
+        if (isTaskOrPart || isRequiredPhoto) {
+            wo.photos = wo.photos.filter(p => p.caption !== photoData.caption);
+        }
+    }
+
     wo.photos.push({
         url: photoData.url,
         caption: photoData.caption || "",

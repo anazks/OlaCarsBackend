@@ -161,6 +161,8 @@ const workOrderSchema = new mongoose.Schema(
         // Cost Estimates vs Actuals
         estimatedLabourHours: { type: Number, default: 0 },
         actualLabourHours: { type: Number, default: 0 },
+        workStartTime: { type: Date },
+        workEndTime: { type: Date },
         estimatedPartsCost: { type: Number, default: 0 },
         actualPartsCost: { type: Number, default: 0 },
         estimatedTotalCost: { type: Number, default: 0 },

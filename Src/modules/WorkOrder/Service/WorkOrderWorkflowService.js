@@ -136,12 +136,8 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
-            const tasks = wo.tasks || [];
-            const incompleteTasks = tasks.filter(
-                (t) => t.status !== "COMPLETED" && t.status !== "SKIPPED"
-            );
-            if (tasks.length > 0 && incompleteTasks.length > 0) {
-                return `${incompleteTasks.length} task(s) are still incomplete. All tasks must be completed or skipped before QC.`;
+            if (!wo.actualLabourHours || wo.actualLabourHours <= 0) {
+                return "Work start and end times must be updated (actual labour hours must be greater than 0) before proceeding to Quality Check.";
             }
             return null;
         },
@@ -162,6 +158,39 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
+            // Validate Tasks and Parts Verification Checklist (evidence gating)
+            const tasks = wo.tasks || [];
+            const incompleteTasks = tasks.filter(
+                (t) => t.status !== "COMPLETED" && t.status !== "SKIPPED"
+            );
+            if (tasks.length > 0 && incompleteTasks.length > 0) {
+                return `${incompleteTasks.length} task(s) are still incomplete. All tasks must be completed or skipped before release.`;
+            }
+
+            const parts = wo.parts || [];
+            const uninstalledParts = parts.filter(
+                (p) => p.status !== "INSTALLED" && p.status !== "RETURNED"
+            );
+            if (parts.length > 0 && uninstalledParts.length > 0) {
+                return `${uninstalledParts.length} listed part(s) are not installed. All listed parts must be installed or returned before release.`;
+            }
+
+            // Enforce photo uploads for completed tasks and installed parts
+            const uploadedPhotos = wo.photos || [];
+            const missingTaskPhotos = tasks.filter(t => 
+                t.status === "COMPLETED" && !uploadedPhotos.some(up => up.caption === `TASK_${t._id}`)
+            );
+            if (missingTaskPhotos.length > 0) {
+                return `Photo verification required for completed tasks: ${missingTaskPhotos.map(t => t.description).join(", ")}`;
+            }
+
+            const missingPartPhotos = parts.filter(p => 
+                p.status === "INSTALLED" && !uploadedPhotos.some(up => up.caption === `PART_${p._id}`)
+            );
+            if (missingPartPhotos.length > 0) {
+                return `Photo verification required for installed parts: ${missingPartPhotos.map(p => p.partName).join(", ")}`;
+            }
+
             // Validate QC Checklist
             const qcItems = wo.qcChecklist || [];
             if (qcItems.length > 0) {
@@ -173,20 +202,7 @@ const STATUS_RULES = {
                 }
             }
 
-            // Validate Photo Requirements
-            const requiredPhotos = wo.requiredPhotos || [];
-            const uploadedPhotos = wo.photos || [];
-            
-            if (requiredPhotos.length > 0) {
-                const missingMandatory = requiredPhotos.filter(rp => 
-                    rp.isMandatory && !uploadedPhotos.some(up => up.caption === rp.label)
-                );
-                if (missingMandatory.length > 0) {
-                    return `Mandatory photos missing: ${missingMandatory.map(m => m.label).join(", ")}`;
-                }
-            } else if (uploadedPhotos.length < 4) {
-                return `Minimum 4 QC/repair photos required. Currently ${uploadedPhotos.length} uploaded.`;
-            }
+            // Validate Photo Requirements (Repair verification photos are optional per user request)
 
             return null;
         },
@@ -264,75 +280,7 @@ const triggerSideEffects = async (targetStatus, workOrder, user) => {
         console.log(`[WorkOrder] WO ${workOrder.workOrderNumber} cancelled. Releasing reserved inventory.`);
     }
 
-    if (targetStatus === "PAUSED") {
-        const { logLabourEntry } = require("./WorkOrderService");
-        const technicianId = workOrder.assignedTechnician;
-        if (technicianId) {
-            try {
-                await logLabourEntry(workOrder._id, {
-                    technicianId: technicianId,
-                    action: "PAUSE",
-                    notes: workOrder.pauseReason || "Work order paused",
-                });
-            } catch (err) {
-                console.warn(`[WorkOrder] Auto-pause failed: ${err.message}`);
-            }
-        }
-    }
-
-    if (targetStatus === "QUALITY_CHECK") {
-        const { logLabourEntry } = require("./WorkOrderService");
-        const techLastActions = {};
-        for (const log of workOrder.labourLog || []) {
-            techLastActions[log.technicianId.toString()] = log.action;
-        }
-
-        for (const [techId, lastAction] of Object.entries(techLastActions)) {
-            if (["CLOCK_IN", "RESUME"].includes(lastAction)) {
-                try {
-                    await logLabourEntry(workOrder._id, {
-                        technicianId: techId,
-                        action: "CLOCK_OUT",
-                        notes: "Auto-clocked out at Quality Check",
-                    });
-                } catch (err) {
-                    console.warn(`[WorkOrder] Auto-clock-out failed for ${techId}: ${err.message}`);
-                }
-            }
-        }
-    }
-
-    if (targetStatus === "IN_PROGRESS" && workOrder.statusHistory.length > 0) {
-        const lastStatus = workOrder.statusHistory[workOrder.statusHistory.length - 2]?.status;
-        if (lastStatus === "PAUSED") {
-            const { logLabourEntry } = require("./WorkOrderService");
-            const technicianId = workOrder.assignedTechnician;
-            if (technicianId) {
-                try {
-                    await logLabourEntry(workOrder._id, {
-                        technicianId: technicianId,
-                        action: "RESUME",
-                        notes: "Work order resumed",
-                    });
-                } catch (err) {
-                    console.warn(`[WorkOrder] Auto-resume failed: ${err.message}`);
-                }
-            }
-        }
-    }
-
-    // Automated Labour Tracking
-    try {
-        if (targetStatus === "IN_PROGRESS") {
-            await logLabourEntry(workOrder._id, {
-                technicianId: user.id,
-                action: "CLOCK_IN",
-                notes: "Automated clock-in on IN_PROGRESS transition"
-            });
-        }
-    } catch (labourError) {
-        console.error(`[WorkOrder] Failed to automate labour log: ${labourError.message}`);
-    }
+    // Automated Labour Tracking side-effects disabled as actualLabourHours is now entered manually.
 };
 
 // ─── Main Workflow Engine ────────────────────────────────────────────
