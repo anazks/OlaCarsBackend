@@ -429,14 +429,27 @@ exports.getBankTransactions = async (req, res, next) => {
         const { page = 1, limit = 25, type, startDate, endDate, search, sort = "desc", balance } = req.query;
 
         const BankAccount = require("../Model/BankAccountModel");
-        const BankTransaction = require("../Model/BankTransactionModel");
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
             return res.status(404).json({ success: false, message: "Bank account not found" });
         }
 
-        const query = { bankAccount: id };
+        if (!account.accountingCode) {
+            return res.status(200).json({
+                success: true,
+                data: [],
+                pagination: {
+                    total: 0,
+                    pages: 1,
+                    limit: parseInt(limit, 10),
+                    page: parseInt(page, 10)
+                }
+            });
+        }
+
+        const query = { accountingCode: account.accountingCode };
 
         if (type) {
             query.type = type.toUpperCase();
@@ -477,9 +490,9 @@ exports.getBankTransactions = async (req, res, next) => {
         const limitNum = parseInt(limit, 10);
         const skip = (pageNum - 1) * limitNum;
 
-        const total = await BankTransaction.countDocuments(query);
+        const total = await LedgerEntry.countDocuments(query);
         const sortOrder = sort === "asc" ? 1 : -1;
-        const transactions = await BankTransaction.find(query)
+        const transactions = await LedgerEntry.find(query)
             .sort({ entryDate: sortOrder, createdAt: sortOrder })
             .skip(skip)
             .limit(limitNum);
@@ -512,12 +525,37 @@ exports.getBankTransactionById = async (req, res, next) => {
     try {
         const { transactionId } = req.params;
         const BankTransaction = require("../Model/BankTransactionModel");
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
-        const transaction = await BankTransaction.findById(transactionId)
+        let transaction = await BankTransaction.findById(transactionId)
             .populate("bankAccount", "accountName bankName accountNumber currency status")
             .populate("branch", "name code")
             .populate("accountingCode", "code name category")
             .populate("createdBy", "name email");
+
+        if (!transaction) {
+            const ledgerEntry = await LedgerEntry.findById(transactionId)
+                .populate("branch", "name code")
+                .populate("accountingCode", "code name category")
+                .populate("createdBy", "name email");
+
+            if (ledgerEntry) {
+                transaction = ledgerEntry.toObject();
+                transaction.entryDate = ledgerEntry.entryDate;
+                transaction.transactionId = ledgerEntry.transactionId;
+                
+                const BankAccount = require("../Model/BankAccountModel");
+                const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode, isDeleted: false });
+                transaction.bankAccount = matchedAccount ? {
+                    _id: matchedAccount._id,
+                    accountName: matchedAccount.accountName || matchedAccount.bankName,
+                    bankName: matchedAccount.bankName,
+                    accountNumber: matchedAccount.accountNumber,
+                    currency: matchedAccount.currency,
+                    status: matchedAccount.status
+                } : null;
+            }
+        }
 
         if (!transaction) {
             return res.status(404).json({ success: false, message: "Bank transaction not found" });
