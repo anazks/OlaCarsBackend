@@ -98,8 +98,14 @@ exports.getAllExpenses = async (req, res, next) => {
         if (startDate || endDate) {
             // User adjusted custom dates -> apply custom range
             query.expenseDate = {};
-            if (startDate) query.expenseDate.$gte = new Date(startDate);
-            if (endDate) query.expenseDate.$lte = new Date(endDate);
+            if (startDate) {
+                query.expenseDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.expenseDate.$lte = end;
+            }
         }
 
         // Apply filters

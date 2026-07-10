@@ -1,0 +1,18 @@
+[2026-07-09T09:02:41.372Z] Called for WO: 6a4ce2b6b790fc0d1c22f9e1 | Body: {"workStartTime":"2026-07-09T07:02:40.800Z","workEndTime":"2026-07-09T09:02:40.801Z"}
+[2026-07-09T09:02:41.374Z] Calculated actualLabourHours: 2
+[2026-07-09T09:02:43.517Z] Saved WO. actualLabourHours: 2 | workStartTime: 2026-07-09T07:02:40.800Z | workEndTime: 2026-07-09T09:02:40.801Z
+[2026-07-09T09:10:48.723Z] Called for WO: 6a4df3c0941a12ebdf68e6ee | Body: {"workStartTime":"2026-07-07T22:34:00.000Z","workEndTime":"2026-07-07T22:34:00.000Z"}
+[2026-07-09T09:10:48.725Z] Calculated actualLabourHours: 0
+[2026-07-09T09:10:48.999Z] Saved WO. actualLabourHours: 0 | workStartTime: 2026-07-07T22:34:00.000Z | workEndTime: 2026-07-07T22:34:00.000Z
+[2026-07-09T09:11:34.103Z] Called for WO: 6a4df3c0941a12ebdf68e6ee | Body: {"workStartTime":"2026-07-07T22:34:00.000Z","workEndTime":"2026-07-07T22:34:00.000Z"}
+[2026-07-09T09:11:34.104Z] Calculated actualLabourHours: 0
+[2026-07-09T09:11:34.383Z] Saved WO. actualLabourHours: 0 | workStartTime: 2026-07-07T22:34:00.000Z | workEndTime: 2026-07-07T22:34:00.000Z
+[2026-07-09T09:14:43.161Z] Called for WO: 6a4df3c0941a12ebdf68e6ee | Body: {"workStartTime":"2026-07-07T22:34:00.000Z","workEndTime":"2026-07-07T22:50:00.000Z"}
+[2026-07-09T09:14:43.165Z] Calculated actualLabourHours: 0.27
+[2026-07-09T09:14:43.444Z] Saved WO. actualLabourHours: 0.27 | workStartTime: 2026-07-07T22:34:00.000Z | workEndTime: 2026-07-07T22:50:00.000Z
+[2026-07-09T10:19:50.325Z] Called for WO: 6a4f67fe032bf9f8f9076481 | Body: {"workStartTime":"2026-07-08T22:00:00.000Z","workEndTime":"2026-07-08T23:30:00.000Z"}
+[2026-07-09T10:19:50.330Z] Calculated actualLabourHours: 1.5
+[2026-07-09T10:19:50.607Z] Saved WO. actualLabourHours: 1.5 | workStartTime: 2026-07-08T22:00:00.000Z | workEndTime: 2026-07-08T23:30:00.000Z
+[2026-07-09T10:38:46.105Z] Called for WO: 6a4f798ed34660de6f26b693 | Body: {"workStartTime":"2026-07-08T21:30:00.000Z","workEndTime":"2026-07-09T00:30:00.000Z"}
+[2026-07-09T10:38:46.108Z] Calculated actualLabourHours: 3
+[2026-07-09T10:38:46.388Z] Saved WO. actualLabourHours: 3 | workStartTime: 2026-07-08T21:30:00.000Z | workEndTime: 2026-07-09T00:30:00.000Z

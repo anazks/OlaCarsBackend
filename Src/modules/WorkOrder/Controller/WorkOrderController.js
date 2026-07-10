@@ -26,6 +26,49 @@ const createWorkOrderHandler = async (req, res) => {
         data.reportedBy = req.user.id;
         data.reportedByRole = req.user.role;
 
+        // If work order is created as preventive maintenance, auto-assign default tasks & parts
+        if (data.workOrderType === "PREVENTIVE") {
+            const defaultTasks = [
+                { description: "OIL FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING" },
+                { description: "AIR FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING" },
+                { description: "AC FILTER CHANGE", category: "Electrical", estimatedHours: 0.5, status: "PENDING" },
+                { description: "COOLANT TOP-UP", category: "Fluids", estimatedHours: 0.5, status: "PENDING" },
+                { description: "ENGINE OIL CHANGE", category: "Fluids", estimatedHours: 0.5, status: "PENDING" }
+            ];
+            
+            if (!data.tasks) data.tasks = [];
+            data.tasks.push(...defaultTasks);
+
+            try {
+                const { InventoryPart } = require("../../Inventory/Model/InventoryPartModel");
+                const matchedParts = await InventoryPart.find({
+                    branchId: data.branchId || req.user.branchId,
+                    isActive: true,
+                    partNumber: { $in: ["OWM0001", "OWM0002", "OWM0003", "OWM0016"] }
+                });
+
+                if (!data.parts) data.parts = [];
+                let partsCostSum = 0;
+                matchedParts.forEach(part => {
+                    data.parts.push({
+                        inventoryPartId: part._id,
+                        partName: part.partName,
+                        partNumber: part.partNumber,
+                        quantity: 1,
+                        unitCost: part.unitCost,
+                        totalCost: part.unitCost,
+                        status: "REQUESTED",
+                        source: "IN_STOCK"
+                    });
+                    partsCostSum += part.unitCost || 0;
+                });
+                data.estimatedPartsCost = partsCostSum;
+                console.log(`[PREVENTIVE AUTO-ASSIGN] Auto-assigned ${matchedParts.length} parts (total cost: ${partsCostSum})`);
+            } catch (err) {
+                console.error("[PREVENTIVE AUTO-ASSIGN ERROR]", err);
+            }
+        }
+
         // Auto-set SLA from priority
         if (data.priority) {
             data.slaDeadline = calculateSlaDeadline(data.priority);
@@ -233,14 +276,47 @@ const removePartHandler = async (req, res) => {
  * @route POST /api/work-orders/:id/labour
  */
 const logLabourHandler = async (req, res) => {
-    try {
-        const entry = req.body;
-        if (!entry.technicianId) {
-            entry.technicianId = req.user.id;
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '../../../../debug_labour.log');
+    
+    const writeLog = (msg) => {
+        try {
+            fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+        } catch (e) {
+            console.error('Failed to write to log file:', e);
         }
-        const wo = await logLabourEntry(req.params.id, entry);
-        return res.status(201).json({ success: true, data: wo });
+    };
+
+    try {
+        writeLog(`Called for WO: ${req.params.id} | Body: ${JSON.stringify(req.body)}`);
+        const { workStartTime, workEndTime } = req.body;
+        if (!workStartTime || !workEndTime) {
+            writeLog(`ERROR: Missing workStartTime or workEndTime`);
+            return res.status(400).json({ success: false, message: "workStartTime and workEndTime are required" });
+        }
+        const start = new Date(workStartTime);
+        const end = new Date(workEndTime);
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            writeLog(`ERROR: Invalid date format | start: ${workStartTime} | end: ${workEndTime}`);
+            return res.status(400).json({ success: false, message: "Invalid date format for workStartTime or workEndTime" });
+        }
+        if (end < start) {
+            writeLog(`ERROR: End time before start time | start: ${start.toISOString()} | end: ${end.toISOString()}`);
+            return res.status(400).json({ success: false, message: "Work end time must be after work start time" });
+        }
+        const actualLabourHours = Math.round(((end - start) / (3600 * 1000)) * 100) / 100;
+        writeLog(`Calculated actualLabourHours: ${actualLabourHours}`);
+        
+        const wo = await WorkOrderRepo.updateWorkOrder(req.params.id, {
+            workStartTime: start,
+            workEndTime: end,
+            actualLabourHours: actualLabourHours
+        });
+        writeLog(`Saved WO. actualLabourHours: ${wo?.actualLabourHours} | workStartTime: ${wo?.workStartTime?.toISOString()} | workEndTime: ${wo?.workEndTime?.toISOString()}`);
+        return res.status(200).json({ success: true, data: wo });
     } catch (error) {
+        writeLog(`EXCEPTION ERROR: ${error.message} | Stack: ${error.stack}`);
         const statusCode = error.cause || 500;
         return res.status(statusCode).json({ success: false, message: error.message });
     }

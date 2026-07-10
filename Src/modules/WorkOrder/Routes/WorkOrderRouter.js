@@ -57,7 +57,7 @@ const upload = require("../../../utils/multerConfig.js");
  *             properties:
  *               workOrderType:
  *                 type: string
- *                 enum: [PREVENTIVE, CORRECTIVE, PRE_ENTRY, ACCIDENT, RETURN_INSPECTION, RECALL, SAFETY_PREP, WEAR_ITEM]
+ *                 enum: [PREVENTIVE, CORRECTIVE, PRE_ENTRY, ACCIDENT, RETURN_INSPECTION, RECALL, SAFETY_PREP, WEAR_ITEM, OTHER]
  *               vehicleId:
  *                 type: string
  *                 description: Vehicle ObjectId
