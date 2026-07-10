@@ -100,9 +100,8 @@ exports.deleteAllTransactions = async (req, res, next) => {
         // Delete all bank transactions matching this bankAccount ID
         const bankTxDeleteResult = await BankTransaction.deleteMany({ bankAccount: id });
 
-        // Reset balance
-        account.initialBalance = 0;
-        account.currentBalance = 0;
+        // Reset balance to initial balance
+        account.currentBalance = account.initialBalance || 0;
         await account.save();
 
         res.status(200).json({
@@ -172,6 +171,7 @@ exports.uploadBankStatement = async (req, res, next) => {
 
         let balanceAccum = account.currentBalance || 0;
         const createdEntries = [];
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
         for (const tx of transactions) {
             const amount = Number(tx.amount) || 0;
@@ -199,6 +199,21 @@ exports.uploadBankStatement = async (req, res, next) => {
             });
 
             await entry.save();
+
+            const ledgerEntry = new LedgerEntry({
+                branch: branchId || undefined,
+                accountingCode: accCodeId,
+                type: txType,
+                amount: amount,
+                description: tx.description || `Bank statement transaction: ${tx.referenceNumber || ""}`,
+                entryDate: tx.date ? new Date(tx.date) : new Date(),
+                transactionId: tx.referenceNumber || undefined,
+                runningBalance: balanceAccum,
+                createdBy,
+                creatorRole
+            });
+
+            await ledgerEntry.save();
             createdEntries.push(entry);
         }
 
@@ -292,6 +307,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
         const BankAccount = require("../Model/BankAccountModel");
         const BankTransaction = require("../Model/BankTransactionModel");
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -306,15 +322,24 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const createdBy = req.user?._id || req.user?.id || req.user?.userId;
         const creatorRole = req.user?.role || "ADMIN";
 
-        // If clearExisting is selected, purge existing bank transactions first
+        let balanceAccum = 0;
         if (clearExisting === true) {
             console.log(`[BulkUpload] Clearing existing bank transactions for account ${account.accountName}`);
             await BankTransaction.deleteMany({ bankAccount: id });
-            account.initialBalance = 0;
-            account.currentBalance = 0;
+            await LedgerEntry.deleteMany({ accountingCode: accCodeId });
+            balanceAccum = account.initialBalance || 0;
+        } else {
+            const lastTx = await LedgerEntry.findOne({ accountingCode: accCodeId })
+                .sort({ entryDate: -1, createdAt: -1 });
+            
+            if (lastTx) {
+                console.log(`[BulkUpload] Found last LedgerEntry in DB to connect with: ID=${lastTx._id}, Date=${lastTx.entryDate}, Type=${lastTx.type}, Amount=${lastTx.amount}, RunningBalance=${lastTx.runningBalance}`);
+                balanceAccum = lastTx.runningBalance || 0;
+            } else {
+                console.log(`[BulkUpload] No LedgerEntry found in DB. Falling back to account currentBalance: ${account.currentBalance || 0}`);
+                balanceAccum = account.currentBalance || account.initialBalance || 0;
+            }
         }
-
-        let balanceAccum = account.currentBalance || 0;
         const createdEntries = [];
 
         for (const tx of transactions) {
@@ -397,12 +422,27 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 entryDate: dateVal ? new Date(dateVal) : new Date(),
                 transactionType: typeVal,
                 transactionId: transactionIdVal,
-                runningBalance: runningBalVal !== 0 ? runningBalVal : balanceAccum,
+                runningBalance: balanceAccum,
                 createdBy,
                 creatorRole
             });
 
             await entry.save();
+
+            const ledgerEntry = new LedgerEntry({
+                branch: branchId || undefined,
+                accountingCode: accCodeId,
+                type: typeVal,
+                amount: amountVal,
+                description: finalDescription || "Bulk uploaded ledger transaction",
+                entryDate: dateVal ? new Date(dateVal) : new Date(),
+                transactionId: transactionIdVal,
+                runningBalance: balanceAccum,
+                createdBy,
+                creatorRole
+            });
+
+            await ledgerEntry.save();
             createdEntries.push(entry);
         }
 
@@ -543,7 +583,7 @@ exports.getBankTransactionById = async (req, res, next) => {
                 transaction = ledgerEntry.toObject();
                 transaction.entryDate = ledgerEntry.entryDate;
                 transaction.transactionId = ledgerEntry.transactionId;
-                
+
                 const BankAccount = require("../Model/BankAccountModel");
                 const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode, isDeleted: false });
                 transaction.bankAccount = matchedAccount ? {
