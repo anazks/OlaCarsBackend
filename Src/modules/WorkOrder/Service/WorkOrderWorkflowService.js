@@ -136,7 +136,7 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.WORKSHOPSTAFF],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {
-            const tasks = wo.tasks || [];
+            const tasks = (wo.tasks || []).filter(t => t.isDoable !== false);
             const incompleteTasks = tasks.filter(
                 (t) => t.status !== "COMPLETED" && t.status !== "SKIPPED"
             );

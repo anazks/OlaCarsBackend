@@ -55,6 +55,7 @@ const workOrderTaskSchema = new mongoose.Schema({
     actualHours: { type: Number },
     completedAt: { type: Date },
     notes: { type: String },
+    isDoable: { type: Boolean, default: true },
 });
 
 const workOrderPartSchema = new mongoose.Schema({

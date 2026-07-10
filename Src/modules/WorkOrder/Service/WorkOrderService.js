@@ -36,6 +36,7 @@ const updateTask = async (woId, taskId, updates) => {
     if (updates.actualHours !== undefined) task.actualHours = updates.actualHours;
     if (updates.notes !== undefined) task.notes = updates.notes;
     if (updates.assignedTo) task.assignedTo = updates.assignedTo;
+    if (updates.isDoable !== undefined) task.isDoable = updates.isDoable;
 
     // Auto-set completedAt when marked COMPLETED
     if (updates.status === "COMPLETED" && !task.completedAt) {
