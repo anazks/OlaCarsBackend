@@ -322,22 +322,37 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const createdBy = req.user?._id || req.user?.id || req.user?.userId;
         const creatorRole = req.user?.role || "ADMIN";
 
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const accountingCodeDoc = await AccountingCode.findOne({ _id: accCodeId });
+        if (!accountingCodeDoc) {
+            return res.status(400).json({ success: false, message: "Linked accounting code not found" });
+        }
+
         let balanceAccum = 0;
+        let debitAccum = 0;
+        let creditAccum = 0;
+
         if (clearExisting === true) {
             console.log(`[BulkUpload] Clearing existing bank transactions for account ${account.accountName}`);
             await BankTransaction.deleteMany({ bankAccount: id });
             await LedgerEntry.deleteMany({ accountingCode: accCodeId });
             balanceAccum = account.initialBalance || 0;
+            debitAccum = 0;
+            creditAccum = 0;
         } else {
             const lastTx = await LedgerEntry.findOne({ accountingCode: accCodeId })
-                .sort({ entryDate: -1, createdAt: -1 });
+                .sort({ entryDate: -1, _id: -1 });
             
             if (lastTx) {
                 console.log(`[BulkUpload] Found last LedgerEntry in DB to connect with: ID=${lastTx._id}, Date=${lastTx.entryDate}, Type=${lastTx.type}, Amount=${lastTx.amount}, RunningBalance=${lastTx.runningBalance}`);
                 balanceAccum = lastTx.runningBalance || 0;
+                debitAccum = accountingCodeDoc.debitTotal || 0;
+                creditAccum = accountingCodeDoc.creditTotal || 0;
             } else {
                 console.log(`[BulkUpload] No LedgerEntry found in DB. Falling back to account currentBalance: ${account.currentBalance || 0}`);
                 balanceAccum = account.currentBalance || account.initialBalance || 0;
+                debitAccum = accountingCodeDoc.debitTotal || 0;
+                creditAccum = accountingCodeDoc.creditTotal || 0;
             }
         }
         const createdEntries = [];
@@ -406,10 +421,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${detailsVal}` : detailsVal;
             }
 
+            const isCreditCard = account.accountType === "Credit Card";
             if (typeVal === "DEBIT") {
-                balanceAccum += amountVal;
+                balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
+                debitAccum += amountVal;
             } else if (typeVal === "CREDIT") {
-                balanceAccum -= amountVal;
+                balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
+                creditAccum += amountVal;
             }
 
             const entry = new BankTransaction({
@@ -448,6 +466,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
         account.currentBalance = balanceAccum;
         await account.save();
+
+        // Sync and update the linked accounting code totals and currentBalance
+        accountingCodeDoc.debitTotal = debitAccum;
+        accountingCodeDoc.creditTotal = creditAccum;
+        accountingCodeDoc.currentBalance = balanceAccum;
+        await accountingCodeDoc.save();
 
         res.status(200).json({
             success: true,
@@ -533,7 +557,7 @@ exports.getBankTransactions = async (req, res, next) => {
         const total = await LedgerEntry.countDocuments(query);
         const sortOrder = sort === "asc" ? 1 : -1;
         const transactions = await LedgerEntry.find(query)
-            .sort({ entryDate: sortOrder, createdAt: sortOrder })
+            .sort({ entryDate: sortOrder, _id: sortOrder })
             .skip(skip)
             .limit(limitNum);
 
