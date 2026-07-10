@@ -26,47 +26,20 @@ const createWorkOrderHandler = async (req, res) => {
         data.reportedBy = req.user.id;
         data.reportedByRole = req.user.role;
 
-        // If work order is created as preventive maintenance, auto-assign default tasks & parts
+        // If work order is created as preventive maintenance, auto-assign default tasks (no predefined parts)
         if (data.workOrderType === "PREVENTIVE") {
             const defaultTasks = [
-                { description: "OIL FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING" },
-                { description: "AIR FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING" },
-                { description: "AC FILTER CHANGE", category: "Electrical", estimatedHours: 0.5, status: "PENDING" },
-                { description: "COOLANT TOP-UP", category: "Fluids", estimatedHours: 0.5, status: "PENDING" },
-                { description: "ENGINE OIL CHANGE", category: "Fluids", estimatedHours: 0.5, status: "PENDING" }
+                { description: "OIL FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
+                { description: "AIR FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
+                { description: "AC FILTER CHANGE", category: "Electrical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
+                { description: "COOLANT TOP-UP", category: "Fluids", estimatedHours: 0.5, status: "PENDING", isDoable: false },
+                { description: "ENGINE OIL CHANGE", category: "Fluids", estimatedHours: 0.5, status: "PENDING", isDoable: false }
             ];
             
             if (!data.tasks) data.tasks = [];
             data.tasks.push(...defaultTasks);
-
-            try {
-                const { InventoryPart } = require("../../Inventory/Model/InventoryPartModel");
-                const matchedParts = await InventoryPart.find({
-                    branchId: data.branchId || req.user.branchId,
-                    isActive: true,
-                    partNumber: { $in: ["OWM0001", "OWM0002", "OWM0003", "OWM0016"] }
-                });
-
-                if (!data.parts) data.parts = [];
-                let partsCostSum = 0;
-                matchedParts.forEach(part => {
-                    data.parts.push({
-                        inventoryPartId: part._id,
-                        partName: part.partName,
-                        partNumber: part.partNumber,
-                        quantity: 1,
-                        unitCost: part.unitCost,
-                        totalCost: part.unitCost,
-                        status: "REQUESTED",
-                        source: "IN_STOCK"
-                    });
-                    partsCostSum += part.unitCost || 0;
-                });
-                data.estimatedPartsCost = partsCostSum;
-                console.log(`[PREVENTIVE AUTO-ASSIGN] Auto-assigned ${matchedParts.length} parts (total cost: ${partsCostSum})`);
-            } catch (err) {
-                console.error("[PREVENTIVE AUTO-ASSIGN ERROR]", err);
-            }
+            data.parts = [];
+            data.estimatedPartsCost = 0;
         }
 
         // Auto-set SLA from priority
