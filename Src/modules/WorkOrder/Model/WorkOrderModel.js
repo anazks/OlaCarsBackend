@@ -3,21 +3,26 @@ const { ROLES } = require("../../../shared/constants/roles");
 
 // ─── Enums ───────────────────────────────────────────────────────────
 const WORK_ORDER_STATUSES = [
+    "TASKS",
+    "LABOUR",
+    "QC_PHOTOS",
+    "BILLING",
+    "CANCELLED",
+    // Legacy statuses for backward compatibility
     "DRAFT",
     "START",
-    "APPROVED",
     "VEHICLE_CHECKED_IN",
     "PARTS_REQUESTED",
     "PARTS_RECEIVED",
     "IN_PROGRESS",
     "PAUSED",
+    "ADDITIONAL_WORK_FOUND",
     "QUALITY_CHECK",
     "FAILED_QC",
     "READY_FOR_RELEASE",
     "VEHICLE_RELEASED",
     "INVOICED",
     "CLOSED",
-    "CANCELLED",
 ];
 
 const WORK_ORDER_TYPES = [
@@ -57,6 +62,7 @@ const workOrderTaskSchema = new mongoose.Schema({
     completedAt: { type: Date },
     notes: { type: String },
     isDoable: { type: Boolean, default: true },
+    taskTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "TaskTemplate" },
 });
 
 const workOrderPartSchema = new mongoose.Schema({
@@ -71,6 +77,7 @@ const workOrderPartSchema = new mongoose.Schema({
         default: "IN_STOCK",
     },
     inventoryPartId: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryPart" },
+    taskTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "TaskTemplate" },
     purchaseOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseOrder" },
     status: { type: String, enum: PART_STATUSES, default: "REQUESTED" },
     receivedDate: { type: Date },
@@ -134,7 +141,7 @@ const workOrderSchema = new mongoose.Schema(
         status: {
             type: String,
             enum: WORK_ORDER_STATUSES,
-            default: "DRAFT",
+            default: "TASKS",
         },
 
         // References

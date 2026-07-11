@@ -1,10 +1,7 @@
 {
   "status": "success",
   "account": {
-    "debitTotal": 0,
-    "creditTotal": 0,
-    "currentBalance": 0,
-    "_id": "6a22992fb511f5db1b6d042d",
+    "_id": "6a280db04f5923cd64ec322d",
     "code": "1.1.02-2",
     "name": "Banco General AH 2654",
     "description": "",

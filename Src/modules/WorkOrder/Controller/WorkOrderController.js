@@ -22,22 +22,38 @@ const createWorkOrderHandler = async (req, res) => {
         const data = req.body;
         data.createdBy = req.user.id;
         data.creatorRole = req.user.role;
-        data.status = "DRAFT";
+        data.status = "TASKS";
         data.reportedBy = req.user.id;
         data.reportedByRole = req.user.role;
 
-        // If work order is created as preventive maintenance, auto-assign default tasks (no predefined parts)
-        if (data.workOrderType === "PREVENTIVE") {
-            const defaultTasks = [
-                { description: "OIL FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
-                { description: "AIR FILTER CHANGE", category: "Mechanical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
-                { description: "AC FILTER CHANGE", category: "Electrical", estimatedHours: 0.5, status: "PENDING", isDoable: false },
-                { description: "COOLANT TOP-UP", category: "Fluids", estimatedHours: 0.5, status: "PENDING", isDoable: false },
-                { description: "ENGINE OIL CHANGE", category: "Fluids", estimatedHours: 0.5, status: "PENDING", isDoable: false }
-            ];
-            
-            if (!data.tasks) data.tasks = [];
-            data.tasks.push(...defaultTasks);
+        // Auto-assign tasks from TaskTemplate for the given work order type
+        if (data.workOrderType) {
+            try {
+                const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
+                const branchId = data.branchId || req.user.branchId;
+                const templates = await TaskTemplate.find({
+                    workOrderTypes: data.workOrderType,
+                    branchId: branchId,
+                    isActive: true
+                });
+
+                if (templates.length > 0) {
+                    if (!data.tasks) data.tasks = [];
+                    templates.forEach(t => {
+                        data.tasks.push({
+                            description: t.name,
+                            category: t.category,
+                            estimatedHours: t.estimatedHours || 0.5,
+                            status: "PENDING",
+                            isDoable: false,
+                            taskTemplateId: t._id,
+                        });
+                    });
+                    console.log(`[TASK-TEMPLATE] Auto-assigned ${templates.length} tasks from templates for ${data.workOrderType}`);
+                }
+            } catch (err) {
+                console.error("[TASK-TEMPLATE AUTO-ASSIGN ERROR]", err.message);
+            }
             data.parts = [];
             data.estimatedPartsCost = 0;
         }
@@ -176,7 +192,7 @@ const addTaskHandler = async (req, res) => {
  */
 const updateTaskHandler = async (req, res) => {
     try {
-        const wo = await updateTask(req.params.id, req.params.taskId, req.body);
+        const wo = await updateTask(req.params.id, req.params.taskId, req.body, req.user);
         return res.status(200).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -190,7 +206,7 @@ const updateTaskHandler = async (req, res) => {
  */
 const removeTaskHandler = async (req, res) => {
     try {
-        const wo = await removeTask(req.params.id, req.params.taskId);
+        const wo = await removeTask(req.params.id, req.params.taskId, req.user);
         return res.status(200).json({ success: true, data: wo });
     } catch (error) {
         const statusCode = error.cause || 500;
@@ -482,6 +498,170 @@ const generateBillHandler = async (req, res) => {
     }
 };
 
+// ─── Toggle Task Doable (atomic check + part add/remove) ─────────────
+
+const toggleTaskDoableHandler = async (req, res) => {
+    try {
+        const { id, taskId } = req.params;
+        const wo = await WorkOrderRepo.getWorkOrderById(id);
+        if (!wo) return res.status(404).json({ success: false, message: "Work order not found." });
+
+        const task = wo.tasks.id(taskId);
+        if (!task) return res.status(404).json({ success: false, message: "Task not found." });
+
+        const nextDoable = !task.isDoable;
+
+        if (!task.taskTemplateId) {
+            // No template linked — just toggle isDoable
+            task.isDoable = nextDoable;
+            await wo.save();
+            const updated = await WorkOrderRepo.getWorkOrderById(id);
+            return res.status(200).json({ success: true, data: updated });
+        }
+
+        const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
+        const template = await TaskTemplate.findById(task.taskTemplateId)
+            .populate("linkedParts.inventoryPartId", "partName partNumber quantityOnHand quantityReserved unitCost");
+
+        if (!template) {
+            // Template was deleted — just toggle
+            task.isDoable = nextDoable;
+            await wo.save();
+            const updated = await WorkOrderRepo.getWorkOrderById(id);
+            return res.status(200).json({ success: true, data: updated });
+        }
+
+        // Filter linked parts by vehicle make/model
+        let applicableParts = template.linkedParts;
+        if (wo.vehicleId && typeof wo.vehicleId === 'object') {
+            const make = (wo.vehicleId.basicDetails?.make || '').toLowerCase().trim();
+            const model = (wo.vehicleId.basicDetails?.model || '').toLowerCase().trim();
+            if (make || model) {
+                const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+                const dbMakes = await Vehicle.distinct("basicDetails.make").catch(() => []);
+                const dbModels = await Vehicle.distinct("basicDetails.model").catch(() => []);
+
+                const knownModels = Array.from(new Set([
+                    'carens', 'soluto', 'brv', 'x70', 's07', 'okavango', 'tiggo',
+                    ...dbModels.map(m => (m || '').toLowerCase().trim()).filter(m => m.length >= 3)
+                ]));
+                const knownMakes = Array.from(new Set([
+                    'kia', 'honda', 'jetour', 'soueast', 'souest', 'geely', 'chery', 'cherry',
+                    ...dbMakes.map(mk => (mk || '').toLowerCase().trim()).filter(mk => mk.length >= 3)
+                ]));
+                
+                applicableParts = applicableParts.filter(lp => {
+                    const name = (lp.partName || '').toLowerCase();
+                    
+                    // 1. Model specificity check:
+                    // If the part name contains any known model name, it MUST match the vehicle's model name
+                    const mentionsAnyModel = knownModels.some(m => name.includes(m));
+                    if (mentionsAnyModel) {
+                        if (!model) return false;
+                        const specificModelMatch = knownModels.find(m => name.includes(m));
+                        if (specificModelMatch && !model.includes(specificModelMatch)) {
+                            return false;
+                        }
+                    }
+
+                    // 2. Make specificity check:
+                    // If the part name contains any known brand make, it MUST match the vehicle's make
+                    const mentionsAnyMake = knownMakes.some(mk => name.includes(mk));
+                    if (mentionsAnyMake) {
+                        if (!make) return false;
+                        const specificMakeMatch = knownMakes.find(mk => name.includes(mk));
+                        
+                        let normalizedMake = make;
+                        if (make === 'soueast' || make === 'souest') normalizedMake = 'soue';
+                        
+                        let normalizedPartMake = specificMakeMatch;
+                        if (specificMakeMatch === 'soueast' || specificMakeMatch === 'souest') normalizedPartMake = 'soue';
+                        
+                        if (normalizedPartMake && !normalizedMake.includes(normalizedPartMake) && !normalizedPartMake.includes(normalizedMake)) {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                });
+            }
+        }
+
+        if (nextDoable) {
+            // CHECKING — reserve stock & add parts
+            const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
+            const user = { id: req.user?.id || req.user?._id, role: req.user?.role };
+            for (const lp of applicableParts) {
+                const qty = lp.defaultQuantity || 1;
+                const reserveResult = await checkAndReserve(lp.inventoryPartId?._id || lp.inventoryPartId, qty, user, id);
+                if (!reserveResult.success) {
+                    return res.status(400).json({
+                        success: false,
+                        message: reserveResult.message || `Cannot check task: part '${lp.partName}' is out of stock.`
+                    });
+                }
+            }
+            // Add parts to WO
+            const { InventoryPart } = require("../../Inventory/Model/InventoryPartModel");
+            for (const lp of applicableParts) {
+                const invPart = await InventoryPart.findById(lp.inventoryPartId?._id || lp.inventoryPartId);
+                const qty = lp.defaultQuantity || 1;
+                const alreadyExists = wo.parts.some(p =>
+                    p.inventoryPartId?.toString() === (lp.inventoryPartId?._id || lp.inventoryPartId).toString()
+                );
+                if (!alreadyExists) {
+                    wo.parts.push({
+                        partName: lp.partName,
+                        partNumber: lp.partNumber,
+                        quantity: qty,
+                        unitCost: invPart.unitCost,
+                        totalCost: invPart.unitCost * qty,
+                        source: "IN_STOCK",
+                        inventoryPartId: lp.inventoryPartId?._id || lp.inventoryPartId,
+                        taskTemplateId: task.taskTemplateId,
+                        status: "RESERVED",
+                    });
+                }
+            }
+            task.isDoable = true;
+        } else {
+            // UNCHECKING — release reservation & remove auto-added parts
+            const { releaseReservation } = require("../../Inventory/Service/InventoryService");
+            const user = { id: req.user?.id || req.user?._id, role: req.user?.role };
+            for (const lp of applicableParts) {
+                const qty = lp.defaultQuantity || 1;
+                const partIdStr = (lp.inventoryPartId?._id || lp.inventoryPartId).toString();
+                const wasAdded = wo.parts.some(p => 
+                    p.inventoryPartId?.toString() === partIdStr && 
+                    p.taskTemplateId?.toString() === task.taskTemplateId?.toString()
+                );
+                if (wasAdded) {
+                    try {
+                        await releaseReservation(lp.inventoryPartId?._id || lp.inventoryPartId, qty, user, id);
+                    } catch (err) {
+                        console.error(`Failed to release reservation for part ${lp.partName}:`, err);
+                    }
+                }
+            }
+
+            const partsToRemoveIds = applicableParts.map(lp => (lp.inventoryPartId?._id || lp.inventoryPartId).toString());
+            wo.parts = wo.parts.filter(p => {
+                const matchesTemplate = p.taskTemplateId && p.taskTemplateId.toString() === task.taskTemplateId.toString();
+                const matchesPartId = p.inventoryPartId && partsToRemoveIds.includes(p.inventoryPartId.toString());
+                return !(matchesTemplate || matchesPartId);
+            });
+            task.isDoable = false;
+        }
+
+        await wo.save();
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({ success: true, data: updated });
+    } catch (error) {
+        const statusCode = error.cause || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     createWorkOrderHandler,
     getWorkOrdersHandler,
@@ -501,5 +681,6 @@ module.exports = {
     removePhotoHandler,
     generateBillHandler,
     releaseVehicleHandler,
+    toggleTaskDoableHandler,
 };
 

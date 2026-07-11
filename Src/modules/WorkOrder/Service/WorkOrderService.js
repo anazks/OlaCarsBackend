@@ -25,12 +25,14 @@ const addTask = async (woId, taskData) => {
  * @param {Object} updates - { status, actualHours, notes, completedAt }
  * @returns {Promise<Object>}
  */
-const updateTask = async (woId, taskId, updates) => {
+const updateTask = async (woId, taskId, updates, user = null) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
     const task = wo.tasks.id(taskId);
     if (!task) throw new Error("Task not found.", { cause: 404 });
+
+    const oldStatus = task.status;
 
     if (updates.status) task.status = updates.status;
     if (updates.actualHours !== undefined) task.actualHours = updates.actualHours;
@@ -43,6 +45,47 @@ const updateTask = async (woId, taskId, updates) => {
         task.completedAt = new Date();
     }
 
+    // Sync part status with task status
+    if (updates.status && updates.status !== oldStatus) {
+        const templateIdStr = task.taskTemplateId?.toString();
+        if (templateIdStr) {
+            const { confirmInstallation, confirmReturn } = require("../../Inventory/Service/InventoryService");
+            const performer = { id: user?.id || user?._id || "system", role: user?.role || "system" };
+
+            if (updates.status === "COMPLETED") {
+                // Task is completed: RESERVED -> INSTALLED
+                for (const p of wo.parts) {
+                    if (p.taskTemplateId && p.taskTemplateId.toString() === templateIdStr && p.status === "RESERVED") {
+                        p.status = "INSTALLED";
+                        if (p.inventoryPartId) {
+                            try {
+                                await confirmInstallation(p.inventoryPartId, p.quantity || 1, performer, woId);
+                            } catch (err) {
+                                console.error(`Failed to confirm installation for part ${p.partName}:`, err);
+                            }
+                        }
+                    }
+                }
+            } else if (oldStatus === "COMPLETED") {
+                // Task was completed, but now moved back: INSTALLED -> RESERVED
+                const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
+                for (const p of wo.parts) {
+                    if (p.taskTemplateId && p.taskTemplateId.toString() === templateIdStr && p.status === "INSTALLED") {
+                        p.status = "RESERVED";
+                        if (p.inventoryPartId) {
+                            try {
+                                await confirmReturn(p.inventoryPartId, p.quantity || 1, performer, woId);
+                                await checkAndReserve(p.inventoryPartId, p.quantity || 1, performer, woId);
+                            } catch (err) {
+                                console.error(`Failed to revert installation/reserve for part ${p.partName}:`, err);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     await wo.save();
     return wo;
 };
@@ -53,7 +96,7 @@ const updateTask = async (woId, taskId, updates) => {
  * @param {string} taskId
  * @returns {Promise<Object>}
  */
-const removeTask = async (woId, taskId) => {
+const removeTask = async (woId, taskId, user = null) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
@@ -62,8 +105,40 @@ const removeTask = async (woId, taskId) => {
     if (task.status !== "PENDING") {
         throw new Error("Only PENDING tasks can be removed.", { cause: 400 });
     }
+    // Clean up parts associated with this task template if it has one
+    if (task.taskTemplateId) {
+        const templateIdStr = task.taskTemplateId.toString();
+        const partsToRemove = wo.parts.filter(p => p.taskTemplateId && p.taskTemplateId.toString() === templateIdStr);
+        if (partsToRemove.length > 0) {
+            const { releaseReservation, confirmReturn } = require("../../Inventory/Service/InventoryService");
+            const performer = { id: user?.id || user?._id || "system", role: user?.role || "system" };
+            for (const p of partsToRemove) {
+                if (p.inventoryPartId) {
+                    try {
+                        if (p.status === "RESERVED") {
+                            await releaseReservation(p.inventoryPartId, p.quantity || 1, performer, woId);
+                        } else if (p.status === "INSTALLED") {
+                            await confirmReturn(p.inventoryPartId, p.quantity || 1, performer, woId);
+                        }
+                    } catch (err) {
+                        console.error(`Failed to cleanup inventory for part ${p.partName} during removeTask:`, err);
+                    }
+                }
+            }
+        }
+        wo.parts = wo.parts.filter(p => {
+            const matchesTemplate = p.taskTemplateId && p.taskTemplateId.toString() === templateIdStr;
+            return !matchesTemplate;
+        });
+    }
 
     wo.tasks.pull(taskId);
+
+    // Recalculate actualPartsCost (only INSTALLED parts)
+    wo.actualPartsCost = wo.parts
+        .filter(p => p.status === "INSTALLED")
+        .reduce((sum, p) => sum + (p.totalCost || 0), 0);
+
     await wo.save();
     return wo;
 };

@@ -85,8 +85,8 @@ const submitQcResults = async (woId, results, inspector) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
-    if (wo.status !== "QUALITY_CHECK") {
-        throw new Error("Work order must be in QUALITY_CHECK status.", { cause: 400 });
+    if (wo.status !== "QC_PHOTOS") {
+        throw new Error("Work order must be in QC_PHOTOS status.", { cause: 400 });
     }
 
     // Update each checklist item
@@ -190,8 +190,8 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
-    if (wo.status !== "READY_FOR_RELEASE") {
-        throw new Error("Work order must be in READY_FOR_RELEASE status to release vehicle.", { cause: 400 });
+    if (wo.status !== "BILLING") {
+        throw new Error("Work order must be in BILLING status to release vehicle.", { cause: 400 });
     }
 
     // Verify QC passed
@@ -231,11 +231,11 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
     wo.releaseNotes = releaseData.releaseNotes || "";
     wo.releasedBy = user.id;
     wo.releasedAt = new Date();
-    wo.status = "VEHICLE_RELEASED";
+    wo.status = "BILLING";
 
     // Add to status history
     wo.statusHistory.push({
-        status: "VEHICLE_RELEASED",
+        status: "BILLING",
         changedBy: user.id,
         changedByRole: user.role,
         timestamp: new Date(),
