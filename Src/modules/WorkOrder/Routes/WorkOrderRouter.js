@@ -25,6 +25,7 @@ const {
     removePhotoHandler,
     generateBillHandler,
     releaseVehicleHandler,
+    toggleTaskDoableHandler,
 } = require("../Controller/WorkOrderController");
 const upload = require("../../../utils/multerConfig.js");
 
@@ -850,5 +851,16 @@ router.put(
     releaseVehicleHandler
 );
 
-module.exports = router;
+// ═════════════════════════════════════════════════════════════════════
+//  TOGGLE TASK DOABLE (atomic task check + auto part management)
+// ═════════════════════════════════════════════════════════════════════
 
+router.put(
+    "/:id/tasks/:taskId/toggle-doable",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("WORK_ORDER_EDIT"),
+    toggleTaskDoableHandler
+);
+
+module.exports = router;
