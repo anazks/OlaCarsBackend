@@ -362,11 +362,83 @@ const clearLedgerByCode = async (req, res) => {
     }
 };
 
+const updateLedgerEntry = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const entry = await LedgerEntry.findById(id);
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        const { description, accountingCode } = req.body;
+        if (description !== undefined) {
+            entry.description = description;
+        }
+        
+        if (accountingCode !== undefined) {
+            entry.accountingCode = accountingCode;
+        }
+
+        // Handle existing attachments
+        let attachmentsList = [];
+        if (req.body.existingAttachments) {
+            try {
+                attachmentsList = typeof req.body.existingAttachments === "string" 
+                    ? JSON.parse(req.body.existingAttachments)
+                    : req.body.existingAttachments;
+            } catch (err) {
+                return res.status(400).json({ success: false, message: "Invalid format for existingAttachments" });
+            }
+        } else {
+            attachmentsList = entry.attachments || [];
+        }
+
+        // Process newly uploaded files
+        if (req.files && req.files.length > 0) {
+            const uploadLocal = require("../../../utils/uploadLocal");
+            const newAttachments = req.files.map(file => {
+                const fileUrl = uploadLocal(file, "ledger");
+                return {
+                    name: file.originalname,
+                    url: fileUrl,
+                    uploadedAt: new Date()
+                };
+            });
+            attachmentsList = [...attachmentsList, ...newAttachments];
+        }
+
+        // Limit total attachments to 5
+        if (attachmentsList.length > 5) {
+            return res.status(400).json({ success: false, message: "A ledger entry can have at most 5 attachments" });
+        }
+
+        entry.attachments = attachmentsList;
+        await entry.save();
+
+        const updatedEntry = await LedgerEntry.findById(entry._id)
+            .populate("transaction")
+            .populate("manualJournal")
+            .populate("voucher")
+            .populate("accountingCode", "code name category")
+            .populate("contact", "name email")
+            .populate("createdBy", "name email");
+
+        return res.status(200).json({
+            success: true,
+            message: "Ledger entry updated successfully",
+            data: updatedEntry
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
     importLedgerEntries,
     deleteLedgerJournal,
     clearLedgerByCode,
+    updateLedgerEntry,
 };
 
