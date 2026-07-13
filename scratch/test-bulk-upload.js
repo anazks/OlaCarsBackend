@@ -21,6 +21,29 @@ async function run() {
     const testAccountNumber = '999999999';
     await BankAccount.deleteMany({ accountNumber: testAccountNumber });
     
+    const Branch = require('../Src/modules/Branch/Model/BranchModel');
+    await Branch.deleteMany({ code: { $in: ['TESTHO', 'TESTWS'] } });
+
+    const testBranch = new Branch({
+        name: 'Test Head Office',
+        code: 'TESTHO',
+        type: 'BRANCH',
+        phone: '12345678',
+        createdBy: new mongoose.Types.ObjectId('608d7e431b9b48abb30e4307'),
+        creatorRole: 'ADMIN'
+    });
+    await testBranch.save();
+
+    const testWorkshop = new Branch({
+        name: 'Test Ola Workshop',
+        code: 'TESTWS',
+        type: 'WORKSHOP',
+        phone: '87654321',
+        createdBy: new mongoose.Types.ObjectId('608d7e431b9b48abb30e4307'),
+        creatorRole: 'ADMIN'
+    });
+    await testWorkshop.save();
+    
     let accCode = await AccountingCode.findOne({});
     if (!accCode) {
         accCode = new AccountingCode({
@@ -63,9 +86,6 @@ async function run() {
     }
 
     // 2. Prepare test transactions
-    // Scenario A: Correct bank name, correct receipt (debit), prefix & number
-    // Scenario B: Mismatched bank name (should return 400 error)
-    // Scenario C: Correct bank name, payment (credit), prefix & number
     const validTransactions = [
         {
             DATE: '2026-06-01',
@@ -77,19 +97,19 @@ async function run() {
             PAYMENT: 0.00,
             DESCRIPTION: 'ACH - JESSICA VALERIA SOTO CASTRO',
             REMARKS: 'JESSICA SOTO EU8783',
-            BRANCH: 'HEAD OFFICE'
+            BRANCH: 'Test Head Office'
         },
         {
             DATE: '2026-06-02',
             PREFIX: '2026',
             NUMBER: '0000002',
-            'BANK NAME': 'Banco General', // Partial match, should be fine
+            'BANK NAME': 'Banco General', 
             'ACCOUNTS NAME': 'JOHN DOE',
             RECEIPT: 0.00,
             PAYMENT: 50.00,
             DESCRIPTION: 'Office Supplies',
             REMARKS: 'Payment for supplies',
-            BRANCH: 'HEAD OFFICE'
+            BRANCH: 'Test Ola Workshop'
         }
     ];
 
@@ -172,6 +192,7 @@ async function run() {
             console.log(` - Type: ${t.type} (Expected DEBIT/CREDIT polarity)`);
             console.log(` - Amount: ${t.amount}`);
             console.log(` - Running Balance: ${t.runningBalance} (Expected running balance calculation)`);
+            console.log(` - Branch ID: ${t.branch} (Expected to match resolved branch ID)`);
         });
 
         // Verify the account currentBalance
@@ -185,6 +206,7 @@ async function run() {
     await BankAccount.deleteMany({ accountNumber: testAccountNumber });
     await BankTransaction.deleteMany({ bankAccount: account._id });
     await LedgerEntry.deleteMany({ accountingCode: accCode._id });
+    await Branch.deleteMany({ code: { $in: ['TESTHO', 'TESTWS'] } });
 
     console.log('Disconnecting...');
     await mongoose.disconnect();

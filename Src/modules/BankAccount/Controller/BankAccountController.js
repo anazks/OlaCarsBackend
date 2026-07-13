@@ -308,6 +308,9 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const BankAccount = require("../Model/BankAccountModel");
         const BankTransaction = require("../Model/BankTransactionModel");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const Branch = require("../../Branch/Model/BranchModel");
+
+        const allBranches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -369,6 +372,37 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const descVal = tx.DESCRIPTION || tx.Description || tx.description || "";
             const remarksVal = tx.REMARKS || tx.Remarks || tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
             const branchVal = tx.BRANCH || tx.Branch || tx.branch || "";
+
+            let resolvedBranchId = null;
+            if (branchVal) {
+                const trimmedVal = String(branchVal).trim().toLowerCase();
+                // 1. Try exact name match
+                let match = allBranches.find(b => b.name.trim().toLowerCase() === trimmedVal);
+                
+                // 2. Try partial name match
+                if (!match) {
+                    match = allBranches.find(b => {
+                        const dbName = b.name.trim().toLowerCase();
+                        return dbName.includes(trimmedVal) || trimmedVal.includes(dbName);
+                    });
+                }
+                
+                // 3. Try matching by type if no name matches
+                if (!match) {
+                    const isWorkshopType = trimmedVal.includes("workshop") || trimmedVal.includes("taller");
+                    const targetType = isWorkshopType ? "WORKSHOP" : "BRANCH";
+                    match = allBranches.find(b => b.type === targetType);
+                }
+
+                if (match) {
+                    resolvedBranchId = match._id;
+                }
+            }
+
+            // Ultimate fallback to first branch if still not resolved
+            if (!resolvedBranchId && allBranches.length > 0) {
+                resolvedBranchId = allBranches[0]._id;
+            }
 
             // Verify the bank name in the Excel row matches the selected bank account (case-insensitive checks)
             if (bankNameVal) {
@@ -442,7 +476,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
             const entry = new BankTransaction({
                 bankAccount: id,
-                branch: branchId || undefined,
+                branch: resolvedBranchId || branchId || undefined,
                 accountingCode: accCodeId,
                 type: typeVal,
                 amount: amountVal,
@@ -458,7 +492,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             await entry.save();
 
             const ledgerEntry = new LedgerEntry({
-                branch: branchId || undefined,
+                branch: resolvedBranchId || branchId || undefined,
                 accountingCode: accCodeId,
                 type: typeVal,
                 amount: amountVal,
