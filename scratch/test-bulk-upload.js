@@ -88,7 +88,7 @@ async function run() {
     // 2. Prepare test transactions
     const validTransactions = [
         {
-            DATE: '2026-06-01',
+            DATE: '01-06-2026',
             PREFIX: '2026',
             NUMBER: '0000001',
             'BANK NAME': 'Banco General AH 1601',
@@ -100,7 +100,7 @@ async function run() {
             BRANCH: 'Test Head Office'
         },
         {
-            DATE: '2026-06-02',
+            DATE: '02-06-2026',
             PREFIX: '2026',
             NUMBER: '0000002',
             'BANK NAME': 'Banco General', 
@@ -115,7 +115,7 @@ async function run() {
 
     const mismatchedTransactions = [
         {
-            DATE: '2026-06-01',
+            DATE: '01-06-2026',
             PREFIX: '2026',
             NUMBER: '0000001',
             'BANK NAME': 'Mismatched Bank PLC', // Should trigger error

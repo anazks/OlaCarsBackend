@@ -296,6 +296,46 @@ exports.recordManualPayment = async (req, res, next) => {
     }
 };
 
+const parseDateFlexible = (val) => {
+    if (val === undefined || val === null) return null;
+    if (typeof val === 'number') {
+        const totalDays = Math.floor(val - 25569);
+        const date = new Date(Date.UTC(1970, 0, 1 + totalDays));
+        return isNaN(date.getTime()) ? null : date;
+    }
+    const str = String(val).trim();
+    if (!str) return null;
+    if (/^\d{5}(\.\d+)?$/.test(str)) {
+        const num = parseFloat(str);
+        const totalDays = Math.floor(num - 25569);
+        const date = new Date(Date.UTC(1970, 0, 1 + totalDays));
+        return isNaN(date.getTime()) ? null : date;
+    }
+    const parts = str.split(/[\/\-.]/);
+    if (parts.length === 3) {
+        if (parts[0].length === 4) {
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1;
+            const day = parseInt(parts[2], 10);
+            const date = new Date(Date.UTC(year, month, day));
+            if (!isNaN(date.getTime())) return date;
+        } else {
+            const part1 = parseInt(parts[0], 10);
+            const part2 = parseInt(parts[1], 10);
+            const part3 = parseInt(parts[2], 10);
+            const year = part3 < 100 ? 2000 + part3 : part3;
+            const day = part1;
+            const month = part2;
+            const date = new Date(Date.UTC(year, month - 1, day));
+            if (!isNaN(date.getTime())) return date;
+        }
+    }
+    const fallback = new Date(str);
+    if (isNaN(fallback.getTime())) return null;
+    const date = new Date(Date.UTC(fallback.getFullYear(), fallback.getMonth(), fallback.getDate()));
+    return date;
+};
+
 exports.bulkUploadTransactions = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -363,6 +403,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         for (const tx of transactions) {
             // Parse custom template headings and support the new sample file headings:
             const dateVal = tx.DATE || tx.Date || tx.date;
+            const finalEntryDate = parseDateFlexible(dateVal) || new Date();
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
             const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
@@ -481,7 +522,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 type: typeVal,
                 amount: amountVal,
                 description: finalDescription || "Bulk uploaded ledger transaction",
-                entryDate: dateVal ? new Date(dateVal) : new Date(),
+                entryDate: finalEntryDate,
                 transactionType: typeVal,
                 transactionId: transactionIdVal,
                 runningBalance: balanceAccum,
@@ -497,7 +538,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 type: typeVal,
                 amount: amountVal,
                 description: finalDescription || "Bulk uploaded ledger transaction",
-                entryDate: dateVal ? new Date(dateVal) : new Date(),
+                entryDate: finalEntryDate,
                 transactionId: transactionIdVal,
                 runningBalance: balanceAccum,
                 createdBy,
