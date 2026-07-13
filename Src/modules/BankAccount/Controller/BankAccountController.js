@@ -358,40 +358,57 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const createdEntries = [];
 
         for (const tx of transactions) {
-            // Parse custom template headings:
-            // Date, Description, Transaction Details, Debit, Credit, Running Balance, Transaction Type, Amount
-            const dateVal = tx.Date || tx.date;
-            const descVal = tx.Description || tx.description || "";
-            const detailsVal = tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
-            const debitVal = Number(tx.Debit || tx.debit) || 0;
-            const creditVal = Number(tx.Credit || tx.credit) || 0;
-            const runningBalVal = Number(tx["Running Balance"] || tx.runningBalance || tx.running_balance) || 0;
-            let typeVal = String(tx["Transaction Type"] || tx.transactionType || tx.transaction_type || "").trim().toUpperCase();
-            let amountVal = Number(tx.Amount || tx.amount) || 0;
-            const transactionIdVal = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
+            // Parse custom template headings and support the new sample file headings:
+            const dateVal = tx.DATE || tx.Date || tx.date;
+            const prefixVal = tx.PREFIX || tx.prefix;
+            const numberVal = tx.NUMBER || tx.number;
+            const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
+            const accountsNameVal = tx["ACCOUNTS NAME"] || tx.accountsName || tx.accounts_name;
+            const receiptVal = Number(tx.RECEIPT || tx.Receipt || tx.debit || tx.Debit) || 0;
+            const paymentVal = Number(tx.PAYMENT || tx.Payment || tx.credit || tx.Credit) || 0;
+            const descVal = tx.DESCRIPTION || tx.Description || tx.description || "";
+            const remarksVal = tx.REMARKS || tx.Remarks || tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
+            const branchVal = tx.BRANCH || tx.Branch || tx.branch || "";
 
-            // Resolve Type based on priority
-            let resolvedType = "";
-
-            // 1. Check Debit/Credit columns first
-            if (debitVal > 0 && creditVal === 0) {
-                resolvedType = "DEBIT";
-            } else if (creditVal > 0 && debitVal === 0) {
-                resolvedType = "CREDIT";
-            }
-
-            // 2. Check Amount suffix next
-            if (!resolvedType) {
-                const amountStr = String(tx.Amount || tx.amount || "").toUpperCase();
-                if (amountStr.includes("DR")) {
-                    resolvedType = "DEBIT";
-                } else if (amountStr.includes("CR")) {
-                    resolvedType = "CREDIT";
+            // Verify the bank name in the Excel row matches the selected bank account (case-insensitive checks)
+            if (bankNameVal) {
+                const excelBank = String(bankNameVal).trim().toLowerCase();
+                const selBank = String(account.bankName || "").trim().toLowerCase();
+                const selAccName = String(account.accountName || "").trim().toLowerCase();
+                
+                const isMatch = (
+                    excelBank.includes(selBank) ||
+                    selBank.includes(excelBank) ||
+                    excelBank.includes(selAccName) ||
+                    selAccName.includes(excelBank)
+                );
+                
+                if (!isMatch) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Bank name mismatch in file row: "${bankNameVal}", but target bank account is "${account.accountName || account.bankName}".`
+                    });
                 }
             }
 
-            // 3. Match from the user's specific transaction types
-            if (!resolvedType) {
+            // Combine PREFIX & NUMBER for transaction ID
+            let transactionIdVal = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
+            if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
+                transactionIdVal = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
+            }
+
+            // Polarity: RECEIPT = DEBIT, PAYMENT = CREDIT
+            let typeVal = "DEBIT";
+            if (receiptVal > 0 && paymentVal === 0) {
+                typeVal = "DEBIT";
+            } else if (paymentVal > 0 && receiptVal === 0) {
+                typeVal = "CREDIT";
+            } else if (receiptVal > 0 && paymentVal > 0) {
+                // If both are provided, default to DEBIT
+                typeVal = "DEBIT";
+            } else {
+                // Check if any legacy transaction type is passed
+                const rawType = String(tx["Transaction Type"] || tx.transactionType || tx.transaction_type || "").trim().toUpperCase();
                 const creditTypes = [
                     "CREDIT",
                     "EXPENSE",
@@ -401,24 +418,17 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     "SALES RETURN",
                     "WITHDRAWAL"
                 ];
-                if (creditTypes.includes(typeVal)) {
-                    resolvedType = "CREDIT";
-                } else {
-                    // All others default to DEBIT (Customer Payment, Deposit, Expense Refund, Interest Income, Journal, Opening Balance, Other Income, Vendor Payment Refund, etc.)
-                    resolvedType = "DEBIT";
+                if (creditTypes.includes(rawType)) {
+                    typeVal = "CREDIT";
                 }
             }
-            typeVal = resolvedType;
 
-            // Resolve Amount
-            if (amountVal <= 0) {
-                amountVal = debitVal > 0 ? debitVal : (creditVal > 0 ? creditVal : 0);
-            }
+            const amountVal = receiptVal > 0 ? receiptVal : paymentVal;
 
-            // Combine Description and Details if both exist
+            // Combine Description and Remarks if both exist
             let finalDescription = descVal;
-            if (detailsVal) {
-                finalDescription = descVal ? `${descVal} - ${detailsVal}` : detailsVal;
+            if (remarksVal) {
+                finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
             const isCreditCard = account.accountType === "Credit Card";
