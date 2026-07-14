@@ -780,3 +780,45 @@ exports.getBankTransactionById = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.bulkDeleteTransactions = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { transactionIds } = req.body;
+
+        if (!transactionIds || !Array.isArray(transactionIds) || transactionIds.length === 0) {
+            return res.status(400).json({ success: false, message: "transactionIds is required and must be a non-empty array" });
+        }
+
+        const result = await BankAccountService.bulkDeleteTransactions(id, transactionIds);
+        res.status(200).json({
+            success: true,
+            message: `Successfully deleted ${result.deletedCount} transactions and updated balances`,
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in bulkDeleteTransactions controller:", error);
+        next(error);
+    }
+};
+
+exports.bulkEditTransactions = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { updates } = req.body;
+
+        if (!updates || !Array.isArray(updates) || updates.length === 0) {
+            return res.status(400).json({ success: false, message: "updates is required and must be a non-empty array" });
+        }
+
+        const result = await BankAccountService.bulkEditTransactions(id, updates);
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated transactions and updated balances",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in bulkEditTransactions controller:", error);
+        next(error);
+    }
+};

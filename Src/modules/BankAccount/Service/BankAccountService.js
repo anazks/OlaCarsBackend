@@ -626,6 +626,134 @@ const deleteAllTransactions = async (id) => {
     };
 };
 
+const recalculateRunningBalances = async (bankAccountId) => {
+    const BankAccount = require("../Model/BankAccountModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+    const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
+    if (!account) return;
+
+    const entries = await LedgerEntry.find({ accountingCode: account.accountingCode }).sort({ entryDate: 1, _id: 1 });
+    
+    let balanceAccum = account.initialBalance || 0;
+    const bulkOps = [];
+    const isCreditCard = account.accountType === 'Credit Card';
+
+    for (const entry of entries) {
+        if (entry.type === 'DEBIT') {
+            balanceAccum = isCreditCard ? (balanceAccum - entry.amount) : (balanceAccum + entry.amount);
+        } else if (entry.type === 'CREDIT') {
+            balanceAccum = isCreditCard ? (balanceAccum + entry.amount) : (balanceAccum - entry.amount);
+        }
+
+        bulkOps.push({
+            updateOne: {
+                filter: { _id: entry._id },
+                update: { $set: { runningBalance: balanceAccum } }
+            }
+        });
+    }
+
+    if (bulkOps.length > 0) {
+        await LedgerEntry.bulkWrite(bulkOps);
+    }
+
+    account.currentBalance = balanceAccum;
+    await account.save();
+    
+    return balanceAccum;
+};
+
+const bulkDeleteTransactions = async (bankAccountId, transactionIds) => {
+    const BankAccount = require("../Model/BankAccountModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+
+    const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
+    if (!account) throw new AppError("Bank account not found", 404);
+
+    const entries = await LedgerEntry.find({ _id: { $in: transactionIds } });
+    
+    const journalIds = [...new Set(
+        entries
+            .filter(e => e.manualJournal)
+            .map(e => e.manualJournal.toString())
+    )];
+
+    let deletedCount = 0;
+    if (journalIds.length > 0) {
+        const delEntries = await LedgerEntry.deleteMany({ manualJournal: { $in: journalIds } });
+        deletedCount += delEntries.deletedCount;
+        await ManualJournal.deleteMany({ _id: { $in: journalIds } });
+    }
+
+    const remainingIds = transactionIds.filter(id => !entries.find(e => e._id.toString() === id && e.manualJournal));
+    if (remainingIds.length > 0) {
+        const delOrphans = await LedgerEntry.deleteMany({ _id: { $in: remainingIds } });
+        deletedCount += delOrphans.deletedCount;
+    }
+
+    await recalculateRunningBalances(bankAccountId);
+
+    return { deletedCount };
+};
+
+const bulkEditTransactions = async (bankAccountId, updates) => {
+    const BankAccount = require("../Model/BankAccountModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+
+    const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
+    if (!account) throw new AppError("Bank account not found", 404);
+
+    for (const update of updates) {
+        const { id: txId, entryDate, description, type, amount } = update;
+        const entry = await LedgerEntry.findById(txId);
+        if (!entry) continue;
+
+        if (entryDate !== undefined) entry.entryDate = new Date(entryDate);
+        if (description !== undefined) entry.description = description;
+        if (type !== undefined) entry.type = type;
+        if (amount !== undefined) entry.amount = Number(amount);
+
+        await entry.save();
+
+        if (entry.manualJournal) {
+            const journal = await ManualJournal.findById(entry.manualJournal);
+            if (journal) {
+                if (entryDate !== undefined) journal.date = new Date(entryDate);
+                if (description !== undefined) journal.description = description;
+                if (amount !== undefined) journal.totalAmount = Number(amount);
+                await journal.save();
+
+                const partnerUpdate = {};
+                if (entryDate !== undefined) partnerUpdate.entryDate = new Date(entryDate);
+                if (amount !== undefined) partnerUpdate.amount = Number(amount);
+                if (type !== undefined) {
+                    const journalLines = await LedgerEntry.find({ manualJournal: journal._id });
+                    if (journalLines.length === 2) {
+                        const partner = journalLines.find(l => l._id.toString() !== entry._id.toString());
+                        if (partner) {
+                            partner.type = type === "DEBIT" ? "CREDIT" : "DEBIT";
+                            await partner.save();
+                        }
+                    }
+                }
+                
+                if (Object.keys(partnerUpdate).length > 0) {
+                    await LedgerEntry.updateMany(
+                        { manualJournal: journal._id, _id: { $ne: entry._id } },
+                        { $set: partnerUpdate }
+                    );
+                }
+            }
+        }
+    }
+
+    await recalculateRunningBalances(bankAccountId);
+    return { success: true };
+};
+
 module.exports = {
     createBankAccount,
     getAllBankAccounts,
@@ -635,5 +763,8 @@ module.exports = {
     updateBalance,
     importStatement,
     recordManualPayment,
-    deleteAllTransactions
+    deleteAllTransactions,
+    recalculateRunningBalances,
+    bulkDeleteTransactions,
+    bulkEditTransactions
 };

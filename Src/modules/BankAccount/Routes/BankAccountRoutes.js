@@ -74,6 +74,20 @@ router.get(
     BankAccountController.getBankTransactions
 );
 
+// Bulk delete transactions
+router.post(
+    "/:id/transactions/bulk-delete",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.bulkDeleteTransactions
+);
+
+// Bulk edit transactions
+router.post(
+    "/:id/transactions/bulk-edit",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.bulkEditTransactions
+);
+
 // Record manual payment
 router.post(
     "/:id/manual-payment",
