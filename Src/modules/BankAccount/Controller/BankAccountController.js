@@ -654,6 +654,64 @@ exports.getBankTransactions = async (req, res, next) => {
             return obj;
         });
 
+        // Calculate total deposits and withdrawals matching the query
+        const totalsResult = await LedgerEntry.aggregate([
+            { $match: query },
+            {
+                $group: {
+                    _id: null,
+                    totalDeposits: {
+                        $sum: {
+                            $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0]
+                        }
+                    },
+                    totalWithdrawals: {
+                        $sum: {
+                            $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0]
+                        }
+                    }
+                }
+            }
+        ]);
+        const totalDeposits = totalsResult.length > 0 ? totalsResult[0].totalDeposits : 0;
+        const totalWithdrawals = totalsResult.length > 0 ? totalsResult[0].totalWithdrawals : 0;
+
+        // Calculate dynamic opening balance for the filtered period
+        let openingBalance = account.initialBalance || 0;
+        if (startDate) {
+            const priorQuery = {
+                accountingCode: account.accountingCode,
+                entryDate: { $lt: new Date(startDate) }
+            };
+            const priorTotals = await LedgerEntry.aggregate([
+                { $match: priorQuery },
+                {
+                    $group: {
+                        _id: null,
+                        totalDeposits: {
+                            $sum: {
+                                $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0]
+                            }
+                        },
+                        totalWithdrawals: {
+                            $sum: {
+                                $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0]
+                            }
+                        }
+                    }
+                }
+            ]);
+
+            if (priorTotals.length > 0) {
+                const priorDebits = priorTotals[0].totalDeposits || 0;
+                const priorCredits = priorTotals[0].totalWithdrawals || 0;
+                const isCreditCard = account.accountType === "Credit Card";
+                openingBalance = isCreditCard
+                    ? (priorCredits - priorDebits)
+                    : (priorDebits - priorCredits);
+            }
+        }
+
         res.status(200).json({
             success: true,
             data: mappedTransactions,
@@ -662,7 +720,10 @@ exports.getBankTransactions = async (req, res, next) => {
                 page: pageNum,
                 limit: limitNum,
                 totalPages: Math.ceil(total / limitNum)
-            }
+            },
+            totalDeposits,
+            totalWithdrawals,
+            openingBalance
         });
     } catch (error) {
         console.error("Error in getBankTransactions controller:", error);

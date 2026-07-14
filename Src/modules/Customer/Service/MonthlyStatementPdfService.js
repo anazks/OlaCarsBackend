@@ -26,9 +26,23 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
  * Layout: A4 Portrait with columns: Date | Transactions | Details | Amount | Payments | Balance
  * Includes opening balance row and closing balance due footer.
  */
-exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, options = {}) => {
+exports.generateMonthlyStatementPdf = (customer, invoices, payments, creditNotesOrRes, resOrOptions, options = {}) => {
     if (!customer) {
         throw new Error("No customer data provided");
+    }
+
+    let creditNotes = [];
+    let res;
+    let opt = {};
+
+    if (creditNotesOrRes && typeof creditNotesOrRes.pipe === 'function') {
+        res = creditNotesOrRes;
+        opt = resOrOptions || {};
+        creditNotes = [];
+    } else {
+        creditNotes = creditNotesOrRes || [];
+        res = resOrOptions;
+        opt = options || {};
     }
 
     let startDate, endDate;
@@ -36,16 +50,16 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
 
     const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-    if (options.fromDate || options.toDate) {
-        startDate = options.fromDate ? (() => { const d = new Date(options.fromDate); d.setHours(0,0,0,0); return d; })() : new Date(0);
-        endDate = options.toDate ? (() => { const d = new Date(options.toDate); d.setHours(23,59,59,999); return d; })() : new Date(8640000000000000);
+    if (opt.fromDate || opt.toDate) {
+        startDate = opt.fromDate ? (() => { const d = new Date(opt.fromDate); d.setHours(0,0,0,0); return d; })() : new Date(0);
+        endDate = opt.toDate ? (() => { const d = new Date(opt.toDate); d.setHours(23,59,59,999); return d; })() : new Date(8640000000000000);
         
-        const fromStr = options.fromDate ? formatDate(startDate) : "Beginning";
-        const toStr = options.toDate ? formatDate(endDate) : "Present";
+        const fromStr = opt.fromDate ? formatDate(startDate) : "Beginning";
+        const toStr = opt.toDate ? formatDate(endDate) : "Present";
         periodLabel = `${fromStr} - ${toStr}`;
-    } else if (options.month && options.year) {
-        const month = parseInt(options.month);
-        const year = parseInt(options.year);
+    } else if (opt.month && opt.year) {
+        const month = parseInt(opt.month);
+        const year = parseInt(opt.year);
         const monthIndex = month - 1;
         startDate = new Date(year, monthIndex, 1);
         endDate = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
@@ -108,9 +122,37 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
         const d = new Date(pmt.paymentDate || pmt.createdAt || 0);
         return d < startDate;
     }) : [];
+    const creditNotesBefore = hasOpeningBalance ? creditNotes.filter(cn => {
+        const d = new Date(cn.creditNoteDate || cn.createdAt || 0);
+        return d < startDate;
+    }) : [];
     const totalInvoicedBefore = invoicesBefore.reduce((sum, inv) => sum + (inv.totalAmountDue || 0), 0);
     const totalPaidBefore = paymentsBefore.reduce((sum, pmt) => sum + (pmt.amountReceived || 0), 0);
-    const openingBalance = totalInvoicedBefore - totalPaidBefore;
+    const totalCreditNotesBefore = creditNotesBefore.reduce((sum, cn) => sum + (cn.amount || 0), 0);
+    const openingBalance = totalInvoicedBefore - totalPaidBefore - totalCreditNotesBefore;
+
+    // Calculate period totals for the Account Summary table
+    const invoicedAmountPeriod = invoices.reduce((sum, inv) => {
+        const d = new Date(inv.dueDate || inv.generatedAt || inv.createdAt || 0);
+        if (d >= startDate && d <= endDate) {
+            return sum + (inv.totalAmountDue || 0);
+        }
+        return sum;
+    }, 0);
+    const amountPaidPeriod = validPayments.reduce((sum, pmt) => {
+        const d = new Date(pmt.paymentDate || pmt.createdAt || 0);
+        if (d >= startDate && d <= endDate) {
+            return sum + (pmt.amountReceived || 0);
+        }
+        return sum;
+    }, 0);
+    const creditNotesAmountPeriod = creditNotes.reduce((sum, cn) => {
+        const d = new Date(cn.creditNoteDate || cn.createdAt || 0);
+        if (d >= startDate && d <= endDate) {
+            return sum + (cn.amount || 0);
+        }
+        return sum;
+    }, 0);
 
     // Build transaction rows within range
     const txRows = [];
@@ -131,36 +173,31 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
         }
     });
 
-    // Payments within range — each invoice application becomes a separate row
+    // Payments within range — consolidated payment row
     validPayments.forEach(pmt => {
         const d = new Date(pmt.paymentDate || pmt.createdAt || 0);
         if (d >= startDate && d <= endDate) {
             if (pmt.invoices && pmt.invoices.length > 0) {
-                pmt.invoices.forEach(invApp => {
-                    txRows.push({
-                        date: d,
-                        type: 'Payment Received',
-                        detailLine1: pmt.paymentNumber || pmt.referenceNumber || '—',
-                        detailLine2: `$${formatCurrency(invApp.amountApplied || 0)} for payment of ${invApp.invoiceNumber || 'INV'}`,
-                        amount: 0,
-                        payment: invApp.amountApplied || 0,
-                        sortKey: d.getTime() + 1
-                    });
-                });
-                // Unapplied excess
+                const detailsArray = pmt.invoices.map(invApp => 
+                    `$${formatCurrency(invApp.amountApplied || 0)} to ${invApp.invoiceNumber || 'INV'}`
+                );
+                
                 const totalApplied = pmt.invoices.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0);
                 const excess = (pmt.amountReceived || 0) - totalApplied;
+                
                 if (excess > 0.01) {
-                    txRows.push({
-                        date: d,
-                        type: 'Payment Received',
-                        detailLine1: pmt.paymentNumber || '—',
-                        detailLine2: `$${formatCurrency(excess)} prepayment credit`,
-                        amount: 0,
-                        payment: excess,
-                        sortKey: d.getTime() + 2
-                    });
+                    detailsArray.push(`$${formatCurrency(excess)} prepayment credit`);
                 }
+                
+                txRows.push({
+                    date: d,
+                    type: 'Payment Received',
+                    detailLine1: pmt.paymentNumber || pmt.referenceNumber || '—',
+                    detailLine2: `Applied: ${detailsArray.join(", ")}`,
+                    amount: 0,
+                    payment: pmt.amountReceived || 0,
+                    sortKey: d.getTime() + 1
+                });
             } else {
                 txRows.push({
                     date: d,
@@ -175,6 +212,22 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
         }
     });
 
+    // Credit notes within range
+    creditNotes.forEach(cn => {
+        const d = new Date(cn.creditNoteDate || cn.createdAt || 0);
+        if (d >= startDate && d <= endDate) {
+            txRows.push({
+                date: d,
+                type: 'Credit Note',
+                detailLine1: cn.creditNoteNumber || '—',
+                detailLine2: cn.reason ? `Reason: ${cn.reason}` : 'Credit Note Issued',
+                amount: 0,
+                payment: cn.amount || 0,
+                sortKey: d.getTime() + 1
+            });
+        }
+    });
+
     // Sort chronologically
     txRows.sort((a, b) => a.sortKey - b.sortKey);
 
@@ -185,7 +238,7 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
         row.balance = runningBalance;
     });
 
-    const closingBalance = txRows.length > 0 ? txRows[txRows.length - 1].balance : openingBalance;
+    const closingBalance = openingBalance + invoicedAmountPeriod - amountPaidPeriod - creditNotesAmountPeriod;
 
     // ═══════════════════════════════════════════════════
     // DRAW PDF
@@ -230,29 +283,62 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
            .text(`Statement Date: ${formatDate(new Date())}`, 350, metaY + 12)
            .text(`Account Status: ${customer.status || "N/A"}`, 350, metaY + 24);
 
-        metaY += 50;
+        // Account Summary Table on the right
+        const boxX = 350;
+        const boxY = 125;
+        const boxW = 205;
 
-        // Balance Due Box
-        doc.moveTo(leftMargin, metaY)
-           .lineTo(rightMargin, metaY)
+        // Light grey background for the container title
+        doc.fillColor("#F3F4F6")
+           .rect(boxX, boxY, boxW, 14)
+           .fill();
+
+        doc.fillColor(primaryColor)
+           .font("Helvetica-Bold")
+           .fontSize(8)
+           .text("Account Summary", boxX + 6, boxY + 3);
+
+        // Rows
+        let rowY = boxY + 18;
+        doc.font("Helvetica").fontSize(7.5).fillColor(secondaryColor);
+        
+        doc.text("Opening Balance", boxX + 6, rowY)
+           .text(`$ ${formatCurrency(openingBalance)}`, boxX + boxW - 86, rowY, { width: 80, align: "right" });
+
+        rowY += 11;
+        doc.text("Invoiced Amount", boxX + 6, rowY)
+           .text(`$ ${formatCurrency(invoicedAmountPeriod)}`, boxX + boxW - 86, rowY, { width: 80, align: "right" });
+
+        rowY += 11;
+        doc.text("Amount Paid", boxX + 6, rowY)
+           .text(`$ ${formatCurrency(amountPaidPeriod)}`, boxX + boxW - 86, rowY, { width: 80, align: "right" });
+
+        rowY += 11;
+        doc.text("Credit Notes", boxX + 6, rowY)
+           .text(`$ ${formatCurrency(creditNotesAmountPeriod)}`, boxX + boxW - 86, rowY, { width: 80, align: "right" });
+
+        // Line
+        rowY += 9;
+        doc.moveTo(boxX, rowY)
+           .lineTo(boxX + boxW, rowY)
            .strokeColor(borderMain)
            .lineWidth(0.5)
            .stroke();
 
-        metaY += 8;
-        doc.fontSize(9).fillColor(secondaryColor).font("Helvetica-Bold")
-           .text("Balance Due", rightMargin - 200, metaY, { width: 100, align: "right" });
-        doc.fontSize(12).fillColor(primaryColor).font("Helvetica-Bold")
-           .text(`$ ${formatCurrency(closingBalance)}`, rightMargin - 95, metaY - 2, { width: 95, align: "right" });
+        // Balance Due
+        rowY += 3;
+        doc.font("Helvetica-Bold").fontSize(8).fillColor(primaryColor)
+           .text("Balance Due", boxX + 6, rowY)
+           .text(`$ ${formatCurrency(closingBalance)}`, boxX + boxW - 86, rowY, { width: 80, align: "right" });
 
-        metaY += 20;
-        doc.moveTo(leftMargin, metaY)
-           .lineTo(rightMargin, metaY)
+        // Bottom border line for the whole header area
+        doc.moveTo(leftMargin, 205)
+           .lineTo(rightMargin, 205)
            .strokeColor(primaryColor)
-           .lineWidth(1.5)
+           .lineWidth(1)
            .stroke();
 
-        return metaY + 10;
+        return 215;
     };
 
     const drawTableHeaders = (y) => {
@@ -287,7 +373,14 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
 
     // Helper to draw a single row (may be multi-line for details)
     const drawRow = (row, y, isStripe) => {
-        const lineHeight = row.detailLine2 ? 24 : 16;
+        let lines = 1;
+        if (row.detailLine2) {
+            doc.fontSize(6.5);
+            const textWidth = doc.widthOfString(row.detailLine2);
+            lines = Math.max(1, Math.ceil(textWidth / colDetailsW));
+            doc.fontSize(7.5);
+        }
+        const lineHeight = row.detailLine2 ? (14 + lines * 8) : 16;
 
         // Stripe background
         if (isStripe) {
@@ -305,13 +398,13 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
         doc.font("Helvetica-Bold")
            .text(row.type, colTx, y, { width: colTxW, ellipsis: true });
 
-        // Details (potentially 2 lines)
+        // Details (potentially multi-line)
         doc.font("Helvetica")
            .text(row.detailLine1, colDetails, y, { width: colDetailsW, ellipsis: true });
         if (row.detailLine2) {
-            doc.fontSize(7)
+            doc.fontSize(6.5)
                .fillColor(secondaryColor)
-               .text(row.detailLine2, colDetails, y + 10, { width: colDetailsW, ellipsis: true })
+               .text(row.detailLine2, colDetails, y + 10, { width: colDetailsW })
                .fillColor(primaryColor)
                .fontSize(7.5);
         }
@@ -367,9 +460,17 @@ exports.generateMonthlyStatementPdf = (customer, invoices, payments, res, option
 
     // Draw transaction rows
     txRows.forEach(row => {
-        const estimatedHeight = row.detailLine2 ? 26 : 18;
+        let estHeight = 18;
+        if (row.detailLine2) {
+            doc.fontSize(6.5);
+            const w = doc.widthOfString(row.detailLine2);
+            const lines = Math.max(1, Math.ceil(w / colDetailsW));
+            estHeight = 14 + lines * 8;
+            doc.fontSize(7.5);
+        }
+        
         // Page break check (A4 Portrait is 842pt high)
-        if (currentY + estimatedHeight > 780) {
+        if (currentY + estHeight > 780) {
             doc.addPage();
             currentY = drawTableHeaders(40);
             isStripe = false;

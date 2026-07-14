@@ -216,11 +216,13 @@ exports.downloadMonthlyStatementPdf = async (req, res) => {
 
         const { Invoice } = require('../../Invoice/Model/InvoiceModel');
         const PaymentReceived = require('../../PaymentReceived/Model/PaymentReceivedModel');
+        const CreditNote = require('../../CreditNote/Model/CreditNoteModel');
         const MonthlyStatementPdfService = require('../Service/MonthlyStatementPdfService');
 
-        const [invoices, payments] = await Promise.all([
+        const [invoices, payments, creditNotes] = await Promise.all([
             Invoice.find({ customer: customer._id, isDeleted: false }),
-            PaymentReceived.find({ customerId: customer._id })
+            PaymentReceived.find({ customerId: customer._id }),
+            CreditNote.find({ customerId: customer._id })
         ]);
 
         const { month, year, fromDate, toDate } = req.query;
@@ -241,7 +243,7 @@ exports.downloadMonthlyStatementPdf = async (req, res) => {
             `inline; filename="Statement_${safeName}_${periodName}.pdf"`
         );
 
-        MonthlyStatementPdfService.generateMonthlyStatementPdf(customer, invoices, payments, res, {
+        MonthlyStatementPdfService.generateMonthlyStatementPdf(customer, invoices, payments, creditNotes || [], res, {
             month,
             year,
             fromDate,
