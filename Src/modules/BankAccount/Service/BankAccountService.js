@@ -9,6 +9,10 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
     const parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
 
+    if (!parentName) {
+        throw new AppError("Parent Account is required when Accounts Name is specified", 400);
+    }
+
     // 1. Find parent accounting code
     let parentDoc = await AccountingCode.findOne({
         $or: [
@@ -19,27 +23,7 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
     });
 
     if (!parentDoc) {
-        // Fallback search for Accounts Receivable
-        parentDoc = await AccountingCode.findOne({
-            name: { $regex: /Accounts Receivable/i },
-            isDeleted: false
-        });
-    }
-
-    if (!parentDoc) {
-        // Create Accounts Receivable parent code if it doesn't exist
-        console.log(`[BankAccountService] Creating fallback parent Accounts Receivable (1200)`);
-        parentDoc = await AccountingCode.create({
-            code: "1200",
-            name: "Accounts Receivable",
-            category: "Accounts Receivable",
-            accountType: "Accounts Receivable",
-            description: "Default Accounts Receivable parent account",
-            currency: "USD",
-            accountStatus: "Active",
-            createdBy: creatorId,
-            creatorRole: creatorRole || "ADMIN"
-        });
+        throw new AppError(`Parent Account "${parentName}" not found in Chart of Accounts.`, 400);
     }
 
     // 2. Find existing sub-accounting code under this parent
