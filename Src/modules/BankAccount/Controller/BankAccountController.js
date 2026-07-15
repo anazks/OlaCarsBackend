@@ -750,11 +750,14 @@ exports.getBankTransactions = async (req, res, next) => {
                     e.accountingCode && e.accountingCode._id.toString() !== account.accountingCode.toString()
                 );
                 if (partnerEntry && partnerEntry.accountingCode) {
-                    obj.accountsName = partnerEntry.accountingCode.name;
                     if (partnerEntry.accountingCode.parentAccount) {
+                        obj.accountsName = partnerEntry.accountingCode.name;
                         obj.parentAccount = typeof partnerEntry.accountingCode.parentAccount === 'object'
                             ? partnerEntry.accountingCode.parentAccount.name
                             : partnerEntry.accountingCode.parentAccount;
+                    } else {
+                        obj.accountsName = "";
+                        obj.parentAccount = partnerEntry.accountingCode.name;
                     }
                 }
             }

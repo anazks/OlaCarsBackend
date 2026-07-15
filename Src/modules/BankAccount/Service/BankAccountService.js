@@ -877,11 +877,14 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
 
         await entry.save();
 
-        // 2. Swapping/Auto-Creating Offsetting Accounts (ACCOUNTS NAME)
-        if (accountsName && String(accountsName).trim()) {
+        // 2. Swapping/Auto-Creating Offsetting Accounts (ACCOUNTS NAME / PARENT ACCOUNT)
+        const hasSubAccount = accountsName && String(accountsName).trim();
+        const hasParentAccount = parentAccount && String(parentAccount).trim();
+
+        if (hasSubAccount || hasParentAccount) {
             const subDoc = await ensureSubAccountingCode(
                 parentAccount || "Accounts Receivable",
-                accountsName,
+                accountsName || "",
                 entry.createdBy,
                 entry.creatorRole
             );
@@ -937,8 +940,8 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             }
         }
 
-        // Standard updates when there's an existing manualJournal and no accountsName swap
-        if (entry.manualJournal && (!accountsName || !String(accountsName).trim())) {
+        // Standard updates when there's an existing manualJournal
+        if (entry.manualJournal) {
             const journal = await ManualJournal.findById(entry.manualJournal);
             if (journal) {
                 if (entryDate !== undefined) journal.date = new Date(entryDate);
