@@ -822,3 +822,110 @@ exports.bulkEditTransactions = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.getBankAccountLedgerPdf = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { startDate, endDate, search, sort = "asc" } = req.query;
+
+        const BankAccount = require("../Model/BankAccountModel");
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const BankAccountLedgerPdfService = require("../Service/BankAccountLedgerPdfService");
+
+        const account = await BankAccount.findOne({ _id: id, isDeleted: false });
+        if (!account) {
+            return res.status(404).json({ success: false, message: "Bank account not found" });
+        }
+
+        if (!account.accountingCode) {
+            return res.status(400).json({ success: false, message: "No accounting code linked to this bank account" });
+        }
+
+        const query = { accountingCode: account.accountingCode };
+
+        if (startDate || endDate) {
+            query.entryDate = {};
+            if (startDate) {
+                query.entryDate.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                query.entryDate.$lte = new Date(endDate);
+            }
+        }
+
+        if (search) {
+            const searchConditions = [
+                { description: { $regex: search, $options: "i" } },
+                { transactionId: { $regex: search, $options: "i" } }
+            ];
+            const searchNum = parseFloat(search);
+            if (!isNaN(searchNum)) {
+                searchConditions.push({
+                    runningBalance: { $gte: searchNum - 0.01, $lte: searchNum + 0.01 }
+                });
+            }
+            query.$or = searchConditions;
+        }
+
+        // For statements, we sort oldest first (asc) to calculate/display the running balance progression
+        const sortOrder = sort === "desc" ? -1 : 1;
+        const transactions = await LedgerEntry.find(query)
+            .sort({ entryDate: sortOrder, _id: sortOrder });
+
+        // Calculate opening balance
+        let openingBalance = account.initialBalance || 0;
+        if (startDate) {
+            const priorTotals = await LedgerEntry.aggregate([
+                {
+                    $match: {
+                        accountingCode: account.accountingCode,
+                        entryDate: { $lt: new Date(startDate) }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalDeposits: {
+                            $sum: {
+                                $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0]
+                            }
+                        },
+                        totalWithdrawals: {
+                            $sum: {
+                                $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0]
+                            }
+                        }
+                    }
+                }
+            ]);
+
+            if (priorTotals.length > 0) {
+                const priorDebits = priorTotals[0].totalDeposits || 0;
+                const priorCredits = priorTotals[0].totalWithdrawals || 0;
+                const isCreditCard = account.accountType === "Credit Card";
+                openingBalance = isCreditCard
+                    ? (account.initialBalance || 0) + (priorCredits - priorDebits)
+                    : (account.initialBalance || 0) + (priorDebits - priorCredits);
+            }
+        }
+
+        // Set response headers for PDF download/viewing
+        const safeName = (account.accountName || account.bankName || "Account").replace(/\s+/g, "_");
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `inline; filename="Ledger_Statement_${safeName}.pdf"`
+        );
+
+        BankAccountLedgerPdfService.generateLedgerPdf(
+            account,
+            transactions,
+            openingBalance,
+            { startDate, endDate },
+            res
+        );
+    } catch (error) {
+        console.error("Error in getBankAccountLedgerPdf controller:", error);
+        next(error);
+    }
+};

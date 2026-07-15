@@ -74,6 +74,13 @@ router.get(
     BankAccountController.getBankTransactions
 );
 
+// Get ledger PDF
+router.get(
+    "/:id/ledger/pdf",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.getBankAccountLedgerPdf
+);
+
 // Bulk delete transactions
 router.post(
     "/:id/transactions/bulk-delete",
