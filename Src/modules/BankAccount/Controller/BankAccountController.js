@@ -406,8 +406,9 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const finalEntryDate = parseDateFlexible(dateVal) || new Date();
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
-            const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
+                        const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
             const accountsNameVal = tx["ACCOUNTS NAME"] || tx.accountsName || tx.accounts_name;
+            const parentAccountVal = tx["PARENT ACCOUNT"] || tx.parentAccount || tx.parent_account;
             const receiptVal = Number(tx.RECEIPT || tx.Receipt || tx.debit || tx.Debit) || 0;
             const paymentVal = Number(tx.PAYMENT || tx.Payment || tx.credit || tx.Credit) || 0;
             const descVal = tx.DESCRIPTION || tx.Description || tx.description || "";
@@ -506,6 +507,66 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
+            // If sub-account is specified, perform double-entry booking
+            if (accountsNameVal && String(accountsNameVal).trim()) {
+                const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+                const subDoc = await ensureSubAccountingCode(
+                    parentAccountVal || "Accounts Receivable",
+                    accountsNameVal,
+                    createdBy,
+                    creatorRole
+                );
+
+                if (subDoc) {
+                    const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
+                    const journalPayload = {
+                        description: finalDescription || "Bulk uploaded double entry",
+                        date: finalEntryDate,
+                        branch: resolvedBranchId || branchId,
+                        lines: [
+                            {
+                                accountingCode: accCodeId, // Bank Account
+                                type: typeVal,
+                                amount: amountVal,
+                                description: finalDescription
+                            },
+                            {
+                                accountingCode: subDoc._id, // Offset Sub-Account
+                                type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
+                                amount: amountVal,
+                                description: finalDescription
+                            }
+                        ],
+                        createdBy,
+                        creatorRole: creatorRole.toUpperCase()
+                    };
+
+                    const journalResult = await ManualJournalService.createManualJournal(journalPayload);
+
+                    // We also save a BankTransaction matching it
+                    const entry = new BankTransaction({
+                        bankAccount: id,
+                        branch: resolvedBranchId || branchId || undefined,
+                        accountingCode: accCodeId,
+                        type: typeVal,
+                        amount: amountVal,
+                        description: finalDescription || "Bulk uploaded double-entry transaction",
+                        entryDate: finalEntryDate,
+                        transactionType: typeVal,
+                        transactionId: transactionIdVal,
+                        createdBy,
+                        creatorRole
+                    });
+                    await entry.save();
+
+                    createdEntries.push(entry);
+
+                    // Trigger balance sync for sub-account immediately
+                    await syncAccountingCodeBalances(subDoc._id);
+                    continue;
+                }
+            }
+
             const isCreditCard = account.accountType === "Credit Card";
             if (typeVal === "DEBIT") {
                 balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
@@ -549,21 +610,23 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             createdEntries.push(entry);
         }
 
-        account.currentBalance = balanceAccum;
-        await account.save();
+        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
 
-        // Sync and update the linked accounting code totals and currentBalance
-        accountingCodeDoc.debitTotal = debitAccum;
-        accountingCodeDoc.creditTotal = creditAccum;
-        accountingCodeDoc.currentBalance = balanceAccum;
-        await accountingCodeDoc.save();
+        // Recalculate running balances for the bank account
+        await recalculateRunningBalances(id);
+
+        // Sync and update the bank's accounting code totals and currentBalance
+        await syncAccountingCodeBalances(accCodeId);
+
+        // Fetch updated bank account to return correct balance
+        const updatedAccount = await BankAccount.findById(id);
 
         res.status(200).json({
             success: true,
-            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${account.currentBalance}.`,
+            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.`,
             data: {
                 count: createdEntries.length,
-                newBalance: account.currentBalance
+                newBalance: updatedAccount.currentBalance
             }
         });
     } catch (error) {
@@ -646,11 +709,55 @@ exports.getBankTransactions = async (req, res, next) => {
             .skip(skip)
             .limit(limitNum);
 
+        // Gather all manualJournal IDs
+        const manualJournalIds = transactions
+            .map(tx => tx.manualJournal)
+            .filter(mjId => mjId !== undefined && mjId !== null);
+
+        let partnerEntriesMap = {};
+        if (manualJournalIds.length > 0) {
+            const partnerEntries = await LedgerEntry.find({ manualJournal: { $in: manualJournalIds } })
+                .populate({
+                    path: "accountingCode",
+                    populate: {
+                        path: "parentAccount"
+                    }
+                });
+            
+            // Group by manualJournal ID
+            partnerEntries.forEach(entry => {
+                if (entry.manualJournal) {
+                    const mjIdStr = entry.manualJournal.toString();
+                    if (!partnerEntriesMap[mjIdStr]) {
+                        partnerEntriesMap[mjIdStr] = [];
+                    }
+                    partnerEntriesMap[mjIdStr].push(entry);
+                }
+            });
+        }
+
         // Map transactions to mimic LedgerEntry fields for frontend compatibility
         const mappedTransactions = transactions.map(tx => {
             const obj = tx.toObject();
             obj.date = tx.entryDate;
             obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
+
+            // Find partner accounting code name if double-entry is present
+            if (tx.manualJournal && partnerEntriesMap[tx.manualJournal.toString()]) {
+                const journalLegs = partnerEntriesMap[tx.manualJournal.toString()];
+                // The partner leg is the one that DOES NOT have the bank account's accountingCode
+                const partnerEntry = journalLegs.find(e => 
+                    e.accountingCode && e.accountingCode._id.toString() !== account.accountingCode.toString()
+                );
+                if (partnerEntry && partnerEntry.accountingCode) {
+                    obj.accountsName = partnerEntry.accountingCode.name;
+                    if (partnerEntry.accountingCode.parentAccount) {
+                        obj.parentAccount = typeof partnerEntry.accountingCode.parentAccount === 'object'
+                            ? partnerEntry.accountingCode.parentAccount.name
+                            : partnerEntry.accountingCode.parentAccount;
+                    }
+                }
+            }
             return obj;
         });
 

@@ -1,6 +1,125 @@
+const mongoose = require("mongoose");
 const BankAccount = require("../Model/BankAccountModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const AppError = require("../../../shared/utils/AppError");
+
+const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole) => {
+    if (!accountsNameVal) return null;
+
+    const parentName = String(parentAccountVal || "").trim();
+    const subName = String(accountsNameVal || "").trim();
+
+    // 1. Find parent accounting code
+    let parentDoc = await AccountingCode.findOne({
+        $or: [
+            { code: parentName },
+            { name: { $regex: new RegExp(`^${parentName}$`, "i") } }
+        ],
+        isDeleted: false
+    });
+
+    if (!parentDoc) {
+        // Fallback search for Accounts Receivable
+        parentDoc = await AccountingCode.findOne({
+            name: { $regex: /Accounts Receivable/i },
+            isDeleted: false
+        });
+    }
+
+    if (!parentDoc) {
+        // Create Accounts Receivable parent code if it doesn't exist
+        console.log(`[BankAccountService] Creating fallback parent Accounts Receivable (1200)`);
+        parentDoc = await AccountingCode.create({
+            code: "1200",
+            name: "Accounts Receivable",
+            category: "Accounts Receivable",
+            accountType: "Accounts Receivable",
+            description: "Default Accounts Receivable parent account",
+            currency: "USD",
+            accountStatus: "Active",
+            createdBy: creatorId,
+            creatorRole: creatorRole || "ADMIN"
+        });
+    }
+
+    // 2. Find existing sub-accounting code under this parent
+    let subDoc = await AccountingCode.findOne({
+        parentAccount: parentDoc._id,
+        name: { $regex: new RegExp(`^${subName}$`, "i") },
+        isDeleted: false
+    });
+
+    if (!subDoc) {
+        console.log(`[BankAccountService] Creating new sub-accounting code: ${subName}`);
+        const subCount = await AccountingCode.countDocuments({ parentAccount: parentDoc._id });
+        let suffix = subCount + 1;
+        let uniqueCode = `${parentDoc.code}-${String(suffix).padStart(3, '0')}`;
+        let exists = await AccountingCode.findOne({ code: uniqueCode });
+        while (exists) {
+            suffix++;
+            uniqueCode = `${parentDoc.code}-${String(suffix).padStart(3, '0')}`;
+            exists = await AccountingCode.findOne({ code: uniqueCode });
+        }
+
+        subDoc = await AccountingCode.create({
+            code: uniqueCode,
+            name: subName,
+            parentAccount: parentDoc._id,
+            category: parentDoc.category,
+            accountType: parentDoc.accountType,
+            description: `Auto-created sub-account for ${subName} under parent ${parentDoc.name}`,
+            currency: parentDoc.currency || "USD",
+            accountStatus: "Active",
+            createdBy: creatorId,
+            creatorRole: creatorRole || "ADMIN"
+        });
+    }
+
+    return subDoc;
+};
+
+const isDebitNormalCategory = (category) => {
+    const cat = String(category).toUpperCase();
+    return [
+        "CASH", "BANK", "ACCOUNTS RECEIVABLE", "FIXED ASSET", "OTHER CURRENT ASSET",
+        "OTHER ASSET", "STOCK", "EXPENSE", "COST OF GOODS SOLD", "OTHER EXPENSE", "INPUT TAX",
+        "ASSET"
+    ].includes(cat);
+};
+
+const syncAccountingCodeBalances = async (accountingCodeId) => {
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+
+    const result = await LedgerEntry.aggregate([
+        { $match: { accountingCode: new mongoose.Types.ObjectId(accountingCodeId) } },
+        {
+            $group: {
+                _id: null,
+                debitTotal: {
+                    $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0] }
+                },
+                creditTotal: {
+                    $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0] }
+                }
+            }
+        }
+    ]);
+
+    const debitTotal = result.length > 0 ? result[0].debitTotal : 0;
+    const creditTotal = result.length > 0 ? result[0].creditTotal : 0;
+
+    const codeDoc = await AccountingCode.findById(accountingCodeId);
+    if (codeDoc) {
+        codeDoc.debitTotal = debitTotal;
+        codeDoc.creditTotal = creditTotal;
+        const isDebit = isDebitNormalCategory(codeDoc.category);
+        codeDoc.currentBalance = isDebit ? (debitTotal - creditTotal) : (creditTotal - debitTotal);
+        await codeDoc.save();
+        console.log(`[BankAccountService] Synced AccountingCode ${codeDoc.code}: debitTotal=${debitTotal}, creditTotal=${creditTotal}, currentBalance=${codeDoc.currentBalance}`);
+    }
+};
+
 
 const ensureAccountingCode = async (data) => {
     if (!data.accountCode) return null;
@@ -702,23 +821,138 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
     const BankAccount = require("../Model/BankAccountModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
     const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
 
     const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
     if (!account) throw new AppError("Bank account not found", 404);
 
+    const affectedBankAccounts = new Set([bankAccountId]);
+
     for (const update of updates) {
-        const { id: txId, entryDate, description, type, amount } = update;
+        const { id: txId, entryDate, description, type, amount, accountsName, parentAccount, bankName, bankAccountId: newBankAccountId } = update;
         const entry = await LedgerEntry.findById(txId);
         if (!entry) continue;
+
+        const oldEntryDate = entry.entryDate;
+        const oldAmount = entry.amount;
+        const oldType = entry.type;
 
         if (entryDate !== undefined) entry.entryDate = new Date(entryDate);
         if (description !== undefined) entry.description = description;
         if (type !== undefined) entry.type = type;
         if (amount !== undefined) entry.amount = Number(amount);
 
+        // 1. Swapping Bank Accounts (BANK NAME)
+        let resolvedNewBank = null;
+        if (newBankAccountId && String(newBankAccountId) !== String(bankAccountId)) {
+            resolvedNewBank = await BankAccount.findOne({ _id: newBankAccountId, isDeleted: false });
+        } else if (bankName && String(bankName).trim()) {
+            const trimmedBankName = String(bankName).trim();
+            resolvedNewBank = await BankAccount.findOne({
+                $or: [
+                    { bankName: { $regex: new RegExp(`^${trimmedBankName}$`, "i") } },
+                    { accountName: { $regex: new RegExp(`^${trimmedBankName}$`, "i") } }
+                ],
+                isDeleted: false
+            });
+        }
+
+        if (resolvedNewBank && String(resolvedNewBank._id) !== String(bankAccountId)) {
+            console.log(`[bulkEditTransactions] Swapping bank from ${account.accountName} to ${resolvedNewBank.accountName}`);
+            
+            // Track the new bank account ID for balance recalculation at the end
+            affectedBankAccounts.add(resolvedNewBank._id.toString());
+
+            // Find matching BankTransaction
+            const bankTx = await BankTransaction.findOne({
+                bankAccount: bankAccountId,
+                $or: [
+                    { transactionId: entry.transactionId },
+                    { entryDate: oldEntryDate, amount: oldAmount, type: oldType }
+                ]
+            });
+
+            if (bankTx) {
+                bankTx.bankAccount = resolvedNewBank._id;
+                bankTx.accountingCode = resolvedNewBank.accountingCode;
+                if (entryDate !== undefined) bankTx.entryDate = new Date(entryDate);
+                if (description !== undefined) bankTx.description = description;
+                if (type !== undefined) {
+                    bankTx.type = type;
+                    bankTx.transactionType = type;
+                }
+                if (amount !== undefined) bankTx.amount = Number(amount);
+                await bankTx.save();
+            }
+
+            // Update primary ledger entry accounting code to the new bank's accounting code
+            entry.accountingCode = resolvedNewBank.accountingCode;
+        }
+
         await entry.save();
 
-        if (entry.manualJournal) {
+        // 2. Swapping/Auto-Creating Offsetting Accounts (ACCOUNTS NAME)
+        if (accountsName && String(accountsName).trim()) {
+            const subDoc = await ensureSubAccountingCode(
+                parentAccount || "Accounts Receivable",
+                accountsName,
+                entry.createdBy,
+                entry.creatorRole
+            );
+
+            if (subDoc) {
+                if (entry.manualJournal) {
+                    const journalLines = await LedgerEntry.find({ manualJournal: entry.manualJournal });
+                    const partner = journalLines.find(l => l._id.toString() !== entry._id.toString());
+                    if (partner) {
+                        const oldSubAccId = partner.accountingCode;
+                        partner.accountingCode = subDoc._id;
+                        if (entryDate !== undefined) partner.entryDate = new Date(entryDate);
+                        if (amount !== undefined) partner.amount = Number(amount);
+                        if (type !== undefined) partner.type = type === "DEBIT" ? "CREDIT" : "DEBIT";
+                        await partner.save();
+
+                        if (oldSubAccId) {
+                            await syncAccountingCodeBalances(oldSubAccId);
+                        }
+                        await syncAccountingCodeBalances(subDoc._id);
+                    }
+                } else {
+                    // Convert single-entry to double-entry
+                    const journal = await ManualJournal.create({
+                        description: entry.description,
+                        date: entry.entryDate,
+                        branch: entry.branch,
+                        totalAmount: entry.amount,
+                        status: "POSTED",
+                        createdBy: entry.createdBy,
+                        creatorRole: entry.creatorRole
+                    });
+
+                    entry.manualJournal = journal._id;
+                    await entry.save();
+
+                    const partner = new LedgerEntry({
+                        branch: entry.branch,
+                        accountingCode: subDoc._id,
+                        type: entry.type === "DEBIT" ? "CREDIT" : "DEBIT",
+                        amount: entry.amount,
+                        description: entry.description,
+                        entryDate: entry.entryDate,
+                        transactionId: entry.transactionId,
+                        manualJournal: journal._id,
+                        createdBy: entry.createdBy,
+                        creatorRole: entry.creatorRole
+                    });
+                    await partner.save();
+
+                    await syncAccountingCodeBalances(subDoc._id);
+                }
+            }
+        }
+
+        // Standard updates when there's an existing manualJournal and no accountsName swap
+        if (entry.manualJournal && (!accountsName || !String(accountsName).trim())) {
             const journal = await ManualJournal.findById(entry.manualJournal);
             if (journal) {
                 if (entryDate !== undefined) journal.date = new Date(entryDate);
@@ -750,7 +984,15 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
         }
     }
 
-    await recalculateRunningBalances(bankAccountId);
+    // Recalculate running balances for all affected bank accounts
+    for (const affectedId of affectedBankAccounts) {
+        await recalculateRunningBalances(affectedId);
+        const bankAcc = await BankAccount.findById(affectedId);
+        if (bankAcc && bankAcc.accountingCode) {
+            await syncAccountingCodeBalances(bankAcc.accountingCode);
+        }
+    }
+
     return { success: true };
 };
 
@@ -766,5 +1008,7 @@ module.exports = {
     deleteAllTransactions,
     recalculateRunningBalances,
     bulkDeleteTransactions,
-    bulkEditTransactions
+    bulkEditTransactions,
+    ensureSubAccountingCode,
+    syncAccountingCodeBalances
 };
