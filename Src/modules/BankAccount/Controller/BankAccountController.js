@@ -407,7 +407,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
                         const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
-            const accountsNameVal = tx["ACCOUNTS NAME"] || tx.accountsName || tx.accounts_name;
+            const accountsNameVal = tx["SUB ACCOUNT"] || tx.subAccount || tx.sub_account || tx["ACCOUNTS NAME"] || tx.accountsName || tx.accounts_name;
             const parentAccountVal = tx["PARENT ACCOUNT"] || tx.parentAccount || tx.parent_account;
             const receiptVal = Number(tx.RECEIPT || tx.Receipt || tx.debit || tx.Debit) || 0;
             const paymentVal = Number(tx.PAYMENT || tx.Payment || tx.credit || tx.Credit) || 0;
@@ -507,11 +507,11 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
-            // If sub-account is specified, perform double-entry booking
-            if (accountsNameVal && String(accountsNameVal).trim()) {
+            // If sub-account or parent-account is specified, perform double-entry booking
+            if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
                 const subDoc = await ensureSubAccountingCode(
-                    parentAccountVal || "Accounts Receivable",
+                    parentAccountVal,
                     accountsNameVal,
                     createdBy,
                     creatorRole

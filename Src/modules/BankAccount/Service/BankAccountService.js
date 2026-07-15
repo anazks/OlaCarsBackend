@@ -4,13 +4,11 @@ const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel")
 const AppError = require("../../../shared/utils/AppError");
 
 const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole) => {
-    if (!accountsNameVal) return null;
-
     const parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
 
     if (!parentName) {
-        throw new AppError("Parent Account is required when Accounts Name is specified", 400);
+        throw new AppError("Parent Account is required", 400);
     }
 
     // 1. Find parent accounting code
@@ -24,6 +22,10 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
 
     if (!parentDoc) {
         throw new AppError(`Parent Account "${parentName}" not found in Chart of Accounts.`, 400);
+    }
+
+    if (!subName) {
+        return parentDoc;
     }
 
     // 2. Find existing sub-accounting code under this parent
