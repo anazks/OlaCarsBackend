@@ -3,35 +3,88 @@ const BankAccount = require("../Model/BankAccountModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const AppError = require("../../../shared/utils/AppError");
 
+const escapeRegExp = (string) => {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole) => {
-    const parentName = String(parentAccountVal || "").trim();
+    let parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
 
-    if (!parentName) {
-        throw new AppError("Parent Account is required", 400);
+    // Intelligent parent mapping
+    let parentDoc = null;
+
+    if (parentName) {
+        // 1. Try exact match on code or name (case-insensitive with regex escape)
+        parentDoc = await AccountingCode.findOne({
+            $or: [
+                { code: parentName },
+                { name: { $regex: new RegExp(`^${escapeRegExp(parentName)}$`, "i") } }
+            ],
+            isDeleted: false
+        });
+
+        // 2. Try partial match (substring) on parent accounts (no parentAccount field)
+        if (!parentDoc) {
+            parentDoc = await AccountingCode.findOne({
+                name: { $regex: new RegExp(escapeRegExp(parentName), "i") },
+                parentAccount: null,
+                isDeleted: false
+            });
+        }
+
+        // 3. Try key match
+        if (!parentDoc) {
+            const lowerParent = parentName.toLowerCase();
+            let fallbackCode = null;
+            if (lowerParent.includes("receivable") || lowerParent.includes("cobrar")) {
+                fallbackCode = "1.1.03";
+            } else if (lowerParent.includes("payable") || lowerParent.includes("pagar")) {
+                fallbackCode = "2.1.01";
+            } else if (lowerParent.includes("income") || lowerParent.includes("revenue") || lowerParent.includes("ingreso") || lowerParent.includes("venta")) {
+                fallbackCode = "4.1.01";
+            } else if (lowerParent.includes("expense") || lowerParent.includes("gasto")) {
+                fallbackCode = "6.1.01";
+            }
+
+            if (fallbackCode) {
+                parentDoc = await AccountingCode.findOne({
+                    code: fallbackCode,
+                    isDeleted: false
+                });
+            }
+        }
     }
 
-    // 1. Find parent accounting code
-    let parentDoc = await AccountingCode.findOne({
-        $or: [
-            { code: parentName },
-            { name: { $regex: new RegExp(`^${parentName}$`, "i") } }
-        ],
-        isDeleted: false
-    });
+    // 4. Default fallbacks if parent still not found
+    if (!parentDoc) {
+        // Default to "Accounts Receivable/Cuenta por Cobrar" (code 1.1.03)
+        parentDoc = await AccountingCode.findOne({
+            code: "1.1.03",
+            isDeleted: false
+        });
+    }
 
     if (!parentDoc) {
-        throw new AppError(`Parent Account "${parentName}" not found in Chart of Accounts.`, 400);
+        // Fallback to first primary account
+        parentDoc = await AccountingCode.findOne({
+            parentAccount: null,
+            isDeleted: false
+        });
+    }
+
+    if (!parentDoc) {
+        throw new AppError("Parent Account is required and could not be resolved in Chart of Accounts.", 400);
     }
 
     if (!subName) {
         return parentDoc;
     }
 
-    // 2. Find existing sub-accounting code under this parent
+    // 5. Find existing sub-accounting code under this parent
     let subDoc = await AccountingCode.findOne({
         parentAccount: parentDoc._id,
-        name: { $regex: new RegExp(`^${subName}$`, "i") },
+        name: { $regex: new RegExp(`^${escapeRegExp(subName)}$`, "i") },
         isDeleted: false
     });
 
