@@ -148,7 +148,7 @@ exports.generateRentInvoices = async (driverId, vehicleId, amount, count, freque
 };
 
 exports.payInvoice = async (invoiceId, paymentData) => {
-    const { amount, paymentMethod, transactionId, note, createdBy, creatorRole } = paymentData;
+    const { amount, paymentMethod, transactionId, note, createdBy, creatorRole, depositedTo } = paymentData;
     if (!amount || amount <= 0) throw new Error("Payment amount must be greater than 0");
 
     const invoice = await Invoice.findById(invoiceId);
@@ -322,7 +322,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
     }
 
     // Ledger & Payment Transaction
-    await this.createLedgerEntry(amount, paymentMethod, invoice, createdBy, creatorRole, note);
+    await this.createLedgerEntry(amount, paymentMethod, invoice, createdBy, creatorRole, note, depositedTo);
 
     // Roll over carry over across all invoices
     await this.rolloverCustomerInvoices(invoice.customer);
@@ -434,7 +434,7 @@ exports.rolloverDriverInvoices = async (driverId) => {
     }
 };
 
-exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note) => {
+exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, creatorRole, note, depositedTo) => {
     try {
         const finalCreatorRole = creatorRole ? creatorRole.toUpperCase() : "ADMIN";
         console.log(`[InvoiceService] Starting ledger generation for invoice payment ${invoice.invoiceNumber}`);
@@ -485,7 +485,13 @@ exports.createLedgerEntry = async (amount, paymentMethod, invoice, createdBy, cr
             const branchId = invoice.branch || (customerDoc ? customerDoc.branch : undefined);
 
             // Fetch a cash/bank asset account
-            let cashBankAccount = await AccountingCode.findOne({ category: "ASSET", code: { $nin: ["1100", "1200"] } });
+            let cashBankAccount = null;
+            if (depositedTo) {
+                cashBankAccount = await AccountingCode.findById(depositedTo);
+            }
+            if (!cashBankAccount) {
+                cashBankAccount = await AccountingCode.findOne({ category: "ASSET", code: { $nin: ["1100", "1200"] } });
+            }
             if (!cashBankAccount) {
                 cashBankAccount = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
             }

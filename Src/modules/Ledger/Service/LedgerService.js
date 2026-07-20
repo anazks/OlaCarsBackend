@@ -15,6 +15,7 @@ const ALLOWED_CREATE_FIELDS = [
     'createdBy',
     'creatorRole',
     'contact',
+    'contactModel',
     'transactionType',
     'transactionId'
 ];

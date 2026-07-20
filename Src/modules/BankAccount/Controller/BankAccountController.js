@@ -169,9 +169,20 @@ exports.uploadBankStatement = async (req, res, next) => {
         const createdBy = req.user?._id || req.user?.id || req.user?.userId;
         const creatorRole = req.user?.role || "ADMIN";
 
+        const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const arCodeDoc = await AccountingCode.findOne({
+            $or: [
+                { code: "1.1.03" },
+                { code: "1200" },
+                { name: { $regex: /Accounts Receivable/i } },
+                { name: { $regex: /Cuenta por Cobrar/i } }
+            ],
+            isDeleted: { $ne: true }
+        });
+
         let balanceAccum = account.currentBalance || 0;
         const createdEntries = [];
-        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
         for (const tx of transactions) {
             const amount = Number(tx.amount) || 0;
@@ -182,6 +193,30 @@ exports.uploadBankStatement = async (req, res, next) => {
             } else if (txType === "CREDIT") {
                 balanceAccum -= amount;
             }
+
+            const journalPayload = {
+                description: tx.description || `Bank statement transaction: ${tx.referenceNumber || ""}`,
+                date: tx.date ? new Date(tx.date) : new Date(),
+                branch: branchId || undefined,
+                lines: [
+                    {
+                        accountingCode: accCodeId,
+                        type: txType,
+                        amount: amount,
+                        description: tx.description || `Bank statement transaction: ${tx.referenceNumber || ""}`
+                    },
+                    {
+                        accountingCode: arCodeDoc ? arCodeDoc._id : accCodeId,
+                        type: txType === "DEBIT" ? "CREDIT" : "DEBIT",
+                        amount: amount,
+                        description: tx.description || `Bank statement transaction offset`
+                    }
+                ],
+                createdBy,
+                creatorRole
+            };
+
+            await ManualJournalService.createManualJournal(journalPayload);
 
             const entry = new BankTransaction({
                 bankAccount: id,
@@ -199,26 +234,12 @@ exports.uploadBankStatement = async (req, res, next) => {
             });
 
             await entry.save();
-
-            const ledgerEntry = new LedgerEntry({
-                branch: branchId || undefined,
-                accountingCode: accCodeId,
-                type: txType,
-                amount: amount,
-                description: tx.description || `Bank statement transaction: ${tx.referenceNumber || ""}`,
-                entryDate: tx.date ? new Date(tx.date) : new Date(),
-                transactionId: tx.referenceNumber || undefined,
-                runningBalance: balanceAccum,
-                createdBy,
-                creatorRole
-            });
-
-            await ledgerEntry.save();
             createdEntries.push(entry);
         }
 
         account.currentBalance = balanceAccum;
         await account.save();
+
 
         res.status(200).json({
             success: true,
@@ -371,6 +392,17 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "Linked accounting code not found" });
         }
 
+        const arCodeDoc = await AccountingCode.findOne({
+            $or: [
+                { code: "1.1.03" },
+                { code: "1200" },
+                { name: { $regex: /Accounts Receivable/i } },
+                { name: { $regex: /Cuenta por Cobrar/i } }
+            ],
+            isDeleted: { $ne: true }
+        });
+
+
         let balanceAccum = 0;
         let debitAccum = 0;
         let creditAccum = 0;
@@ -385,7 +417,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         } else {
             const lastTx = await LedgerEntry.findOne({ accountingCode: accCodeId })
                 .sort({ entryDate: -1, _id: -1 });
-            
+
             if (lastTx) {
                 console.log(`[BulkUpload] Found last LedgerEntry in DB to connect with: ID=${lastTx._id}, Date=${lastTx.entryDate}, Type=${lastTx.type}, Amount=${lastTx.amount}, RunningBalance=${lastTx.runningBalance}`);
                 balanceAccum = lastTx.runningBalance || 0;
@@ -399,6 +431,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             }
         }
         const createdEntries = [];
+        let setOffResults = [];
 
         for (const tx of transactions) {
             // Parse custom template headings and support the new sample file headings:
@@ -406,7 +439,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const finalEntryDate = parseDateFlexible(dateVal) || new Date();
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
-                        const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
+            const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
             const accountsNameVal = tx["SUB ACCOUNT"] || tx.subAccount || tx.sub_account || tx["ACCOUNTS NAME"] || tx.accountsName || tx.accounts_name;
             const parentAccountVal = tx["PARENT ACCOUNT"] || tx.parentAccount || tx.parent_account;
             const receiptVal = Number(tx.RECEIPT || tx.Receipt || tx.debit || tx.Debit) || 0;
@@ -420,7 +453,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 const trimmedVal = String(branchVal).trim().toLowerCase();
                 // 1. Try exact name match
                 let match = allBranches.find(b => b.name.trim().toLowerCase() === trimmedVal);
-                
+
                 // 2. Try partial name match
                 if (!match) {
                     match = allBranches.find(b => {
@@ -428,7 +461,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         return dbName.includes(trimmedVal) || trimmedVal.includes(dbName);
                     });
                 }
-                
+
                 // 3. Try matching by type if no name matches
                 if (!match) {
                     const isWorkshopType = trimmedVal.includes("workshop") || trimmedVal.includes("taller");
@@ -451,14 +484,14 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 const excelBank = String(bankNameVal).trim().toLowerCase();
                 const selBank = String(account.bankName || "").trim().toLowerCase();
                 const selAccName = String(account.accountName || "").trim().toLowerCase();
-                
+
                 const isMatch = (
                     excelBank.includes(selBank) ||
                     selBank.includes(excelBank) ||
                     excelBank.includes(selAccName) ||
                     selAccName.includes(excelBank)
                 );
-                
+
                 if (!isMatch) {
                     return res.status(400).json({
                         success: false,
@@ -507,6 +540,83 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
+            // Resolve Customer if CUSTOMER NAME or customerId is provided
+            let customerDoc = null;
+            const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
+            const customerIdVal = tx.customerId || tx.customer;
+
+            if (customerIdVal) {
+                const Customer = require("../../Customer/Model/CustomerModel");
+                customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
+            } else if (customerNameVal && String(customerNameVal).trim()) {
+                const Customer = require("../../Customer/Model/CustomerModel");
+                const escapedName = String(customerNameVal).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                customerDoc = await Customer.findOne({
+                    name: { $regex: new RegExp("^" + escapedName + "$", "i") },
+                    isDeleted: false
+                });
+            }
+
+            // If customer is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
+            if (customerDoc && typeVal === "DEBIT") {
+                const { autoSetOffInvoices } = require("../Service/BankAccountService");
+
+                const setOffResult = await autoSetOffInvoices(customerDoc._id, amountVal, {
+                    bankAccountingCodeId: accCodeId,
+                    branchId: resolvedBranchId || branchId,
+                    entryDate: finalEntryDate,
+                    description: finalDescription || `Bank statement receipt`,
+                    transactionId: transactionIdVal,
+                    createdBy,
+                    creatorRole
+                });
+
+                // Build invoice numbers string for the description
+                const invoiceNumbers = setOffResult.invoicesSetOff.map(inv => inv.invoiceNumber).join(", ");
+                const setOffDesc = setOffResult.invoicesSetOff.length > 0
+                    ? `${finalDescription || "Receipt"} - Set off: ${invoiceNumbers}`
+                    : finalDescription || "Receipt - No unpaid invoices to set off";
+
+                const entry = new BankTransaction({
+                    bankAccount: id,
+                    branch: resolvedBranchId || branchId || undefined,
+                    accountingCode: accCodeId,
+                    type: typeVal,
+                    amount: amountVal,
+                    description: setOffDesc,
+                    entryDate: finalEntryDate,
+                    transactionType: typeVal,
+                    transactionId: transactionIdVal,
+                    customer: customerDoc._id,
+                    customerName: customerDoc.name,
+                    invoice: setOffResult.invoicesSetOff.length > 0 ? setOffResult.invoicesSetOff[0].invoiceId : undefined,
+                    invoices: setOffResult.invoicesSetOff.map(inv => ({
+                        invoiceId: inv.invoiceId,
+                        invoiceNumber: inv.invoiceNumber,
+                        amountApplied: inv.amountApplied
+                    })),
+                    setOffSummary: {
+                        totalSetOff: setOffResult.totalSetOff,
+                        invoiceCount: setOffResult.invoicesSetOff.length,
+                        excessAmount: setOffResult.excessAmount
+                    },
+                    createdBy,
+                    creatorRole
+                });
+                await entry.save();
+                createdEntries.push(entry);
+
+                // Track set-off results for the response
+                setOffResults.push({
+                    transactionId: transactionIdVal,
+                    customerName: customerDoc.name,
+                    amount: amountVal,
+                    ...setOffResult
+                });
+
+                continue;
+            }
+
             // If sub-account or parent-account is specified, perform double-entry booking
             if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
@@ -547,7 +657,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     const entry = new BankTransaction({
                         bankAccount: id,
                         branch: resolvedBranchId || branchId || undefined,
-                        accountingCode: accCodeId,
+                        accountingCode: subDoc._id,
                         type: typeVal,
                         amount: amountVal,
                         description: finalDescription || "Bulk uploaded double-entry transaction",
@@ -576,6 +686,36 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 creditAccum += amountVal;
             }
 
+            const targetArCodeId = arCodeDoc ? arCodeDoc._id : accCodeId;
+            const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
+            const journalPayload = {
+                description: finalDescription || "Bulk uploaded double entry",
+                date: finalEntryDate,
+                branch: resolvedBranchId || branchId,
+                lines: [
+                    {
+                        accountingCode: accCodeId,
+                        type: typeVal,
+                        amount: amountVal,
+                        description: finalDescription || "Bulk uploaded ledger transaction",
+                        contact: customerDoc ? customerDoc._id : undefined,
+                        contactModel: customerDoc ? "Customer" : undefined
+                    },
+                    {
+                        accountingCode: targetArCodeId,
+                        type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
+                        amount: amountVal,
+                        description: finalDescription || "Bulk uploaded ledger transaction offset",
+                        contact: customerDoc ? customerDoc._id : undefined,
+                        contactModel: customerDoc ? "Customer" : undefined
+                    }
+                ],
+                createdBy,
+                creatorRole: creatorRole.toUpperCase()
+            };
+
+            await ManualJournalService.createManualJournal(journalPayload);
+
             const entry = new BankTransaction({
                 bankAccount: id,
                 branch: resolvedBranchId || branchId || undefined,
@@ -587,27 +727,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 transactionType: typeVal,
                 transactionId: transactionIdVal,
                 runningBalance: balanceAccum,
+                customer: customerDoc ? customerDoc._id : undefined,
+                customerName: customerDoc ? customerDoc.name : undefined,
                 createdBy,
                 creatorRole
             });
 
             await entry.save();
-
-            const ledgerEntry = new LedgerEntry({
-                branch: resolvedBranchId || branchId || undefined,
-                accountingCode: accCodeId,
-                type: typeVal,
-                amount: amountVal,
-                description: finalDescription || "Bulk uploaded ledger transaction",
-                entryDate: finalEntryDate,
-                transactionId: transactionIdVal,
-                runningBalance: balanceAccum,
-                createdBy,
-                creatorRole
-            });
-
-            await ledgerEntry.save();
             createdEntries.push(entry);
+
         }
 
         const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
@@ -623,10 +751,11 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.`,
+            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${setOffResults.reduce((sum, r) => sum + r.invoicesSetOff.length, 0)} invoice(s).` : ''}`,
             data: {
                 count: createdEntries.length,
-                newBalance: updatedAccount.currentBalance
+                newBalance: updatedAccount.currentBalance,
+                setOffResults: setOffResults.length > 0 ? setOffResults : undefined
             }
         });
     } catch (error) {
@@ -723,7 +852,7 @@ exports.getBankTransactions = async (req, res, next) => {
                         path: "parentAccount"
                     }
                 });
-            
+
             // Group by manualJournal ID
             partnerEntries.forEach(entry => {
                 if (entry.manualJournal) {
@@ -736,20 +865,80 @@ exports.getBankTransactions = async (req, res, next) => {
             });
         }
 
+        // Fetch corresponding BankTransactions to enrich customer & invoice details
+        const BankTransaction = require("../Model/BankTransactionModel");
+        const txIds = transactions.map(tx => tx.transactionId).filter(Boolean);
+
+        // Build fallback OR conditions for matching by date, amount, type in case transactionId is missing
+        const fallbackOrConditions = transactions.map(tx => {
+            const dateStart = new Date(tx.entryDate);
+            dateStart.setMinutes(dateStart.getMinutes() - 1);
+            const dateEnd = new Date(tx.entryDate);
+            dateEnd.setMinutes(dateEnd.getMinutes() + 1);
+
+            return {
+                amount: tx.amount,
+                type: tx.type,
+                entryDate: { $gte: dateStart, $lte: dateEnd }
+            };
+        });
+
+        const btOrConditions = [];
+        if (txIds.length > 0) {
+            btOrConditions.push({ transactionId: { $in: txIds } });
+        }
+        if (fallbackOrConditions.length > 0) {
+            btOrConditions.push(...fallbackOrConditions);
+        }
+
+        let bankTransactions = [];
+        if (btOrConditions.length > 0) {
+            bankTransactions = await BankTransaction.find({
+                bankAccount: id,
+                $or: btOrConditions
+            });
+        }
+
+        const findBankTx = (tx) => {
+            if (tx.transactionId) {
+                const match = bankTransactions.find(bt => bt.transactionId === tx.transactionId);
+                if (match) return match;
+            }
+            return bankTransactions.find(bt =>
+                Math.abs(bt.amount - tx.amount) < 0.01 &&
+                bt.type === tx.type &&
+                Math.abs(new Date(bt.entryDate).getTime() - new Date(tx.entryDate).getTime()) < 60000
+            );
+        };
+
         // Map transactions to mimic LedgerEntry fields for frontend compatibility
         const mappedTransactions = transactions.map(tx => {
             const obj = tx.toObject();
             obj.date = tx.entryDate;
             obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
 
+            // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists
+            const bt = findBankTx(tx);
+            if (bt) {
+                obj.customer = bt.customer;
+                obj.customerName = bt.customerName;
+                obj.invoice = bt.invoice;
+                obj.invoices = bt.invoices;
+                obj.setOffSummary = bt.setOffSummary;
+                if (bt.accountingCode && bt.accountingCode.toString() !== account.accountingCode.toString()) {
+                    obj.accountingCode = bt.accountingCode;
+                }
+            }
+
             // Find partner accounting code name if double-entry is present
             if (tx.manualJournal && partnerEntriesMap[tx.manualJournal.toString()]) {
                 const journalLegs = partnerEntriesMap[tx.manualJournal.toString()];
                 // The partner leg is the one that DOES NOT have the bank account's accountingCode
-                const partnerEntry = journalLegs.find(e => 
+                const partnerEntry = journalLegs.find(e =>
                     e.accountingCode && e.accountingCode._id.toString() !== account.accountingCode.toString()
                 );
                 if (partnerEntry && partnerEntry.accountingCode) {
+                    obj.accountingCode = partnerEntry.accountingCode._id;
                     if (partnerEntry.accountingCode.parentAccount) {
                         obj.accountsName = partnerEntry.accountingCode.name;
                         obj.parentAccount = typeof partnerEntry.accountingCode.parentAccount === 'object'
@@ -1038,4 +1227,4 @@ exports.getBankAccountLedgerPdf = async (req, res, next) => {
         console.error("Error in getBankAccountLedgerPdf controller:", error);
         next(error);
     }
-};
+};

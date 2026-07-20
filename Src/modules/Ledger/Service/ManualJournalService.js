@@ -38,6 +38,8 @@ exports.createManualJournal = async (data) => {
         const sanitizedLine = { ...line };
         if (sanitizedLine.contact === "") {
             delete sanitizedLine.contact;
+        } else if (sanitizedLine.contact && !sanitizedLine.contactModel) {
+            sanitizedLine.contactModel = "Customer";
         }
         if (sanitizedLine.transactionType === "") {
             delete sanitizedLine.transactionType;

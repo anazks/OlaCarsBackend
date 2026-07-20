@@ -78,11 +78,24 @@ const manualJournalSchema = new mongoose.Schema(
 // Auto-generate journal number before saving
 manualJournalSchema.pre("validate", async function () {
     if (!this.journalNumber) {
-        const count = await this.constructor.countDocuments();
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-        this.journalNumber = `JV-${dateStr}-${(count + 1).toString().padStart(4, "0")}`;
+        let count = await this.constructor.countDocuments();
+        let candidate = `JV-${dateStr}-${(count + 1).toString().padStart(4, "0")}`;
+        let exists = await this.constructor.exists({ journalNumber: candidate });
+        let attempts = 0;
+        while (exists && attempts < 50) {
+            count++;
+            candidate = `JV-${dateStr}-${(count + 1).toString().padStart(4, "0")}`;
+            exists = await this.constructor.exists({ journalNumber: candidate });
+            attempts++;
+        }
+        if (exists) {
+            candidate = `JV-${dateStr}-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000)}`;
+        }
+        this.journalNumber = candidate;
     }
 });
+
 
 // manualJournalSchema.index({ journalNumber: 1 }); // Already unique: true
 manualJournalSchema.index({ branch: 1 });

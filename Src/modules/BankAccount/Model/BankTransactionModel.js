@@ -18,6 +18,33 @@ const bankTransactionSchema = new mongoose.Schema(
             ref: "AccountingCode",
             required: false,
         },
+        customer: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Customer",
+            required: false,
+        },
+        customerName: {
+            type: String,
+            required: false,
+        },
+        invoice: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Invoice",
+            required: false,
+        },
+        invoices: [{
+            invoiceId: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Invoice",
+            },
+            invoiceNumber: { type: String },
+            amountApplied: { type: Number },
+        }],
+        setOffSummary: {
+            totalSetOff: { type: Number, default: 0 },
+            invoiceCount: { type: Number, default: 0 },
+            excessAmount: { type: Number, default: 0 },
+        },
         type: {
             type: String,
             required: true,
