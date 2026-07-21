@@ -1193,7 +1193,7 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                     }
                 });
 
-                // Also check if any invoice of oldCustomerId has matching payment records
+                // Also check if any invoice of oldCustomerId has matching payment records for this transaction
                 if (oldCustomerId) {
                     const custInvoices = await Invoice.find({ customer: oldCustomerId, isDeleted: false });
                     custInvoices.forEach(inv => {
@@ -1201,9 +1201,10 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                             (bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId)) ||
                             (entry.transactionId && String(p.transactionId) === String(entry.transactionId)) ||
                             (String(p.transactionId) === String(entry._id)) ||
+                            (String(p.transactionId) === String(bankTx._id)) ||
                             (entry.manualJournal && String(p.transactionId) === String(entry.manualJournal)) ||
                             (p.note && prNumbers.some(prNum => p.note.includes(prNum))) ||
-                            isCustomerChanged
+                            (bankTx.invoices && bankTx.invoices.some(bi => String(bi.invoiceId) === String(inv._id)))
                         );
                         if (hasMatchingPayment) {
                             prevInvoiceIds.add(String(inv._id));
@@ -1219,11 +1220,14 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                             const matchTxId = bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId);
                             const matchEntryTxId = entry.transactionId && String(p.transactionId) === String(entry.transactionId);
                             const matchEntryId = String(p.transactionId) === String(entry._id);
+                            const matchBankTxId = String(p.transactionId) === String(bankTx._id);
                             const matchJournalId = entry.manualJournal && String(p.transactionId) === String(entry.manualJournal);
                             const matchPRNumber = p.note && prNumbers.some(prNum => p.note.includes(prNum));
-                            const isOldCustPayment = isCustomerChanged && oldCustomerId && String(invDoc.customer) === String(oldCustomerId);
+                            const matchInvSetOff = bankTx.invoices && bankTx.invoices.some(bi =>
+                                String(bi.invoiceId) === String(invDoc._id) && Math.abs((p.amount || 0) - (bi.amountApplied || 0)) < 0.01
+                            );
 
-                            const isTargetPayment = matchTxId || matchEntryTxId || matchEntryId || matchJournalId || matchPRNumber || isOldCustPayment;
+                            const isTargetPayment = matchTxId || matchEntryTxId || matchEntryId || matchBankTxId || matchJournalId || matchPRNumber || matchInvSetOff;
                             return !isTargetPayment;
                         });
 
@@ -1293,6 +1297,13 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                             _id: { $ne: entry._id }
                         });
                     }
+
+                    // Resync Accounts Receivable & Advance Received accounting code balances after deleting old journal
+                    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+                    const arCode = await AccountingCode.findOne({ $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }], isDeleted: { $ne: true } });
+                    const advCode = await AccountingCode.findOne({ $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }], isDeleted: { $ne: true } });
+                    if (arCode) await syncAccountingCodeBalances(arCode._id);
+                    if (advCode) await syncAccountingCodeBalances(advCode._id);
                 } catch (mjErr) {
                     console.error("[bulkEditTransactions] Error deleting old ledger journal:", mjErr);
                 }
@@ -1339,8 +1350,8 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                     description: finalDesc || `Bank statement edit set-off`,
                     transactionId: bankTx.transactionId || entry.transactionId,
                     existingBankLedgerEntryId: entry._id,
-                    createdBy: entry.createdBy,
-                    creatorRole: entry.creatorRole
+                    createdBy: entry.createdBy || bankTx.createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: entry.creatorRole || bankTx.creatorRole || "ADMIN"
                 });
 
                 bankTx.customer = newCustomerId;
@@ -1772,7 +1783,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                 date: timestamp,
                 branch: branchId,
                 lines: journalLines,
-                createdBy,
+                createdBy: createdBy || "6a2290019fa01283dd165204",
                 creatorRole: (creatorRole || "ADMIN").toUpperCase()
             };
 
