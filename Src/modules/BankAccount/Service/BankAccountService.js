@@ -521,6 +521,7 @@ const recordManualPayment = async (targetId, data) => {
         description,
         currency,
         fromAccountId,
+        toAccountId,
         branchId,
         supportingDocument,
         userId,
@@ -532,14 +533,15 @@ const recordManualPayment = async (targetId, data) => {
     const targetAccount = await BankAccount.findOne({ _id: targetId, isDeleted: false });
     if (!targetAccount) throw new AppError("Target bank account not found", 404);
 
-    const fromAccount = await BankAccount.findOne({ _id: fromAccountId, isDeleted: false });
-    if (!fromAccount) throw new AppError("Source bank account (From Account) not found", 404);
+    const offsetAccountId = toAccountId || fromAccountId;
+    const offsetAccount = await BankAccount.findOne({ _id: offsetAccountId, isDeleted: false });
+    if (!offsetAccount) throw new AppError("Destination / Offset bank account (To Account) not found", 404);
 
     if (!targetAccount.accountingCode) {
         throw new AppError("Target bank account is not linked to any accounting code", 400);
     }
-    if (!fromAccount.accountingCode) {
-        throw new AppError("Source bank account is not linked to any accounting code", 400);
+    if (!offsetAccount.accountingCode) {
+        throw new AppError("Destination / Offset bank account is not linked to any accounting code", 400);
     }
 
     const numericAmount = Number(amount);
@@ -567,7 +569,7 @@ const recordManualPayment = async (targetId, data) => {
     }
 
     // Resolve credit accounting code and load invoice if provided
-    let creditAccountingCode = fromAccount.accountingCode;
+    let creditAccountingCode = offsetAccount.accountingCode;
     let invoiceDoc = null;
 
     if (invoiceId) {
@@ -724,22 +726,195 @@ const recordManualPayment = async (targetId, data) => {
     targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
     await targetAccount.save();
 
-    // Update from balance (CREDIT: decreases Asset balance, increases Liability balance)
-    let fromBalanceChange = 0;
-    if (fromAccount.accountType === "Credit Card") {
-        fromBalanceChange = numericAmount;
+    // Update offset balance (CREDIT: decreases Asset balance, increases Liability balance)
+    let offsetBalanceChange = 0;
+    if (offsetAccount.accountType === "Credit Card") {
+        offsetBalanceChange = numericAmount;
     } else {
-        fromBalanceChange = -numericAmount;
+        offsetBalanceChange = -numericAmount;
     }
-    fromAccount.currentBalance = Number(fromAccount.currentBalance || 0) + fromBalanceChange;
-    await fromAccount.save();
+    offsetAccount.currentBalance = Number(offsetAccount.currentBalance || 0) + offsetBalanceChange;
+    await offsetAccount.save();
 
     return {
         success: true,
         journal: result.journal,
         targetNewBalance: targetAccount.currentBalance,
-        fromNewBalance: fromAccount.currentBalance
+        fromNewBalance: offsetAccount.currentBalance
     };
+};
+
+/**
+ * Helper function to revert invoice set-offs and statuses when bank transactions are deleted
+ */
+const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledgerEntries = []) => {
+    try {
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+        const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+
+        // 1. Calculate the exact total amount of the transaction(s) being deleted
+        const totalDeletedTxAmount = [
+            ...bankTransactions.map(b => Number(b.amount || 0)),
+            ...ledgerEntries.map(l => Number(l.amount || 0))
+        ].reduce((sum, amt) => sum + amt, 0);
+
+        // Gather all transaction reference strings and ObjectIds
+        const validTxIds = [
+            ...bankTransactions.map(bt => bt.transactionId),
+            ...bankTransactions.map(bt => bt._id ? bt._id.toString() : null),
+            ...ledgerEntries.map(l => l.transactionId),
+            ...ledgerEntries.map(l => l._id ? l._id.toString() : null),
+            ...ledgerEntries.map(l => l.manualJournal ? l.manualJournal.toString() : null)
+        ].filter(id => id !== undefined && id !== null && String(id).trim() !== '');
+
+        const bankTxIds = bankTransactions.map(bt => bt._id).filter(Boolean);
+
+        // 2. Delete associated PaymentReceived records by exact match only
+        if (validTxIds.length > 0 || bankTxIds.length > 0) {
+            const prConditions = [];
+            if (validTxIds.length > 0) prConditions.push({ referenceNumber: { $in: validTxIds } });
+            if (bankTxIds.length > 0) prConditions.push({ bankTransactionId: { $in: bankTxIds } });
+
+            await PaymentReceived.deleteMany({ $or: prConditions });
+        }
+
+        // 3. Extract candidate invoice IDs directly linked to the deleted BankTransactions
+        const candidateInvoiceIds = new Set();
+        for (const btx of bankTransactions) {
+            let setOffItems = [];
+            if (Array.isArray(btx.invoices) && btx.invoices.length > 0) {
+                setOffItems = btx.invoices;
+            } else if (btx.invoice) {
+                setOffItems = [{ invoiceId: btx.invoice, amountApplied: btx.amount }];
+            }
+
+            for (const item of setOffItems) {
+                const invId = item.invoiceId || item.invoice;
+                if (invId && mongoose.Types.ObjectId.isValid(String(invId))) {
+                    candidateInvoiceIds.add(String(invId));
+                }
+            }
+        }
+
+        // 4. Find all Invoices directly linked via payments.transactionId OR candidateInvoiceIds
+        const invQueryConditions = [];
+        if (validTxIds.length > 0) {
+            invQueryConditions.push({ "payments.transactionId": { $in: validTxIds } });
+        }
+        const invObjectIds = Array.from(candidateInvoiceIds).filter(id => mongoose.Types.ObjectId.isValid(id));
+        if (invObjectIds.length > 0) {
+            invQueryConditions.push({ _id: { $in: invObjectIds } });
+        }
+
+        if (invQueryConditions.length === 0) return;
+
+        const invoices = await Invoice.find({ $or: invQueryConditions });
+
+        // Calculate deduction directly from the deleted ledger entries & bank transactions (deduplicating double-entry pairs)
+        const uniqueLedgerAmounts = [...new Set(ledgerEntries.map(l => Number(l.amount || 0)))];
+        const ledgerTxAmount = uniqueLedgerAmounts.reduce((sum, amt) => sum + amt, 0);
+        const uniqueBankAmounts = [...new Set(bankTransactions.map(b => Number(b.amount || 0)))];
+        const bankTxAmount = uniqueBankAmounts.reduce((sum, amt) => sum + amt, 0);
+        const exactDeletedTxValue = ledgerTxAmount > 0 ? ledgerTxAmount : bankTxAmount;
+
+        for (const invoice of invoices) {
+            // Directly assign deduction value from deleted ledger entry transaction value without using invoice.amountPaid
+            let deduction = Number(exactDeletedTxValue || 0);
+
+            const remainingPayments = [];
+
+            // Filter out 1 matching payment record from invoice.payments
+            let paymentRemoved = false;
+            if (Array.isArray(invoice.payments)) {
+                for (const p of invoice.payments) {
+                    const isMatch = validTxIds.some(tId =>
+                        (p.transactionId && String(p.transactionId).trim() === String(tId).trim()) ||
+                        (p.reference && String(p.reference).trim() === String(tId).trim()) ||
+                        (p.paymentReference && String(p.paymentReference).trim() === String(tId).trim())
+                    );
+
+                    if (isMatch && !paymentRemoved) {
+                        paymentRemoved = true;
+                    } else {
+                        remainingPayments.push(p);
+                    }
+                }
+                if (!paymentRemoved && remainingPayments.length > 0) {
+                    remainingPayments.pop();
+                }
+            }
+
+            if (deduction <= 0) continue;
+
+            const totalInvoiceAmount = Number(
+                invoice.totalAmountDue !== undefined && invoice.totalAmountDue > 0
+                    ? invoice.totalAmountDue
+                    : (invoice.baseAmount !== undefined && invoice.baseAmount > 0
+                        ? invoice.baseAmount
+                        : (invoice.grandTotal !== undefined && invoice.grandTotal > 0
+                            ? invoice.grandTotal
+                            : ((invoice.amountPaid || 0) + (invoice.balance || 0))))
+            );
+
+            // Subtract ONLY the deleted transaction amount (deduction) from invoice amountPaid
+            const newAmountPaid = Math.max(0, (invoice.amountPaid || 0) - deduction);
+            const newBalance = Math.max(0, totalInvoiceAmount - newAmountPaid);
+
+            // Recalculate status
+            let newStatus = invoice.status;
+            const now = new Date();
+            const isOverdue = invoice.dueDate && new Date(invoice.dueDate) < now;
+
+            if (newBalance >= totalInvoiceAmount - 0.01) {
+                newStatus = isOverdue ? "OVERDUE" : "PENDING";
+            } else if (newBalance > 0.01) {
+                newStatus = isOverdue ? "OVERDUE" : "PARTIAL";
+            } else {
+                newStatus = "PAID";
+            }
+
+            invoice.amountPaid = newAmountPaid;
+            invoice.balance = newBalance;
+            invoice.status = newStatus;
+            invoice.payments = remainingPayments;
+            await invoice.save();
+
+            console.log(`\n===============================================================`);
+            console.log(`[EXACT TRANSACTION DEDUCTION ON DELETE]`);
+            console.log(`  • Target Invoice: #${invoice.invoiceNumber} (ID: ${invoice._id})`);
+            console.log(`  • Total Invoice Amount: $${totalInvoiceAmount.toFixed(2)}`);
+            console.log(`  • Previous Payments Received: $${((invoice.amountPaid || 0) + deduction).toFixed(2)}`);
+            console.log(`  • Deleted Transaction Amount: -$${deduction.toFixed(2)}`);
+            console.log(`  • NEW Payments Received: $${newAmountPaid.toFixed(2)}`);
+            console.log(`  • NEW Remaining Balance: $${newBalance.toFixed(2)}`);
+            console.log(`  • NEW Invoice Status: ${newStatus}`);
+            console.log(`  • Payments Remaining on Invoice: ${remainingPayments.length} payment(s)`);
+            console.log(`===============================================================\n`);
+
+            // Sync ServiceBill if WORKSHOP invoice
+            if (invoice.invoiceType === 'WORKSHOP' && invoice.serviceBill) {
+                try {
+                    const bill = await ServiceBill.findById(invoice.serviceBill);
+                    if (bill) {
+                        const newBillAmountPaid = Math.max(0, (bill.amountPaid || 0) - deduction);
+                        const newBillPaymentStatus = newBillAmountPaid >= bill.totalAmount - 0.01 ? "PAID" : (newBillAmountPaid > 0.01 ? "PARTIAL" : "UNPAID");
+                        await ServiceBill.findByIdAndUpdate(bill._id, {
+                            $set: {
+                                amountPaid: newBillAmountPaid,
+                                paymentStatus: newBillPaymentStatus,
+                                status: newBillPaymentStatus === "PAID" ? "PAID" : "APPROVED"
+                            }
+                        });
+                    }
+                } catch (sbErr) {
+                    console.error(`Error reverting ServiceBill for Invoice ${invoice.invoiceNumber}:`, sbErr);
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Error in revertInvoiceSetOffsForTransactions:", err);
+    }
 };
 
 /**
@@ -754,41 +929,49 @@ const deleteAllTransactions = async (id) => {
         throw new AppError("Bank account has no accounting code linked", 400);
     }
 
+    const BankTransaction = require("../Model/BankTransactionModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
     const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
 
-    // Find all ledger entries for this account's accounting code
-    const entries = await LedgerEntry.find({ accountingCode: account.accountingCode });
+    const bankTransactions = await BankTransaction.find({ bankAccount: id });
+    const ledgerEntries = await LedgerEntry.find({ accountingCode: account.accountingCode });
 
-    // Collect unique manualJournal IDs from those entries
+    // Revert all invoice set-offs and payment received records
+    await revertInvoiceSetOffsForTransactions(bankTransactions, ledgerEntries);
+
+    // Delete BankTransaction documents
+    await BankTransaction.deleteMany({ bankAccount: id });
+
+    // Collect unique manualJournal IDs from entries
     const journalIds = [...new Set(
-        entries
+        ledgerEntries
             .filter(e => e.manualJournal)
             .map(e => e.manualJournal.toString())
     )];
 
-    // Delete all ledger entries that reference these journals
-    // (covers the double-entry partner lines too)
     let deletedEntries = 0;
     if (journalIds.length > 0) {
         const result = await LedgerEntry.deleteMany({ manualJournal: { $in: journalIds } });
         deletedEntries = result.deletedCount;
 
-        // Delete the ManualJournal header documents
         await ManualJournal.deleteMany({ _id: { $in: journalIds } });
     }
 
-    // Also remove any orphaned entries directly on this accounting code (no journal)
     const orphanResult = await LedgerEntry.deleteMany({
         accountingCode: account.accountingCode,
         manualJournal: { $exists: false }
     });
     deletedEntries += orphanResult.deletedCount;
 
-    // Reset the balance back to the initial balance
+    // Reset current balance back to initial balance
     const previousBalance = account.currentBalance;
     account.currentBalance = account.initialBalance || 0;
     await account.save();
+
+    if (account.accountingCode) {
+        const { syncAccountingCodeBalances } = require("./BankAccountService");
+        await syncAccountingCodeBalances(account.accountingCode);
+    }
 
     return {
         deletedJournals: journalIds.length,
@@ -877,33 +1060,70 @@ const recalculateRunningBalances = async (bankAccountId) => {
 
 const bulkDeleteTransactions = async (bankAccountId, transactionIds) => {
     const BankAccount = require("../Model/BankAccountModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
     const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
 
     const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
     if (!account) throw new AppError("Bank account not found", 404);
 
-    const entries = await LedgerEntry.find({ _id: { $in: transactionIds } });
+    // 1. Fetch ONLY the exact ledger entries selected for deletion (by _id)
+    const selectedEntries = await LedgerEntry.find({ _id: { $in: transactionIds } });
 
+    // 2. Collect the manualJournal IDs from the selected entries
     const journalIds = [...new Set(
-        entries
+        selectedEntries
             .filter(e => e.manualJournal)
             .map(e => e.manualJournal.toString())
     )];
 
+    // 3. Find matching BankTransactions for invoice reversion.
+    //    The frontend sends LedgerEntry _ids, so we need to bridge to BankTransactions
+    //    via the transactionId string, scoped to THIS bank account only (no cascading).
+    const selectedTxIdStrings = [...new Set(
+        selectedEntries
+            .map(e => e.transactionId)
+            .filter(id => id !== undefined && id !== null && String(id).trim() !== '')
+    )];
+
+    let matchedBankTxs = [];
+    if (selectedTxIdStrings.length > 0) {
+        matchedBankTxs = await BankTransaction.find({
+            bankAccount: bankAccountId,
+            transactionId: { $in: selectedTxIdStrings }
+        });
+    }
+
+    // 4. Revert invoice set-offs for the matched BankTransactions and Selected Ledger Entries
+    await revertInvoiceSetOffsForTransactions(matchedBankTxs, selectedEntries);
+
+    // 5. Delete the matched BankTransaction documents
     let deletedCount = 0;
+    if (matchedBankTxs.length > 0) {
+        const btxDelRes = await BankTransaction.deleteMany({
+            _id: { $in: matchedBankTxs.map(b => b._id) }
+        });
+        deletedCount += btxDelRes.deletedCount;
+    }
+
+    // 6. Delete the selected ledger entries and their parent journals
     if (journalIds.length > 0) {
+        // Delete ALL ledger entries that belong to these journals (both sides of double-entry)
         const delEntries = await LedgerEntry.deleteMany({ manualJournal: { $in: journalIds } });
         deletedCount += delEntries.deletedCount;
         await ManualJournal.deleteMany({ _id: { $in: journalIds } });
     }
 
-    const remainingIds = transactionIds.filter(id => !entries.find(e => e._id.toString() === id && e.manualJournal));
-    if (remainingIds.length > 0) {
-        const delOrphans = await LedgerEntry.deleteMany({ _id: { $in: remainingIds } });
+    // Also delete any orphaned entries (no journal) that were directly selected
+    const orphanIds = selectedEntries
+        .filter(e => !e.manualJournal)
+        .map(e => e._id);
+    if (orphanIds.length > 0) {
+        const delOrphans = await LedgerEntry.deleteMany({ _id: { $in: orphanIds } });
         deletedCount += delOrphans.deletedCount;
     }
 
+    // 7. Recalculate running balances
     await recalculateRunningBalances(bankAccountId);
 
     return { deletedCount };

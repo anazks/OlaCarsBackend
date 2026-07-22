@@ -262,10 +262,13 @@ exports.recordManualPayment = async (req, res, next) => {
             description,
             currency,
             fromAccountId,
+            toAccountId,
             branchId,
             customerId,
             invoiceId
         } = req.body;
+
+        const targetOffsetAccountId = toAccountId || fromAccountId;
 
         if (!amount) {
             return res.status(400).json({ success: false, message: "Amount is required" });
@@ -276,8 +279,8 @@ exports.recordManualPayment = async (req, res, next) => {
         if (!paymentMode) {
             return res.status(400).json({ success: false, message: "Payment Mode is required" });
         }
-        if (!fromAccountId) {
-            return res.status(400).json({ success: false, message: "From Account is required" });
+        if (!targetOffsetAccountId) {
+            return res.status(400).json({ success: false, message: "To Account (Destination / Offset Account) is required" });
         }
 
         const uploadLocal = require("../../../utils/uploadLocal");
@@ -297,7 +300,8 @@ exports.recordManualPayment = async (req, res, next) => {
             paymentMode,
             description,
             currency,
-            fromAccountId,
+            fromAccountId: targetOffsetAccountId,
+            toAccountId: targetOffsetAccountId,
             branchId,
             supportingDocument,
             customerId,
