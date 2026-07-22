@@ -1557,19 +1557,39 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         console.log(`  📌 [${i + 1}] Invoice #${inv.invoiceNumber} | ID: ${inv._id} | Status: ${inv.status} | Total Due: $${inv.totalAmountDue} | Paid: $${inv.amountPaid || 0} | Balance: $${invBal} | Due Date: ${inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A'}`);
     });
 
-    const partialInvoices = unpaidInvoices
-        .filter(inv => String(inv.status).toUpperCase() === "PARTIAL")
+    const timestamp = entryDate instanceof Date ? entryDate : new Date(entryDate);
+
+    // Helper to determine if an invoice is overdue
+    const isOverdue = (inv) => {
+        const st = String(inv.status || "").toUpperCase();
+        if (st === "OVERDUE") return true;
+        if (inv.dueDate) {
+            const dDate = new Date(inv.dueDate);
+            return dDate < timestamp;
+        }
+        return false;
+    };
+
+    // Priority 1: OVERDUE invoices (oldest dueDate first)
+    const overdueInvoices = unpaidInvoices
+        .filter(inv => isOverdue(inv))
         .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0));
 
-    const otherInvoices = unpaidInvoices
-        .filter(inv => String(inv.status).toUpperCase() !== "PARTIAL")
+    // Priority 2: Non-overdue PARTIAL invoices (oldest dueDate first)
+    const nonOverduePartialInvoices = unpaidInvoices
+        .filter(inv => !isOverdue(inv) && String(inv.status).toUpperCase() === "PARTIAL")
         .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0));
 
-    const sortedInvoices = [...partialInvoices, ...otherInvoices];
+    // Priority 3: Non-overdue PENDING invoices (oldest dueDate first)
+    const nonOverduePendingInvoices = unpaidInvoices
+        .filter(inv => !isOverdue(inv) && String(inv.status).toUpperCase() !== "PARTIAL")
+        .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0));
+
+    const sortedInvoices = [...overdueInvoices, ...nonOverduePartialInvoices, ...nonOverduePendingInvoices];
 
     console.log(`[AUTO SET-OFF STAGE 2] Priority Order for Set-off (${sortedInvoices.length} invoice(s)):`);
     sortedInvoices.forEach((inv, idx) => {
-        console.log(`  ${idx + 1}. #${inv.invoiceNumber} (${inv.status}) - Due Date: ${inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A'}`);
+        console.log(`  ${idx + 1}. #${inv.invoiceNumber} (${inv.status}${isOverdue(inv) ? ' - OVERDUE' : ''}) - Due Date: ${inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A'}`);
     });
 
     let remainingAmount = Number(amount);
@@ -1595,8 +1615,6 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         isDeleted: { $ne: true }
     });
 
-    const timestamp = entryDate instanceof Date ? entryDate : new Date(entryDate);
-
     for (const invoice of sortedInvoices) {
         if (remainingAmount <= 0.01) break;
 
@@ -1607,8 +1625,13 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         const newPaid = (invoice.amountPaid || 0) + amountToApply;
         const newBalance = Math.max(0, invoice.totalAmountDue - newPaid);
         let newStatus = "PENDING";
-        if (newBalance <= 0) newStatus = "PAID";
-        else if (newPaid > 0) newStatus = "PARTIAL";
+        if (newBalance <= 0) {
+            newStatus = "PAID";
+        } else if (invoice.dueDate && new Date(invoice.dueDate) < timestamp) {
+            newStatus = "OVERDUE";
+        } else if (newPaid > 0) {
+            newStatus = "PARTIAL";
+        }
 
         console.log(`[AUTO SET-OFF STAGE 3] Executing Set-off on Invoice #${invoice.invoiceNumber}:`);
         console.log(`  • Original Balance: $${invoiceBalance}`);

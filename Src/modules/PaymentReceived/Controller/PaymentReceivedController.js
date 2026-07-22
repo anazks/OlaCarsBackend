@@ -204,15 +204,14 @@ exports.getAllPaymentReceiveds = async (req, res) => {
 
         if (startDate || endDate) {
             query.paymentDate = {};
-            if (startDate) {
-                query.paymentDate.$gte = new Date(startDate);
+            if (startDate && startDate.trim()) {
+                query.paymentDate.$gte = new Date(startDate.trim());
             }
-            if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                query.paymentDate.$lte = end;
+            if (endDate && endDate.trim()) {
+                const endStr = endDate.trim().includes('T') ? endDate.trim() : `${endDate.trim()}T23:59:59.999Z`;
+                query.paymentDate.$lte = new Date(endStr);
             }
-        } else if (!customerId && !driverId) {
+        } else if (req.query.allTime !== 'true' && req.query.ignoreDefaultDates !== 'true' && !customerId && !driverId && !search) {
             // Default to last 30 days
             const now = new Date();
             const last30Days = new Date();
@@ -247,11 +246,20 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             }).select('_id');
             const customerIds = customers.map(c => c._id);
 
+            // Find matching invoices by invoice number
+            const { Invoice } = require('../../Invoice/Model/InvoiceModel');
+            const matchingInvoices = await Invoice.find({
+                invoiceNumber: searchRegex
+            }).select('_id');
+            const matchedInvoiceIds = matchingInvoices.map(inv => inv._id);
+
             query.$or = [
                 { paymentNumber: searchRegex },
                 { referenceNumber: searchRegex },
                 { driverId: { $in: driverIds } },
-                { customerId: { $in: customerIds } }
+                { customerId: { $in: customerIds } },
+                { "invoices.invoiceNumber": searchRegex },
+                { "invoices.invoiceId": { $in: matchedInvoiceIds } }
             ];
         }
 
@@ -260,8 +268,8 @@ exports.getAllPaymentReceiveds = async (req, res) => {
             sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
         }
 
-        // Run pagination queries in parallel (dashboard metrics query and calculation completely removed to speed up)
-        const [total, docs] = await Promise.all([
+        // Run pagination queries and metrics calculation in parallel
+        const [total, docs, totalsAgg] = await Promise.all([
             PaymentReceived.countDocuments(query),
             PaymentReceived.find(query)
                 .populate('customerId', 'name customerId')
@@ -269,13 +277,26 @@ exports.getAllPaymentReceiveds = async (req, res) => {
                 .populate('depositedTo', 'name code')
                 .sort(sort)
                 .skip(skip)
-                .limit(parseInt(limit))
+                .limit(parseInt(limit)),
+            PaymentReceived.aggregate([
+                { $match: query },
+                { $group: { _id: null, totalReceived: { $sum: "$amountReceived" } } }
+            ])
         ]);
+
+        const totalReceived = totalsAgg.length > 0 ? totalsAgg[0].totalReceived : 0;
 
         res.status(200).json({
             success: true,
             data: docs,
-            metrics: null,
+            metrics: {
+                totalReceived,
+                totalCount: total,
+                totalSurplus: 0,
+                mtdTotal: totalReceived,
+                methodBreakdown: {},
+                monthlyTrends: []
+            },
             pagination: {
                 total,
                 page: parseInt(page),

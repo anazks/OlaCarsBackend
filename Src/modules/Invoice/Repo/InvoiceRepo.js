@@ -28,7 +28,17 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.customer) query.customer = queryParams.customer;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
-    if (queryParams.status && queryParams.status !== 'ALL') query.status = queryParams.status;
+    if (queryParams.status && queryParams.status !== 'ALL') {
+        const rawStatus = String(queryParams.status).trim();
+        if (rawStatus.toUpperCase() === 'OPEN' || rawStatus.toUpperCase() === 'UNPAID') {
+            query.status = { $in: ['PENDING', 'PARTIAL', 'OVERDUE', 'pending', 'partial', 'overdue'] };
+        } else if (rawStatus.includes(',')) {
+            const statusArr = rawStatus.split(',').map(s => s.trim().toUpperCase());
+            query.status = { $in: statusArr };
+        } else {
+            query.status = rawStatus;
+        }
+    }
     if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
     
     if (queryParams.invoiceType) {
@@ -41,34 +51,42 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
     if ((queryParams.startDate || queryParams.endDate) && !isFullInvoice) {
         const dateQuery = {};
-        if (queryParams.startDate) dateQuery.$gte = new Date(queryParams.startDate);
-        if (queryParams.endDate) {
-            dateQuery.$lte = new Date(queryParams.endDate + 'T23:59:59.999Z');
+        if (queryParams.startDate && queryParams.startDate.trim()) {
+            dateQuery.$gte = new Date(queryParams.startDate.trim());
+        }
+        if (queryParams.endDate && queryParams.endDate.trim()) {
+            const endStr = queryParams.endDate.trim().includes('T') ? queryParams.endDate.trim() : `${queryParams.endDate.trim()}T23:59:59.999Z`;
+            dateQuery.$lte = new Date(endStr);
         }
         query.$or = [
-            { generatedAt: dateQuery },
-            { createdAt: dateQuery }
+            { invoiceDate: dateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: dateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: dateQuery }
         ];
-    }
-
-    const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
-
-    if ((queryParams.month || queryParams.year) && !isFullInvoice) {
+    } else if ((queryParams.month || queryParams.year) && !isFullInvoice) {
         const now = new Date();
         const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
+        let monthDateQuery;
         if (queryParams.month) {
             const m = parseInt(queryParams.month) - 1;
-            query.generatedAt = {
+            monthDateQuery = {
                 $gte: new Date(y, m, 1, 0, 0, 0, 0),
                 $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
             };
         } else {
-            query.generatedAt = {
+            monthDateQuery = {
                 $gte: new Date(y, 0, 1, 0, 0, 0, 0),
                 $lte: new Date(y, 11, 31, 23, 59, 59, 999)
             };
         }
+        query.$or = [
+            { invoiceDate: monthDateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: monthDateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: monthDateQuery }
+        ];
     }
+
+    const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
 
     if (cleanSearch) {
         if (isFullInvoice) {
@@ -93,12 +111,16 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     }
 
     // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted, and not explicitly ignored (and not searching for a full invoice)
-    if (!hasDateFilter && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && !isFullInvoice && queryParams.ignoreDefaultDates !== 'true') {
+    if (!hasDateFilter && queryParams.allTime !== 'true' && queryParams.ignoreDefaultDates !== 'true' && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && !isFullInvoice) {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        query.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
-        metricsQuery.generatedAt = { $gte: startOfMonth, $lte: endOfToday };
+        const defaultDateQuery = { $gte: startOfMonth, $lte: endOfToday };
+        query.$or = [
+            { invoiceDate: defaultDateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: defaultDateQuery },
+            { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: defaultDateQuery }
+        ];
     }
 
     console.log('[InvoiceRepo] final query:', JSON.stringify(query));
