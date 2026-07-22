@@ -944,6 +944,9 @@ exports.getBankTransactions = async (req, res, next) => {
                 obj.invoice = bt.invoice;
                 obj.invoices = bt.invoices;
                 obj.setOffSummary = bt.setOffSummary;
+                if (bt.runningBalance !== undefined && bt.runningBalance !== null) {
+                    obj.runningBalance = bt.runningBalance;
+                }
                 if (bt.accountingCode && bt.accountingCode.toString() !== account.accountingCode.toString()) {
                     obj.accountingCode = bt.accountingCode;
                 }
