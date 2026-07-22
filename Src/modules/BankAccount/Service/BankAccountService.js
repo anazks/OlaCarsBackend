@@ -800,40 +800,79 @@ const deleteAllTransactions = async (id) => {
 
 const recalculateRunningBalances = async (bankAccountId) => {
     const BankAccount = require("../Model/BankAccountModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
     const account = await BankAccount.findOne({ _id: bankAccountId, isDeleted: false });
     if (!account) return;
 
-    const entries = await LedgerEntry.find({ accountingCode: account.accountingCode }).sort({ entryDate: 1, _id: 1 });
-
-    let balanceAccum = account.initialBalance || 0;
-    const bulkOps = [];
     const isCreditCard = account.accountType === 'Credit Card';
 
-    for (const entry of entries) {
-        if (entry.type === 'DEBIT') {
-            balanceAccum = isCreditCard ? (balanceAccum - entry.amount) : (balanceAccum + entry.amount);
-        } else if (entry.type === 'CREDIT') {
-            balanceAccum = isCreditCard ? (balanceAccum + entry.amount) : (balanceAccum - entry.amount);
+    // 1. Recalculate running balance on all BankTransactions for this account
+    const bankTxs = await BankTransaction.find({ bankAccount: bankAccountId })
+        .sort({ entryDate: 1, createdAt: 1, _id: 1 });
+
+    let bankBalanceAccum = account.initialBalance || 0;
+    const bankBulkOps = [];
+
+    for (const tx of bankTxs) {
+        if (tx.type === 'DEBIT') {
+            bankBalanceAccum = isCreditCard ? (bankBalanceAccum - (tx.amount || 0)) : (bankBalanceAccum + (tx.amount || 0));
+        } else if (tx.type === 'CREDIT') {
+            bankBalanceAccum = isCreditCard ? (bankBalanceAccum + (tx.amount || 0)) : (bankBalanceAccum - (tx.amount || 0));
         }
 
-        bulkOps.push({
+        bankBulkOps.push({
             updateOne: {
-                filter: { _id: entry._id },
-                update: { $set: { runningBalance: balanceAccum } }
+                filter: { _id: tx._id },
+                update: { $set: { runningBalance: bankBalanceAccum } }
             }
         });
     }
 
-    if (bulkOps.length > 0) {
-        await LedgerEntry.bulkWrite(bulkOps);
+    if (bankBulkOps.length > 0) {
+        await BankTransaction.bulkWrite(bankBulkOps);
     }
 
-    account.currentBalance = balanceAccum;
+    // 2. Recalculate running balance on all LedgerEntries for this account's accounting code
+    if (account.accountingCode) {
+        const entries = await LedgerEntry.find({ accountingCode: account.accountingCode })
+            .sort({ entryDate: 1, createdAt: 1, _id: 1 });
+
+        let ledgerBalanceAccum = account.initialBalance || 0;
+        const ledgerBulkOps = [];
+
+        for (const entry of entries) {
+            if (entry.type === 'DEBIT') {
+                ledgerBalanceAccum = isCreditCard ? (ledgerBalanceAccum - (entry.amount || 0)) : (ledgerBalanceAccum + (entry.amount || 0));
+            } else if (entry.type === 'CREDIT') {
+                ledgerBalanceAccum = isCreditCard ? (ledgerBalanceAccum + (entry.amount || 0)) : (ledgerBalanceAccum - (entry.amount || 0));
+            }
+
+            ledgerBulkOps.push({
+                updateOne: {
+                    filter: { _id: entry._id },
+                    update: { $set: { runningBalance: ledgerBalanceAccum } }
+                }
+            });
+        }
+
+        if (ledgerBulkOps.length > 0) {
+            await LedgerEntry.bulkWrite(ledgerBulkOps);
+        }
+    }
+
+    // 3. Update BankAccount currentBalance to bankBalanceAccum
+    account.currentBalance = bankBalanceAccum;
     await account.save();
 
-    return balanceAccum;
+    // 4. Sync AccountingCode balance
+    if (account.accountingCode) {
+        const { syncAccountingCodeBalances } = require("./BankAccountService");
+        await syncAccountingCodeBalances(account.accountingCode);
+    }
+
+    return bankBalanceAccum;
 };
 
 const bulkDeleteTransactions = async (bankAccountId, transactionIds) => {

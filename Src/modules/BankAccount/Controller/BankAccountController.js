@@ -557,8 +557,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 });
             }
 
+            const isCreditCard = account.accountType === "Credit Card";
+
             // If customer is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
             if (customerDoc && typeVal === "DEBIT") {
+                if (typeVal === "DEBIT") {
+                    balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
+                    debitAccum += amountVal;
+                } else if (typeVal === "CREDIT") {
+                    balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
+                    creditAccum += amountVal;
+                }
+
                 const { autoSetOffInvoices } = require("../Service/BankAccountService");
 
                 const setOffResult = await autoSetOffInvoices(customerDoc._id, amountVal, {
@@ -587,6 +597,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     entryDate: finalEntryDate,
                     transactionType: typeVal,
                     transactionId: transactionIdVal,
+                    runningBalance: balanceAccum,
                     customer: customerDoc._id,
                     customerName: customerDoc.name,
                     invoice: setOffResult.invoicesSetOff.length > 0 ? setOffResult.invoicesSetOff[0].invoiceId : undefined,
@@ -619,6 +630,14 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
             // If sub-account or parent-account is specified, perform double-entry booking
             if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
+                if (typeVal === "DEBIT") {
+                    balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
+                    debitAccum += amountVal;
+                } else if (typeVal === "CREDIT") {
+                    balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
+                    creditAccum += amountVal;
+                }
+
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
                 const subDoc = await ensureSubAccountingCode(
                     parentAccountVal,
@@ -664,6 +683,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         entryDate: finalEntryDate,
                         transactionType: typeVal,
                         transactionId: transactionIdVal,
+                        runningBalance: balanceAccum,
                         createdBy,
                         creatorRole
                     });
@@ -677,7 +697,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
             }
 
-            const isCreditCard = account.accountType === "Credit Card";
             if (typeVal === "DEBIT") {
                 balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
                 debitAccum += amountVal;
