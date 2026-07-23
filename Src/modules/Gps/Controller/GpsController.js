@@ -211,6 +211,16 @@ const getGpsObdData = async (req, res, next) => {
     }
 };
 
+const getFleetSummaryReport = async (req, res, next) => {
+    try {
+        const { imeis, group, startTime, endTime, reportType } = req.query;
+        const data = await GpsService.getFleetSummaryReport({ imeis, group, startTime, endTime, reportType });
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getGpsVehicles,
     getGpsLocations,
@@ -221,5 +231,6 @@ module.exports = {
     getGpsTrackList,
     receiveGpsNotification,
     getGpsNotifications,
-    getGpsObdData
+    getGpsObdData,
+    getFleetSummaryReport
 };
