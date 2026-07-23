@@ -20,266 +20,329 @@
     "creatorRole": "ADMIN",
     "isDeleted": false,
     "createdAt": "2026-06-09T12:57:20.278Z",
-    "updatedAt": "2026-06-29T09:27:40.278Z",
+    "updatedAt": "2026-07-23T07:21:23.972Z",
     "__v": 0,
-    "creditTotal": 23672.43,
-    "currentBalance": 10630.470000000008,
-    "debitTotal": 34302.90000000001
+    "creditTotal": 47344.86,
+    "currentBalance": 5983.060000000034,
+    "debitTotal": 53327.920000000035
   },
-  "balance": 2978.810000000003,
-  "entriesCount": 28,
+  "balance": 2991.530000000004,
+  "entriesCount": 35,
   "entries": [
     {
-      "id": "6a422bb616f1f250e1bd5c08",
+      "id": "6a609fe68a4613f0ede12bc8",
       "entryDate": "2024-04-16T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 3145.14,
       "runningBalance": 3145.14,
-      "description": "BANCA EN LINEA TRANSFERENCIA A xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. Ahorro pago extrao - Transaction ID: 6671277000002778829 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002778829]",
-      "createdAt": "2026-06-29T08:24:22.047Z"
+      "description": "Banco General AH  1601 - Transaction ID: 6671277000002778829 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002778829]",
+      "createdAt": "2026-07-22T10:48:06.104Z"
     },
     {
-      "id": "6a422bb616f1f250e1bd5c09",
+      "id": "6a609fe68a4613f0ede12bc9",
       "entryDate": "2024-04-16T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 1196.66,
       "runningBalance": 4341.8,
-      "description": "BANCA EN LINEA TRANSFERENCIA A xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. Ahorro pago extrao - Transaction ID: 6671277000002778851 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002778851]",
-      "createdAt": "2026-06-29T08:24:22.047Z"
+      "description": "Banco General AH  1601 - Transaction ID: 6671277000002778851 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002778851]",
+      "createdAt": "2026-07-22T10:48:06.104Z"
     },
     {
-      "id": "6a422bb616f1f250e1bd5cda",
+      "id": "6a609fe68a4613f0ede12be3",
       "entryDate": "2024-04-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 1.8,
       "runningBalance": 4343.6,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991304 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991304]",
-      "createdAt": "2026-06-29T08:24:22.062Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991304 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991304]",
+      "createdAt": "2026-07-22T10:48:06.107Z"
     },
     {
-      "id": "6a422bbf16f1f250e1bd5fb4",
+      "id": "6a609fe68a4613f0ede12c2c",
       "entryDate": "2024-05-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 3.72,
       "runningBalance": 4347.320000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991604 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991604]",
-      "createdAt": "2026-06-29T08:24:31.101Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991604 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991604]",
+      "createdAt": "2026-07-22T10:48:06.118Z"
     },
     {
-      "id": "6a422bbf16f1f250e1bd61ab",
+      "id": "6a609fe68a4613f0ede12c6d",
       "entryDate": "2024-06-22T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 2096.76,
       "runningBalance": 6444.080000000001,
-      "description": "BANCA EN LINEA TRANSFERENCIA A xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. Ahorro de Flota 1 - Transaction ID: 6671277000002778785 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002778785]",
-      "createdAt": "2026-06-29T08:24:31.124Z"
+      "description": "Banco General AH  1601 - Transaction ID: 6671277000002778785 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002778785]",
+      "createdAt": "2026-07-22T10:48:06.146Z"
     },
     {
-      "id": "6a422bbf16f1f250e1bd61ac",
+      "id": "6a609fe68a4613f0ede12c6e",
       "entryDate": "2024-06-22T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 1196.66,
       "runningBalance": 7640.740000000001,
-      "description": "BANCA EN LINEA TRANSFERENCIA A xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. Ahorro de leasing - Transaction ID: 6671277000002778807 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002778807]",
-      "createdAt": "2026-06-29T08:24:31.124Z"
+      "description": "Banco General AH  1601 - Transaction ID: 6671277000002778807 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002778807]",
+      "createdAt": "2026-07-22T10:48:06.146Z"
     },
     {
-      "id": "6a422bbf16f1f250e1bd6260",
+      "id": "6a609fe68a4613f0ede12c85",
       "entryDate": "2024-06-29T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 4.41,
       "runningBalance": 7645.150000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991340 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991340]",
-      "createdAt": "2026-06-29T08:24:31.136Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991340 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991340]",
+      "createdAt": "2026-07-22T10:48:06.148Z"
     },
     {
-      "id": "6a422bc716f1f250e1bd6656",
+      "id": "6a609fe68a4613f0ede12d07",
       "entryDate": "2024-07-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 6.51,
       "runningBalance": 7651.660000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991364 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991364]",
-      "createdAt": "2026-06-29T08:24:39.980Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991364 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991364]",
+      "createdAt": "2026-07-22T10:48:06.155Z"
     },
     {
-      "id": "6a422bd916f1f250e1bd6dfd",
+      "id": "6a609fe68a4613f0ede12de4",
       "entryDate": "2024-08-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 6.51,
       "runningBalance": 7658.170000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991460 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991460]",
-      "createdAt": "2026-06-29T08:24:57.755Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991460 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991460]",
+      "createdAt": "2026-07-22T10:48:06.173Z"
     },
     {
-      "id": "6a422beb16f1f250e1bd7782",
+      "id": "6a609fe78a4613f0ede12eff",
       "entryDate": "2024-09-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 6.3,
       "runningBalance": 7664.470000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991484 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991484]",
-      "createdAt": "2026-06-29T08:25:15.531Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991484 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991484]",
+      "createdAt": "2026-07-22T10:48:07.156Z"
     },
     {
-      "id": "6a422c0616f1f250e1bd8403",
+      "id": "6a609fe78a4613f0ede13050",
       "entryDate": "2024-10-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 6.51,
       "runningBalance": 7670.980000000001,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991412 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991412]",
-      "createdAt": "2026-06-29T08:25:42.105Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991412 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991412]",
+      "createdAt": "2026-07-22T10:48:07.171Z"
     },
     {
-      "id": "6a422c2916f1f250e1bd94c7",
+      "id": "6a609fe78a4613f0ede1322d",
       "entryDate": "2024-11-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 6.3,
       "runningBalance": 7677.280000000002,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991436 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991436]",
-      "createdAt": "2026-06-29T08:26:17.864Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991436 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991436]",
+      "createdAt": "2026-07-22T10:48:07.195Z"
     },
     {
-      "id": "6a422c3216f1f250e1bd9a1b",
+      "id": "6a609fe78a4613f0ede132b9",
       "entryDate": "2024-12-07T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 8900,
       "runningBalance": 16577.280000000002,
-      "description": "BANCA EN LINEA TRANSFERENCIA A xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. Refund of the paym - Transaction ID: 6671277000002778751 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002778751]",
-      "createdAt": "2026-06-29T08:26:26.476Z"
+      "description": "Banco General AH  1601 - Transaction ID: 6671277000002778751 - [offset_account_id: 6671277000000095371 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002778751]",
+      "createdAt": "2026-07-22T10:48:07.202Z"
     },
     {
-      "id": "6a422c3216f1f250e1bd9b0b",
+      "id": "6a609fe78a4613f0ede132c8",
       "entryDate": "2024-12-12T00:00:00.000Z",
       "type": "CREDIT",
       "amount": 10000,
       "runningBalance": 6577.2800000000025,
-      "description": "PAYMENT TO W GROUP - Transaction ID: 6671277000012899357 - [offset_account_id: 6671277000012237001 | offset_account_type: equity | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000012899357]",
-      "createdAt": "2026-06-29T08:26:26.492Z"
+      "description": "W GROUP WORLDWIDE, S.A. EQUITY - Transaction ID: 6671277000012899357 - [offset_account_id: 6671277000012237001 | offset_account_type: equity | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000012899357]",
+      "createdAt": "2026-07-22T10:48:07.203Z"
     },
     {
-      "id": "6a422c3b16f1f250e1bd9f6f",
+      "id": "6a609fea8a4613f0ede13348",
       "entryDate": "2024-12-16T00:00:00.000Z",
       "type": "CREDIT",
       "amount": 2672.43,
       "runningBalance": 3904.8500000000026,
-      "description": "Maintenance Car/Mantenimiento de Coche Taller - Transaction ID: 6671277000001991840 - [offset_account_id: 6671277000001414798 | offset_account_type: expense | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991840]",
-      "createdAt": "2026-06-29T08:26:35.773Z"
+      "description": "Maintenance Car/Mantenimiento de Coche Taller - Transaction ID: 6671277000001991840 - [offset_account_id: 6671277000001414798 | offset_account_type: expense | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991840]",
+      "createdAt": "2026-07-22T10:48:10.392Z"
     },
     {
-      "id": "6a422c4516f1f250e1bda48f",
+      "id": "6a609fea8a4613f0ede133e6",
       "entryDate": "2024-12-23T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 10000,
       "runningBalance": 13904.850000000002,
-      "description": "ACH - W GROUP WORLDWIDE, S.A. - Transaction ID: 6671277000001991798 - [offset_account_id: 6671277000012237001 | offset_account_type: equity | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991798]",
-      "createdAt": "2026-06-29T08:26:45.075Z"
+      "description": "W GROUP WORLDWIDE, S.A. EQUITY - Transaction ID: 6671277000001991798 - [offset_account_id: 6671277000012237001 | offset_account_type: equity | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991798]",
+      "createdAt": "2026-07-22T10:48:10.398Z"
     },
     {
-      "id": "6a422c5716f1f250e1bdab59",
+      "id": "6a609fea8a4613f0ede13491",
       "entryDate": "2024-12-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 8.42,
       "runningBalance": 13913.270000000002,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991508 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991508]",
-      "createdAt": "2026-06-29T08:27:03.221Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991508 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991508]",
+      "createdAt": "2026-07-22T10:48:10.406Z"
     },
     {
-      "id": "6a42349516f1f250e1c310b2",
+      "id": "6a609fec8a4613f0ede13785",
       "entryDate": "2025-01-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 11.78,
       "runningBalance": 13925.050000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991532 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991532]",
-      "createdAt": "2026-06-29T09:02:13.312Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991532 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991532]",
+      "createdAt": "2026-07-22T10:48:12.181Z"
     },
     {
-      "id": "6a4234cb16f1f250e1c32559",
+      "id": "6a609fec8a4613f0ede139eb",
       "entryDate": "2025-02-28T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 10.64,
       "runningBalance": 13935.690000000002,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991628 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991628]",
-      "createdAt": "2026-06-29T09:03:07.655Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991628 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991628]",
+      "createdAt": "2026-07-22T10:48:12.210Z"
     },
     {
-      "id": "6a4234f816f1f250e1c3398f",
+      "id": "6a609fed8a4613f0ede13c31",
       "entryDate": "2025-03-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 11.78,
       "runningBalance": 13947.470000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991652 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991652]",
-      "createdAt": "2026-06-29T09:03:52.960Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991652 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991652]",
+      "createdAt": "2026-07-22T10:48:13.149Z"
     },
     {
-      "id": "6a42352f16f1f250e1c3517f",
+      "id": "6a609fed8a4613f0ede13eef",
       "entryDate": "2025-04-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 11.4,
       "runningBalance": 13958.870000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991556 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991556]",
-      "createdAt": "2026-06-29T09:04:47.451Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991556 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991556]",
+      "createdAt": "2026-07-22T10:48:13.837Z"
     },
     {
-      "id": "6a42375516f1f250e1c3630f",
+      "id": "6a609fed8a4613f0ede14076",
       "entryDate": "2025-05-14T00:00:00.000Z",
       "type": "CREDIT",
       "amount": 1000,
       "runningBalance": 12958.870000000003,
-      "description": "BANCA EN LINEA TRANSFERENCIA A 0471000003010 ARRENDADORA OLA CARS, S.A. transfer fund - Transaction ID: 6671277000001994003 - [entity_number: 13 | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: 6671277000001403197 | Voucher: 6671277000001994003]",
-      "createdAt": "2026-06-29T09:13:57.021Z"
+      "description": "OLA WORKSHOP VENDOR - Transaction ID: 6671277000001994003 - [entity_number: 13 | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: 6671277000001403197 | Voucher: 6671277000001994003]",
+      "createdAt": "2026-07-22T10:48:13.855Z"
     },
     {
-      "id": "6a42377a16f1f250e1c37181",
+      "id": "6a609fed8a4613f0ede141f8",
       "entryDate": "2025-05-28T00:00:00.000Z",
       "type": "CREDIT",
       "amount": 10000,
       "runningBalance": 2958.8700000000026,
-      "description": "BANCA EN LINEA TRANSFERENCIA DE xxxxxxxxx2654 ARRENDADORA OLA CARS, S.A. transfer funds - Transaction ID: 6671277000001988041 - [offset_account_id: 6671277000000199433 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001988041]",
-      "createdAt": "2026-06-29T09:14:34.557Z"
+      "description": "Banco General CT  7905 - Transaction ID: 6671277000001988041 - [offset_account_id: 6671277000000199433 | offset_account_type: bank | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001988041]",
+      "createdAt": "2026-07-22T10:48:13.872Z"
     },
     {
-      "id": "6a42378d16f1f250e1c376fc",
+      "id": "6a609fee8a4613f0ede142b4",
       "entryDate": "2025-05-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 10.3,
       "runningBalance": 2969.170000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991580 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991580]",
-      "createdAt": "2026-06-29T09:14:53.210Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991580 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991580]",
+      "createdAt": "2026-07-22T10:48:14.529Z"
     },
     {
-      "id": "6a4237d516f1f250e1c3968b",
+      "id": "6a609fee8a4613f0ede14665",
       "entryDate": "2025-06-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 2.4,
       "runningBalance": 2971.570000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000001991388 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000001991388]",
-      "createdAt": "2026-06-29T09:16:05.780Z"
+      "description": "Ledger Import - Transaction ID: 6671277000001991388 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000001991388]",
+      "createdAt": "2026-07-22T10:48:14.577Z"
     },
     {
-      "id": "6a42388816f1f250e1c3c50c",
+      "id": "6a609fef8a4613f0ede14ae7",
       "entryDate": "2025-07-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 2.48,
       "runningBalance": 2974.050000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000002363737 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000002363737]",
-      "createdAt": "2026-06-29T09:19:04.216Z"
+      "description": "Ledger Import - Transaction ID: 6671277000002363737 - [offset_account_id: 6671277000000000394 | offset_account_type: income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000002363737]",
+      "createdAt": "2026-07-22T10:48:15.931Z"
     },
     {
-      "id": "6a42392416f1f250e1c40a6d",
+      "id": "6a609ff08a4613f0ede15226",
       "entryDate": "2025-08-31T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 2.48,
       "runningBalance": 2976.530000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000003581600 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6671277000003581600]",
-      "createdAt": "2026-06-29T09:21:40.650Z"
+      "description": "Ledger Import - Transaction ID: 6671277000003581600 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000003581600]",
+      "createdAt": "2026-07-22T10:48:16.674Z"
     },
     {
-      "id": "6a423a2616f1f250e1c45262",
+      "id": "6a609ff18a4613f0ede155c1",
       "entryDate": "2025-09-30T00:00:00.000Z",
       "type": "DEBIT",
       "amount": 2.28,
       "runningBalance": 2978.810000000003,
-      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6.67128E+18 - [offset_account_id: 6.67128E+18 | offset_account_type: income | reference_number: INTEREST INCOME | account_id: 6.67128E+18 | currency_code: USD | account_group: asset | account_type: bank | account_code: 1.1.02-2 | account.CF.Cuenta en EspaÃ±ol:: Banco General AH 2654 | Contact: '-1 | Voucher: 6.67128E+18]",
-      "createdAt": "2026-06-29T09:25:58.403Z"
+      "description": "Ledger Import - Transaction ID: 6671277000004275629 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTEREST INCOME | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000004275629]",
+      "createdAt": "2026-07-22T10:48:17.646Z"
+    },
+    {
+      "id": "6a609ff28a4613f0ede15759",
+      "entryDate": "2025-10-31T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.86,
+      "runningBalance": 2980.6700000000033,
+      "description": "INTERES CUENTA DE AHORROS - Transaction ID: 6671277000005724681 - [reference_number: SAVINGS BANK INTEREST | entity_number: 213 | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000005724681]",
+      "createdAt": "2026-07-22T10:48:18.326Z"
+    },
+    {
+      "id": "6a609ff28a4613f0ede158f2",
+      "entryDate": "2025-11-30T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.8,
+      "runningBalance": 2982.4700000000034,
+      "description": "Ledger Import - Transaction ID: 6671277000007024510 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000007024510]",
+      "createdAt": "2026-07-22T10:48:18.344Z"
+    },
+    {
+      "id": "6a609ff28a4613f0ede159f4",
+      "entryDate": "2025-12-31T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.86,
+      "runningBalance": 2984.3300000000036,
+      "description": "Ledger Import - Transaction ID: 6671277000007777273 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: interest income | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000007777273]",
+      "createdAt": "2026-07-22T10:48:18.355Z"
+    },
+    {
+      "id": "6a609ff38a4613f0ede15b84",
+      "entryDate": "2026-01-31T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.86,
+      "runningBalance": 2986.1900000000037,
+      "description": "General Income / Ingresos generales - Transaction ID: 6671277000009492171 - [offset_account_id: 6671277000000000391 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000009492171]",
+      "createdAt": "2026-07-22T10:48:19.298Z"
+    },
+    {
+      "id": "6a609ff38a4613f0ede15c1c",
+      "entryDate": "2026-02-28T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.68,
+      "runningBalance": 2987.8700000000035,
+      "description": "Ledger Import - Transaction ID: 6671277000011862967 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000011862967]",
+      "createdAt": "2026-07-22T10:48:19.305Z"
+    },
+    {
+      "id": "6a609ff38a4613f0ede15c9a",
+      "entryDate": "2026-03-31T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.86,
+      "runningBalance": 2989.7300000000037,
+      "description": "Ledger Import - Transaction ID: 6671277000012158603 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTERES CUENTA DE AHORROS | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000012158603]",
+      "createdAt": "2026-07-22T10:48:19.312Z"
+    },
+    {
+      "id": "6a609ff38a4613f0ede15d09",
+      "entryDate": "2026-04-30T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 1.8,
+      "runningBalance": 2991.530000000004,
+      "description": "Ledger Import - Transaction ID: 6671277000013493764 - [offset_account_id: 6671277000000000394 | offset_account_type: income | reference_number: INTEREST RECEIVED | account_id: 6671277000001986832 | currency_code: USD | account_group: asset | account_type: bank | Contact: -1 | Voucher: 6671277000013493764]",
+      "createdAt": "2026-07-22T10:48:19.317Z"
     }
   ]
 }

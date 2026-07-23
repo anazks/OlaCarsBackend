@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 const Branch = require("../../Branch/Model/BranchModel");
@@ -102,11 +103,19 @@ exports.getPLReport = async (filters) => {
     const query = { isDeleted: { $ne: true } };
 
     if (branch) {
-        query.branch = branch;
+        const branchObjId = mongoose.Types.ObjectId.isValid(branch) ? new mongoose.Types.ObjectId(branch) : branch;
+        query.$or = [
+            { branch: branchObjId },
+            { branch: String(branch) }
+        ];
     } else if (country) {
         const branches = await Branch.find({ country, isDeleted: false });
-        const branchIds = branches.map(b => b._id);
-        query.branch = { $in: branchIds };
+        const branchObjIds = branches.map(b => (mongoose.Types.ObjectId.isValid(b._id) ? new mongoose.Types.ObjectId(b._id) : b._id));
+        const branchStrings = branches.map(b => String(b._id));
+        query.$or = [
+            { branch: { $in: branchObjIds } },
+            { branch: { $in: branchStrings } }
+        ];
     }
 
     query.entryDate = {};
@@ -165,9 +174,9 @@ exports.getPLReport = async (filters) => {
         allActiveCodes.forEach(code => {
             const category = normalizeCategory(code.category);
             if (category === "INCOME") {
-                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null, branchAmounts: {} };
             } else if (category === "EXPENSE") {
-                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null, branchAmounts: {} };
             }
         });
     } catch (e) {
@@ -182,17 +191,64 @@ exports.getPLReport = async (filters) => {
         if (category === "INCOME") {
             const val = row.creditSum - row.debitSum;
             if (!report.income[code.name]) {
-                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
+                report.income[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null, branchAmounts: {} };
             }
             report.income[code.name].amount = val;
         } else if (category === "EXPENSE") {
             const val = row.debitSum - row.creditSum;
             if (!report.expenses[code.name]) {
-                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null };
+                report.expenses[code.name] = { amount: 0, code: code.code, accountType: code.accountType, category: code.category, id: code._id, parentAccount: code.parentAccount || null, branchAmounts: {} };
             }
             report.expenses[code.name].amount = val;
         }
     });
+
+    // Run per-branch aggregation for detailed Chart of Accounts breakdown
+    try {
+        const bPipeline = [
+            { $match: query },
+            {
+                $group: {
+                    _id: { accountingCode: "$accountingCode", branch: "$branch" },
+                    debitSum: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0] } },
+                    creditSum: { $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0] } }
+                }
+            },
+            {
+                $lookup: {
+                    from: AccountingCode.collection.name,
+                    localField: "_id.accountingCode",
+                    foreignField: "_id",
+                    as: "codeDetails"
+                }
+            },
+            { $unwind: "$codeDetails" }
+        ];
+        const bAggregated = await LedgerEntry.aggregate(bPipeline);
+
+        bAggregated.forEach(row => {
+            const code = row.codeDetails;
+            if (!code) return;
+            const bId = row._id.branch ? String(row._id.branch) : 'unassigned';
+            const category = normalizeCategory(code.category);
+
+            if (category === "INCOME") {
+                const val = row.creditSum - row.debitSum;
+                if (report.income[code.name]) {
+                    report.income[code.name].branchAmounts = report.income[code.name].branchAmounts || {};
+                    report.income[code.name].branchAmounts[bId] = (report.income[code.name].branchAmounts[bId] || 0) + val;
+                }
+            } else if (category === "EXPENSE") {
+                const val = row.debitSum - row.creditSum;
+                if (report.expenses[code.name]) {
+                    report.expenses[code.name].branchAmounts = report.expenses[code.name].branchAmounts || {};
+                    report.expenses[code.name].branchAmounts[bId] = (report.expenses[code.name].branchAmounts[bId] || 0) + val;
+                }
+            }
+        });
+    } catch (bAggErr) {
+        console.warn("[Reporting Service] Error aggregating branchAmounts for P&L:", bAggErr.message);
+    }
 
     const incomeArray = Object.keys(report.income).map(name => ({
         name,
@@ -201,7 +257,8 @@ exports.getPLReport = async (filters) => {
         accountType: report.income[name].accountType,
         category: report.income[name].category,
         id: report.income[name].id,
-        parentAccount: report.income[name].parentAccount || null
+        parentAccount: report.income[name].parentAccount || null,
+        branchAmounts: report.income[name].branchAmounts || {}
     }));
     const expenseArray = Object.keys(report.expenses).map(name => ({
         name,
@@ -210,16 +267,103 @@ exports.getPLReport = async (filters) => {
         accountType: report.expenses[name].accountType,
         category: report.expenses[name].category,
         id: report.expenses[name].id,
-        parentAccount: report.expenses[name].parentAccount || null
+        parentAccount: report.expenses[name].parentAccount || null,
+        branchAmounts: report.expenses[name].branchAmounts || {}
     }));
 
     const totalIncome = incomeArray.reduce((acc, curr) => acc + curr.amount, 0);
     const totalExpense = expenseArray.reduce((acc, curr) => acc + curr.amount, 0);
 
+    // Calculate branch-wise breakdown
+    let branchBreakdown = [];
+    try {
+        const allBranches = await Branch.find({ isDeleted: false }).lean();
+        if (allBranches && allBranches.length > 0) {
+            branchBreakdown = await Promise.all(allBranches.map(async (b) => {
+                const bObjId = mongoose.Types.ObjectId.isValid(b._id) ? new mongoose.Types.ObjectId(b._id) : b._id;
+                const bQuery = {
+                    isDeleted: { $ne: true },
+                    $or: [
+                        { branch: bObjId },
+                        { branch: String(b._id) }
+                    ],
+                    entryDate: query.entryDate
+                };
+
+                const bPipeline = [
+                    { $match: bQuery },
+                    {
+                        $group: {
+                            _id: "$accountingCode",
+                            debitSum: { $sum: { $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0] } },
+                            creditSum: { $sum: { $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0] } }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: AccountingCode.collection.name,
+                            localField: "_id",
+                            foreignField: "_id",
+                            as: "codeDetails"
+                        }
+                    },
+                    { $unwind: "$codeDetails" }
+                ];
+
+                const bAggregated = await LedgerEntry.aggregate(bPipeline);
+
+                let bIncome = 0;
+                let bCOGS = 0;
+                let bOPEX = 0;
+                let bOtherExp = 0;
+
+                bAggregated.forEach(row => {
+                    const code = row.codeDetails;
+                    if (!code) return;
+                    const cat = normalizeCategory(code.category);
+                    const name = (code.name || '').toLowerCase();
+
+                    if (cat === "INCOME") {
+                        bIncome += (row.creditSum - row.debitSum);
+                    } else if (cat === "EXPENSE") {
+                        const val = row.debitSum - row.creditSum;
+                        if (name.includes('cogs') || name.includes('cost of goods sold') || name.includes('costo de ventas')) {
+                            bCOGS += val;
+                        } else if (name.includes('other expense') || name.includes('extraordinary')) {
+                            bOtherExp += val;
+                        } else {
+                            bOPEX += val;
+                        }
+                    }
+                });
+
+                const bGrossProfit = bIncome - bCOGS;
+                const bOperatingProfit = bGrossProfit - bOPEX;
+                const bNetProfit = bOperatingProfit - bOtherExp;
+
+                return {
+                    branchId: b._id,
+                    branchName: b.name,
+                    country: b.country,
+                    totalIncome: Number(bIncome.toFixed(2)),
+                    totalCOGS: Number(bCOGS.toFixed(2)),
+                    grossProfit: Number(bGrossProfit.toFixed(2)),
+                    totalOPEX: Number(bOPEX.toFixed(2)),
+                    operatingProfit: Number(bOperatingProfit.toFixed(2)),
+                    otherExpenses: Number(bOtherExp.toFixed(2)),
+                    netProfit: Number(bNetProfit.toFixed(2))
+                };
+            }));
+        }
+    } catch (bErr) {
+        console.warn("[Reporting Service] Could not generate branchBreakdown for P&L:", bErr.message);
+    }
+
     return {
         income: incomeArray,
         expenses: expenseArray,
-        netProfit: totalIncome - totalExpense
+        netProfit: totalIncome - totalExpense,
+        branchBreakdown
     };
 };
 
@@ -241,11 +385,19 @@ exports.getBalanceSheetReport = async (filters) => {
     const query = { isDeleted: { $ne: true } };
 
     if (branch) {
-        query.branch = branch;
+        const branchObjId = mongoose.Types.ObjectId.isValid(branch) ? new mongoose.Types.ObjectId(branch) : branch;
+        query.$or = [
+            { branch: branchObjId },
+            { branch: String(branch) }
+        ];
     } else if (country) {
         const branches = await Branch.find({ country, isDeleted: false });
-        const branchIds = branches.map(b => b._id);
-        query.branch = { $in: branchIds };
+        const branchObjIds = branches.map(b => (mongoose.Types.ObjectId.isValid(b._id) ? new mongoose.Types.ObjectId(b._id) : b._id));
+        const branchStrings = branches.map(b => String(b._id));
+        query.$or = [
+            { branch: { $in: branchObjIds } },
+            { branch: { $in: branchStrings } }
+        ];
     }
 
     const endStr = endDate.includes("T") ? endDate : `${endDate}T23:59:59.999Z`;
