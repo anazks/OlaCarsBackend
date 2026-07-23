@@ -1018,11 +1018,11 @@ const recalculateRunningBalances = async (bankAccountId) => {
     }
 
     // 2. Recalculate running balance on all LedgerEntries for this account's accounting code
+    let ledgerBalanceAccum = account.initialBalance || 0;
     if (account.accountingCode) {
         const entries = await LedgerEntry.find({ accountingCode: account.accountingCode })
             .sort({ entryDate: 1, createdAt: 1, _id: 1 });
 
-        let ledgerBalanceAccum = account.initialBalance || 0;
         const ledgerBulkOps = [];
 
         for (const entry of entries) {
@@ -1032,12 +1032,19 @@ const recalculateRunningBalances = async (bankAccountId) => {
                 ledgerBalanceAccum = isCreditCard ? (ledgerBalanceAccum + (entry.amount || 0)) : (ledgerBalanceAccum - (entry.amount || 0));
             }
 
-            ledgerBulkOps.push({
-                updateOne: {
-                    filter: { _id: entry._id },
-                    update: { $set: { runningBalance: ledgerBalanceAccum } }
-                }
-            });
+            if (Math.abs((entry.runningBalance || 0) - ledgerBalanceAccum) > 0.001) {
+                ledgerBulkOps.push({
+                    updateOne: {
+                        filter: { _id: entry._id },
+                        update: { $set: { runningBalance: ledgerBalanceAccum } }
+                    }
+                });
+            }
+
+            if (ledgerBulkOps.length >= 5000) {
+                await LedgerEntry.bulkWrite(ledgerBulkOps);
+                ledgerBulkOps.length = 0;
+            }
         }
 
         if (ledgerBulkOps.length > 0) {
@@ -1045,17 +1052,17 @@ const recalculateRunningBalances = async (bankAccountId) => {
         }
     }
 
-    // 3. Update BankAccount currentBalance to bankBalanceAccum
-    account.currentBalance = bankBalanceAccum;
+    // 3. Update BankAccount currentBalance to ledgerBalanceAccum if accountingCode exists
+    const finalBalance = account.accountingCode ? ledgerBalanceAccum : bankBalanceAccum;
+    account.currentBalance = finalBalance;
     await account.save();
 
     // 4. Sync AccountingCode balance
     if (account.accountingCode) {
-        const { syncAccountingCodeBalances } = require("./BankAccountService");
         await syncAccountingCodeBalances(account.accountingCode);
     }
 
-    return bankBalanceAccum;
+    return finalBalance;
 };
 
 const bulkDeleteTransactions = async (bankAccountId, transactionIds) => {

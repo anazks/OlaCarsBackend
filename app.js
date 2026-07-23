@@ -477,5 +477,5 @@ process.on("SIGINT", () => {
   console.log("Server shutting down...");
   process.exit(0);
 });
-// Trigger nodemon reload after fixing DB URI
+// Trigger nodemon reload after updating bank account ledger controller logic
 
