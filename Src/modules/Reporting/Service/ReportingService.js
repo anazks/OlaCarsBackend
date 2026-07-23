@@ -12,26 +12,26 @@ const WorkshopManager = require("../../WorkshopManager/Model/WorkshopManagerMode
 const normalizeCategory = (categoryStr) => {
     if (!categoryStr) return "";
     const cat = categoryStr.trim().toLowerCase();
-    
+
     // INCOME / REVENUE
     if (cat === 'income' || cat === 'revenue' || cat === 'sales' || cat.includes('income') || cat.includes('revenue')) {
         return 'INCOME';
     }
-    
+
     // EXPENSES
     if (cat === 'expense' || cat === 'expenses' || cat.includes('expense') || cat.includes('cost of goods sold') || cat.includes('cost_of_goods_sold')) {
         return 'EXPENSE';
     }
-    
+
     // ASSETS
     if (
-        cat.includes('asset') || 
-        cat.includes('receivable') || 
-        cat === 'cash' || 
-        cat === 'bank' || 
-        cat.includes('cash') || 
-        cat.includes('bank') || 
-        cat === 'input tax' || 
+        cat.includes('asset') ||
+        cat.includes('receivable') ||
+        cat === 'cash' ||
+        cat === 'bank' ||
+        cat.includes('cash') ||
+        cat.includes('bank') ||
+        cat === 'input tax' ||
         cat === 'input_tax'
     ) {
         // Exception: 'output tax' / 'output_tax' is liability, not asset
@@ -40,32 +40,32 @@ const normalizeCategory = (categoryStr) => {
         }
         return 'ASSET';
     }
-    
+
     // LIABILITY
     if (
-        cat.includes('liability') || 
-        cat.includes('liabilities') || 
-        cat.includes('liab') || 
-        cat.includes('payable') || 
-        cat.includes('output tax') || 
+        cat.includes('liability') ||
+        cat.includes('liabilities') ||
+        cat.includes('liab') ||
+        cat.includes('payable') ||
+        cat.includes('output tax') ||
         cat.includes('output_tax') ||
         cat.includes('tax') // fallback for other taxes
     ) {
         return 'LIABILITY';
     }
-    
+
     // EQUITY
     if (cat.includes('equity') || cat.includes('stock') || cat.includes('capital') || cat.includes('retained')) {
         return 'EQUITY';
     }
-    
+
     // Mapped fallbacks
     if (cat === 'income') return 'INCOME';
     if (cat === 'expense' || cat === 'expenses') return 'EXPENSE';
     if (cat === 'asset' || cat === 'assets') return 'ASSET';
     if (cat === 'liability' || cat === 'liabilities') return 'LIABILITY';
     if (cat === 'equity') return 'EQUITY';
-    
+
     return categoryStr.toUpperCase();
 };
 
@@ -73,11 +73,11 @@ const filterDuplicateLedgerEntries = (entries) => {
     const seen = new Set();
     return entries.filter(e => {
         if (!e.accountingCode) return false;
-        
+
         const dateStr = e.entryDate ? new Date(e.entryDate).toISOString().split('T')[0] : '';
         const cleanDesc = (e.description || '').replace(/\d+/g, "").toLowerCase().trim();
         const accountId = e.accountingCode._id ? e.accountingCode._id.toString() : e.accountingCode.toString();
-        
+
         const key = `${accountId}_${dateStr}_${e.type}_${e.amount || 0}_${cleanDesc}`;
         if (seen.has(key)) {
             return false;
@@ -89,7 +89,7 @@ const filterDuplicateLedgerEntries = (entries) => {
 
 exports.getPLReport = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
-    
+
     if (!startDate || !endDate) {
         return {
             income: [],
@@ -98,9 +98,9 @@ exports.getPLReport = async (filters) => {
             message: "Please select a date range to generate the Profit & Loss report."
         };
     }
-    
+
     const query = { isDeleted: { $ne: true } };
-    
+
     if (branch) {
         query.branch = branch;
     } else if (country) {
@@ -126,12 +126,12 @@ exports.getPLReport = async (filters) => {
                 _id: "$accountingCode",
                 debitSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$type", "DEBIT"] }, "$amount", 0 ]
+                        $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0]
                     }
                 },
                 creditSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$type", "CREDIT"] }, "$amount", 0 ]
+                        $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0]
                     }
                 }
             }
@@ -225,7 +225,7 @@ exports.getPLReport = async (filters) => {
 
 exports.getBalanceSheetReport = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
-    
+
     if (!endDate) {
         return {
             assets: [],
@@ -237,9 +237,9 @@ exports.getBalanceSheetReport = async (filters) => {
             message: "Please select an end date to generate the Balance Sheet."
         };
     }
-    
+
     const query = { isDeleted: { $ne: true } };
-    
+
     if (branch) {
         query.branch = branch;
     } else if (country) {
@@ -259,12 +259,12 @@ exports.getBalanceSheetReport = async (filters) => {
                 _id: "$accountingCode",
                 debitSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$type", "DEBIT"] }, "$amount", 0 ]
+                        $cond: [{ $eq: ["$type", "DEBIT"] }, "$amount", 0]
                     }
                 },
                 creditSum: {
                     $sum: {
-                        $cond: [ { $eq: ["$type", "CREDIT"] }, "$amount", 0 ]
+                        $cond: [{ $eq: ["$type", "CREDIT"] }, "$amount", 0]
                     }
                 }
             }
@@ -428,7 +428,7 @@ exports.getBalanceSheetReport = async (filters) => {
 
                 const bal = balanceMap[code._id.toString()] || { debit: 0, credit: 0 };
                 const closingBalance = bal.debit - bal.credit;
-                
+
                 report.assets[code.name] = {
                     amount: closingBalance,
                     category: code.category,
@@ -491,7 +491,7 @@ exports.getBalanceSheetReport = async (filters) => {
     const resolveLiabilityAccountType = (rawCategory, existingAccountType) => {
         const type = (existingAccountType || '').toLowerCase().trim();
         const cat = (rawCategory || '').toLowerCase().trim();
-        
+
         // Output Tax is grouped under Other Current Liability per user request
         if (type === 'output tax' || type === 'output_tax' || cat === 'output tax' || cat === 'output_tax') {
             return 'Other Current Liability';
@@ -502,12 +502,12 @@ exports.getBalanceSheetReport = async (filters) => {
         }
 
         if (
-            type.includes('non current') || 
-            type.includes('non-current') || 
-            type.includes('non_current') || 
-            cat.includes('non current') || 
-            cat.includes('non-current') || 
-            cat.includes('non_current') || 
+            type.includes('non current') ||
+            type.includes('non-current') ||
+            type.includes('non_current') ||
+            cat.includes('non current') ||
+            cat.includes('non-current') ||
+            cat.includes('non_current') ||
             cat === 'non current liab'
         ) {
             return 'Non Current Liability';
@@ -520,11 +520,11 @@ exports.getBalanceSheetReport = async (filters) => {
         if (type.includes('other liability') || type.includes('other liabilities') || cat.includes('other liability') || cat.includes('other liabilities')) {
             return 'Other Liability';
         }
-        
+
         if (existingAccountType && existingAccountType !== 'Liability' && existingAccountType !== 'LIABILITY') {
             return existingAccountType;
         }
-        
+
         return existingAccountType || 'Other Current Liability';
     };
 
@@ -548,10 +548,10 @@ exports.getBalanceSheetReport = async (filters) => {
     const resultsOfTheExercise = currentPeriodItem ? currentPeriodItem.amount : 0;
 
     // Filter database equity to exclude current period and any matching retained earnings/utilidades retenidas
-    const databaseEquity = rawEquityArray.filter(e => 
-        e.code !== "RE-CURRENT" && 
-        !e.name.includes("Current Period") && 
-        !e.name.toLowerCase().includes("retained earnings") && 
+    const databaseEquity = rawEquityArray.filter(e =>
+        e.code !== "RE-CURRENT" &&
+        !e.name.includes("Current Period") &&
+        !e.name.toLowerCase().includes("retained earnings") &&
         !e.name.toLowerCase().includes("utilidades retenidas")
     );
 
@@ -592,7 +592,7 @@ exports.getBalanceSheetReport = async (filters) => {
 
 exports.getDailyFinanceReport = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
-    
+
     const query = {};
     if (branch) {
         query.branch = branch;
@@ -639,7 +639,7 @@ exports.getDailyFinanceReport = async (filters) => {
 
 exports.getDriverPerformanceReport = async (filters) => {
     const { branch, country } = filters;
-    
+
     const query = { isDeleted: false };
     if (branch) {
         query.branch = branch;
@@ -654,8 +654,8 @@ exports.getDriverPerformanceReport = async (filters) => {
         .populate("branch", "name");
 
     return drivers.map(driver => {
-        const lastRent = driver.rentTracking && driver.rentTracking.length > 0 
-            ? driver.rentTracking[driver.rentTracking.length - 1] 
+        const lastRent = driver.rentTracking && driver.rentTracking.length > 0
+            ? driver.rentTracking[driver.rentTracking.length - 1]
             : null;
 
         return {
@@ -674,7 +674,7 @@ exports.getDriverPerformanceReport = async (filters) => {
 
 exports.getStaffPerformanceReport = async (filters) => {
     const { branch, country } = filters;
-    
+
     let branchIds = [];
     if (branch) {
         branchIds = [branch];
@@ -693,14 +693,14 @@ exports.getStaffPerformanceReport = async (filters) => {
     const opStaff = await OperationStaff.find(staffQuery).lean();
     const wsStaff = await WorkshopStaff.find(staffQuery).lean();
     const wsManagers = await WorkshopManager.find(staffQuery).lean();
-    
+
     const staff = [
         ...finStaff.map(s => ({ ...s, role: 'FINANCESTAFF' })),
         ...opStaff.map(s => ({ ...s, role: 'OPERATIONSTAFF' })),
         ...wsStaff.map(s => ({ ...s, role: 'WORKSHOPSTAFF' })),
         ...wsManagers.map(s => ({ ...s, role: 'WORKSHOPMANAGER' }))
     ];
-    
+
     const staffIds = staff.map(s => s._id);
 
     const tasks = await Task.find({ assignedTo: { $in: staffIds } });

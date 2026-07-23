@@ -45,9 +45,9 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
 
     // Header section
     doc.fillColor(primaryColor)
-       .fontSize(22)
-       .font("Helvetica-Bold")
-       .text("OLA CARS", leftMargin, 50);
+        .fontSize(22)
+        .font("Helvetica-Bold")
+        .text("OLA CARS", leftMargin, 50);
 
     // Logo image integration
     try {
@@ -58,14 +58,14 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
     }
 
     doc.fontSize(14)
-       .fillColor(primaryColor)
-       .font("Helvetica-Bold")
-       .text(reportTitle, 250, 58, { align: "right", width: 295 });
+        .fillColor(primaryColor)
+        .font("Helvetica-Bold")
+        .text(reportTitle, 250, 58, { align: "right", width: 295 });
 
     doc.moveTo(leftMargin, 95)
-       .lineTo(rightMargin, 95)
-       .strokeColor(borderMain)
-       .stroke();
+        .lineTo(rightMargin, 95)
+        .strokeColor(borderMain)
+        .stroke();
 
     // Metadata details
     const metaY = 110;
@@ -75,20 +75,20 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
     doc.fontSize(9).fillColor(primaryColor).font("Helvetica");
     const generatedDateStr = formatDate(new Date());
     doc.text(`Generated Date: ${generatedDateStr}`, leftMargin, metaY + 16)
-       .text(`Currency: USD`, leftMargin, metaY + 30);
+        .text(`Currency: USD`, leftMargin, metaY + 30);
 
     const branchName = meta.branchName || "Consolidated (All Branches)";
-    const dateRangeStr = (meta.startDate || meta.endDate) 
+    const dateRangeStr = (meta.startDate || meta.endDate)
         ? `${meta.startDate ? formatDate(meta.startDate) : "Beginning"} to ${meta.endDate ? formatDate(meta.endDate) : "Present"}`
         : "All Time";
-    
+
     doc.text(`Branch: ${branchName}`, 300, metaY + 16)
-       .text(`Period: ${dateRangeStr}`, 300, metaY + 30);
+        .text(`Period: ${dateRangeStr}`, 300, metaY + 30);
 
     doc.moveTo(leftMargin, 160)
-       .lineTo(rightMargin, 160)
-       .strokeColor(borderMain)
-       .stroke();
+        .lineTo(rightMargin, 160)
+        .strokeColor(borderMain)
+        .stroke();
 
     let currentY = 180;
 
@@ -96,23 +96,23 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         if (currentY + neededHeight > 730) {
             doc.addPage();
             currentY = 50;
-            
+
             // Draw running header on new pages
             doc.fontSize(8)
-               .fillColor(secondaryColor)
-               .font("Helvetica-Bold")
-               .text(`OLA CARS  |  ${reportTitle.toUpperCase()} (CONTINUED)`, leftMargin, currentY)
-               .fontSize(8)
-               .text(`Period: ${dateRangeStr}`, rightMargin - 200, currentY, { align: "right", width: 200 });
-            
+                .fillColor(secondaryColor)
+                .font("Helvetica-Bold")
+                .text(`OLA CARS  |  ${reportTitle.toUpperCase()} (CONTINUED)`, leftMargin, currentY)
+                .fontSize(8)
+                .text(`Period: ${dateRangeStr}`, rightMargin - 200, currentY, { align: "right", width: 200 });
+
             doc.moveTo(leftMargin, currentY + 12)
-               .lineTo(rightMargin, currentY + 12)
-               .strokeColor(borderMain)
-               .lineWidth(0.5)
-               .stroke();
-            
+                .lineTo(rightMargin, currentY + 12)
+                .strokeColor(borderMain)
+                .lineWidth(0.5)
+                .stroke();
+
             currentY += 25;
-            
+
             if (sectionHeaderFn) {
                 sectionHeaderFn();
             }
@@ -132,12 +132,12 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
             doc.text("Category", leftMargin, currentY);
             doc.text("Amount ($)", rightMargin - 150, currentY, { width: 150, align: "right" });
             currentY += 14;
-            
+
             doc.moveTo(leftMargin, currentY)
-               .lineTo(rightMargin, currentY)
-               .strokeColor(primaryColor)
-               .lineWidth(1)
-               .stroke();
+                .lineTo(rightMargin, currentY)
+                .strokeColor(primaryColor)
+                .lineWidth(1)
+                .stroke();
             currentY += 8;
         };
         printIncomeHeader();
@@ -169,10 +169,10 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         // Income Total
         ensureSpace(20);
         doc.moveTo(leftMargin, currentY - 4)
-           .lineTo(rightMargin, currentY - 4)
-           .strokeColor(borderMain)
-           .lineWidth(1)
-           .stroke();
+            .lineTo(rightMargin, currentY - 4)
+            .strokeColor(borderMain)
+            .lineWidth(1)
+            .stroke();
 
         doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Income", leftMargin, currentY);
         doc.text(`$${formatCurrency(totalIncome)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
@@ -191,10 +191,10 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
             currentY += 14;
 
             doc.moveTo(leftMargin, currentY)
-               .lineTo(rightMargin, currentY)
-               .strokeColor(primaryColor)
-               .lineWidth(1)
-               .stroke();
+                .lineTo(rightMargin, currentY)
+                .strokeColor(primaryColor)
+                .lineWidth(1)
+                .stroke();
             currentY += 8;
         };
         printExpensesHeader();
@@ -226,10 +226,10 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         // Expense Total
         ensureSpace(20);
         doc.moveTo(leftMargin, currentY - 4)
-           .lineTo(rightMargin, currentY - 4)
-           .strokeColor(borderMain)
-           .lineWidth(1)
-           .stroke();
+            .lineTo(rightMargin, currentY - 4)
+            .strokeColor(borderMain)
+            .lineWidth(1)
+            .stroke();
 
         doc.fillColor(primaryColor).font("Helvetica-Bold").text("Total Expenses", leftMargin, currentY);
         doc.text(`$${formatCurrency(totalExpenses)}`, rightMargin - 150, currentY, { width: 150, align: "right" });
@@ -241,22 +241,22 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         const isNetLoss = netProfit < 0;
 
         doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(borderMain)
-           .lineWidth(1)
-           .stroke();
+            .lineTo(rightMargin, currentY)
+            .strokeColor(borderMain)
+            .lineWidth(1)
+            .stroke();
         currentY += 12;
 
         doc.fillColor(isNetLoss ? "#EF4444" : accentColor)
-           .rect(leftMargin, currentY, printableWidth, 45)
-           .fill();
+            .rect(leftMargin, currentY, printableWidth, 45)
+            .fill();
 
         doc.fillColor("#FFFFFF")
-           .fontSize(11)
-           .font("Helvetica-Bold")
-           .text(isNetLoss ? "NET LOSS" : "NET PROFIT", leftMargin + 15, currentY + 16)
-           .fontSize(16)
-           .text(`$${formatCurrency(netProfit)}`, rightMargin - 200, currentY + 14, { width: 185, align: "right" });
+            .fontSize(11)
+            .font("Helvetica-Bold")
+            .text(isNetLoss ? "NET LOSS" : "NET PROFIT", leftMargin + 15, currentY + 16)
+            .fontSize(16)
+            .text(`$${formatCurrency(netProfit)}`, rightMargin - 200, currentY + 14, { width: 185, align: "right" });
 
     } else {
         // --- Balance Sheet layout (grouped by account type) ---
@@ -289,12 +289,12 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         const renderGroupHeader = (title) => {
             ensureSpace(28);
             doc.fontSize(8).font("Helvetica-Bold").fillColor(secondaryColor)
-               .text(title.toUpperCase(), leftMargin + 4, currentY);
+                .text(title.toUpperCase(), leftMargin + 4, currentY);
             doc.moveTo(leftMargin + 4, currentY + 11)
-               .lineTo(rightMargin, currentY + 11)
-               .strokeColor(borderMain)
-               .lineWidth(0.5)
-               .stroke();
+                .lineTo(rightMargin, currentY + 11)
+                .strokeColor(borderMain)
+                .lineWidth(0.5)
+                .stroke();
             currentY += 16;
 
             // Column headers
@@ -313,11 +313,11 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
                     doc.fillColor(stripeBg).rect(leftMargin + 4, currentY - 1, printableWidth - 4, 14).fill();
                 }
                 doc.fontSize(8.5).font("Helvetica").fillColor(primaryColor)
-                   .text(item.name, leftMargin + 10, currentY, { width: 240, ellipsis: true });
+                    .text(item.name, leftMargin + 10, currentY, { width: 240, ellipsis: true });
                 doc.fillColor(secondaryColor)
-                   .text(item.code || "—", leftMargin + 260, currentY);
+                    .text(item.code || "—", leftMargin + 260, currentY);
                 doc.fillColor(primaryColor)
-                   .text(`$${formatCurrency(item.amount)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
+                    .text(`$${formatCurrency(item.amount)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
                 currentY += 14;
                 isStripe = !isStripe;
             });
@@ -326,15 +326,15 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         const renderSubtotalRow = (label, value, color = secondaryColor, isBold = false) => {
             ensureSpace(18);
             doc.moveTo(leftMargin + 4, currentY)
-               .lineTo(rightMargin, currentY)
-               .strokeColor(borderMain)
-               .lineWidth(0.6)
-               .stroke();
+                .lineTo(rightMargin, currentY)
+                .strokeColor(borderMain)
+                .lineWidth(0.6)
+                .stroke();
             currentY += 3;
             doc.fontSize(8.5).font(isBold ? "Helvetica-Bold" : "Helvetica-Bold").fillColor(color)
-               .text(label, leftMargin + 10, currentY);
+                .text(label, leftMargin + 10, currentY);
             doc.fillColor(color)
-               .text(`$${formatCurrency(value)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
+                .text(`$${formatCurrency(value)}`, rightMargin - 130, currentY, { width: 130, align: "right" });
             currentY += 14;
         };
 
@@ -354,13 +354,13 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
             ensureSpace(30);
             doc.rect(leftMargin, currentY - 2, printableWidth, 20).fill(sectionColor);
             doc.fontSize(10.5).font("Helvetica-Bold").fillColor("#FFFFFF")
-               .text(sectionTitle, leftMargin + 8, currentY + 3);
+                .text(sectionTitle, leftMargin + 8, currentY + 3);
             currentY += 24;
 
             if (!items || items.length === 0) {
                 ensureSpace(20);
                 doc.fontSize(8.5).font("Helvetica").fillColor(secondaryColor)
-                   .text(`No ${sectionTitle.toLowerCase()} recorded.`, leftMargin + 10, currentY);
+                    .text(`No ${sectionTitle.toLowerCase()} recorded.`, leftMargin + 10, currentY);
                 currentY += 16;
             } else {
                 const groups = groupByAccountType(items);
@@ -379,17 +379,17 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
 
             ensureSpace(26);
             doc.moveTo(leftMargin, currentY)
-               .lineTo(rightMargin, currentY)
-               .strokeColor(sectionColor)
-               .lineWidth(1)
-               .stroke();
+                .lineTo(rightMargin, currentY)
+                .strokeColor(sectionColor)
+                .lineWidth(1)
+                .stroke();
             currentY += 4;
 
             doc.rect(leftMargin, currentY, printableWidth, 20).fill("#F9FAFB");
             doc.fontSize(9).font("Helvetica-Bold").fillColor(primaryColor)
-               .text(totalLabel.toUpperCase(), leftMargin + 8, currentY + 5);
+                .text(totalLabel.toUpperCase(), leftMargin + 8, currentY + 5);
             doc.fontSize(9.5).font("Helvetica-Bold").fillColor(sectionColor)
-               .text(`$${formatCurrency(totalValue)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
+                .text(`$${formatCurrency(totalValue)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
             currentY += 30;
         };
 
@@ -397,7 +397,7 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         ensureSpace(30);
         doc.rect(leftMargin, currentY - 2, printableWidth, 20).fill(accentColor);
         doc.fontSize(10.5).font("Helvetica-Bold").fillColor("#FFFFFF")
-           .text("ASSETS", leftMargin + 8, currentY + 3);
+            .text("ASSETS", leftMargin + 8, currentY + 3);
         currentY += 24;
 
         const assetsList = reportData.assets || [];
@@ -423,7 +423,7 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         // Current Assets Header
         ensureSpace(20);
         doc.fontSize(9.5).font("Helvetica-Bold").fillColor(primaryColor)
-           .text("Current Assets", leftMargin + 2, currentY);
+            .text("Current Assets", leftMargin + 2, currentY);
         currentY += 14;
 
         // Cash Group
@@ -479,7 +479,7 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         // Non Current Assets Header
         ensureSpace(20);
         doc.fontSize(9.5).font("Helvetica-Bold").fillColor(primaryColor)
-           .text("Non Current Assets", leftMargin + 2, currentY);
+            .text("Non Current Assets", leftMargin + 2, currentY);
         currentY += 14;
 
         // Fixed Assets Group
@@ -506,17 +506,17 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         // Grand Total ASSETS Bar
         ensureSpace(26);
         doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(accentColor)
-           .lineWidth(1.2)
-           .stroke();
+            .lineTo(rightMargin, currentY)
+            .strokeColor(accentColor)
+            .lineWidth(1.2)
+            .stroke();
         currentY += 4;
 
         doc.rect(leftMargin, currentY, printableWidth, 20).fill("#F9FAFB");
         doc.fontSize(9).font("Helvetica-Bold").fillColor(primaryColor)
-           .text("TOTAL ASSETS", leftMargin + 8, currentY + 5);
+            .text("TOTAL ASSETS", leftMargin + 8, currentY + 5);
         doc.fontSize(9.5).font("Helvetica-Bold").fillColor(accentColor)
-           .text(`$${formatCurrency(reportData.assetsTotal || 0)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
+            .text(`$${formatCurrency(reportData.assetsTotal || 0)}`, rightMargin - 140, currentY + 4, { width: 140, align: "right" });
         currentY += 30;
 
         // ── LIABILITIES RENDERING ─────────────────────────────────────────────
@@ -543,24 +543,24 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
         const liabilitiesPlusEquityVal = (reportData.liabilitiesTotal || 0) + (reportData.equityTotal || 0);
 
         doc.moveTo(leftMargin, currentY)
-           .lineTo(rightMargin, currentY)
-           .strokeColor(borderMain)
-           .lineWidth(1)
-           .stroke();
+            .lineTo(rightMargin, currentY)
+            .strokeColor(borderMain)
+            .lineWidth(1)
+            .stroke();
         currentY += 10;
 
         doc.fillColor("#111827")
-           .rect(leftMargin, currentY, printableWidth, 36)
-           .fill();
+            .rect(leftMargin, currentY, printableWidth, 36)
+            .fill();
 
         doc.fillColor("#FFFFFF")
-           .fontSize(9)
-           .font("Helvetica-Bold")
-           .text("TOTAL FOR LIABILITIES + EQUITY", leftMargin + 15, currentY + 12);
+            .fontSize(9)
+            .font("Helvetica-Bold")
+            .text("TOTAL FOR LIABILITIES + EQUITY", leftMargin + 15, currentY + 12);
 
         doc.fontSize(11)
-           .font("Helvetica-Bold")
-           .text(`$${formatCurrency(liabilitiesPlusEquityVal)}`, rightMargin - 165, currentY + 10, { width: 165, align: "right" });
+            .font("Helvetica-Bold")
+            .text(`$${formatCurrency(liabilitiesPlusEquityVal)}`, rightMargin - 165, currentY + 10, { width: 165, align: "right" });
 
         currentY += 36;
     } // end Balance Sheet else block
@@ -568,18 +568,18 @@ exports.generateReportPdf = (reportType, reportData, meta, res) => {
     // Footnotes / Stamp
     const footerY = 740;
     doc.moveTo(leftMargin, footerY - 10)
-       .lineTo(rightMargin, footerY - 10)
-       .strokeColor(borderMain)
-       .lineWidth(0.5)
-       .stroke();
+        .lineTo(rightMargin, footerY - 10)
+        .strokeColor(borderMain)
+        .lineWidth(0.5)
+        .stroke();
 
     doc.fontSize(7.5)
-       .fillColor(secondaryColor)
-       .font("Helvetica")
-       .text("This report is system-generated and reflects the verified financial ledgers recorded in the central ERP system.", leftMargin, footerY, { width: 300 });
+        .fillColor(secondaryColor)
+        .font("Helvetica")
+        .text("This report is system-generated and reflects the verified financial ledgers recorded in the central ERP system.", leftMargin, footerY, { width: 300 });
 
     doc.fontSize(7.5)
-       .text("Ola Cars Logistics Group. All rights reserved.", rightMargin - 200, footerY, { width: 200, align: "right" });
+        .text("Ola Cars Logistics Group. All rights reserved.", rightMargin - 200, footerY, { width: 200, align: "right" });
 
     doc.end();
 };

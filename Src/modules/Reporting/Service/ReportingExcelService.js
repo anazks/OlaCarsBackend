@@ -159,7 +159,7 @@ exports.generateExcelReport = async (reportType, filters) => {
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
-    
+
     // Auto-fit column widths
     if (data.length > 0) {
         const keys = Object.keys(data[0]);
