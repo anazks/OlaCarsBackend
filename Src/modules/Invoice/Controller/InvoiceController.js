@@ -226,6 +226,31 @@ exports.downloadInvoicePdf = async (req, res) => {
     }
 };
 
+exports.downloadInvoiceRegistryPdf = async (req, res) => {
+    try {
+        const queryParams = { ...req.query, limit: 1000, ignoreDefaultDates: true };
+        const { startDate, endDate } = queryParams;
+        const result = (startDate || endDate)
+            ? await InvoiceService.getDateWise(queryParams)
+            : await InvoiceService.getRegistry(queryParams);
+
+        const invoices = result.data || [];
+        const metrics = result.metrics || {};
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="Invoice_Registry_Report_${new Date().toISOString().split('T')[0]}.pdf"`
+        );
+
+        const InvoiceRegistryPdfService = require("../Service/InvoiceRegistryPdfService");
+        InvoiceRegistryPdfService.generateInvoiceRegistryPdf(invoices, metrics, queryParams, res);
+    } catch (error) {
+        console.error("Error in downloadInvoiceRegistryPdf:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 exports.getReconfigProgress = async (req, res) => {
     try {
         const DriverService = require("../../Driver/Service/DriverService");

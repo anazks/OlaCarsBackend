@@ -8,6 +8,7 @@ const upload = require("../../../utils/multerConfig");
 router.use(authenticate);
 
 router.get("/registry", InvoiceController.getRegistryInvoices);
+router.get("/registry/pdf", InvoiceController.downloadInvoiceRegistryPdf);
 router.get("/driver/:driverId/pending", InvoiceController.getPendingInvoicesByDriver);
 router.get("/count", InvoiceController.getInvoicesCount);
 router.get("/date-wise", InvoiceController.getDateWiseInvoices);
