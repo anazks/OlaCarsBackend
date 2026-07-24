@@ -10,7 +10,7 @@ exports.getDiag = async (req, res) => {
     try {
         const LedgerEntry = mongoose.model("LedgerEntry");
         const accountCodeId = '6a280dab4f5923cd64ec316d';
-        
+
         // Group all entries by formatted date to see exactly where they landed
         const dateGroups = await LedgerEntry.aggregate([
             {
@@ -44,7 +44,7 @@ exports.getDiag = async (req, res) => {
                 dateGroups
             }, null, 2)
         );
-        
+
         res.status(200).json({
             status: "success",
             totalCount: dateGroups.reduce((acc, g) => acc + g.count, 0),

@@ -56,7 +56,7 @@ const invoiceSchema = new mongoose.Schema({
     },
     weekNumber: {
         type: Number,
-        required: function() { return this.invoiceType === 'RENTAL'; },
+        required: function () { return this.invoiceType === 'RENTAL'; },
     },
     weekLabel: {
         type: String
@@ -145,7 +145,7 @@ const invoiceSchema = new mongoose.Schema({
     mailSentRecovery: { type: Boolean, default: false },
 }, { timestamps: true });
 
-invoiceSchema.index({ customer: 1, weekNumber: 1 }, { 
+invoiceSchema.index({ customer: 1, weekNumber: 1 }, {
     unique: true,
     partialFilterExpression: { invoiceType: 'RENTAL' }
 });

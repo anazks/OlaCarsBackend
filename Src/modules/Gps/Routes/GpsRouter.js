@@ -112,6 +112,7 @@ router.get("/track", authenticate, authorize(...ALLOWED_ROLES), GpsController.ge
 router.get("/notifications", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsNotifications);
 router.post("/webhook", GpsController.receiveGpsNotification);
 router.get("/obd", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsObdData);
+router.get("/fleet-summary-report", authenticate, authorize(...ALLOWED_ROLES), GpsController.getFleetSummaryReport);
 
 module.exports = router;
 

@@ -1,7 +1,7 @@
 {
-  "timestamp": "2026-07-18T06:21:34.009Z",
+  "timestamp": "2026-07-23T05:18:26.859Z",
   "accountCodeId": "6a280dab4f5923cd64ec316d",
-  "totalCount": 31380,
+  "totalCount": 34000,
   "dateGroups": [
     {
       "_id": "2023-12-01",
@@ -646,7 +646,41 @@
       "totalCredit": 1280
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-11",
+=======
+      "_id": "2026-02-24",
+      "count": 93,
+      "totalDebit": 280.59999999999997,
+      "totalCredit": 10069.35
+    },
+    {
+      "_id": "2026-02-25",
+      "count": 57,
+      "totalDebit": 786.32,
+      "totalCredit": 5095.73
+    },
+    {
+      "_id": "2026-02-26",
+      "count": 885,
+      "totalDebit": 107478,
+      "totalCredit": 59850.86
+    },
+    {
+      "_id": "2026-02-27",
+      "count": 135,
+      "totalDebit": 338.53999999999996,
+      "totalCredit": 23186.03
+    },
+    {
+      "_id": "2026-02-28",
+      "count": 60,
+      "totalDebit": 937.7,
+      "totalCredit": 8389.32
+    },
+    {
+      "_id": "2026-03-01",
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "count": 6,
       "totalDebit": 645.6,
       "totalCredit": 10
@@ -676,9 +710,27 @@
       "totalCredit": 3130.38
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-17",
       "count": 12,
       "totalDebit": 112.24,
+=======
+      "_id": "2026-03-06",
+      "count": 132,
+      "totalDebit": 379.26,
+      "totalCredit": 19528.72
+    },
+    {
+      "_id": "2026-03-07",
+      "count": 97,
+      "totalDebit": 1572.52,
+      "totalCredit": 8506.78
+    },
+    {
+      "_id": "2026-03-08",
+      "count": 6,
+      "totalDebit": 0,
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "totalCredit": 770
     },
     {
@@ -700,6 +752,7 @@
       "totalCredit": 27579.59
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-21",
       "count": 4,
       "totalDebit": 307.7,
@@ -713,21 +766,330 @@
     },
     {
       "_id": "2024-12-24",
+=======
+      "_id": "2026-03-12",
+      "count": 875,
+      "totalDebit": 118101.38,
+      "totalCredit": 60074.49
+    },
+    {
+      "_id": "2026-03-13",
+      "count": 149,
+      "totalDebit": 1238.43,
+      "totalCredit": 22081.55
+    },
+    {
+      "_id": "2026-03-14",
+      "count": 85,
+      "totalDebit": 1168.74,
+      "totalCredit": 7358.43
+    },
+    {
+      "_id": "2026-03-15",
+      "count": 8,
+      "totalDebit": 0,
+      "totalCredit": 670
+    },
+    {
+      "_id": "2026-03-16",
+      "count": 82,
+      "totalDebit": 1241.77,
+      "totalCredit": 7160.1900000000005
+    },
+    {
+      "_id": "2026-03-17",
+      "count": 116,
+      "totalDebit": 363.83000000000004,
+      "totalCredit": 12750.92
+    },
+    {
+      "_id": "2026-03-18",
+      "count": 38,
+      "totalDebit": 916.98,
+      "totalCredit": 3406.21
+    },
+    {
+      "_id": "2026-03-19",
+      "count": 925,
+      "totalDebit": 121377.73,
+      "totalCredit": 67191.73
+    },
+    {
+      "_id": "2026-03-20",
+      "count": 135,
+      "totalDebit": 479.74,
+      "totalCredit": 23566.07
+    },
+    {
+      "_id": "2026-03-21",
+      "count": 55,
+      "totalDebit": 1497.24,
+      "totalCredit": 5290.05
+    },
+    {
+      "_id": "2026-03-22",
+      "count": 21,
+      "totalDebit": 0,
+      "totalCredit": 2034.3899999999999
+    },
+    {
+      "_id": "2026-03-23",
+      "count": 84,
+      "totalDebit": 817.23,
+      "totalCredit": 9020.19
+    },
+    {
+      "_id": "2026-03-24",
+      "count": 158,
+      "totalDebit": 864.5600000000001,
+      "totalCredit": 13262.07
+    },
+    {
+      "_id": "2026-03-25",
+      "count": 66,
+      "totalDebit": 2185.95,
+      "totalCredit": 5865.23
+    },
+    {
+      "_id": "2026-03-26",
+      "count": 974,
+      "totalDebit": 125772.43,
+      "totalCredit": 71138.07
+    },
+    {
+      "_id": "2026-03-27",
+      "count": 160,
+      "totalDebit": 1479.62,
+      "totalCredit": 20463.85
+    },
+    {
+      "_id": "2026-03-28",
+      "count": 121,
+      "totalDebit": 1575.2,
+      "totalCredit": 15524.55
+    },
+    {
+      "_id": "2026-03-29",
+      "count": 12,
+      "totalDebit": 0,
+      "totalCredit": 1531.05
+    },
+    {
+      "_id": "2026-03-30",
+      "count": 110,
+      "totalDebit": 1245.83,
+      "totalCredit": 13207.14
+    },
+    {
+      "_id": "2026-03-31",
+      "count": 178,
+      "totalDebit": 668.73,
+      "totalCredit": 15368.54
+    },
+    {
+      "_id": "2026-04-01",
+      "count": 92,
+      "totalDebit": 966.28,
+      "totalCredit": 7847.64
+    },
+    {
+      "_id": "2026-04-02",
+      "count": 1014,
+      "totalDebit": 132802.16,
+      "totalCredit": 69680.55
+    },
+    {
+      "_id": "2026-04-03",
+      "count": 42,
+      "totalDebit": 0,
+      "totalCredit": 6873.65
+    },
+    {
+      "_id": "2026-04-04",
+      "count": 58,
+      "totalDebit": 1208.93,
+      "totalCredit": 6026.71
+    },
+    {
+      "_id": "2026-04-05",
+      "count": 16,
+      "totalDebit": 0,
+      "totalCredit": 5775
+    },
+    {
+      "_id": "2026-04-06",
+      "count": 107,
+      "totalDebit": 2081.39,
+      "totalCredit": 13872.09
+    },
+    {
+      "_id": "2026-04-07",
+      "count": 192,
+      "totalDebit": 1314,
+      "totalCredit": 24153.09
+    },
+    {
+      "_id": "2026-04-08",
+      "count": 94,
+      "totalDebit": 1475.0900000000001,
+      "totalCredit": 13032.43
+    },
+    {
+      "_id": "2026-04-09",
+      "count": 927,
+      "totalDebit": 128447.03,
+      "totalCredit": 63827.49
+    },
+    {
+      "_id": "2026-04-10",
+      "count": 126,
+      "totalDebit": 289.65999999999997,
+      "totalCredit": 26152.059999999998
+    },
+    {
+      "_id": "2026-04-11",
+      "count": 49,
+      "totalDebit": 1333.41,
+      "totalCredit": 4410.89
+    },
+    {
+      "_id": "2026-04-12",
+      "count": 9,
+      "totalDebit": 0,
+      "totalCredit": 1160
+    },
+    {
+      "_id": "2026-04-13",
+      "count": 68,
+      "totalDebit": 1438.22,
+      "totalCredit": 6606.34
+    },
+    {
+      "_id": "2026-04-14",
+      "count": 150,
+      "totalDebit": 1252.79,
+      "totalCredit": 20588.67
+    },
+    {
+      "_id": "2026-04-15",
+      "count": 95,
+      "totalDebit": 1675.56,
+      "totalCredit": 6691.06
+    },
+    {
+      "_id": "2026-04-16",
+      "count": 999,
+      "totalDebit": 136237.81,
+      "totalCredit": 68371.59
+    },
+    {
+      "_id": "2026-04-17",
+      "count": 143,
+      "totalDebit": 1046.95,
+      "totalCredit": 19698.14
+    },
+    {
+      "_id": "2026-04-18",
+      "count": 59,
+      "totalDebit": 846.58,
+      "totalCredit": 10261.9
+    },
+    {
+      "_id": "2026-04-19",
+      "count": 10,
+      "totalDebit": 0,
+      "totalCredit": 1525
+    },
+    {
+      "_id": "2026-04-20",
+      "count": 71,
+      "totalDebit": 1579.66,
+      "totalCredit": 6431
+    },
+    {
+      "_id": "2026-04-21",
+      "count": 190,
+      "totalDebit": 1986.74,
+      "totalCredit": 21536.47
+    },
+    {
+      "_id": "2026-04-22",
+      "count": 93,
+      "totalDebit": 1017.21,
+      "totalCredit": 8198.37
+    },
+    {
+      "_id": "2026-04-23",
+      "count": 945,
+      "totalDebit": 130602.84,
+      "totalCredit": 65093.12
+    },
+    {
+      "_id": "2026-04-24",
+      "count": 159,
+      "totalDebit": 1172.57,
+      "totalCredit": 23398.69
+    },
+    {
+      "_id": "2026-04-25",
+      "count": 105,
+      "totalDebit": 1560.8,
+      "totalCredit": 18954.6
+    },
+    {
+      "_id": "2026-04-26",
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "count": 15,
       "totalDebit": 0,
       "totalCredit": 1450
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-25",
       "count": 4,
+=======
+      "_id": "2026-04-27",
+      "count": 109,
+      "totalDebit": 1691.8600000000001,
+      "totalCredit": 10452.78
+    },
+    {
+      "_id": "2026-04-28",
+      "count": 194,
+      "totalDebit": 1321.04,
+      "totalCredit": 20713.43
+    },
+    {
+      "_id": "2026-04-29",
+      "count": 109,
+      "totalDebit": 710.22,
+      "totalCredit": 14044.06
+    },
+    {
+      "_id": "2026-04-30",
+      "count": 1014,
+      "totalDebit": 128979.33,
+      "totalCredit": 66895.71
+    },
+    {
+      "_id": "2026-05-01",
+      "count": 57,
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "totalDebit": 0,
       "totalCredit": 480
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-26",
       "count": 31,
       "totalDebit": 1424.16,
       "totalCredit": 2001
+=======
+      "_id": "2026-05-02",
+      "count": 79,
+      "totalDebit": 1206.51,
+      "totalCredit": 13625.54
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2024-12-27",
@@ -736,7 +1098,47 @@
       "totalCredit": 29066.33
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-28",
+=======
+      "_id": "2026-05-04",
+      "count": 101,
+      "totalDebit": 1865.3000000000002,
+      "totalCredit": 11758.46
+    },
+    {
+      "_id": "2026-05-05",
+      "count": 242,
+      "totalDebit": 2203.31,
+      "totalCredit": 29854.07
+    },
+    {
+      "_id": "2026-05-06",
+      "count": 113,
+      "totalDebit": 1987.1200000000001,
+      "totalCredit": 14096
+    },
+    {
+      "_id": "2026-05-07",
+      "count": 912,
+      "totalDebit": 125067.6,
+      "totalCredit": 57305.54
+    },
+    {
+      "_id": "2026-05-08",
+      "count": 135,
+      "totalDebit": 1582.94,
+      "totalCredit": 19282.35
+    },
+    {
+      "_id": "2026-05-09",
+      "count": 47,
+      "totalDebit": 1731.67,
+      "totalCredit": 3066.02
+    },
+    {
+      "_id": "2026-05-10",
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "count": 9,
       "totalDebit": 168.35999999999999,
       "totalCredit": 550
@@ -748,6 +1150,7 @@
       "totalCredit": 10
     },
     {
+<<<<<<< HEAD
       "_id": "2024-12-30",
       "count": 6,
       "totalDebit": 334.8,
@@ -764,6 +1167,102 @@
       "count": 3,
       "totalDebit": 543,
       "totalCredit": 0
+=======
+      "_id": "2026-05-11",
+      "count": 103,
+      "totalDebit": 2090.37,
+      "totalCredit": 13538.86
+    },
+    {
+      "_id": "2026-05-12",
+      "count": 159,
+      "totalDebit": 1546.9,
+      "totalCredit": 23043.13
+    },
+    {
+      "_id": "2026-05-13",
+      "count": 117,
+      "totalDebit": 1662.2,
+      "totalCredit": 19100.489999999998
+    },
+    {
+      "_id": "2026-05-14",
+      "count": 884,
+      "totalDebit": 124368.02,
+      "totalCredit": 56695.93
+    },
+    {
+      "_id": "2026-05-15",
+      "count": 136,
+      "totalDebit": 1143.19,
+      "totalCredit": 20132.06
+    },
+    {
+      "_id": "2026-05-16",
+      "count": 52,
+      "totalDebit": 1733.75,
+      "totalCredit": 5136
+    },
+    {
+      "_id": "2026-05-17",
+      "count": 11,
+      "totalDebit": 0,
+      "totalCredit": 886.36
+    },
+    {
+      "_id": "2026-05-18",
+      "count": 87,
+      "totalDebit": 2431.41,
+      "totalCredit": 6936.65
+    },
+    {
+      "_id": "2026-05-19",
+      "count": 195,
+      "totalDebit": 2113.29,
+      "totalCredit": 24060.12
+    },
+    {
+      "_id": "2026-05-20",
+      "count": 121,
+      "totalDebit": 1241.13,
+      "totalCredit": 12293.84
+    },
+    {
+      "_id": "2026-05-21",
+      "count": 965,
+      "totalDebit": 128925.79,
+      "totalCredit": 65454.64
+    },
+    {
+      "_id": "2026-05-22",
+      "count": 125,
+      "totalDebit": 2282.94,
+      "totalCredit": 14740.87
+    },
+    {
+      "_id": "2026-05-23",
+      "count": 64,
+      "totalDebit": 1602.68,
+      "totalCredit": 5999.9
+    },
+    {
+      "_id": "2026-05-24",
+      "count": 8,
+      "totalDebit": 0,
+      "totalCredit": 940
+    },
+    {
+      "_id": "2026-05-25",
+      "count": 94,
+      "totalDebit": 2373.4700000000003,
+      "totalCredit": 7329.64
+    },
+    {
+      "_id": "2026-05-26",
+      "count": 262,
+      "totalDebit": 3647.44,
+      "totalCredit": 30029.72
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2025-01-02",
@@ -772,6 +1271,7 @@
       "totalCredit": 801.95
     },
     {
+<<<<<<< HEAD
       "_id": "2025-01-03",
       "count": 344,
       "totalDebit": 42729.5,
@@ -788,6 +1288,24 @@
       "count": 1,
       "totalDebit": 0,
       "totalCredit": 155
+=======
+      "_id": "2026-05-28",
+      "count": 972,
+      "totalDebit": 125220.73,
+      "totalCredit": 61638.57
+    },
+    {
+      "_id": "2026-05-29",
+      "count": 148,
+      "totalDebit": 2138.64,
+      "totalCredit": 17289.72
+    },
+    {
+      "_id": "2026-05-30",
+      "count": 86,
+      "totalDebit": 1542.8400000000001,
+      "totalCredit": 9454.95
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2025-01-06",
@@ -916,6 +1434,7 @@
       "totalCredit": 5755
     },
     {
+<<<<<<< HEAD
       "_id": "2025-01-29",
       "count": 6,
       "totalDebit": 363.82,
@@ -932,6 +1451,24 @@
       "count": 308,
       "totalDebit": 30352.46,
       "totalCredit": 25210
+=======
+      "_id": "2026-06-01",
+      "count": 96,
+      "totalDebit": 2278.52,
+      "totalCredit": 9611.31
+    },
+    {
+      "_id": "2026-06-02",
+      "count": 209,
+      "totalDebit": 2444.76,
+      "totalCredit": 24572.66
+    },
+    {
+      "_id": "2026-06-03",
+      "count": 125,
+      "totalDebit": 1531.6,
+      "totalCredit": 14068.81
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2025-02-01",
@@ -940,12 +1477,30 @@
       "totalCredit": 122.47
     },
     {
+<<<<<<< HEAD
       "_id": "2025-02-02",
       "count": 2,
+=======
+      "_id": "2026-06-05",
+      "count": 116,
+      "totalDebit": 1451.33,
+      "totalCredit": 14314.29
+    },
+    {
+      "_id": "2026-06-06",
+      "count": 46,
+      "totalDebit": 1635.1100000000001,
+      "totalCredit": 4886.67
+    },
+    {
+      "_id": "2026-06-07",
+      "count": 14,
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
       "totalDebit": 0,
       "totalCredit": 240
     },
     {
+<<<<<<< HEAD
       "_id": "2025-02-03",
       "count": 11,
       "totalDebit": 139.34,
@@ -956,6 +1511,18 @@
       "count": 10,
       "totalDebit": 112.24,
       "totalCredit": 1190
+=======
+      "_id": "2026-06-08",
+      "count": 132,
+      "totalDebit": 2661.34,
+      "totalCredit": 13334.94
+    },
+    {
+      "_id": "2026-06-09",
+      "count": 211,
+      "totalDebit": 1777.97,
+      "totalCredit": 27620.85
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2025-02-05",
@@ -976,6 +1543,7 @@
       "totalCredit": 25572
     },
     {
+<<<<<<< HEAD
       "_id": "2025-02-08",
       "count": 8,
       "totalDebit": 0,
@@ -2372,6 +2940,12 @@
       "count": 65,
       "totalDebit": 1970.6299999999999,
       "totalCredit": 4669.5
+=======
+      "_id": "2026-06-13",
+      "count": 65,
+      "totalDebit": 1419.3899999999999,
+      "totalCredit": 13813.949999999999
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2026-06-14",
@@ -2380,10 +2954,23 @@
       "totalCredit": 520
     },
     {
+<<<<<<< HEAD
       "_id": "2026-07-17",
       "count": 3,
       "totalDebit": 0,
       "totalCredit": 300
+=======
+      "_id": "2026-06-15",
+      "count": 118,
+      "totalDebit": 2039.57,
+      "totalCredit": 14683.39
+    },
+    {
+      "_id": "2026-06-16",
+      "count": 8,
+      "totalDebit": 0,
+      "totalCredit": 225
+>>>>>>> 14a03f3324f436c8276c0b08d08f79798f0be4c2
     },
     {
       "_id": "2026-07-18",
