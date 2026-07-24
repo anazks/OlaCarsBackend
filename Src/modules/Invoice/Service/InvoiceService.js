@@ -1076,12 +1076,15 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
 };
 
 exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) => {
+    const mongoose = require("mongoose");
     const { Invoice } = require("../Model/InvoiceModel");
     const { Driver } = require("../../Driver/Model/DriverModel");
     const Customer = require("../../Customer/Model/CustomerModel");
     const Branch = require("../../Branch/Model/BranchModel");
     const LedgerService = require("../../Ledger/Service/LedgerService");
     const Tax = require("../../Tax/Model/TaxModel");
+
+    const validCreatedBy = (createdBy && mongoose.Types.ObjectId.isValid(createdBy)) ? createdBy : undefined;
 
     const activeTax = await Tax.findOne({ isActive: true, isDeleted: false }).lean();
     const defaultTaxRate = activeTax ? activeTax.rate : 0;
@@ -1131,14 +1134,15 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
     const errors = [];
     const skipped = [];
 
-    // Helper to get normalized value from row with whitespace & case-insensitive matching
+    // Helper to get normalized value from row with whitespace, underscore, dot & case-insensitive matching
     const getRowVal = (r, possibleKeys) => {
+        if (!r) return undefined;
+        const normalize = s => s.replace(/^\ufeff/, '').trim().toLowerCase().replace(/[\s\-_.:]/g, '');
         for (const key of possibleKeys) {
-            const cleanKey = key.replace(/^\ufeff/, '').trim().toLowerCase();
+            const cleanKey = normalize(key);
             if (r[key] !== undefined) return r[key];
             for (const k of Object.keys(r)) {
-                const cleanK = k.replace(/^\ufeff/, '').trim().toLowerCase();
-                if (cleanK === cleanKey) {
+                if (normalize(k) === cleanKey) {
                     return r[k];
                 }
             }
@@ -1171,13 +1175,37 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         return isNaN(parsedDate.getTime()) ? null : parsedDate;
     };
 
+    // Helper to format key names nicely for notes accumulation
+    const formatFieldLabel = (key) => {
+        return key
+            .replace(/^contact\.CF\./i, '')
+            .replace(/^invoice\.CF\./i, '')
+            .replace(/_/g, ' ')
+            .replace(/:/g, '')
+            .trim()
+            .replace(/\b\w/g, char => char.toUpperCase());
+    };
+
+    // Set of normalized standard keys to exclude from notes accumulation
+    const standardKeys = new Set([
+        'invoicenumber', 'invoiceid', 'customername', 'customerid', 'customernumber',
+        'companyid', 'isinclusivetax', 'duedate', 'invoicedate', 'date', 'txnpostingdate',
+        'discounttype', 'subtotal', 'total', 'bcytotal', 'balance', 'bcybalance',
+        'adjustment', 'notes', 'termsconditions', 'termsandconditions', 'terms',
+        'entitydiscountamount', 'locationid', 'itemname', 'itemdesc', 'description',
+        'quantity', 'discount', 'discountamount', 'itemtotal', 'itemprice', 'account',
+        'accountcode', 'lineitemlocationname', 'invoiceshipmentstatus', 'manuallyshippedquantity',
+        'taxid', 'itemtax', 'itemtaxpct', 'itemtaxamount', 'taxamount', 'itemtaxtype',
+        'weeknumber', 'invoicestatus', 'status'
+    ]);
+
     // 2. Group uploaded rows by "Invoice Number" (or "Invoice ID") to handle multi-line items
     const invoiceGroups = new Map();
     let rowCounter = 0;
     for (const row of rows) {
         rowCounter++;
-        const invNo = getRowVal(row, ["Invoice Number", "invoiceNumber"]);
-        const invId = getRowVal(row, ["Invoice ID", "invoiceId"]);
+        const invNo = getRowVal(row, ["Invoice Number", "invoiceNumber", "invoice_number"]);
+        const invId = getRowVal(row, ["Invoice ID", "invoiceId", "invoice_id"]);
         const key = (invNo || invId || `TEMP-${Date.now()}-${rowCounter}`).toString().trim();
         if (!invoiceGroups.has(key)) {
             invoiceGroups.set(key, []);
@@ -1192,9 +1220,9 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const origIdx = headerRowObj.originalIndex;
 
         // Resolve Customer Document strictly by Customer Name
-        const customerIdVal = getRowVal(headerRow, ["Customer ID", "customerId", "customerNumber"]);
-        const customerNameVal = getRowVal(headerRow, ["Customer Name", "customerName", "customer"]);
-        const customerNumberVal = getRowVal(headerRow, ["Customer Number", "customerNumber"]);
+        const customerIdVal = getRowVal(headerRow, ["Customer ID", "customerId", "customer_id", "customerNumber", "customer_number"]);
+        const customerNameVal = getRowVal(headerRow, ["Customer Name", "customerName", "customer_name", "customer"]);
+        const customerNumberVal = getRowVal(headerRow, ["Customer Number", "customerNumber", "customer_number"]);
 
         const customerIdInput = (customerIdVal || "").toString().trim().toLowerCase();
         const customerNameInput = (customerNameVal || "").toString().trim().toLowerCase().replace(/\s+/g, ' ');
@@ -1254,12 +1282,12 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         }
 
         // Validate invoice duplicates - skip if duplicate exists
-        const invNo = (getRowVal(headerRow, ["Invoice Number", "invoiceNumber"]) || "").toString().trim();
+        const invNo = (getRowVal(headerRow, ["Invoice Number", "invoiceNumber", "invoice_number"]) || "").toString().trim();
         const invoiceNumber = invNo || exports.formatInvoiceNumber(startSeq + invoiceIndex);
         invoiceIndex++;
 
         // 1. Read weekNumber from row if provided, otherwise auto-calculate
-        const weekNoVal = getRowVal(headerRow, ["Week Number", "weekNumber", "week"]);
+        const weekNoVal = getRowVal(headerRow, ["Week Number", "weekNumber", "week_number", "week"]);
         let weekNumber = (weekNoVal !== undefined && weekNoVal !== "") ? Number(weekNoVal) : undefined;
 
         if (weekNumber === undefined && (invoiceType === "RENTAL" || !invoiceType)) {
@@ -1284,16 +1312,16 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         for (const itemObj of grouped) {
             const r = itemObj.row;
-            const itemName = getRowVal(r, ["Item Name", "itemName"]);
+            const itemName = getRowVal(r, ["Item Name", "itemName", "item_name"]);
             if (!itemName) continue;
 
             const qty = Number(getRowVal(r, ["Quantity", "quantity"])) || 1;
-            const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice"])) || 0;
-            const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal"])) || (qty * unitPrice);
+            const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice", "unit_price", "rate"])) || 0;
+            const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal", "bcy_total", "total"])) || (qty * unitPrice);
 
             // Calculate tax for this line item
             let taxPct = defaultTaxRate;
-            const itemTaxPctVal = getRowVal(r, ["Item Tax %", "itemTaxPct", "taxRate"]);
+            const itemTaxPctVal = getRowVal(r, ["Item Tax %", "itemTaxPct", "taxRate", "tax_amount"]);
             if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
                 taxPct = Number(itemTaxPctVal);
                 if (taxPct > 0 && taxPct < 1) {
@@ -1302,12 +1330,12 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             }
             itemTaxRate = taxPct;
 
-            const itemTaxAmtVal = getRowVal(r, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
+            const itemTaxAmtVal = getRowVal(r, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"]);
             const taxAmt = Number(itemTaxAmtVal) || (itemTotal * (taxPct / 100));
 
             lineItems.push({
                 name: itemName,
-                description: getRowVal(r, ["Item Desc", "itemDesc"]) || "",
+                description: getRowVal(r, ["Item Desc", "itemDesc", "description"]) || "",
                 qty,
                 unitPrice,
                 total: itemTotal,
@@ -1321,9 +1349,12 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         // Fallback if no item details were parsed
         if (lineItems.length === 0) {
-            const baseAmount = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "amount"])) || 0;
+            const totalVal = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "amount"])) || 0;
+            const taxVal = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || 0;
+            const baseAmount = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || (totalVal > taxVal ? totalVal - taxVal : totalVal);
+
             lineItems.push({
-                name: getRowVal(headerRow, ["Item Name", "itemName"]) || getRowVal(headerRow, ["description"]) || "Manual Billing",
+                name: getRowVal(headerRow, ["Item Name", "itemName", "item_name"]) || getRowVal(headerRow, ["Invoice Number", "invoiceNumber", "invoice_number"]) || getRowVal(headerRow, ["description"]) || "Manual Billing",
                 qty: 1,
                 unitPrice: baseAmount,
                 total: baseAmount
@@ -1338,8 +1369,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             }
             itemTaxRate = taxPct;
 
-            const itemTaxAmtVal = getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount"]);
-            calculatedTaxAmount = Number(itemTaxAmtVal) || (baseAmount * (taxPct / 100));
+            calculatedTaxAmount = taxVal || (baseAmount * (taxPct / 100));
         }
 
         if (existingInv) {
@@ -1418,24 +1448,24 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const taxInclusiveParsed = isInclusiveTaxVal !== undefined &&
             (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1');
 
-        const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal"])) || calculatedSubtotal;
-        const taxAmount = calculatedTaxAmount; // Always sum of line items tax amounts
+        const taxAmount = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || calculatedTaxAmount;
+        const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || calculatedSubtotal;
 
         let baseAmount;
         let totalAmountDue;
 
         if (taxInclusiveParsed) {
-            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (subtotal - discountAmount);
+            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || (subtotal - discountAmount);
             baseAmount = totalAmountDue - taxAmount;
         } else {
             baseAmount = subtotal - discountAmount;
-            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total"])) || (baseAmount + taxAmount);
+            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || (baseAmount + taxAmount);
         }
 
-        const balance = Number(getRowVal(headerRow, ["Balance", "balance"])) || 0;
+        const balance = Number(getRowVal(headerRow, ["Balance", "balance", "bcy_balance", "balance_amount"])) || 0;
 
         // Map status: Closed/Paid -> PAID, Overdue -> OVERDUE, Draft -> DRAFT, Cancelled/Rejected -> CANCELLED, Pending -> PENDING
-        const rawStatus = (getRowVal(headerRow, ["Invoice Status", "status"]) || "PENDING").toString().trim().toUpperCase();
+        const rawStatus = (getRowVal(headerRow, ["Invoice Status", "status", "invoice_status"]) || "PENDING").toString().trim().toUpperCase();
         let status = "PENDING";
         if (rawStatus === "CLOSED" || rawStatus === "PAID") {
             status = "PAID";
@@ -1452,18 +1482,31 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
         // Map Notes: Invoice ID and Tax ID are separately recorded in note field if they aren't already included
         const notesList = [];
-        const rawNotes = getRowVal(headerRow, ["Notes", "notes"]);
+        const rawNotes = getRowVal(headerRow, ["Notes", "notes", "description"]);
         if (rawNotes) {
             notesList.push(rawNotes);
         }
-        const rawInvoiceId = getRowVal(headerRow, ["Invoice ID", "invoiceId"]);
+        const rawInvoiceId = getRowVal(headerRow, ["Invoice ID", "invoiceId", "invoice_id"]);
         if (rawInvoiceId) {
             notesList.push(`Invoice ID: ${rawInvoiceId}`);
         }
-        const rawTaxId = getRowVal(headerRow, ["Tax ID", "taxId"]);
+        const rawTaxId = getRowVal(headerRow, ["Tax ID", "taxId", "tax_id"]);
         if (rawTaxId) {
             notesList.push(`Tax ID: ${rawTaxId}`);
         }
+
+        // Accumulate all remaining custom/extra fields from headerRow into notes
+        for (const k of Object.keys(headerRow)) {
+            const normKey = k.replace(/^\ufeff/, '').trim().toLowerCase().replace(/[\s\-_.:]/g, '');
+            if (!standardKeys.has(normKey) && headerRow[k] !== null && headerRow[k] !== undefined) {
+                const strVal = String(headerRow[k]).trim();
+                if (strVal !== '') {
+                    const label = formatFieldLabel(k);
+                    notesList.push(`${label}: ${strVal}`);
+                }
+            }
+        }
+
         const finalNotes = notesList.join("\n");
 
         // Terms & Conditions column
@@ -1471,8 +1514,8 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const terms = rawTerms ? String(rawTerms).trim() : undefined;
 
         // Format dates
-        const dueDate = parseFlexibleDate(getRowVal(headerRow, ["Due Date", "dueDate"])) || new Date();
-        const generatedAt = parseFlexibleDate(getRowVal(headerRow, ["Invoice Date", "invoiceDate"])) || new Date();
+        const dueDate = parseFlexibleDate(getRowVal(headerRow, ["Due Date", "dueDate", "due_date"])) || new Date();
+        const generatedAt = parseFlexibleDate(getRowVal(headerRow, ["Invoice Date", "invoiceDate", "date", "txn_posting_date", "invoice_date"])) || new Date();
 
         const payments = [];
         let paidAt = undefined;
@@ -1514,7 +1557,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             isTaxInclusive: taxInclusiveParsed,
             notes: finalNotes,
             terms,
-            createdBy,
+            createdBy: validCreatedBy,
             creatorRole
         };
 
