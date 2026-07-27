@@ -265,10 +265,18 @@ exports.recordManualPayment = async (req, res, next) => {
             toAccountId,
             branchId,
             customerId,
-            invoiceId
+            invoiceId,
+            entryType: rawEntryType,
+            type: rawType
         } = req.body;
 
-        const targetOffsetAccountId = toAccountId || fromAccountId;
+        const entryType = (rawEntryType || rawType || "RECEIPT").toUpperCase();
+        
+        const cleanCustomerId = (customerId && customerId !== "undefined" && customerId !== "null" && String(customerId).trim() !== "") ? String(customerId).trim() : null;
+        const cleanInvoiceId = (invoiceId && invoiceId !== "undefined" && invoiceId !== "null" && String(invoiceId).trim() !== "") ? String(invoiceId).trim() : null;
+        const cleanToAccountId = (toAccountId && toAccountId !== "undefined" && toAccountId !== "null" && String(toAccountId).trim() !== "") ? String(toAccountId).trim() : null;
+        const cleanFromAccountId = (fromAccountId && fromAccountId !== "undefined" && fromAccountId !== "null" && String(fromAccountId).trim() !== "") ? String(fromAccountId).trim() : null;
+        const targetOffsetAccountId = cleanToAccountId || cleanFromAccountId;
 
         if (!amount) {
             return res.status(400).json({ success: false, message: "Amount is required" });
@@ -279,8 +287,11 @@ exports.recordManualPayment = async (req, res, next) => {
         if (!paymentMode) {
             return res.status(400).json({ success: false, message: "Payment Mode is required" });
         }
-        if (!targetOffsetAccountId) {
-            return res.status(400).json({ success: false, message: "To Account (Destination / Offset Account) is required" });
+        if (entryType === "PAYMENT" && !targetOffsetAccountId) {
+            return res.status(400).json({ success: false, message: "To Account (Destination / Offset Account) is required for Payment" });
+        }
+        if (entryType === "RECEIPT" && !cleanCustomerId && !targetOffsetAccountId) {
+            return res.status(400).json({ success: false, message: "Please select either a Customer or a To Account for Receipt" });
         }
 
         const uploadLocal = require("../../../utils/uploadLocal");
@@ -304,15 +315,16 @@ exports.recordManualPayment = async (req, res, next) => {
             toAccountId: targetOffsetAccountId,
             branchId,
             supportingDocument,
-            customerId,
-            invoiceId,
+            customerId: cleanCustomerId,
+            invoiceId: cleanInvoiceId,
+            entryType,
             userId: req.user?._id || req.user?.id,
             userRole: req.user?.role
         });
 
         res.status(200).json({
             success: true,
-            message: "Manual payment recorded successfully",
+            message: `${entryType === "PAYMENT" ? "Payment (Money Out)" : "Receipt (Money In)"} recorded successfully`,
             data: result
         });
     } catch (error) {

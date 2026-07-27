@@ -527,22 +527,13 @@ const recordManualPayment = async (targetId, data) => {
         userId,
         userRole,
         customerId,
-        invoiceId
+        invoiceId,
+        entryType = "RECEIPT"
     } = data;
 
+    const normalizedEntryType = String(entryType).toUpperCase();
     const targetAccount = await BankAccount.findOne({ _id: targetId, isDeleted: false });
     if (!targetAccount) throw new AppError("Target bank account not found", 404);
-
-    const offsetAccountId = toAccountId || fromAccountId;
-    const offsetAccount = await BankAccount.findOne({ _id: offsetAccountId, isDeleted: false });
-    if (!offsetAccount) throw new AppError("Destination / Offset bank account (To Account) not found", 404);
-
-    if (!targetAccount.accountingCode) {
-        throw new AppError("Target bank account is not linked to any accounting code", 400);
-    }
-    if (!offsetAccount.accountingCode) {
-        throw new AppError("Destination / Offset bank account is not linked to any accounting code", 400);
-    }
 
     const numericAmount = Number(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
@@ -550,6 +541,7 @@ const recordManualPayment = async (targetId, data) => {
     }
 
     const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
     let finalRole = (userRole || "ADMIN").toUpperCase();
     const { ROLES } = require("../../../shared/constants/roles");
@@ -568,67 +560,162 @@ const recordManualPayment = async (targetId, data) => {
         }
     }
 
-    // Resolve credit accounting code and load invoice if provided
-    let creditAccountingCode = offsetAccount.accountingCode;
-    let invoiceDoc = null;
+    const parsedDate = (() => {
+        if (!depositDate) return new Date();
+        const dateParts = String(depositDate).split("-");
+        if (dateParts.length === 3) {
+            const year = parseInt(dateParts[0], 10);
+            const month = parseInt(dateParts[1], 10) - 1;
+            const day = parseInt(dateParts[2], 10);
+            const d = new Date();
+            d.setFullYear(year, month, day);
+            return d;
+        }
+        return new Date(depositDate);
+    })();
 
-    if (invoiceId) {
-        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
-        invoiceDoc = await Invoice.findOne({ _id: invoiceId, isDeleted: false });
-        if (invoiceDoc) {
-            const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
-                || await AccountingCode.findOne({ code: "1100" })
-                || await AccountingCode.findOne({ code: "1200" });
-            if (arAccount) {
-                creditAccountingCode = arAccount._id;
+    const cleanCustomerId = (customerId && customerId !== "undefined" && customerId !== "null" && String(customerId).trim() !== "") ? String(customerId).trim() : null;
+    const cleanInvoiceId = (invoiceId && invoiceId !== "undefined" && invoiceId !== "null" && String(invoiceId).trim() !== "") ? String(invoiceId).trim() : null;
+
+    // -------------------------------------------------------------
+    // CASE A: RECEIPT WITH CUSTOMER & NO SPECIFIC INVOICE (Auto Set-off)
+    // -------------------------------------------------------------
+    if (normalizedEntryType === "RECEIPT" && cleanCustomerId && !cleanInvoiceId) {
+        const setOffResult = await autoSetOffInvoices(cleanCustomerId, numericAmount, {
+            bankAccountingCodeId: targetAccount.accountingCode,
+            branchId: finalBranchId,
+            entryDate: parsedDate,
+            description: description || `Manual Payment Received from Customer`,
+            createdBy: userId,
+            creatorRole: finalRole
+        });
+
+        // Update target bank account balance (DEBIT: Money In)
+        let targetBalanceChange = targetAccount.accountType === "Credit Card" ? -numericAmount : numericAmount;
+        targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
+        await targetAccount.save();
+
+        return {
+            success: true,
+            setOffResult,
+            targetNewBalance: targetAccount.currentBalance
+        };
+    }
+
+    // -------------------------------------------------------------
+    // CASE B: OTHER RECEIPTS OR PAYMENTS (requires offset Account or Specific Invoice)
+    // -------------------------------------------------------------
+    const cleanOffsetAccountId = (toAccountId && toAccountId !== "undefined" && toAccountId !== "null" && String(toAccountId).trim() !== "") ? String(toAccountId).trim() : ((fromAccountId && fromAccountId !== "undefined" && fromAccountId !== "null" && String(fromAccountId).trim() !== "") ? String(fromAccountId).trim() : null);
+    let offsetAccount = null;
+    let offsetAccountingCode = null;
+
+    if (cleanOffsetAccountId) {
+        // First check if cleanOffsetAccountId is a BankAccount
+        offsetAccount = await BankAccount.findOne({ _id: cleanOffsetAccountId, isDeleted: false });
+        if (offsetAccount) {
+            offsetAccountingCode = offsetAccount.accountingCode;
+        } else {
+            // Check if cleanOffsetAccountId is directly an AccountingCode ID
+            const accCodeDoc = await AccountingCode.findOne({ _id: cleanOffsetAccountId, isDeleted: false });
+            if (accCodeDoc) {
+                offsetAccountingCode = accCodeDoc._id;
             }
         }
     }
 
-    const journalPayload = {
-        description: description || `Manual Payment via ${paymentMode}`,
-        date: (() => {
-            if (!depositDate) return new Date();
-            const dateParts = String(depositDate).split("-");
-            if (dateParts.length === 3) {
-                const year = parseInt(dateParts[0], 10);
-                const month = parseInt(dateParts[1], 10) - 1;
-                const day = parseInt(dateParts[2], 10);
-                const d = new Date();
-                d.setFullYear(year, month, day);
-                return d;
+    // If Customer Receipt, automatically route to Accounts Receivable (1.1.03) if offset accounting code not explicitly selected
+    if (normalizedEntryType === "RECEIPT" && (cleanCustomerId || cleanInvoiceId)) {
+        if (!offsetAccountingCode) {
+            const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
+                || await AccountingCode.findOne({ code: "1100" })
+                || await AccountingCode.findOne({ code: "1200" })
+                || await AccountingCode.findOne({ category: "Accounts Receivable" });
+            if (arAccount) {
+                offsetAccountingCode = arAccount._id;
             }
-            return new Date(depositDate);
-        })(),
-        branch: finalBranchId,
-        paymentMode,
-        currency: currency || "USD",
-        fromAccount: fromAccountId,
-        supportingDocument,
-        lines: [
-            {
-                accountingCode: targetAccount.accountingCode,
-                type: "DEBIT",
-                amount: numericAmount,
-                description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                contact: customerId || undefined
-            },
-            {
-                accountingCode: creditAccountingCode,
-                type: "CREDIT",
-                amount: numericAmount,
-                description: description || `Manual Payment Sent - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                contact: customerId || undefined
-            }
-        ],
-        createdBy: userId,
-        creatorRole: finalRole
-    };
+        }
+    }
+
+    if (!targetAccount.accountingCode) {
+        throw new AppError("Target bank account is not linked to any accounting code", 400);
+    }
+    if (!offsetAccountingCode) {
+        throw new AppError("Destination / Offset account is required and must have a valid accounting code", 400);
+    }
+
+    let invoiceDoc = null;
+    if (invoiceId) {
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        invoiceDoc = await Invoice.findOne({ _id: invoiceId, isDeleted: false });
+    }
+
+    let journalPayload;
+    if (normalizedEntryType === "PAYMENT") {
+        // PAYMENT (Money Out): DEBIT Offset Account (Expense/Vendor), CREDIT Bank Account
+        journalPayload = {
+            description: description || `Manual Payment Sent via ${paymentMode}`,
+            date: parsedDate,
+            branch: finalBranchId,
+            paymentMode,
+            currency: currency || "USD",
+            fromAccount: targetAccount._id,
+            toAccount: offsetAccountId,
+            supportingDocument,
+            lines: [
+                {
+                    accountingCode: offsetAccountingCode,
+                    type: "DEBIT",
+                    amount: numericAmount,
+                    description: description || `Manual Payment Sent - Mode: ${paymentMode}`,
+                    contact: customerId || undefined
+                },
+                {
+                    accountingCode: targetAccount.accountingCode,
+                    type: "CREDIT",
+                    amount: numericAmount,
+                    description: description || `Manual Payment Sent via Bank - Mode: ${paymentMode}`,
+                    contact: customerId || undefined
+                }
+            ],
+            createdBy: userId,
+            creatorRole: finalRole
+        };
+    } else {
+        // RECEIPT (Money In): DEBIT Bank Account, CREDIT Offset Account / AR
+        journalPayload = {
+            description: description || `Manual Payment Received via ${paymentMode}`,
+            date: parsedDate,
+            branch: finalBranchId,
+            paymentMode,
+            currency: currency || "USD",
+            fromAccount: offsetAccountId,
+            toAccount: targetAccount._id,
+            supportingDocument,
+            lines: [
+                {
+                    accountingCode: targetAccount.accountingCode,
+                    type: "DEBIT",
+                    amount: numericAmount,
+                    description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
+                    contact: customerId || undefined
+                },
+                {
+                    accountingCode: offsetAccountingCode,
+                    type: "CREDIT",
+                    amount: numericAmount,
+                    description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
+                    contact: customerId || undefined
+                }
+            ],
+            createdBy: userId,
+            creatorRole: finalRole
+        };
+    }
 
     const result = await ManualJournalService.createManualJournal(journalPayload);
 
     // Apply the payment to the Invoice if one is selected
-    if (invoiceDoc && invoiceDoc.status !== "PAID") {
+    if (normalizedEntryType === "RECEIPT" && invoiceDoc && invoiceDoc.status !== "PAID") {
         const timestamp = new Date();
         let newPaid = (invoiceDoc.amountPaid || 0) + numericAmount;
         let newBalance = Math.max(0, invoiceDoc.totalAmountDue - newPaid);
@@ -661,7 +748,6 @@ const recordManualPayment = async (targetId, data) => {
         }
         await invoiceDoc.save();
 
-        // Sync with Service Bill if it's workshop
         if (invoiceDoc.invoiceType === 'WORKSHOP' && invoiceDoc.serviceBill) {
             try {
                 const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
@@ -696,13 +782,11 @@ const recordManualPayment = async (targetId, data) => {
             }
         }
 
-        // Run sync, excess application and rollover calculations
         try {
             const InvoiceService = require("../../Invoice/Service/InvoiceService");
             await InvoiceService.syncInvoiceToAdditionalPayments(invoiceDoc);
             await InvoiceService.rolloverCustomerInvoices(invoiceDoc.customer);
 
-            // Handle excess if any
             if (excessAmount > 0) {
                 await InvoiceService.applyExcessToNextInvoice(invoiceDoc.customer, excessAmount, {
                     paymentMethod: paymentMode || "Cash",
@@ -716,31 +800,40 @@ const recordManualPayment = async (targetId, data) => {
         }
     }
 
-    // Update target balance (DEBIT: increases Asset balance, decreases Liability balance)
+    // Update target balance
     let targetBalanceChange = 0;
-    if (targetAccount.accountType === "Credit Card") {
-        targetBalanceChange = -numericAmount;
+    if (normalizedEntryType === "PAYMENT") {
+        targetBalanceChange = targetAccount.accountType === "Credit Card" ? numericAmount : -numericAmount;
     } else {
-        targetBalanceChange = numericAmount;
+        targetBalanceChange = targetAccount.accountType === "Credit Card" ? -numericAmount : numericAmount;
     }
     targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
     await targetAccount.save();
 
-    // Update offset balance (CREDIT: decreases Asset balance, increases Liability balance)
-    let offsetBalanceChange = 0;
-    if (offsetAccount.accountType === "Credit Card") {
-        offsetBalanceChange = numericAmount;
-    } else {
-        offsetBalanceChange = -numericAmount;
+    // Update offset balance if offset account is a BankAccount
+    if (offsetAccount) {
+        let offsetBalanceChange = 0;
+        if (normalizedEntryType === "PAYMENT") {
+            offsetBalanceChange = offsetAccount.accountType === "Credit Card" ? -numericAmount : numericAmount;
+        } else {
+            offsetBalanceChange = offsetAccount.accountType === "Credit Card" ? numericAmount : -numericAmount;
+        }
+        offsetAccount.currentBalance = Number(offsetAccount.currentBalance || 0) + offsetBalanceChange;
+        await offsetAccount.save();
     }
-    offsetAccount.currentBalance = Number(offsetAccount.currentBalance || 0) + offsetBalanceChange;
-    await offsetAccount.save();
+
+    try {
+        await syncAccountingCodeBalances(targetAccount.accountingCode);
+        if (offsetAccountingCode) await syncAccountingCodeBalances(offsetAccountingCode);
+    } catch (syncCodeErr) {
+        console.error("Failed to sync accounting code balances after manual payment:", syncCodeErr);
+    }
 
     return {
         success: true,
         journal: result.journal,
         targetNewBalance: targetAccount.currentBalance,
-        fromNewBalance: offsetAccount.currentBalance
+        fromNewBalance: offsetAccount ? offsetAccount.currentBalance : undefined
     };
 };
 
