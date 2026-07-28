@@ -9,7 +9,12 @@ const debitNoteSchema = new mongoose.Schema({
     customerId: { 
         type: mongoose.Schema.Types.ObjectId, 
         ref: 'Customer', 
-        required: true 
+        required: false 
+    },
+    supplierId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Supplier',
+        required: false
     },
     driverId: { 
         type: mongoose.Schema.Types.ObjectId, 
@@ -35,6 +40,16 @@ const debitNoteSchema = new mongoose.Schema({
         required: true, 
         min: 0 
     },
+    amountPaid: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    balance: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
     debitNoteDate: { 
         type: Date, 
         default: Date.now 
@@ -44,10 +59,14 @@ const debitNoteSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    isDeposit: {
+        type: Boolean,
+        default: false
+    },
     status: { 
         type: String, 
-        enum: ['DRAFT', 'OPEN', 'APPLIED', 'CLOSED', 'VOID'], 
-        default: 'OPEN' 
+        enum: ['DRAFT', 'PENDING', 'PARTIAL', 'PAID', 'OVERDUE', 'CANCELLED', 'OPEN', 'APPLIED', 'CLOSED', 'VOID'], 
+        default: 'PENDING' 
     },
     notes: {
         type: String,
