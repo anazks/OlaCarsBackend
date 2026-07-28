@@ -659,7 +659,7 @@ const recordManualPayment = async (targetId, data) => {
             paymentMode,
             currency: currency || "USD",
             fromAccount: targetAccount._id,
-            toAccount: offsetAccountId,
+            toAccount: cleanOffsetAccountId || undefined,
             supportingDocument,
             lines: [
                 {
@@ -667,14 +667,14 @@ const recordManualPayment = async (targetId, data) => {
                     type: "DEBIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Sent - Mode: ${paymentMode}`,
-                    contact: customerId || undefined
+                    contact: cleanCustomerId || undefined
                 },
                 {
                     accountingCode: targetAccount.accountingCode,
                     type: "CREDIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Sent via Bank - Mode: ${paymentMode}`,
-                    contact: customerId || undefined
+                    contact: cleanCustomerId || undefined
                 }
             ],
             createdBy: userId,
@@ -688,7 +688,7 @@ const recordManualPayment = async (targetId, data) => {
             branch: finalBranchId,
             paymentMode,
             currency: currency || "USD",
-            fromAccount: offsetAccountId,
+            fromAccount: cleanOffsetAccountId || undefined,
             toAccount: targetAccount._id,
             supportingDocument,
             lines: [
@@ -697,14 +697,14 @@ const recordManualPayment = async (targetId, data) => {
                     type: "DEBIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                    contact: customerId || undefined
+                    contact: cleanCustomerId || undefined
                 },
                 {
                     accountingCode: offsetAccountingCode,
                     type: "CREDIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                    contact: customerId || undefined
+                    contact: cleanCustomerId || undefined
                 }
             ],
             createdBy: userId,
@@ -810,6 +810,26 @@ const recordManualPayment = async (targetId, data) => {
     targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
     await targetAccount.save();
 
+    // Create BankTransaction record for Target Bank Account
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const targetBankTx = new BankTransaction({
+        bankAccount: targetAccount._id,
+        transactionId: result.journal?.journalNumber || `TXN-${Date.now()}`,
+        entryDate: parsedDate,
+        amount: numericAmount,
+        type: normalizedEntryType === "RECEIPT" ? "DEBIT" : "CREDIT",
+        description: description || `Manual Payment ${normalizedEntryType === "RECEIPT" ? "Received" : "Sent"} via ${paymentMode}`,
+        runningBalance: targetAccount.currentBalance,
+        accountingCode: offsetAccountingCode || undefined,
+        customer: cleanCustomerId || undefined,
+        invoice: cleanInvoiceId || undefined,
+        paymentMode: paymentMode || "Bank Transfer",
+        currency: currency || "USD",
+        createdBy: userId,
+        creatorRole: finalRole
+    });
+    await targetBankTx.save();
+
     // Update offset balance if offset account is a BankAccount
     if (offsetAccount) {
         let offsetBalanceChange = 0;
@@ -820,6 +840,25 @@ const recordManualPayment = async (targetId, data) => {
         }
         offsetAccount.currentBalance = Number(offsetAccount.currentBalance || 0) + offsetBalanceChange;
         await offsetAccount.save();
+
+        // Create BankTransaction record for Offset Bank Account
+        const offsetBankTx = new BankTransaction({
+            bankAccount: offsetAccount._id,
+            transactionId: result.journal?.journalNumber || `TXN-${Date.now()}`,
+            entryDate: parsedDate,
+            amount: numericAmount,
+            type: normalizedEntryType === "PAYMENT" ? "DEBIT" : "CREDIT",
+            description: description || `Manual Transfer ${normalizedEntryType === "PAYMENT" ? "Received from" : "Sent to"} ${targetAccount.accountName || targetAccount.bankName}`,
+            runningBalance: offsetAccount.currentBalance,
+            accountingCode: targetAccount.accountingCode || undefined,
+            customer: cleanCustomerId || undefined,
+            invoice: cleanInvoiceId || undefined,
+            paymentMode: paymentMode || "Bank Transfer",
+            currency: currency || "USD",
+            createdBy: userId,
+            creatorRole: finalRole
+        });
+        await offsetBankTx.save();
     }
 
     try {

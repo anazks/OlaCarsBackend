@@ -834,10 +834,14 @@ exports.getBankTransactions = async (req, res, next) => {
         if (startDate || endDate) {
             query.entryDate = {};
             if (startDate) {
-                query.entryDate.$gte = new Date(startDate);
+                const startD = new Date(startDate);
+                startD.setHours(0, 0, 0, 0);
+                query.entryDate.$gte = startD;
             }
             if (endDate) {
-                query.entryDate.$lte = new Date(endDate);
+                const endD = new Date(endDate);
+                endD.setHours(23, 59, 59, 999);
+                query.entryDate.$lte = endD;
             }
         }
 
@@ -951,6 +955,9 @@ exports.getBankTransactions = async (req, res, next) => {
             const obj = tx.toObject();
             obj.date = tx.entryDate;
             obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
+            obj.bankAccount = account._id;
+            obj.bankAccountName = account.accountName || account.bankName;
+            obj.bankAccountingCode = account.accountingCode;
 
             // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists
             const bt = findBankTx(tx);
@@ -960,9 +967,6 @@ exports.getBankTransactions = async (req, res, next) => {
                 obj.invoice = bt.invoice;
                 obj.invoices = bt.invoices;
                 obj.setOffSummary = bt.setOffSummary;
-                if (bt.accountingCode && bt.accountingCode.toString() !== account.accountingCode.toString()) {
-                    obj.accountingCode = bt.accountingCode;
-                }
             }
 
             // Find partner accounting code name if double-entry is present
@@ -973,7 +977,8 @@ exports.getBankTransactions = async (req, res, next) => {
                     e.accountingCode && e.accountingCode._id.toString() !== account.accountingCode.toString()
                 );
                 if (partnerEntry && partnerEntry.accountingCode) {
-                    obj.accountingCode = partnerEntry.accountingCode._id;
+                    obj.offsetAccountingCode = partnerEntry.accountingCode._id;
+                    obj.offsetAccountName = partnerEntry.accountingCode.name;
                     if (partnerEntry.accountingCode.parentAccount) {
                         obj.accountsName = partnerEntry.accountingCode.name;
                         obj.parentAccount = typeof partnerEntry.accountingCode.parentAccount === 'object'
