@@ -27,6 +27,15 @@ const bankTransactionSchema = new mongoose.Schema(
             type: String,
             required: false,
         },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
+            required: false,
+        },
+        supplierName: {
+            type: String,
+            required: false,
+        },
         invoice: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Invoice",

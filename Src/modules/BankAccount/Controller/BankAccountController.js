@@ -335,6 +335,7 @@ exports.recordManualPayment = async (req, res, next) => {
 
 const parseDateFlexible = (val) => {
     if (val === undefined || val === null) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
     if (typeof val === 'number') {
         const totalDays = Math.floor(val - 25569);
         const date = new Date(Date.UTC(1970, 0, 1 + totalDays));
@@ -350,19 +351,30 @@ const parseDateFlexible = (val) => {
     }
     const parts = str.split(/[\/\-.]/);
     if (parts.length === 3) {
+        let year = 0, month = 0, day = 0;
         if (parts[0].length === 4) {
-            const year = parseInt(parts[0], 10);
-            const month = parseInt(parts[1], 10) - 1;
-            const day = parseInt(parts[2], 10);
-            const date = new Date(Date.UTC(year, month, day));
-            if (!isNaN(date.getTime())) return date;
-        } else {
-            const part1 = parseInt(parts[0], 10);
-            const part2 = parseInt(parts[1], 10);
-            const part3 = parseInt(parts[2], 10);
-            const year = part3 < 100 ? 2000 + part3 : part3;
-            const day = part1;
-            const month = part2;
+            year = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10);
+            day = parseInt(parts[2], 10);
+        } else if (parts[2].length === 4 || parts[2].length === 2) {
+            const p1 = parseInt(parts[0], 10);
+            const p2 = parseInt(parts[1], 10);
+            const p3 = parseInt(parts[2], 10);
+            year = p3 < 100 ? 2000 + p3 : p3;
+
+            if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2;
+            } else if (p1 <= 12 && p2 > 12) {
+                month = p1;
+                day = p2;
+            } else {
+                // Default to DD-MM-YYYY format
+                day = p1;
+                month = p2;
+            }
+        }
+        if (year && month && day) {
             const date = new Date(Date.UTC(year, month - 1, day));
             if (!isNaN(date.getTime())) return date;
         }
@@ -414,6 +426,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 { code: "1200" },
                 { name: { $regex: /Accounts Receivable/i } },
                 { name: { $regex: /Cuenta por Cobrar/i } }
+            ],
+            isDeleted: { $ne: true }
+        });
+
+        const apCodeDoc = await AccountingCode.findOne({
+            $or: [
+                { code: "2.1.01" },
+                { code: "2000" },
+                { name: { $regex: /Accounts Payable/i } },
+                { name: { $regex: /Cuenta por Pagar/i } }
             ],
             isDeleted: { $ne: true }
         });
@@ -561,6 +583,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
             const customerIdVal = tx.customerId || tx.customer;
 
+            // Resolve Supplier if SUPPLIER NAME or supplierId is provided
+            let supplierDoc = null;
+            const supplierNameVal = tx["SUPPLIER NAME"] || tx.supplierName || tx.supplier_name;
+            const supplierIdVal = tx.supplierId || tx.supplier;
+
+            if (customerNameVal && String(customerNameVal).trim() && supplierNameVal && String(supplierNameVal).trim()) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Row cannot contain both CUSTOMER NAME ("${customerNameVal}") and SUPPLIER NAME ("${supplierNameVal}") simultaneously.`
+                });
+            }
+
             if (customerIdVal) {
                 const Customer = require("../../Customer/Model/CustomerModel");
                 customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
@@ -570,6 +604,22 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 customerDoc = await Customer.findOne({
                     name: { $regex: new RegExp("^" + escapedName + "$", "i") },
                     isDeleted: false
+                });
+            }
+
+            if (supplierIdVal) {
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
+            } else if (supplierNameVal && String(supplierNameVal).trim()) {
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                const escapedSupName = String(supplierNameVal).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                supplierDoc = await Supplier.findOne({
+                    $or: [
+                        { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                        { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                        { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
+                    ],
+                    isDeleted: { $ne: true }
                 });
             }
 
@@ -659,7 +709,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     parentAccountVal,
                     accountsNameVal,
                     createdBy,
-                    creatorRole
+                    creatorRole,
+                    supplierDoc
                 );
 
                 if (subDoc) {
@@ -700,6 +751,10 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         transactionType: typeVal,
                         transactionId: transactionIdVal,
                         runningBalance: balanceAccum,
+                        customer: customerDoc ? customerDoc._id : undefined,
+                        customerName: customerDoc ? customerDoc.name : undefined,
+                        supplier: supplierDoc ? supplierDoc._id : undefined,
+                        supplierName: supplierDoc ? (supplierDoc.name || supplierDoc.companyName) : (supplierNameVal ? String(supplierNameVal).trim() : undefined),
                         createdBy,
                         creatorRole
                     });
@@ -721,7 +776,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 creditAccum += amountVal;
             }
 
-            const targetArCodeId = arCodeDoc ? arCodeDoc._id : accCodeId;
+            const targetOffsetCodeId = supplierDoc
+                ? (apCodeDoc ? apCodeDoc._id : accCodeId)
+                : (arCodeDoc ? arCodeDoc._id : accCodeId);
+
+            const contactId = customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined);
+            const contactModel = customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined);
+
             const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
             const journalPayload = {
                 description: finalDescription || "Bulk uploaded double entry",
@@ -733,16 +794,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         type: typeVal,
                         amount: amountVal,
                         description: finalDescription || "Bulk uploaded ledger transaction",
-                        contact: customerDoc ? customerDoc._id : undefined,
-                        contactModel: customerDoc ? "Customer" : undefined
+                        contact: contactId,
+                        contactModel: contactModel
                     },
                     {
-                        accountingCode: targetArCodeId,
+                        accountingCode: targetOffsetCodeId,
                         type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
                         amount: amountVal,
                         description: finalDescription || "Bulk uploaded ledger transaction offset",
-                        contact: customerDoc ? customerDoc._id : undefined,
-                        contactModel: customerDoc ? "Customer" : undefined
+                        contact: contactId,
+                        contactModel: contactModel
                     }
                 ],
                 createdBy,
@@ -764,6 +825,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 runningBalance: balanceAccum,
                 customer: customerDoc ? customerDoc._id : undefined,
                 customerName: customerDoc ? customerDoc.name : undefined,
+                supplier: supplierDoc ? supplierDoc._id : undefined,
+                supplierName: supplierDoc ? (supplierDoc.name || supplierDoc.companyName) : (supplierNameVal ? String(supplierNameVal).trim() : undefined),
                 createdBy,
                 creatorRole
             });

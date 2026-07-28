@@ -7,7 +7,7 @@ const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole) => {
+const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole, supplierDoc = null) => {
     let parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
 
@@ -56,11 +56,39 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
         }
     }
 
-    // 4. Default fallbacks if parent still not found
-    if (!parentDoc) {
-        // Default to "Accounts Receivable/Cuenta por Cobrar" (code 1.1.03)
+    // Try matching accountsNameVal / subName directly against Chart of Accounts
+    if (!parentDoc && subName) {
         parentDoc = await AccountingCode.findOne({
-            code: "1.1.03",
+            $or: [
+                { code: subName },
+                { name: { $regex: new RegExp(`^${escapeRegExp(subName)}$`, "i") } }
+            ],
+            isDeleted: false
+        });
+
+        if (!parentDoc) {
+            const lowerSub = subName.toLowerCase();
+            let fallbackCode = null;
+            if (lowerSub.includes("payable") || lowerSub.includes("pagar")) {
+                fallbackCode = "2.1.01";
+            } else if (lowerSub.includes("receivable") || lowerSub.includes("cobrar")) {
+                fallbackCode = "1.1.03";
+            }
+            if (fallbackCode) {
+                parentDoc = await AccountingCode.findOne({
+                    code: fallbackCode,
+                    isDeleted: false
+                });
+            }
+        }
+    }
+
+    // Default fallbacks if parent still not found
+    if (!parentDoc) {
+        const isSupplierOrPayable = Boolean(supplierDoc) || subName.toLowerCase().includes("payable") || subName.toLowerCase().includes("pagar");
+        const defaultCode = isSupplierOrPayable ? "2.1.01" : "1.1.03";
+        parentDoc = await AccountingCode.findOne({
+            code: defaultCode,
             isDeleted: false
         });
     }
