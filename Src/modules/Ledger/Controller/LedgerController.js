@@ -361,10 +361,94 @@ const clearLedgerByCode = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+const updateLedgerEntry = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { description, accountingCode, existingAttachments } = req.body;
+
+        const entry = await LedgerEntry.findById(id);
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        // 1. Update Description if provided
+        if (description !== undefined) {
+            entry.description = description;
+        }
+
+        // 2. Update Accounting Code if provided
+        if (accountingCode !== undefined) {
+            const AccountingCode = mongoose.model("AccountingCode");
+            const codeDoc = await AccountingCode.findById(accountingCode);
+            if (!codeDoc) {
+                return res.status(400).json({ success: false, message: "Target accounting code not found" });
+            }
+            entry.accountingCode = accountingCode;
+        }
+
+        // 3. Handle Attachments
+        let attachments = [];
+        
+        // Parse existing attachments if provided (sent as a JSON string or array)
+        if (existingAttachments !== undefined) {
+            try {
+                attachments = typeof existingAttachments === "string" 
+                    ? JSON.parse(existingAttachments) 
+                    : existingAttachments;
+            } catch (err) {
+                console.error("Failed to parse existingAttachments:", err);
+            }
+        } else {
+            attachments = entry.attachments || [];
+        }
+
+        // Handle newly uploaded files
+        if (req.files && req.files.length > 0) {
+            const uploadToS3 = require("../../../utils/uploadToS3");
+            const uploadLocal = require("../../../utils/uploadLocal");
+
+            for (const file of req.files) {
+                let uploadedUrl;
+                try {
+                    uploadedUrl = await uploadToS3(file, "ledger/attachments");
+                } catch (s3Error) {
+                    console.log("[Ledger Upload] S3 upload failed, falling back to local storage:", s3Error.message);
+                    uploadedUrl = uploadLocal(file, "ledger/attachments");
+                }
+
+                attachments.push({
+                    name: file.originalname,
+                    url: uploadedUrl,
+                    uploadedAt: new Date()
+                });
+            }
+        }
+
+        entry.attachments = attachments;
+
+        // Save entry
+        await entry.save();
+
+        // Populate details like front-end expects
+        const updatedEntry = await LedgerEntry.findById(id)
+            .populate("transaction")
+            .populate("manualJournal")
+            .populate("voucher")
+            .populate("accountingCode", "code name category")
+            .populate("contact", "name email")
+            .populate("createdBy", "name email");
+
+        return res.status(200).json({ success: true, data: updatedEntry });
+    } catch (error) {
+        console.error("Failed to update ledger entry:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
+    updateLedgerEntry,
     importLedgerEntries,
     deleteLedgerJournal,
     clearLedgerByCode,

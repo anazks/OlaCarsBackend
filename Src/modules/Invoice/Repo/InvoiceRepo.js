@@ -22,12 +22,47 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const baseQuery = options.baseQuery || { isDeleted: false };
     const query = { ...baseQuery };
 
+    let isWorkshopQuery = false;
+
     const cleanSearch = queryParams.search ? queryParams.search.trim() : '';
     const isFullInvoice = /^INV-\d{6}$/i.test(cleanSearch) || /^WRK-\d{6,8}-\d{4}$/i.test(cleanSearch);
 
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.customer) query.customer = queryParams.customer;
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
+
+    if (queryParams.branch) {
+        const Branch = require("../../Branch/Model/BranchModel");
+        const branchDoc = await Branch.findById(queryParams.branch);
+        
+        const Customer = require("../../Customer/Model/CustomerModel");
+        let customerQuery = { isDeleted: false };
+        
+        if (branchDoc && (branchDoc.name || "").toLowerCase().includes("workshop")) {
+            customerQuery.name = { $regex: /ARRENDADORA OLA CARS/i };
+            isWorkshopQuery = true;
+        } else {
+            customerQuery.branch = queryParams.branch;
+            customerQuery.name = { $not: { $regex: /ARRENDADORA OLA CARS/i } };
+        }
+
+        const customersInBranch = await Customer.find(customerQuery).select('_id');
+        const customerIds = customersInBranch.map(c => c._id);
+        if (query.customer) {
+            if (query.customer.$in) {
+                query.customer.$in = query.customer.$in.filter(id => customerIds.some(cid => cid.equals(id)));
+            } else {
+                const targetId = mongoose.Types.ObjectId.isValid(query.customer) ? new mongoose.Types.ObjectId(query.customer) : query.customer;
+                if (customerIds.some(cid => cid.equals(targetId))) {
+                    query.customer = targetId;
+                } else {
+                    query.customer = { $in: [] };
+                }
+            }
+        } else {
+            query.customer = { $in: customerIds };
+        }
+    }
     if (queryParams.status && queryParams.status !== 'ALL') {
         const rawStatus = String(queryParams.status).trim();
         if (rawStatus.toUpperCase() === 'OPEN' || rawStatus.toUpperCase() === 'UNPAID') {
@@ -40,7 +75,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
     if (queryParams.weekNumber) query.weekNumber = queryParams.weekNumber;
-    
+
     if (queryParams.invoiceType) {
         if (queryParams.invoiceType === 'RENTAL') {
             query.invoiceType = { $in: ['RENTAL', null, undefined] };
@@ -49,44 +84,46 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         }
     }
 
-    if ((queryParams.startDate || queryParams.endDate) && !isFullInvoice) {
-        const dateQuery = {};
-        if (queryParams.startDate && queryParams.startDate.trim()) {
-            dateQuery.$gte = new Date(queryParams.startDate.trim());
+    if (!isWorkshopQuery) {
+        if ((queryParams.startDate || queryParams.endDate) && !isFullInvoice) {
+            const dateQuery = {};
+            if (queryParams.startDate && queryParams.startDate.trim()) {
+                dateQuery.$gte = new Date(queryParams.startDate.trim());
+            }
+            if (queryParams.endDate && queryParams.endDate.trim()) {
+                const endStr = queryParams.endDate.trim().includes('T') ? queryParams.endDate.trim() : `${queryParams.endDate.trim()}T23:59:59.999Z`;
+                dateQuery.$lte = new Date(endStr);
+            }
+            query.$or = [
+                { invoiceDate: dateQuery },
+                { invoiceDate: { $exists: false }, generatedAt: dateQuery },
+                { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: dateQuery }
+            ];
+        } else if ((queryParams.month || queryParams.year) && !isFullInvoice) {
+            const now = new Date();
+            const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
+            let monthDateQuery;
+            if (queryParams.month) {
+                const m = parseInt(queryParams.month) - 1;
+                monthDateQuery = {
+                    $gte: new Date(y, m, 1, 0, 0, 0, 0),
+                    $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
+                };
+            } else {
+                monthDateQuery = {
+                    $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+                    $lte: new Date(y, 11, 31, 23, 59, 59, 999)
+                };
+            }
+            query.$or = [
+                { invoiceDate: monthDateQuery },
+                { invoiceDate: { $exists: false }, generatedAt: monthDateQuery },
+                { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: monthDateQuery }
+            ];
         }
-        if (queryParams.endDate && queryParams.endDate.trim()) {
-            const endStr = queryParams.endDate.trim().includes('T') ? queryParams.endDate.trim() : `${queryParams.endDate.trim()}T23:59:59.999Z`;
-            dateQuery.$lte = new Date(endStr);
-        }
-        query.$or = [
-            { invoiceDate: dateQuery },
-            { invoiceDate: { $exists: false }, generatedAt: dateQuery },
-            { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: dateQuery }
-        ];
-    } else if ((queryParams.month || queryParams.year) && !isFullInvoice) {
-        const now = new Date();
-        const y = queryParams.year ? parseInt(queryParams.year) : now.getFullYear();
-        let monthDateQuery;
-        if (queryParams.month) {
-            const m = parseInt(queryParams.month) - 1;
-            monthDateQuery = {
-                $gte: new Date(y, m, 1, 0, 0, 0, 0),
-                $lte: new Date(y, m + 1, 0, 23, 59, 59, 999)
-            };
-        } else {
-            monthDateQuery = {
-                $gte: new Date(y, 0, 1, 0, 0, 0, 0),
-                $lte: new Date(y, 11, 31, 23, 59, 59, 999)
-            };
-        }
-        query.$or = [
-            { invoiceDate: monthDateQuery },
-            { invoiceDate: { $exists: false }, generatedAt: monthDateQuery },
-            { invoiceDate: { $exists: false }, generatedAt: { $exists: false }, createdAt: monthDateQuery }
-        ];
     }
 
-    const hasDateFilter = !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
+    const hasDateFilter = !isWorkshopQuery && !!(queryParams.startDate || queryParams.endDate || queryParams.month || queryParams.year);
 
     if (cleanSearch) {
         if (isFullInvoice) {
@@ -110,8 +147,8 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
         metricsQuery.vehicle = new mongoose.Types.ObjectId(metricsQuery.vehicle);
     }
 
-    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle) is targeted, and not explicitly ignored (and not searching for a full invoice)
-    if (!hasDateFilter && queryParams.allTime !== 'true' && queryParams.ignoreDefaultDates !== 'true' && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && !isFullInvoice) {
+    // Default to start of current month to today's date if no date filters are supplied and no specific entity (customer, driver, vehicle, branch) is targeted, and not explicitly ignored (and not searching for a full invoice)
+    if (!hasDateFilter && queryParams.allTime !== 'true' && queryParams.ignoreDefaultDates !== 'true' && !queryParams.customer && !queryParams.driver && !queryParams.vehicle && !queryParams.branch && !isFullInvoice) {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
         const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -211,8 +248,8 @@ exports.getPendingByDriverService = async (driverId) => {
         balance: { $gt: 0 },
         isDeleted: false
     })
-    .sort({ dueDate: 1 })
-    .lean();
+        .sort({ dueDate: 1 })
+        .lean();
 };
 
 exports.getInvoiceByIdService = async (id) => {
