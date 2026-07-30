@@ -7,6 +7,19 @@ const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
+const ensureDateTimeWithCurrentTime = (dateInput) => {
+    if (!dateInput) return new Date();
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return new Date();
+
+    // If date is midnight (00:00:00.000, like YYYY-MM-DD input from datepicker), inject current time of day
+    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0) {
+        const now = new Date();
+        d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    }
+    return d;
+};
+
 const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole, supplierDoc = null) => {
     let parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
@@ -497,29 +510,33 @@ const importStatement = async (id, options) => {
             throw new AppError(`Invalid transaction amount: ${amount}. Must be a positive number.`, 400);
         }
 
-        const journalPayload = {
-            description: description || `Bank Statement Transaction - Ref: ${referenceNumber || 'N/A'}`,
-            date: date ? new Date(date) : new Date(),
+        const txRef = referenceNumber || `TX-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+
+        // 1. Primary Bank Ledger Entry
+        await LedgerEntry.create({
             branch: branchId,
-            lines: [
-                {
-                    accountingCode: account.accountingCode,
-                    type,
-                    amount: numericAmount,
-                    description: `${description || 'Bank transaction'}${payee ? ` - Payee: ${payee}` : ''}${referenceNumber ? ` - Ref: ${referenceNumber}` : ''}`
-                },
-                {
-                    accountingCode: arCodeDoc ? arCodeDoc._id : account.accountingCode,
-                    type: type === "DEBIT" ? "CREDIT" : "DEBIT",
-                    amount: numericAmount,
-                    description: `${description || 'Bank transaction offset'}${payee ? ` - Payee: ${payee}` : ''}${referenceNumber ? ` - Ref: ${referenceNumber}` : ''}`
-                }
-            ],
+            accountingCode: account.accountingCode,
+            type,
+            amount: numericAmount,
+            description: `${description || 'Bank transaction'}${payee ? ` - Payee: ${payee}` : ''}`,
+            entryDate: date ? new Date(date) : new Date(),
+            transactionId: txRef,
             createdBy: userId,
             creatorRole: finalRole
-        };
+        });
 
-        await ManualJournalService.createManualJournal(journalPayload);
+        // 2. Offsetting Partner Ledger Entry
+        await LedgerEntry.create({
+            branch: branchId,
+            accountingCode: arCodeDoc ? arCodeDoc._id : account.accountingCode,
+            type: type === "DEBIT" ? "CREDIT" : "DEBIT",
+            amount: numericAmount,
+            description: `${description || 'Bank transaction offset'}${payee ? ` - Payee: ${payee}` : ''}`,
+            entryDate: date ? new Date(date) : new Date(),
+            transactionId: txRef,
+            createdBy: userId,
+            creatorRole: finalRole
+        });
 
         let balanceChange = 0;
         if (account.accountType === "Credit Card") {
@@ -1386,8 +1403,9 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
 
         await entry.save();
 
-        // 2. Swapping Offsetting Accounts (accountingCode)
-        if (accountingCode !== undefined) {
+        // 2. Swapping Offsetting Accounts (accountingCode) - Only for non-customer / non-set-off entries
+        const targetCustomerId = (typeof customer === 'object' && customer !== null) ? (customer._id || customer.id) : (customer || entry.contact);
+        if (accountingCode !== undefined && !targetCustomerId) {
             const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
             let partner = null;
@@ -1502,21 +1520,14 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
         }
 
         if (!bankTx) {
-            // Create a missing BankTransaction dynamically to enable linking and tracking
-            bankTx = new BankTransaction({
-                bankAccount: bankAccountId,
-                branch: entry.branch,
-                type: oldType,
-                amount: oldAmount,
-                description: entry.description || '',
-                entryDate: oldEntryDate,
-                transactionId: entry.transactionId || `TX-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-                accountingCode: entry.accountingCode,
-                createdBy: entry.createdBy,
-                creatorRole: entry.creatorRole
-            });
-            await bankTx.save();
-            console.log(`[bulkEditTransactions] Created dynamically missing BankTransaction ${bankTx._id} for LedgerEntry ${entry._id}`);
+            // Streamlined Architecture: Do not create auxiliary BankTransaction documents on edit
+            bankTx = {
+                _id: entry._id,
+                transactionId: entry.transactionId,
+                invoices: [],
+                setOffSummary: null,
+                save: async () => {} // no-op
+            };
         }
 
         if (bankTx) {
@@ -1538,7 +1549,33 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             const newCustomerId = (typeof customer === 'object' && customer !== null) ? (customer._id || customer.id) : customer;
 
             const finalAmount = amount !== undefined ? Number(amount) : oldAmount;
-            const finalEntryDate = entryDate !== undefined ? new Date(entryDate) : oldEntryDate;
+
+            const getISTNow = () => {
+                const now = new Date();
+                return new Date(now.getTime() + (5.5 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60 * 1000));
+            };
+
+            // Construct finalEntryDate using the edit date and Indian Standard Time (IST) edit time
+            let finalEntryDate = getISTNow();
+            if (entryDate !== undefined && entryDate) {
+                const parsedEditDate = new Date(entryDate);
+                if (!isNaN(parsedEditDate.getTime())) {
+                    if (parsedEditDate.getHours() === 0 && parsedEditDate.getMinutes() === 0 && parsedEditDate.getSeconds() === 0) {
+                        const istNow = getISTNow();
+                        finalEntryDate = new Date(
+                            parsedEditDate.getFullYear(),
+                            parsedEditDate.getMonth(),
+                            parsedEditDate.getDate(),
+                            istNow.getHours(),
+                            istNow.getMinutes(),
+                            istNow.getSeconds(),
+                            istNow.getMilliseconds()
+                        );
+                    } else {
+                        finalEntryDate = parsedEditDate;
+                    }
+                }
+            }
 
             // Automatically sync invoice number in description
             const invoiceRegex = /((?:INV|MAN|WRK)-\w+(?:-\w+)*)/i;
@@ -1572,186 +1609,193 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 newCustomerDoc = await Customer.findOne({ _id: newCustomerId, isDeleted: false });
             }
 
-            // Check if Customer or Invoice is switched / changed or unlinked
+            // Check if Amount, Customer, or Invoice is changed or unlinked
+            const isAmountChanged = amount !== undefined && Math.abs(Number(amount) - oldAmount) > 0.001;
             const isCustomerChanged = String(oldCustomerId || '') !== String(newCustomerId || '');
             const isInvoiceChanged = String(oldInvoiceId || '') !== String(newInvoiceId || '');
             const hasExistingSetOff = (bankTx.invoices && bankTx.invoices.length > 0) || oldInvoiceId || oldCustomerId;
 
-            if (hasExistingSetOff && (isCustomerChanged || isInvoiceChanged || !newCustomerId)) {
+            if (hasExistingSetOff && (isAmountChanged || isCustomerChanged || isInvoiceChanged || !newCustomerId)) {
                 console.log(`[bulkEditTransactions] Reversing previous customer set-off / invoice linking for transaction ${bankTx._id}, oldCustomer=${oldCustomerId}`);
 
-                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                // Use history-based reversal (precise undo using before-state)
+                const reversalResult = await reverseSetOffFromHistory(bankTx._id);
 
-                // 1. Find all PaymentReceived documents associated with this bankTx or oldCustomerId & entry
-                const searchConditions = [];
-                if (bankTx.transactionId) {
-                    searchConditions.push({ referenceNumber: bankTx.transactionId });
-                    searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx.transactionId), "i") } });
-                }
-                if (entry._id) {
-                    searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(entry._id.toString()), "i") } });
-                }
-                if (bankTx._id) {
-                    searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx._id.toString()), "i") } });
-                }
-                if (oldCustomerId) {
-                    searchConditions.push({ customerId: oldCustomerId, amountReceived: oldAmount });
-                }
+                if (!reversalResult) {
+                    // FALLBACK: No history exists (pre-feature transaction), use legacy reversal
+                    console.log(`[bulkEditTransactions] No set-off history found, using legacy reversal for bankTx ${bankTx._id}`);
 
-                const prDocs = searchConditions.length > 0
-                    ? await PaymentReceived.find({ $or: searchConditions })
-                    : [];
+                    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
 
-                const prNumbers = prDocs.map(p => p.paymentNumber).filter(Boolean);
-                const prIds = prDocs.map(p => p._id.toString());
-
-                // 2. Collect all invoice IDs to revert
-                const prevInvoiceIds = new Set();
-                if (bankTx.invoices && bankTx.invoices.length > 0) {
-                    bankTx.invoices.forEach(i => prevInvoiceIds.add(String(i.invoiceId)));
-                }
-                if (oldInvoiceId) {
-                    prevInvoiceIds.add(String(oldInvoiceId));
-                }
-                prDocs.forEach(pr => {
-                    if (pr.invoices && pr.invoices.length > 0) {
-                        pr.invoices.forEach(i => prevInvoiceIds.add(String(i.invoiceId)));
+                    // Find PaymentReceived documents associated with this transaction
+                    const searchConditions = [];
+                    if (bankTx.transactionId) {
+                        searchConditions.push({ referenceNumber: bankTx.transactionId });
+                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx.transactionId), "i") } });
                     }
-                });
+                    if (entry._id) {
+                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(entry._id.toString()), "i") } });
+                    }
+                    if (bankTx._id) {
+                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx._id.toString()), "i") } });
+                    }
+                    if (oldCustomerId) {
+                        searchConditions.push({ customerId: oldCustomerId, amountReceived: oldAmount });
+                    }
 
-                // Also check if any invoice of oldCustomerId has matching payment records for this transaction
-                if (oldCustomerId) {
-                    const custInvoices = await Invoice.find({ customer: oldCustomerId, isDeleted: false });
-                    custInvoices.forEach(inv => {
-                        const hasMatchingPayment = (inv.payments || []).some(p =>
-                            (bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId)) ||
-                            (entry.transactionId && String(p.transactionId) === String(entry.transactionId)) ||
-                            (String(p.transactionId) === String(entry._id)) ||
-                            (String(p.transactionId) === String(bankTx._id)) ||
-                            (entry.manualJournal && String(p.transactionId) === String(entry.manualJournal)) ||
-                            (p.note && prNumbers.some(prNum => p.note.includes(prNum))) ||
-                            (bankTx.invoices && bankTx.invoices.some(bi => String(bi.invoiceId) === String(inv._id)))
-                        );
-                        if (hasMatchingPayment) {
-                            prevInvoiceIds.add(String(inv._id));
+                    const prDocs = searchConditions.length > 0
+                        ? await PaymentReceived.find({ $or: searchConditions })
+                        : [];
+                    const prNumbers = prDocs.map(p => p.paymentNumber).filter(Boolean);
+                    const prIds = prDocs.map(p => p._id.toString());
+
+                    // Collect previous invoice IDs to revert
+                    const prevInvoiceIds = new Set();
+                    if (bankTx.invoices && bankTx.invoices.length > 0) {
+                        bankTx.invoices.forEach(i => prevInvoiceIds.add(String(i.invoiceId)));
+                    }
+                    if (oldInvoiceId) {
+                        prevInvoiceIds.add(String(oldInvoiceId));
+                    }
+                    prDocs.forEach(pr => {
+                        if (pr.invoices && pr.invoices.length > 0) {
+                            pr.invoices.forEach(i => prevInvoiceIds.add(String(i.invoiceId)));
                         }
                     });
-                }
-
-                // 3. Revert payment amounts & statuses on previous invoices
-                for (const invId of prevInvoiceIds) {
-                    const invDoc = await Invoice.findById(invId);
-                    if (invDoc) {
-                        invDoc.payments = (invDoc.payments || []).filter(p => {
-                            const matchTxId = bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId);
-                            const matchEntryTxId = entry.transactionId && String(p.transactionId) === String(entry.transactionId);
-                            const matchEntryId = String(p.transactionId) === String(entry._id);
-                            const matchBankTxId = String(p.transactionId) === String(bankTx._id);
-                            const matchJournalId = entry.manualJournal && String(p.transactionId) === String(entry.manualJournal);
-                            const matchPRNumber = p.note && prNumbers.some(prNum => p.note.includes(prNum));
-                            const matchInvSetOff = bankTx.invoices && bankTx.invoices.some(bi =>
-                                String(bi.invoiceId) === String(invDoc._id) && Math.abs((p.amount || 0) - (bi.amountApplied || 0)) < 0.01
+                    if (oldCustomerId) {
+                        const custInvoices = await Invoice.find({ customer: oldCustomerId, isDeleted: false });
+                        custInvoices.forEach(inv => {
+                            const hasMatchingPayment = (inv.payments || []).some(p =>
+                                (bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId)) ||
+                                (entry.transactionId && String(p.transactionId) === String(entry.transactionId)) ||
+                                (String(p.transactionId) === String(entry._id)) ||
+                                (String(p.transactionId) === String(bankTx._id)) ||
+                                (entry.manualJournal && String(p.transactionId) === String(entry.manualJournal)) ||
+                                (p.note && prNumbers.some(prNum => p.note.includes(prNum))) ||
+                                (bankTx.invoices && bankTx.invoices.some(bi => String(bi.invoiceId) === String(inv._id)))
                             );
-
-                            const isTargetPayment = matchTxId || matchEntryTxId || matchEntryId || matchBankTxId || matchJournalId || matchPRNumber || matchInvSetOff;
-                            return !isTargetPayment;
-                        });
-
-                        const newPaid = (invDoc.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-                        const newBalance = Math.max(0, invDoc.totalAmountDue - newPaid);
-
-                        let newStatus = "PENDING";
-                        if (newBalance <= 0) {
-                            newStatus = "PAID";
-                        } else if (newPaid > 0) {
-                            newStatus = "PARTIAL";
-                        } else {
-                            const now = new Date();
-                            if (invDoc.dueDate && new Date(invDoc.dueDate) < now) {
-                                newStatus = "OVERDUE";
-                            } else {
-                                newStatus = "PENDING";
+                            if (hasMatchingPayment) {
+                                prevInvoiceIds.add(String(inv._id));
                             }
-                        }
+                        });
+                    }
 
-                        invDoc.amountPaid = newPaid;
-                        invDoc.balance = newBalance;
-                        invDoc.status = newStatus;
-                        if (newStatus !== "PAID") {
-                            invDoc.paidAt = undefined;
-                        }
-                        await invDoc.save();
+                    // Revert payment amounts & statuses on previous invoices
+                    for (const invId of prevInvoiceIds) {
+                        const invDoc = await Invoice.findById(invId);
+                        if (invDoc) {
+                            invDoc.payments = (invDoc.payments || []).filter(p => {
+                                const matchTxId = bankTx.transactionId && String(p.transactionId) === String(bankTx.transactionId);
+                                const matchEntryTxId = entry.transactionId && String(p.transactionId) === String(entry.transactionId);
+                                const matchEntryId = String(p.transactionId) === String(entry._id);
+                                const matchBankTxId = String(p.transactionId) === String(bankTx._id);
+                                const matchJournalId = entry.manualJournal && String(p.transactionId) === String(entry.manualJournal);
+                                const matchPRNumber = p.note && prNumbers.some(prNum => p.note.includes(prNum));
+                                const matchInvSetOff = bankTx.invoices && bankTx.invoices.some(bi =>
+                                    String(bi.invoiceId) === String(invDoc._id) && Math.abs((p.amount || 0) - (bi.amountApplied || 0)) < 0.01
+                                );
+                                const isTargetPayment = matchTxId || matchEntryTxId || matchEntryId || matchBankTxId || matchJournalId || matchPRNumber || matchInvSetOff;
+                                return !isTargetPayment;
+                            });
+                            const newPaid = (invDoc.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+                            const newBalance = Math.max(0, invDoc.totalAmountDue - newPaid);
+                            let newStatus = "PENDING";
+                            if (newBalance <= 0) { newStatus = "PAID"; }
+                            else if (newPaid > 0) { newStatus = "PARTIAL"; }
+                            else {
+                                const now = new Date();
+                                if (invDoc.dueDate && new Date(invDoc.dueDate) < now) { newStatus = "OVERDUE"; }
+                            }
+                            invDoc.amountPaid = newPaid;
+                            invDoc.balance = newBalance;
+                            invDoc.status = newStatus;
+                            if (newStatus !== "PAID") { invDoc.paidAt = undefined; }
+                            await invDoc.save();
 
-                        // Sync ServiceBill if workshop invoice
-                        if (invDoc.invoiceType === 'WORKSHOP' && invDoc.serviceBill) {
-                            try {
-                                const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
-                                const bill = await ServiceBill.findById(invDoc.serviceBill);
-                                if (bill) {
-                                    const newBillPaid = Math.max(0, (bill.amountPaid || 0) - oldAmount);
-                                    const newBillPaymentStatus = newBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (newBillPaid > 0 ? "PARTIAL" : "PENDING");
-                                    await ServiceBill.findByIdAndUpdate(bill._id, {
-                                        $set: { amountPaid: newBillPaid, paymentStatus: newBillPaymentStatus, status: newBillPaymentStatus === "PAID" ? "PAID" : bill.status }
-                                    });
+                            if (invDoc.invoiceType === 'WORKSHOP' && invDoc.serviceBill) {
+                                try {
+                                    const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+                                    const bill = await ServiceBill.findById(invDoc.serviceBill);
+                                    if (bill) {
+                                        const newBillPaid = Math.max(0, (bill.amountPaid || 0) - oldAmount);
+                                        const newBillPaymentStatus = newBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (newBillPaid > 0 ? "PARTIAL" : "PENDING");
+                                        await ServiceBill.findByIdAndUpdate(bill._id, {
+                                            $set: { amountPaid: newBillPaid, paymentStatus: newBillPaymentStatus, status: newBillPaymentStatus === "PAID" ? "PAID" : bill.status }
+                                        });
+                                    }
+                                } catch (sbErr) {
+                                    console.error("[bulkEditTransactions] Failed to revert ServiceBill:", sbErr);
                                 }
-                            } catch (sbErr) {
-                                console.error("[bulkEditTransactions] Failed to revert ServiceBill:", sbErr);
                             }
                         }
                     }
-                }
 
-                // 4. Remove previous PaymentReceived records
-                if (prIds.length > 0) {
-                    await PaymentReceived.deleteMany({ _id: { $in: prIds } });
-                    console.log(`[bulkEditTransactions] Deleted ${prIds.length} PaymentReceived record(s) for customer ${oldCustomerId}`);
-                }
+                    // Remove previous PaymentReceived records
+                    if (prIds.length > 0) {
+                        await PaymentReceived.deleteMany({ _id: { $in: prIds } });
+                        console.log(`[bulkEditTransactions] Deleted ${prIds.length} PaymentReceived record(s) for customer ${oldCustomerId}`);
+                    }
 
-                // 5. Remove previous double-entry ledger impact and ManualJournals
-                try {
-                    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+                    // Remove previous double-entry ledger impact and ManualJournals
+                    try {
+                        const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+                        if (entry.manualJournal) {
+                            await LedgerEntry.deleteMany({ manualJournal: entry.manualJournal, _id: { $ne: entry._id } });
+                            await ManualJournal.deleteOne({ _id: entry.manualJournal });
+                            entry.manualJournal = undefined;
+                            partner = null;
+                        }
+                        const txIds = [bankTx.transactionId, entry.transactionId].filter(Boolean);
+                        if (txIds.length > 0) {
+                            await LedgerEntry.deleteMany({
+                                transactionId: { $in: txIds },
+                                _id: { $ne: entry._id }
+                            });
+                        }
+                        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+                        const arCode = await AccountingCode.findOne({ $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }], isDeleted: { $ne: true } });
+                        const advCode = await AccountingCode.findOne({ $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }], isDeleted: { $ne: true } });
+                        if (arCode) await syncAccountingCodeBalances(arCode._id);
+                        if (advCode) await syncAccountingCodeBalances(advCode._id);
+                    } catch (mjErr) {
+                        console.error("[bulkEditTransactions] Error deleting old ledger journal:", mjErr);
+                    }
+                } else {
+                    // History-based reversal succeeded — also clean up the entry's manualJournal reference
                     if (entry.manualJournal) {
-                        await LedgerEntry.deleteMany({ manualJournal: entry.manualJournal, _id: { $ne: entry._id } });
-                        await ManualJournal.deleteOne({ _id: entry.manualJournal });
                         entry.manualJournal = undefined;
                         partner = null;
                     }
-                    const txIds = [bankTx.transactionId, entry.transactionId].filter(Boolean);
-                    if (txIds.length > 0) {
-                        await LedgerEntry.deleteMany({
-                            transactionId: { $in: txIds },
-                            _id: { $ne: entry._id }
-                        });
-                    }
-
-                    // Resync Accounts Receivable & Advance Received accounting code balances after deleting old journal
-                    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-                    const arCode = await AccountingCode.findOne({ $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }], isDeleted: { $ne: true } });
-                    const advCode = await AccountingCode.findOne({ $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }], isDeleted: { $ne: true } });
-                    if (arCode) await syncAccountingCodeBalances(arCode._id);
-                    if (advCode) await syncAccountingCodeBalances(advCode._id);
-                } catch (mjErr) {
-                    console.error("[bulkEditTransactions] Error deleting old ledger journal:", mjErr);
                 }
 
-                // Clear bankTx invoice/setOff metadata
+                // Strip unlinked invoice numbers from descriptions
+                const prevInvoiceIdsForDesc = new Set();
+                if (entry.invoices && entry.invoices.length > 0) {
+                    entry.invoices.forEach(i => prevInvoiceIdsForDesc.add(String(i.invoiceId)));
+                }
+                if (bankTx.invoices && bankTx.invoices.length > 0) {
+                    bankTx.invoices.forEach(i => prevInvoiceIdsForDesc.add(String(i.invoiceId)));
+                }
+                if (oldInvoiceId) prevInvoiceIdsForDesc.add(String(oldInvoiceId));
+
+                // Clear bankTx & entry invoice/setOff metadata
                 bankTx.invoices = [];
                 bankTx.invoice = undefined;
                 bankTx.setOffSummary = undefined;
 
-                // Strip unlinked invoice numbers from entry and bankTx descriptions & delete set-off ledger entries matching unlinked invoices
-                const prevInvoiceDocs = await Invoice.find({ _id: { $in: Array.from(prevInvoiceIds) } });
-                const prevInvoiceNumbers = prevInvoiceDocs.map(i => i.invoiceNumber).filter(Boolean);
-                for (const invNum of prevInvoiceNumbers) {
-                    await LedgerEntry.deleteMany({
-                        description: { $regex: new RegExp(escapeRegExp(invNum), "i") },
-                        _id: { $ne: entry._id }
-                    });
-                    const invRegex = new RegExp(`(?:\\s*\\|?\\s*-?\\s*Set off:\\s*${escapeRegExp(invNum)}|\\s*\\|?\\s*-?\\s*${escapeRegExp(invNum)})`, 'gi');
-                    finalDesc = (finalDesc || '').replace(invRegex, '').trim();
-                    entry.description = (entry.description || '').replace(invRegex, '').trim();
-                    if (bankTx) {
-                        bankTx.description = (bankTx.description || '').replace(invRegex, '').trim();
+                entry.invoices = [];
+                entry.setOffSummary = undefined;
+
+                if (prevInvoiceIdsForDesc.size > 0) {
+                    const prevInvoiceDocs = await Invoice.find({ _id: { $in: Array.from(prevInvoiceIdsForDesc) } });
+                    const prevInvoiceNumbers = prevInvoiceDocs.map(i => i.invoiceNumber).filter(Boolean);
+                    for (const invNum of prevInvoiceNumbers) {
+                        const invRegex = new RegExp(`(?:\\s*\\|?\\s*-?\\s*Set off:\\s*${escapeRegExp(invNum)}|\\s*\\|?\\s*-?\\s*${escapeRegExp(invNum)})`, 'gi');
+                        finalDesc = (finalDesc || '').replace(invRegex, '').trim();
+                        entry.description = (entry.description || '').replace(invRegex, '').trim();
+                        if (bankTx) {
+                            bankTx.description = (bankTx.description || '').replace(invRegex, '').trim();
+                        }
                     }
                 }
                 finalDesc = finalDesc
@@ -1763,43 +1807,54 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 entry.description = finalDesc;
             }
 
-            // Perform automatic set-off if a customer is selected and it's a DEBIT (incoming funds)
-            if (newCustomerId && (type || oldType) === "DEBIT") {
+            // Perform automatic set-off if a customer is selected and the final type is DEBIT (incoming deposit)
+            const finalType = type !== undefined ? type : (entry.type || oldType);
+            if (newCustomerId && finalType === "DEBIT") {
                 const BankAccount = require("../Model/BankAccountModel");
                 const bankAccountDoc = await BankAccount.findById(bankAccountId);
                 const bankAccCodeId = bankAccountDoc ? bankAccountDoc.accountingCode : entry.accountingCode;
 
                 const setOffResult = await autoSetOffInvoices(newCustomerId, finalAmount, {
                     bankAccountingCodeId: bankAccCodeId,
+                    bankTransactionId: bankTx._id,
+                    bankAccountId: bankAccountId,
                     branchId: entry.branch,
                     entryDate: finalEntryDate,
                     description: finalDesc || `Bank statement edit set-off`,
                     transactionId: bankTx.transactionId || entry.transactionId,
                     existingBankLedgerEntryId: entry._id,
+                    targetInvoiceId: newInvoiceId,
                     createdBy: entry.createdBy || bankTx.createdBy || "6a2290019fa01283dd165204",
                     creatorRole: entry.creatorRole || bankTx.creatorRole || "ADMIN"
                 });
 
-                bankTx.customer = newCustomerId;
-                bankTx.customerName = newCustomerDoc ? (newCustomerDoc.name || newCustomerDoc.customerName) : undefined;
-                bankTx.invoices = setOffResult.invoicesSetOff.map(inv => ({
+                const newFormattedInvoices = setOffResult.invoicesSetOff.map(inv => ({
                     invoiceId: inv.invoiceId,
                     invoiceNumber: inv.invoiceNumber,
                     amountApplied: inv.amountApplied
                 }));
-                bankTx.setOffSummary = {
+                const newSetOffSummary = {
                     totalSetOff: setOffResult.totalSetOff,
                     invoiceCount: setOffResult.invoicesSetOff.length,
                     excessAmount: setOffResult.excessAmount
                 };
+
+                bankTx.customer = newCustomerId;
+                bankTx.customerName = newCustomerDoc ? (newCustomerDoc.name || newCustomerDoc.customerName) : undefined;
+                bankTx.invoices = newFormattedInvoices;
+                bankTx.setOffSummary = newSetOffSummary;
                 bankTx.invoice = setOffResult.invoicesSetOff.length > 0 ? setOffResult.invoicesSetOff[0].invoiceId : undefined;
+
+                entry.manualJournal = setOffResult.ledgerJournal || entry.manualJournal;
+                entry.invoices = newFormattedInvoices;
+                entry.setOffSummary = newSetOffSummary;
 
                 const invoiceNumbers = setOffResult.invoicesSetOff.map(inv => inv.invoiceNumber).join(", ");
                 const custName = newCustomerDoc ? (newCustomerDoc.name || newCustomerDoc.customerName) : '';
                 if (setOffResult.invoicesSetOff.length > 0) {
-                    finalDesc = `Bank deposit - Customer: ${custName} | ${invoiceNumbers}${bankTx.transactionId ? ` | Ref: ${bankTx.transactionId}` : ''}`;
+                    finalDesc = `Bank deposit - Customer: ${custName} | ${invoiceNumbers}`;
                 } else {
-                    finalDesc = `Bank deposit - Customer: ${custName} | Advance Payment ($${setOffResult.excessAmount.toFixed(2)})${bankTx.transactionId ? ` | Ref: ${bankTx.transactionId}` : ''}`;
+                    finalDesc = `Bank deposit - Customer: ${custName} | Advance Payment ($${setOffResult.excessAmount.toFixed(2)})`;
                 }
             } else if (!newCustomerId) {
                 // Customer unlinked
@@ -1808,27 +1863,30 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 bankTx.invoice = undefined;
                 bankTx.invoices = [];
                 bankTx.setOffSummary = undefined;
-                finalDesc = `Bank statement deposit${bankTx.transactionId ? ` | Ref: ${bankTx.transactionId}` : ''}`;
+
+                entry.invoices = [];
+                entry.setOffSummary = undefined;
+                finalDesc = `Bank statement deposit`;
             }
 
-            // Sync contact (customer) field and description on the LedgerEntries
+            // Sync contact (customer) field, description, amount and editing date/time on the LedgerEntries
             entry.contact = newCustomerId || undefined;
             entry.description = finalDesc;
             if (amount !== undefined) entry.amount = finalAmount;
-            if (entryDate !== undefined) entry.entryDate = finalEntryDate;
+            entry.entryDate = finalEntryDate;
             await entry.save();
 
             if (partner) {
                 partner.contact = newCustomerId || undefined;
                 partner.description = finalDesc;
                 if (amount !== undefined) partner.amount = finalAmount;
-                if (entryDate !== undefined) partner.entryDate = finalEntryDate;
+                partner.entryDate = finalEntryDate;
                 await partner.save();
             }
 
             // Update BankTransaction fields
             bankTx.description = finalDesc;
-            if (entryDate !== undefined) bankTx.entryDate = finalEntryDate;
+            bankTx.entryDate = finalEntryDate;
             if (type !== undefined) {
                 bankTx.type = type;
                 bankTx.transactionType = type;
@@ -1864,13 +1922,15 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             const journal = await ManualJournal.findById(entry.manualJournal);
             if (journal) {
                 if (entryDate !== undefined) journal.date = new Date(entryDate);
-                if (description !== undefined) journal.description = description;
+                if (description !== undefined || finalDesc) journal.description = finalDesc || description;
                 if (amount !== undefined) journal.totalAmount = Number(amount);
                 await journal.save();
 
                 const partnerUpdate = {};
                 if (entryDate !== undefined) partnerUpdate.entryDate = new Date(entryDate);
                 if (amount !== undefined) partnerUpdate.amount = Number(amount);
+                if (description !== undefined || finalDesc) partnerUpdate.description = finalDesc || description;
+
                 if (type !== undefined) {
                     const journalLines = await LedgerEntry.find({ manualJournal: journal._id });
                     if (journalLines.length === 2) {
@@ -1888,7 +1948,26 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                         { $set: partnerUpdate }
                     );
                 }
+
+                // Sync balances for all accounting codes in this journal
+                const updatedLines = await LedgerEntry.find({ manualJournal: journal._id });
+                for (const line of updatedLines) {
+                    if (line.accountingCode) {
+                        await syncAccountingCodeBalances(line.accountingCode);
+                    }
+                }
             }
+        }
+
+        // Always sync AR (1.1.03) and Advance (2.1.02) balances
+        try {
+            const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+            const arCode = await AccountingCode.findOne({ $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }], isDeleted: { $ne: true } });
+            const advCode = await AccountingCode.findOne({ $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }], isDeleted: { $ne: true } });
+            if (arCode) await syncAccountingCodeBalances(arCode._id);
+            if (advCode) await syncAccountingCodeBalances(advCode._id);
+        } catch (syncErr) {
+            console.error("[bulkEditTransactions] Failed to sync AR/Advance code balances:", syncErr);
         }
     }
 
@@ -1934,6 +2013,8 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
 
     const {
         bankAccountingCodeId,
+        bankTransactionId,
+        bankAccountId: inputBankAccountId,
         branchId: inputBranchId,
         entryDate = new Date(),
         description = "",
@@ -1974,6 +2055,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
     const unpaidInvoices = await Invoice.find({
         customer: { $in: customerObjIds },
         status: { $in: ["PARTIAL", "PENDING", "OVERDUE", "partial", "pending", "overdue"] },
+        balance: { $gt: 0.01 },
         isDeleted: { $ne: true }
     });
 
@@ -1983,7 +2065,11 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         console.log(`  📌 [${i + 1}] Invoice #${inv.invoiceNumber} | ID: ${inv._id} | Status: ${inv.status} | Total Due: $${inv.totalAmountDue} | Paid: $${inv.amountPaid || 0} | Balance: $${invBal} | Due Date: ${inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : 'N/A'}`);
     });
 
-    const timestamp = entryDate instanceof Date ? entryDate : new Date(entryDate);
+    const getISTNow = () => {
+        const now = new Date();
+        return new Date(now.getTime() + (5.5 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60 * 1000));
+    };
+    const timestamp = entryDate ? (entryDate instanceof Date ? entryDate : new Date(entryDate)) : getISTNow();
 
     // Helper to determine if an invoice is overdue
     const isOverdue = (inv) => {
@@ -2011,7 +2097,17 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         .filter(inv => !isOverdue(inv) && String(inv.status).toUpperCase() !== "PARTIAL")
         .sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0));
 
-    const sortedInvoices = [...overdueInvoices, ...nonOverduePartialInvoices, ...nonOverduePendingInvoices];
+    let sortedInvoices = [...overdueInvoices, ...nonOverduePartialInvoices, ...nonOverduePendingInvoices];
+
+    // Priority 0: Explicitly targeted invoice if specified
+    const targetInvId = options.targetInvoiceId || options.invoiceId;
+    if (targetInvId) {
+        const targetIdx = sortedInvoices.findIndex(inv => String(inv._id) === String(targetInvId));
+        if (targetIdx > -1) {
+            const [targetInv] = sortedInvoices.splice(targetIdx, 1);
+            sortedInvoices.unshift(targetInv);
+        }
+    }
 
     console.log(`[AUTO SET-OFF STAGE 2] Priority Order for Set-off (${sortedInvoices.length} invoice(s)):`);
     sortedInvoices.forEach((inv, idx) => {
@@ -2045,9 +2141,18 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         if (remainingAmount <= 0.01) break;
 
         const invoiceBalance = invoice.balance !== undefined ? invoice.balance : (invoice.totalAmountDue - (invoice.amountPaid || 0));
-        if (invoiceBalance <= 0) continue;
+        if (invoiceBalance <= 0.01 || String(invoice.status).toUpperCase() === "PAID") continue;
 
         const amountToApply = Math.min(remainingAmount, invoiceBalance);
+
+        // Capture BEFORE state (before this transaction is applied)
+        const beforeState = {
+            amountPaid: invoice.amountPaid || 0,
+            balance: invoice.balance !== undefined ? invoice.balance : (invoice.totalAmountDue - (invoice.amountPaid || 0)),
+            status: invoice.status || "PENDING",
+            paidAt: invoice.paidAt || null,
+        };
+
         const newPaid = (invoice.amountPaid || 0) + amountToApply;
         const newBalance = Math.max(0, invoice.totalAmountDue - newPaid);
         let newStatus = "PENDING";
@@ -2083,6 +2188,14 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             invoice.paidAt = timestamp;
         }
         await invoice.save();
+
+        // Capture AFTER state (after this transaction is applied)
+        const afterState = {
+            amountPaid: newPaid,
+            balance: newBalance,
+            status: newStatus,
+            paidAt: invoice.paidAt || null,
+        };
 
         // Sync with Service Bill if it's a workshop invoice
         if (invoice.invoiceType === 'WORKSHOP' && invoice.serviceBill) {
@@ -2122,7 +2235,9 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             invoiceNumber: invoice.invoiceNumber,
             amountApplied: amountToApply,
             newStatus,
-            newBalance
+            newBalance,
+            beforeState,
+            afterState
         });
 
         totalSetOff += amountToApply;
@@ -2179,6 +2294,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         || await AccountingCode.findOne({ name: { $regex: /Advance Received|Anticipo/i }, isDeleted: { $ne: true } })
         || targetArCode;
 
+    let createdJournalId = null;
     if (bankAccountingCodeId && (targetArCode || targetAdvCode)) {
         try {
             const invoiceNumbers = invoicesSetOff.length > 0
@@ -2186,77 +2302,130 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                 : "No open invoices";
             const prNumber = prDoc ? prDoc.paymentNumber : "PR-Pending";
 
-            const journalLines = [];
+            const formattedInvoicesForLedger = invoicesSetOff.map(inv => ({
+                invoiceId: inv.invoiceId,
+                invoiceNumber: inv.invoiceNumber,
+                amountApplied: inv.amountApplied
+            }));
 
-            // If existingBankLedgerEntryId is provided, don't create a new DEBIT line; update existing entry instead
-            if (!options.existingBankLedgerEntryId) {
-                journalLines.push({
-                    accountingCode: bankAccountingCodeId,
-                    type: "DEBIT",
-                    amount: amount,
-                    description: `Bank deposit - Customer: ${customerName} | ${invoicesSetOff.length > 0 ? invoiceNumbers : 'Advance Payment'}${transactionId ? ` | Ref: ${transactionId}` : ''}`,
-                    contact: customerId,
-                    contactModel: "Customer",
-                    transactionId: transactionId
-                });
-            }
+            const formattedSetOffSummary = {
+                totalSetOff: totalSetOff,
+                invoiceCount: invoicesSetOff.length,
+                excessAmount: excessAmount
+            };
+
+            const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+            const createdPartnerEntryIds = [];
 
             // Leg 2: CREDIT Accounts Receivable (for invoice set-off portion)
             if (totalSetOff > 0 && targetArCode) {
-                journalLines.push({
+                const arEntry = await LedgerEntry.create({
+                    branch: branchId,
                     accountingCode: targetArCode._id,
                     type: "CREDIT",
                     amount: totalSetOff,
                     description: `Invoice set-off payment (${invoiceNumbers}) - Customer: ${customerName}`,
                     contact: customerId,
-                    contactModel: "Customer",
-                    transactionId: transactionId
+                    transactionId: transactionId,
+                    entryDate: timestamp,
+                    createdBy: createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: (creatorRole || "ADMIN").toUpperCase()
                 });
+                if (arEntry) createdPartnerEntryIds.push(arEntry._id);
             }
 
             // Leg 3: CREDIT Advance Received From Customer (2.1.02) for excess amount
             if (excessAmount > 0 && targetAdvCode) {
-                journalLines.push({
+                const advEntry = await LedgerEntry.create({
+                    branch: branchId,
                     accountingCode: targetAdvCode._id,
                     type: "CREDIT",
                     amount: excessAmount,
-                    description: `Advance Received from Customer: ${customerName} | Payment Ref: ${prNumber} | Advance Amount: $${excessAmount.toFixed(2)}${transactionId ? ` | Bank Ref: ${transactionId}` : ''}`,
+                    description: `Advance Received from Customer: ${customerName} | Payment Ref: ${prNumber} | Advance Amount: $${excessAmount.toFixed(2)}`,
                     contact: customerId,
-                    contactModel: "Customer",
-                    transactionId: transactionId
+                    transactionId: transactionId,
+                    entryDate: timestamp,
+                    createdBy: createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: (creatorRole || "ADMIN").toUpperCase()
                 });
+                if (advEntry) createdPartnerEntryIds.push(advEntry._id);
             }
 
-            const journalPayload = {
-                description: description || `Payment received - Customer: ${customerName} | ${invoicesSetOff.length > 0 ? 'Auto set-off (' + invoiceNumbers + ')' : 'Advance Payment (' + prNumber + ')'}`,
-                date: timestamp,
-                branch: branchId,
-                lines: journalLines,
-                createdBy: createdBy || "6a2290019fa01283dd165204",
-                creatorRole: (creatorRole || "ADMIN").toUpperCase()
-            };
-
-            const mjResult = await ManualJournalService.createManualJournal(journalPayload);
-
-            if (options.existingBankLedgerEntryId && mjResult && mjResult.journal) {
-                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-                const existingEntry = await LedgerEntry.findById(options.existingBankLedgerEntryId);
-                if (existingEntry) {
-                    existingEntry.manualJournal = mjResult.journal._id;
-                    existingEntry.contact = customerId;
-                    existingEntry.contactModel = "Customer";
-                    existingEntry.description = `Bank deposit - Customer: ${customerName} | ${invoicesSetOff.length > 0 ? invoiceNumbers : 'Advance Payment'}${transactionId ? ` | Ref: ${transactionId}` : ''}`;
-                    await existingEntry.save();
-                }
-            }
-            console.log(`[AUTO SET-OFF STAGE 6] Double-Entry Ledger Created successfully (Bank DR $${amount}, AR CR $${totalSetOff}, Advance 2.1.02 CR $${excessAmount})`);
+            console.log(`[AUTO SET-OFF STAGE 6] Direct Double-Entry Ledger Created successfully (Bank DR $${amount}, AR CR $${totalSetOff}, Advance 2.1.02 CR $${excessAmount})`);
 
             // Sync accounting code balances
             await syncAccountingCodeBalances(bankAccountingCodeId);
             if (targetArCode) await syncAccountingCodeBalances(targetArCode._id);
             if (targetAdvCode) await syncAccountingCodeBalances(targetAdvCode._id);
+
+            // Store partner entry IDs in options for history saving
+            options.createdPartnerEntryIds = createdPartnerEntryIds;
         } catch (ledgerErr) {
             console.error("[autoSetOffInvoices] Failed to create ledger entries:", ledgerErr);
+        }
+    }
+
+    // Save or Update InvoiceSetOffHistory
+    let historyDoc = null;
+    if (bankTransactionId) {
+        try {
+            const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
+
+            const historySnapshots = invoicesSetOff.map(inv => ({
+                invoice: inv.invoiceId,
+                invoiceNumber: inv.invoiceNumber,
+                amountApplied: inv.amountApplied,
+                before: inv.beforeState,
+                after: inv.afterState,
+            }));
+
+            // Resolve the ledger journal ID from the ManualJournal created above
+            let ledgerJournalId = createdJournalId || null;
+            const partnerEntryIds = options.createdPartnerEntryIds || [];
+
+            const existingHistory = await InvoiceSetOffHistory.findOne({
+                $or: [
+                    { primaryLedgerEntry: bankTransactionId },
+                    { bankTransaction: bankTransactionId }
+                ]
+            });
+
+            if (existingHistory) {
+                // UPDATE existing: keep BEFORE data, update AFTER data
+                existingHistory.primaryLedgerEntry = bankTransactionId;
+                existingHistory.customer = customerId;
+                existingHistory.transactionAmount = Number(amount);
+                existingHistory.entryDate = entryDate instanceof Date ? entryDate : new Date(entryDate);
+                existingHistory.transactionId = transactionId;
+                existingHistory.invoiceSnapshots = historySnapshots;
+                existingHistory.excessAmount = excessAmount;
+                existingHistory.paymentReceived = prDoc ? prDoc._id : undefined;
+                existingHistory.ledgerJournal = ledgerJournalId || existingHistory.ledgerJournal;
+                existingHistory.partnerLedgerEntries = partnerEntryIds.length > 0 ? partnerEntryIds : existingHistory.partnerLedgerEntries;
+                await existingHistory.save();
+                historyDoc = existingHistory;
+                console.log(`[AUTO SET-OFF HISTORY] Updated existing InvoiceSetOffHistory ${existingHistory._id} for Primary LedgerEntry ${bankTransactionId}`);
+            } else {
+                // CREATE new history
+                historyDoc = await InvoiceSetOffHistory.create({
+                    primaryLedgerEntry: bankTransactionId,
+                    bankAccount: inputBankAccountId || undefined,
+                    customer: customerId,
+                    transactionAmount: Number(amount),
+                    entryDate: entryDate instanceof Date ? entryDate : new Date(entryDate),
+                    transactionId: transactionId,
+                    invoiceSnapshots: historySnapshots,
+                    excessAmount: excessAmount,
+                    paymentReceived: prDoc ? prDoc._id : undefined,
+                    ledgerJournal: ledgerJournalId,
+                    partnerLedgerEntries: partnerEntryIds,
+                    createdBy: createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: (creatorRole || "ADMIN").toUpperCase()
+                });
+                console.log(`[AUTO SET-OFF HISTORY] Created InvoiceSetOffHistory ${historyDoc._id} for Primary LedgerEntry ${bankTransactionId}`);
+            }
+        } catch (historyErr) {
+            console.error("[autoSetOffInvoices] Failed to save InvoiceSetOffHistory:", historyErr);
         }
     }
 
@@ -2271,8 +2440,164 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         invoicesSetOff,
         totalSetOff,
         excessAmount,
-        paymentReceived: prDoc ? { paymentNumber: prDoc.paymentNumber, _id: prDoc._id } : null
+        paymentReceived: prDoc ? { paymentNumber: prDoc.paymentNumber, _id: prDoc._id } : null,
+        historyId: historyDoc ? historyDoc._id : null
     };
+};
+
+/**
+ * Reverse invoice set-offs for a bank transaction using the InvoiceSetOffHistory.
+ * Restores each invoice to its exact BEFORE state from the history record.
+ * Deletes associated PaymentReceived and ledger entries.
+ *
+ * @param {ObjectId} bankTransactionId - The BankTransaction or Primary LedgerEntry _id
+ * @returns {Object|null} The history document, or null if no history found
+ */
+const reverseSetOffFromHistory = async (bankTransactionId) => {
+    const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
+    const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+
+    const history = await InvoiceSetOffHistory.findOne({
+        $or: [
+            { primaryLedgerEntry: bankTransactionId },
+            { bankTransaction: bankTransactionId },
+            { ledgerJournal: bankTransactionId }
+        ]
+    });
+
+    if (!history) {
+        console.log(`[reverseSetOffFromHistory] No InvoiceSetOffHistory found for BankTransaction/LedgerEntry ${bankTransactionId}. Returning null (caller should use fallback).`);
+        return null;
+    }
+
+    console.log(`\n===============================================================`);
+    console.log(`[REVERSE SET-OFF] Reversing set-off for BankTransaction ${bankTransactionId}`);
+    console.log(`  • History ID: ${history._id}`);
+    console.log(`  • Customer: ${history.customer}`);
+    console.log(`  • Transaction Amount: $${history.transactionAmount}`);
+    console.log(`  • Invoice Snapshots: ${history.invoiceSnapshots.length}`);
+    console.log(`---------------------------------------------------------------`);
+
+    // 1. Restore each invoice to its BEFORE state
+    for (const snapshot of history.invoiceSnapshots) {
+        try {
+            const invoiceDoc = await Invoice.findById(snapshot.invoice);
+            if (!invoiceDoc) {
+                console.log(`  ⚠ Invoice ${snapshot.invoiceNumber} (${snapshot.invoice}) not found, skipping.`);
+                continue;
+            }
+
+            console.log(`  ↩ Restoring Invoice #${snapshot.invoiceNumber}:`);
+            console.log(`    Before restore: amountPaid=$${invoiceDoc.amountPaid}, balance=$${invoiceDoc.balance}, status=${invoiceDoc.status}`);
+            console.log(`    Restoring to:   amountPaid=$${snapshot.before.amountPaid}, balance=$${snapshot.before.balance}, status=${snapshot.before.status}`);
+
+            // Remove the payment record associated with this transaction
+            const txId = history.transactionId;
+            if (txId) {
+                invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => {
+                    return String(p.transactionId) !== String(txId);
+                });
+            }
+
+            // Restore exact before-state values
+            invoiceDoc.amountPaid = snapshot.before.amountPaid;
+            invoiceDoc.balance = snapshot.before.balance;
+            invoiceDoc.status = snapshot.before.status;
+            invoiceDoc.paidAt = snapshot.before.paidAt || undefined;
+
+            if (invoiceDoc.status !== "PAID") {
+                invoiceDoc.paidAt = undefined;
+            }
+
+            await invoiceDoc.save();
+            console.log(`    ✓ Invoice #${snapshot.invoiceNumber} restored successfully.`);
+
+            // Sync ServiceBill if workshop invoice
+            if (invoiceDoc.invoiceType === 'WORKSHOP' && invoiceDoc.serviceBill) {
+                try {
+                    const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+                    const bill = await ServiceBill.findById(invoiceDoc.serviceBill);
+                    if (bill) {
+                        const revertedBillPaid = Math.max(0, (bill.amountPaid || 0) - snapshot.amountApplied);
+                        const newBillPaymentStatus = revertedBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (revertedBillPaid > 0 ? "PARTIAL" : "PENDING");
+                        await ServiceBill.findByIdAndUpdate(bill._id, {
+                            $set: {
+                                amountPaid: revertedBillPaid,
+                                paymentStatus: newBillPaymentStatus,
+                                status: newBillPaymentStatus === "PAID" ? "PAID" : bill.status
+                            }
+                        });
+                        console.log(`    ✓ Synced ServiceBill for Invoice #${snapshot.invoiceNumber}`);
+                    }
+                } catch (sbErr) {
+                    console.error(`    ✗ Failed to revert ServiceBill for Invoice #${snapshot.invoiceNumber}:`, sbErr);
+                }
+            }
+        } catch (invErr) {
+            console.error(`  ✗ Failed to restore Invoice ${snapshot.invoiceNumber}:`, invErr);
+        }
+    }
+
+    // 2. Delete associated PaymentReceived record
+    if (history.paymentReceived) {
+        try {
+            await PaymentReceived.deleteOne({ _id: history.paymentReceived });
+            console.log(`  ✓ Deleted PaymentReceived ${history.paymentReceived}`);
+        } catch (prErr) {
+            console.error(`  ✗ Failed to delete PaymentReceived:`, prErr);
+        }
+    }
+
+    // 3. Delete associated set-off partner ledger entries strictly by ObjectId (_id)
+    try {
+        if (history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
+            const delRes = await LedgerEntry.deleteMany({ _id: { $in: history.partnerLedgerEntries } });
+            console.log(`  ✓ Deleted ${delRes.deletedCount} partner set-off LedgerEntries strictly by _id`);
+        } else if (history.customer) {
+            // Legacy fallback: delete non-primary credit entries for this customer
+            const delRes = await LedgerEntry.deleteMany({
+                _id: { $ne: bankTransactionId },
+                contact: history.customer,
+                type: "CREDIT"
+            });
+            console.log(`  ✓ Deleted ${delRes.deletedCount} legacy partner set-off LedgerEntries`);
+        }
+    } catch (lErr) {
+        console.error(`  ✗ Failed to delete partner ledger entries:`, lErr);
+    }
+
+    // 4. Delete the history document itself after successful reversal
+    try {
+        await InvoiceSetOffHistory.deleteOne({ _id: history._id });
+        console.log(`  ✓ Deleted InvoiceSetOffHistory ${history._id}`);
+    } catch (hErr) {
+        console.error(`  ✗ Failed to delete InvoiceSetOffHistory:`, hErr);
+    }
+
+    // 4. Sync accounting code balances
+    try {
+        const arCode = await AccountingCode.findOne({
+            $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }],
+            isDeleted: { $ne: true }
+        });
+        const advCode = await AccountingCode.findOne({
+            $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }],
+            isDeleted: { $ne: true }
+        });
+        if (arCode) await syncAccountingCodeBalances(arCode._id);
+        if (advCode) await syncAccountingCodeBalances(advCode._id);
+    } catch (syncErr) {
+        console.error(`  ✗ Failed to sync accounting code balances:`, syncErr);
+    }
+
+    console.log(`[REVERSE SET-OFF] Reversal complete for BankTransaction ${bankTransactionId}`);
+    console.log(`===============================================================\n`);
+
+    return history;
 };
 
 module.exports = {
@@ -2290,5 +2615,6 @@ module.exports = {
     bulkEditTransactions,
     ensureSubAccountingCode,
     syncAccountingCodeBalances,
-    autoSetOffInvoices
+    autoSetOffInvoices,
+    reverseSetOffFromHistory
 };

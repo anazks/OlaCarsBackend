@@ -88,6 +88,18 @@ const ledgerEntrySchema = new mongoose.Schema(
                 uploadedAt: { type: Date, default: Date.now }
             }
         ],
+        invoices: [
+            {
+                invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+                invoiceNumber: { type: String },
+                amountApplied: { type: Number }
+            }
+        ],
+        setOffSummary: {
+            totalSetOff: { type: Number, default: 0 },
+            invoiceCount: { type: Number, default: 0 },
+            excessAmount: { type: Number, default: 0 }
+        },
     },
     { timestamps: true }
 );
