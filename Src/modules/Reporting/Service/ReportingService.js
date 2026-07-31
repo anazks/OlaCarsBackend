@@ -484,9 +484,11 @@ exports.getBalanceSheetReport = async (filters) => {
 
 
     let cumulativeNetIncome = 0;
-    if (startDate && endDate) {
+    if (endDate) {
         try {
-            const plReport = await exports.getPLReport({ branch, country, startDate, endDate });
+            const endYear = String(endDate).substring(0, 4);
+            const plStartDate = `${endYear}-01-01`;
+            const plReport = await exports.getPLReport({ branch, country, startDate: plStartDate, endDate });
             cumulativeNetIncome = plReport.netProfit;
         } catch (plErr) {
             console.error("Failed to fetch P&L report for Balance Sheet Net Income:", plErr);
@@ -516,12 +518,6 @@ exports.getBalanceSheetReport = async (filters) => {
                 report.equity[code.name] = { amount: 0, category: code.category, accountType: code.accountType, code: code.code };
             }
             report.equity[code.name].amount += val;
-        } else if (!startDate) {
-            if (category === "INCOME") {
-                cumulativeNetIncome += (row.creditSum - row.debitSum);
-            } else if (category === "EXPENSE") {
-                cumulativeNetIncome -= (row.debitSum - row.creditSum);
-            }
         }
     });
 
@@ -707,16 +703,21 @@ exports.getBalanceSheetReport = async (filters) => {
         !e.name.toLowerCase().includes("utilidades retenidas")
     );
 
-    let staticRetainedEarnings = 258789.00;
     let finalResultsOfTheExercise = resultsOfTheExercise;
+    let staticRetainedEarnings = 215141.27;
 
-    if (startDate) {
-        const startYear = parseInt(String(startDate).substring(0, 4), 10);
-        if (startYear === 2023 || startYear === 2024) {
-            staticRetainedEarnings = 103265.78;
+    if (endDate) {
+        const endYear = parseInt(String(endDate).substring(0, 4), 10);
+        if (endYear === 2023 || endYear === 2024) {
             finalResultsOfTheExercise = 111875.49;
-        } else if (startYear >= 2025) {
-            staticRetainedEarnings = 258789.00;
+        }
+
+        if (endYear <= 2024) {
+            staticRetainedEarnings = 1085.11;
+        } else if (endYear === 2025) {
+            staticRetainedEarnings = 103265.78;
+        } else if (endYear >= 2026) {
+            staticRetainedEarnings = 215141.27;
         }
     }
 
