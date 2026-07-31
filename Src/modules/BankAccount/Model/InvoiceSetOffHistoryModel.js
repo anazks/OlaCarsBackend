@@ -84,11 +84,6 @@ const invoiceSetOffHistorySchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "LedgerEntry",
         }],
-        ledgerJournal: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "ManualJournal",
-            required: false,
-        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: false,
@@ -103,7 +98,6 @@ const invoiceSetOffHistorySchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-invoiceSetOffHistorySchema.index({ primaryLedgerEntry: 1 }, { unique: true });
 invoiceSetOffHistorySchema.index({ customer: 1 });
 invoiceSetOffHistorySchema.index({ bankAccount: 1 });
 

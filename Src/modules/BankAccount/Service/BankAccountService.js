@@ -1619,7 +1619,13 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 console.log(`[bulkEditTransactions] Reversing previous customer set-off / invoice linking for transaction ${bankTx._id}, oldCustomer=${oldCustomerId}`);
 
                 // Use history-based reversal (precise undo using before-state)
-                const reversalResult = await reverseSetOffFromHistory(bankTx._id);
+                let reversalResult = await reverseSetOffFromHistory(bankTx._id);
+                if (!reversalResult && entry._id) {
+                    reversalResult = await reverseSetOffFromHistory(entry._id);
+                }
+                if (!reversalResult && bankTx.transactionId) {
+                    reversalResult = await reverseSetOffFromHistory(bankTx.transactionId);
+                }
 
                 if (!reversalResult) {
                     // FALLBACK: No history exists (pre-feature transaction), use legacy reversal
@@ -2367,7 +2373,8 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
 
     // Save or Update InvoiceSetOffHistory
     let historyDoc = null;
-    if (bankTransactionId) {
+    const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
+    if (primaryTxId) {
         try {
             const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
 
@@ -2379,20 +2386,19 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                 after: inv.afterState,
             }));
 
-            // Resolve the ledger journal ID from the ManualJournal created above
-            let ledgerJournalId = createdJournalId || null;
             const partnerEntryIds = options.createdPartnerEntryIds || [];
 
             const existingHistory = await InvoiceSetOffHistory.findOne({
                 $or: [
-                    { primaryLedgerEntry: bankTransactionId },
-                    { bankTransaction: bankTransactionId }
+                    { primaryLedgerEntry: primaryTxId },
+                    { partnerLedgerEntries: primaryTxId },
+                    ...(transactionId ? [{ transactionId: String(transactionId) }] : [])
                 ]
             });
 
             if (existingHistory) {
                 // UPDATE existing: keep BEFORE data, update AFTER data
-                existingHistory.primaryLedgerEntry = bankTransactionId;
+                existingHistory.primaryLedgerEntry = primaryTxId;
                 existingHistory.customer = customerId;
                 existingHistory.transactionAmount = Number(amount);
                 existingHistory.entryDate = entryDate instanceof Date ? entryDate : new Date(entryDate);
@@ -2400,15 +2406,14 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                 existingHistory.invoiceSnapshots = historySnapshots;
                 existingHistory.excessAmount = excessAmount;
                 existingHistory.paymentReceived = prDoc ? prDoc._id : undefined;
-                existingHistory.ledgerJournal = ledgerJournalId || existingHistory.ledgerJournal;
                 existingHistory.partnerLedgerEntries = partnerEntryIds.length > 0 ? partnerEntryIds : existingHistory.partnerLedgerEntries;
                 await existingHistory.save();
                 historyDoc = existingHistory;
-                console.log(`[AUTO SET-OFF HISTORY] Updated existing InvoiceSetOffHistory ${existingHistory._id} for Primary LedgerEntry ${bankTransactionId}`);
+                console.log(`[AUTO SET-OFF HISTORY] Updated existing InvoiceSetOffHistory ${existingHistory._id} for Primary LedgerEntry ${primaryTxId}`);
             } else {
                 // CREATE new history
                 historyDoc = await InvoiceSetOffHistory.create({
-                    primaryLedgerEntry: bankTransactionId,
+                    primaryLedgerEntry: primaryTxId,
                     bankAccount: inputBankAccountId || undefined,
                     customer: customerId,
                     transactionAmount: Number(amount),
@@ -2417,12 +2422,11 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                     invoiceSnapshots: historySnapshots,
                     excessAmount: excessAmount,
                     paymentReceived: prDoc ? prDoc._id : undefined,
-                    ledgerJournal: ledgerJournalId,
                     partnerLedgerEntries: partnerEntryIds,
                     createdBy: createdBy || "6a2290019fa01283dd165204",
                     creatorRole: (creatorRole || "ADMIN").toUpperCase()
                 });
-                console.log(`[AUTO SET-OFF HISTORY] Created InvoiceSetOffHistory ${historyDoc._id} for Primary LedgerEntry ${bankTransactionId}`);
+                console.log(`[AUTO SET-OFF HISTORY] Created InvoiceSetOffHistory ${historyDoc._id} for Primary LedgerEntry ${primaryTxId}`);
             }
         } catch (historyErr) {
             console.error("[autoSetOffInvoices] Failed to save InvoiceSetOffHistory:", historyErr);
@@ -2450,7 +2454,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
  * Restores each invoice to its exact BEFORE state from the history record.
  * Deletes associated PaymentReceived and ledger entries.
  *
- * @param {ObjectId} bankTransactionId - The BankTransaction or Primary LedgerEntry _id
+ * @param {ObjectId} bankTransactionId - The Primary LedgerEntry _id or transaction ID
  * @returns {Object|null} The history document, or null if no history found
  */
 const reverseSetOffFromHistory = async (bankTransactionId) => {
@@ -2458,14 +2462,13 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
     const { Invoice } = require("../../Invoice/Model/InvoiceModel");
     const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
     const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
     const history = await InvoiceSetOffHistory.findOne({
         $or: [
             { primaryLedgerEntry: bankTransactionId },
-            { bankTransaction: bankTransactionId },
-            { ledgerJournal: bankTransactionId }
+            { partnerLedgerEntries: bankTransactionId },
+            { transactionId: String(bankTransactionId) }
         ]
     });
 
