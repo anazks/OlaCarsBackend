@@ -12,7 +12,7 @@ async function createInvoice() {
         await mongoose.connect(mongoUri);
         console.log("✓ Connected to MongoDB.");
 
-        const targetCustomerName = "Test Customer B 1784614775246";
+        const targetCustomerName = "Test Customer A 1784614775174";
         
         // Search by exact name, customerId, or regex match
         let customer = await Customer.findOne({
