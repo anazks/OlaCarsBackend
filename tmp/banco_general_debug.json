@@ -20,11 +20,11 @@
     "creatorRole": "ADMIN",
     "isDeleted": false,
     "createdAt": "2026-06-09T12:57:20.278Z",
-    "updatedAt": "2026-06-29T09:27:40.278Z",
+    "updatedAt": "2026-07-31T18:09:14.129Z",
     "__v": 0,
-    "creditTotal": 23672.43,
-    "currentBalance": 10630.470000000008,
-    "debitTotal": 34302.90000000001
+    "creditTotal": 0,
+    "currentBalance": 0,
+    "debitTotal": 0
   },
   "balance": 0,
   "entriesCount": 0,

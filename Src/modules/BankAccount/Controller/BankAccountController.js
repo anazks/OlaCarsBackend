@@ -104,6 +104,11 @@ exports.deleteAllTransactions = async (req, res, next) => {
         account.currentBalance = account.initialBalance || 0;
         await account.save();
 
+        const { syncAccountingCodeBalances } = require("../Service/BankAccountService");
+        if (accCodeId) {
+            await syncAccountingCodeBalances(accCodeId);
+        }
+
         res.status(200).json({
             success: true,
             message: `Deleted ${deleteResult.deletedCount} ledger entries and ${bankTxDeleteResult.deletedCount} bank transactions. Balance reset to ${account.currentBalance}.`
@@ -1150,11 +1155,16 @@ exports.getBankTransactions = async (req, res, next) => {
                 const priorDebits = priorTotals[0].totalDeposits || 0;
                 const priorCredits = priorTotals[0].totalWithdrawals || 0;
                 const isCreditCard = account.accountType === "Credit Card";
-                openingBalance = isCreditCard
+                openingBalance = (account.initialBalance || 0) + (isCreditCard
                     ? (priorCredits - priorDebits)
-                    : (priorDebits - priorCredits);
+                    : (priorDebits - priorCredits));
             }
         }
+
+        const isCreditCard = account.accountType === "Credit Card";
+        const closingBalance = isCreditCard
+            ? openingBalance + totalWithdrawals - totalDeposits
+            : openingBalance + totalDeposits - totalWithdrawals;
 
         res.status(200).json({
             success: true,
@@ -1167,7 +1177,8 @@ exports.getBankTransactions = async (req, res, next) => {
             },
             totalDeposits,
             totalWithdrawals,
-            openingBalance
+            openingBalance,
+            closingBalance
         });
     } catch (error) {
         console.error("Error in getBankTransactions controller:", error);
