@@ -43,15 +43,23 @@ const checkAndReserve = async (partId, quantity, user, workOrderId = null) => {
     const part = await getPartById(partId);
     if (!part) throw new Error("Inventory part not found.", { cause: 404 });
     if (!part.isActive) throw new Error("This part has been discontinued.", { cause: 400 });
+    if (part.isBlocked) {
+        return {
+            success: false,
+            available: 0,
+            part,
+            message: `Material code ${part.partNumber} (${part.partName}) is fully blocked from issuance/consumption. Reason: ${part.blockedReason || "Admin Blocked"}.`,
+        };
+    }
 
-    const available = part.quantityOnHand - part.quantityReserved;
+    const available = Math.max(0, part.quantityOnHand - part.quantityReserved - (part.quantityBlocked || 0));
     if (available < quantity) {
         return {
             success: false,
             available,
             shortfall: quantity - available,
             part,
-            message: `Insufficient stock for ${part.partName}. Available: ${available}, Need: ${quantity}.`,
+            message: `Insufficient unblocked stock for ${part.partName}. Available: ${available}, Blocked: ${part.quantityBlocked || 0}, Need: ${quantity}.`,
         };
     }
 
@@ -118,6 +126,17 @@ const confirmInstallation = async (partId, quantity, user, workOrderId = null) =
  */
 const confirmDirectInstallation = async (partId, quantity, user, workOrderId = null) => {
     const part = await getPartById(partId);
+    if (!part) throw new Error("Inventory part not found.", { cause: 404 });
+    if (!part.isActive) throw new Error("This part has been discontinued.", { cause: 400 });
+    if (part.isBlocked) {
+        throw new Error(`Material code ${part.partNumber} is blocked from issuance. Reason: ${part.blockedReason || "Admin Blocked"}`);
+    }
+
+    const available = Math.max(0, part.quantityOnHand - part.quantityReserved - (part.quantityBlocked || 0));
+    if (available < quantity) {
+        throw new Error(`Insufficient unblocked stock for ${part.partName}. Available: ${available}, Blocked: ${part.quantityBlocked || 0}, Need: ${quantity}`);
+    }
+
     const updated = await deductStockDirectly(partId, quantity);
     
     await logTransaction({

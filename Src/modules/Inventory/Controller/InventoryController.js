@@ -243,6 +243,233 @@ const getWorkshopRequirementsHandler = async (req, res) => {
     }
 };
 
+/**
+ * Block or unblock a material code.
+ * @route PATCH /api/inventory/:id/block
+ */
+const blockMaterialCodeHandler = async (req, res) => {
+    try {
+        const { isBlocked, blockedReason } = req.body;
+        const part = await updatePart(req.params.id, {
+            isBlocked: !!isBlocked,
+            blockedReason: blockedReason || (isBlocked ? "Blocked by admin" : "")
+        });
+        if (!part) return res.status(404).json({ success: false, message: "Part not found" });
+        return res.status(200).json({
+            success: true,
+            data: part,
+            message: `Material code ${part.partNumber} is now ${isBlocked ? 'BLOCKED' : 'UNBLOCKED'}.`
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Set blocked quantity for an inventory part.
+ * @route PATCH /api/inventory/:id/block-quantity
+ */
+const blockQuantityHandler = async (req, res) => {
+    try {
+        const { quantityBlocked, blockedReason } = req.body;
+        const qty = Math.max(0, Number(quantityBlocked) || 0);
+        const part = await updatePart(req.params.id, {
+            quantityBlocked: qty,
+            blockedReason: blockedReason || (qty > 0 ? `Blocked ${qty} unit(s)` : "")
+        });
+        if (!part) return res.status(404).json({ success: false, message: "Part not found" });
+        return res.status(200).json({
+            success: true,
+            data: part,
+            message: `Blocked quantity updated to ${qty} unit(s).`
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Get stock overview for multiple item codes.
+ * @route POST /api/inventory/multi-stock-overview
+ */
+const getMultiStockOverviewHandler = async (req, res) => {
+    try {
+        const { codes, branchId } = req.body;
+        const { InventoryPart } = require("../Model/InventoryPartModel");
+
+        let codeList = [];
+        if (Array.isArray(codes)) {
+            codeList = codes.map(c => String(c).trim()).filter(Boolean);
+        } else if (typeof codes === "string") {
+            codeList = codes.split(/[\n,;\s]+/).map(c => c.trim()).filter(Boolean);
+        }
+
+        const query = { isActive: { $ne: false } };
+        if (branchId) query.branchId = branchId;
+
+        if (codeList.length > 0) {
+            const regexes = codeList.map(c => new RegExp(`^${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
+            const partialRegexes = codeList.map(c => new RegExp(c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+            query.$or = [
+                { partNumber: { $in: regexes } },
+                { partNumber: { $in: partialRegexes } },
+                { partName: { $in: partialRegexes } }
+            ];
+        }
+
+        const parts = await InventoryPart.find(query).populate("branchId", "name").lean({ virtuals: true });
+
+        const mappedParts = parts.map(p => {
+            const blocked = p.isBlocked ? p.quantityOnHand : (p.quantityBlocked || 0);
+            const available = p.isBlocked ? 0 : Math.max(0, p.quantityOnHand - (p.quantityReserved || 0) - (p.quantityBlocked || 0));
+            return {
+                ...p,
+                quantityAvailable: available,
+                effectiveBlocked: blocked,
+                statusText: p.isBlocked ? "BLOCKED (Material Code)" : (p.quantityBlocked > 0 ? `PARTIALLY BLOCKED (${p.quantityBlocked})` : (available <= 0 ? "OUT OF STOCK" : (p.quantityOnHand <= p.reorderLevel ? "LOW STOCK" : "AVAILABLE")))
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            totalFound: mappedParts.length,
+            requestedCodes: codeList,
+            data: mappedParts
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Get spare parts consumption report.
+ * @route GET /api/inventory/reports/consumption
+ */
+const getConsumptionReportHandler = async (req, res) => {
+    try {
+        const { period = "monthly", startDate, endDate, itemCodes, branchId } = req.query;
+        const { PartTransaction } = require("../Model/PartTransactionModel");
+        const { InventoryPart } = require("../Model/InventoryPartModel");
+
+        let endD = endDate ? new Date(endDate) : new Date();
+        endD.setHours(23, 59, 59, 999);
+
+        let startD = startDate ? new Date(startDate) : new Date();
+        if (!startDate) {
+            startD = new Date(endD);
+            if (period === "daily") {
+                startD.setHours(0, 0, 0, 0);
+            } else if (period === "weekly") {
+                startD.setDate(startD.getDate() - 7);
+                startD.setHours(0, 0, 0, 0);
+            } else if (period === "monthly") {
+                startD.setDate(startD.getDate() - 30);
+                startD.setHours(0, 0, 0, 0);
+            } else if (period === "half-yearly") {
+                startD.setDate(startD.getDate() - 180);
+                startD.setHours(0, 0, 0, 0);
+            } else if (period === "yearly") {
+                startD.setDate(startD.getDate() - 365);
+                startD.setHours(0, 0, 0, 0);
+            } else {
+                startD.setDate(startD.getDate() - 30);
+                startD.setHours(0, 0, 0, 0);
+            }
+        } else {
+            startD.setHours(0, 0, 0, 0);
+        }
+
+        const txQuery = {
+            transactionType: "INSTALL",
+            createdAt: { $gte: startD, $lte: endD }
+        };
+        if (branchId) txQuery.branchId = branchId;
+
+        if (itemCodes && String(itemCodes).trim()) {
+            const rawCodes = String(itemCodes).split(/[\n,;\s]+/).map(c => c.trim()).filter(Boolean);
+            if (rawCodes.length > 0) {
+                const regexes = rawCodes.map(c => new RegExp(c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+                const matchedParts = await InventoryPart.find({
+                    $or: [
+                        { partNumber: { $in: regexes } },
+                        { partName: { $in: regexes } }
+                    ]
+                }).select("_id").lean();
+                const targetPartIds = matchedParts.map(p => p._id);
+                txQuery.partId = { $in: targetPartIds };
+            }
+        }
+
+        const transactions = await PartTransaction.find(txQuery)
+            .populate("partId")
+            .populate("performedBy", "personalInfo fullName email name")
+            .populate("workOrderId", "workOrderNumber vehicleId")
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const partMap = {};
+        let totalQuantityConsumed = 0;
+        let totalConsumptionCost = 0;
+
+        for (const tx of transactions) {
+            const part = tx.partId;
+            if (!part) continue;
+
+            const qty = Math.abs(tx.quantity);
+            const unitCost = part.unitCost || 0;
+            const cost = qty * unitCost;
+
+            totalQuantityConsumed += qty;
+            totalConsumptionCost += cost;
+
+            const partIdStr = String(part._id);
+            if (!partMap[partIdStr]) {
+                partMap[partIdStr] = {
+                    partId: part._id,
+                    partName: part.partName,
+                    partNumber: part.partNumber,
+                    category: part.category,
+                    unit: part.unit,
+                    unitCost: unitCost,
+                    totalQuantity: 0,
+                    totalCost: 0,
+                    transactions: []
+                };
+            }
+
+            partMap[partIdStr].totalQuantity += qty;
+            partMap[partIdStr].totalCost += cost;
+            partMap[partIdStr].transactions.push({
+                transactionId: tx._id,
+                date: tx.createdAt,
+                quantity: qty,
+                cost: cost,
+                workOrderNumber: tx.workOrderId?.workOrderNumber || "N/A",
+                performedBy: tx.performedBy?.personalInfo?.fullName || tx.performedBy?.name || "Technician",
+                notes: tx.notes || ""
+            });
+        }
+
+        const aggregatedItems = Object.values(partMap).sort((a, b) => b.totalQuantity - a.totalQuantity);
+
+        return res.status(200).json({
+            success: true,
+            period,
+            startDate: startD,
+            endDate: endD,
+            summary: {
+                totalPartsCount: aggregatedItems.length,
+                totalQuantityConsumed,
+                totalConsumptionCost
+            },
+            data: aggregatedItems,
+            rawTransactionsCount: transactions.length
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     createPartHandler,
     bulkCreatePartsHandler,
@@ -257,4 +484,8 @@ module.exports = {
     getLowStockHandler,
     getPartTransactionsHandler,
     getWorkshopRequirementsHandler,
+    blockMaterialCodeHandler,
+    blockQuantityHandler,
+    getMultiStockOverviewHandler,
+    getConsumptionReportHandler,
 };

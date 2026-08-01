@@ -15,9 +15,10 @@ exports.addManyInvoicesService = async (dataArray, session = null) => {
 };
 
 exports.getInvoicesService = async (queryParams = {}, options = {}) => {
+    const isUnlimited = queryParams.unlimited === 'true' || queryParams.noLimit === 'true' || queryParams.limit === '0' || queryParams.limit === 0;
     const page = parseInt(queryParams.page) || 1;
-    const limit = parseInt(queryParams.limit) || 20;
-    const skip = (page - 1) * limit;
+    const limit = isUnlimited ? 0 : (parseInt(queryParams.limit) || 20);
+    const skip = isUnlimited ? 0 : ((page - 1) * limit);
 
     const baseQuery = options.baseQuery || { isDeleted: false };
     const query = { ...baseQuery };
@@ -162,14 +163,14 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
 
     console.log('[InvoiceRepo] final query:', JSON.stringify(query));
 
-    // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to workshop/weekNumber sorting
+    // Dynamic sort: respect queryParams sortBy/sortOrder if provided, otherwise default to latest-to-oldest chronological sorting
     let sortOpt = options.defaultSort;
     if (!sortOpt) {
         if (queryParams.sortBy) {
             const order = queryParams.sortOrder === 'desc' ? -1 : 1;
-            sortOpt = { [queryParams.sortBy]: order };
+            sortOpt = { [queryParams.sortBy]: order, _id: -1 };
         } else {
-            sortOpt = queryParams.invoiceType === 'WORKSHOP' ? { createdAt: -1 } : { weekNumber: 1 };
+            sortOpt = { generatedAt: -1, createdAt: -1, _id: -1 };
         }
     }
 
@@ -215,7 +216,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
             .lean()
     ]);
 
-    const totalPages = Math.ceil(totalCount / limit);
+    const totalPages = isUnlimited ? 1 : Math.ceil(totalCount / (limit || 1));
 
     const metrics = (stats && stats.length > 0) ? {
         totalGrossBilled: stats[0].totalGrossBilled || 0,

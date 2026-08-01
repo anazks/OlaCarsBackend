@@ -153,7 +153,7 @@ const workOrderSchema = new mongoose.Schema(
         slaDeadline: { type: Date },
 
         // Description
-        faultDescription: { type: String, required: true },
+        faultDescription: { type: String, required: false, default: "" },
         reportedBy: { type: mongoose.Schema.Types.ObjectId, refPath: "reportedByRole" },
         reportedByRole: { type: String },
 

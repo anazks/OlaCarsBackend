@@ -48,9 +48,12 @@ const inventoryPartSchema = new mongoose.Schema(
         incomeAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode", required: true },
         taxId: { type: mongoose.Schema.Types.ObjectId, ref: "Tax" },
 
-        // Tracking
+        // Tracking & Blocking
         lastRestockedAt: { type: Date },
         isActive: { type: Boolean, default: true },
+        isBlocked: { type: Boolean, default: false },
+        quantityBlocked: { type: Number, default: 0, min: 0 },
+        blockedReason: { type: String, default: "" },
 
         // Audit
         createdBy: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: "creatorRole" },
@@ -59,9 +62,10 @@ const inventoryPartSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Virtual: available = onHand - reserved
+// Virtual: available = onHand - reserved - blocked
 inventoryPartSchema.virtual("quantityAvailable").get(function () {
-    return this.quantityOnHand - this.quantityReserved;
+    if (this.isBlocked) return 0;
+    return Math.max(0, this.quantityOnHand - this.quantityReserved - (this.quantityBlocked || 0));
 });
 
 // Virtual: is low stock

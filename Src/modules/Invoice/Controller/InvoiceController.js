@@ -228,14 +228,23 @@ exports.downloadInvoicePdf = async (req, res) => {
 
 exports.downloadInvoiceRegistryPdf = async (req, res) => {
     try {
-        const queryParams = { ...req.query, limit: 1000, ignoreDefaultDates: true };
+        const queryParams = {
+            ...req.query,
+            unlimited: 'true',
+            ignoreDefaultDates: true,
+            sortBy: req.query.sortBy || 'generatedAt',
+            sortOrder: req.query.sortOrder || 'desc'
+        };
         const { startDate, endDate } = queryParams;
         const result = (startDate || endDate)
             ? await InvoiceService.getDateWise(queryParams)
             : await InvoiceService.getRegistry(queryParams);
 
         const invoices = result.data || [];
-        const metrics = result.metrics || {};
+        const metrics = {
+            ...(result.metrics || {}),
+            totalInvoicesCount: result.pagination?.totalItems || invoices.length
+        };
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(

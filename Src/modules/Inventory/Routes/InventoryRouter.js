@@ -14,6 +14,10 @@ const {
     getLowStockHandler,
     getPartTransactionsHandler,
     getWorkshopRequirementsHandler,
+    blockMaterialCodeHandler,
+    blockQuantityHandler,
+    getMultiStockOverviewHandler,
+    getConsumptionReportHandler,
 } = require("../Controller/InventoryController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware.js");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare.js");
@@ -174,6 +178,25 @@ router.get("/", authenticate, hasPermission("INVENTORY_VIEW"), getPartsHandler);
  */
 router.get("/low-stock", authenticate, hasPermission("INVENTORY_VIEW"), getLowStockHandler);
 router.get("/low-stock/:branchId", authenticate, hasPermission("INVENTORY_VIEW"), getLowStockHandler);
+
+router.post("/multi-stock-overview", authenticate, hasPermission("INVENTORY_VIEW"), getMultiStockOverviewHandler);
+router.get("/reports/consumption", authenticate, hasPermission("INVENTORY_VIEW"), getConsumptionReportHandler);
+
+router.patch(
+    "/:id/block",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
+    blockMaterialCodeHandler
+);
+
+router.patch(
+    "/:id/block-quantity",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    hasPermission("INVENTORY_EDIT"),
+    blockQuantityHandler
+);
 
 /**
  * @swagger
