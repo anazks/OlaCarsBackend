@@ -80,6 +80,14 @@ const workOrderPartSchema = new mongoose.Schema({
     taskTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: "TaskTemplate" },
     purchaseOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseOrder" },
     status: { type: String, enum: PART_STATUSES, default: "REQUESTED" },
+    approvalStatus: {
+        type: String,
+        enum: ["PENDING", "APPROVED", "REJECTED"],
+        default: "PENDING",
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId },
+    approvedAt: { type: Date },
+    rejectionReason: { type: String },
     receivedDate: { type: Date },
     installedBy: { type: mongoose.Schema.Types.ObjectId, ref: "WorkshopStaff" },
 });

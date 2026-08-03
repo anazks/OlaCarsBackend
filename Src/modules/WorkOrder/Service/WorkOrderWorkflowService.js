@@ -52,6 +52,12 @@ const STATUS_RULES = {
             if (doableTasks.length === 0) {
                 return "At least one task must be selected before proceeding to Labour.";
             }
+
+            // Enforce Workshop Manager Inventory Part Approval
+            const pendingParts = (wo.parts || []).filter(p => p.approvalStatus === "PENDING");
+            if (pendingParts.length > 0) {
+                return `Cannot proceed to Labour stage: ${pendingParts.length} part(s) are awaiting Workshop Manager inventory approval.`;
+            }
             return null;
         },
     },
