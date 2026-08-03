@@ -6,14 +6,52 @@ const {
 } = require("../Repo/WorkshopProcurementRepo.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
 
+const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
+
+const generatePRNumber = async () => {
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    const prefix = `PR-OW-${mm}-${yyyy}`;
+
+    const startOfMonth = new Date(yyyy, now.getMonth(), 1);
+    const endOfMonth = new Date(yyyy, now.getMonth() + 1, 0, 23, 59, 59);
+
+    const count = await WorkshopProcurement.countDocuments({
+        createdAt: { $gte: startOfMonth, $lte: endOfMonth }
+    });
+
+    const nextSeq = String(count + 1).padStart(5, '0');
+    return `${prefix}-${nextSeq}`;
+};
+
 exports.createRequest = async (req, res) => {
     try {
+        const reqNumber = await generatePRNumber();
+
+        // Handle uploaded photos if present
+        let fullSizePhoto = req.body.fullSizePhoto || '';
+        let closeUpPhoto = req.body.closeUpPhoto || '';
+
+        if (req.files) {
+            if (req.files.fullSizePhoto && req.files.fullSizePhoto[0]) {
+                fullSizePhoto = `/uploads/${req.files.fullSizePhoto[0].filename}`;
+            }
+            if (req.files.closeUpPhoto && req.files.closeUpPhoto[0]) {
+                closeUpPhoto = `/uploads/${req.files.closeUpPhoto[0].filename}`;
+            }
+        }
+
         const data = {
             ...req.body,
+            requestNumber: reqNumber,
             requestedBy: req.user.id,
             requestedByRole: req.user.role,
-            branch: req.user.branchId,
-            requestNumber: `WR-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+            technicianName: req.body.technicianName || req.user.fullName || req.user.name || 'Technician',
+            branch: req.user.branchId || req.body.branch,
+            fullSizePhoto,
+            closeUpPhoto,
+            status: "PENDING"
         };
 
         if (req.user.role === ROLES.WORKSHOPMANAGER || req.user.role === ROLES.BRANCHMANAGER) {
@@ -28,13 +66,17 @@ exports.createRequest = async (req, res) => {
             editedAt: new Date(),
             editedBy: req.user.id,
             editorRole: req.user.role,
-            previousStatus: "CREATED",
-            changesSummary: `Workshop purchase request created with status: ${data.status || 'PENDING'}.`
+            editorName: req.user.fullName || req.user.name || 'User',
+            action: "CREATED",
+            previousStatus: "NONE",
+            newStatus: data.status,
+            changesSummary: `Purchase request ${reqNumber} created by ${data.technicianName} with status: ${data.status}.`
         }];
 
         const request = await addProcurementRequest(data);
         res.status(201).json({ success: true, data: request });
     } catch (error) {
+        console.error("Error creating procurement request:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -64,36 +106,92 @@ exports.getRequests = async (req, res) => {
 
 exports.approveRequest = async (req, res) => {
     try {
-        const { status, supplier, rejectionReason, quantity } = req.body;
-        console.log("[DEBUG] approveRequest body:", req.body);
+        const {
+            status,
+            rejectionReason,
+            returnReason,
+            quantity,
+            itemCode,
+            partNumber,
+            partName,
+            category,
+            unitOfMeasure,
+            priority,
+            vin,
+            vehicleMake,
+            vehicleModel,
+            vehicleYear,
+            plateNumber,
+            preferredSupplier,
+            preferredSupplierName,
+            preferredBrand,
+            qualityPreference,
+            transportationMode,
+            isInformationVerified,
+            notes
+        } = req.body;
 
-        if (!["APPROVED", "REJECTED", "PENDING_FINANCE_APPROVAL"].includes(status)) {
-            return res.status(400).json({ success: false, message: "Invalid status" });
+        if (!["APPROVED", "RETURNED_TO_TECHNICIAN", "REJECTED", "PENDING_FINANCE_APPROVAL"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status decision" });
         }
 
-        const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
         const request = await WorkshopProcurement.findById(req.params.id);
         if (!request) {
-            return res.status(404).json({ success: false, message: "Request not found" });
+            return res.status(404).json({ success: false, message: "Purchase Request not found" });
         }
 
         const previousStatus = request.status;
-        request.status = status === "APPROVED" ? "WAITING_QUOTATION" : status;
-        request.approvedBy = req.user.id;
-        request.approvedByRole = req.user.role;
+
+        // Editable fields updated by Workshop Manager
+        if (quantity) request.quantity = quantity;
+        if (itemCode !== undefined) request.itemCode = itemCode;
+        if (partNumber !== undefined) request.partNumber = partNumber;
+        if (partName !== undefined) request.partName = partName;
+        if (category !== undefined) request.category = category;
+        if (unitOfMeasure !== undefined) request.unitOfMeasure = unitOfMeasure;
+        if (priority !== undefined) request.priority = priority;
+        if (vin !== undefined) request.vin = vin;
+        if (vehicleMake !== undefined) request.vehicleMake = vehicleMake;
+        if (vehicleModel !== undefined) request.vehicleModel = vehicleModel;
+        if (vehicleYear !== undefined) request.vehicleYear = vehicleYear;
+        if (plateNumber !== undefined) request.plateNumber = plateNumber;
+        if (notes !== undefined) request.notes = notes;
+
+        // Sourcing & Logistics Options
+        if (preferredSupplier) request.preferredSupplier = preferredSupplier;
+        if (preferredSupplierName) request.preferredSupplierName = preferredSupplierName;
+        if (preferredBrand) request.preferredBrand = preferredBrand;
+        if (qualityPreference) request.qualityPreference = qualityPreference;
+        if (transportationMode) request.transportationMode = transportationMode;
+
+        // Decision logic
         if (status === "APPROVED") {
-            if (supplier) request.supplier = supplier;
-            if (quantity) request.quantity = quantity;
+            request.status = "WAITING_QUOTATION";
+            request.approvedBy = req.user.id;
+            request.approvedByRole = req.user.role;
+            request.isInformationVerified = isInformationVerified ?? true;
+            request.verifiedBy = req.user.id;
+            request.verifiedByName = req.user.fullName || req.user.name || 'Workshop Manager';
+            request.verifiedAt = new Date();
+        } else if (status === "RETURNED_TO_TECHNICIAN") {
+            request.status = "RETURNED_TO_TECHNICIAN";
+            request.returnReason = returnReason || "Details need correction by technician";
         } else if (status === "REJECTED") {
-            if (rejectionReason) request.rejectionReason = rejectionReason;
+            request.status = "REJECTED";
+            request.rejectionReason = rejectionReason || "Request rejected by Workshop Manager";
         }
 
+        const actionText = status === "APPROVED" ? "APPROVED" : status === "RETURNED_TO_TECHNICIAN" ? "RETURNED TO TECHNICIAN" : "REJECTED";
         const historyRecord = {
             editedAt: new Date(),
             editedBy: req.user.id,
             editorRole: req.user.role,
+            editorName: req.user.fullName || req.user.name || 'Workshop Manager',
+            action: actionText,
             previousStatus: previousStatus,
-            changesSummary: `Manager/Branch Manager approved/updated request status to ${status}.`
+            newStatus: request.status,
+            changesSummary: `Workshop Manager decision: ${actionText}. Sourcing mode: ${request.transportationMode || 'SEA'}, Quality: ${request.qualityPreference || 'GENUINE_OEM'}.`,
+            notes: returnReason || rejectionReason || notes || ''
         };
 
         if (!request.editHistory) request.editHistory = [];
@@ -101,7 +199,61 @@ exports.approveRequest = async (req, res) => {
 
         await request.save();
 
-        res.status(200).json({ success: true, data: request });
+        res.status(200).json({ success: true, data: request, message: `PR successfully ${actionText.toLowerCase()}` });
+    } catch (error) {
+        console.error("Error approving procurement request:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.resubmitRequest = async (req, res) => {
+    try {
+        const request = await WorkshopProcurement.findById(req.params.id);
+        if (!request) {
+            return res.status(404).json({ success: false, message: "Purchase Request not found" });
+        }
+
+        if (request.status !== "RETURNED_TO_TECHNICIAN") {
+            return res.status(400).json({ success: false, message: "Only returned PRs can be resubmitted." });
+        }
+
+        // Handle uploaded photos if present
+        if (req.files) {
+            if (req.files.fullSizePhoto && req.files.fullSizePhoto[0]) {
+                request.fullSizePhoto = `/uploads/${req.files.fullSizePhoto[0].filename}`;
+            }
+            if (req.files.closeUpPhoto && req.files.closeUpPhoto[0]) {
+                request.closeUpPhoto = `/uploads/${req.files.closeUpPhoto[0].filename}`;
+            }
+        }
+
+        const previousStatus = request.status;
+        const updates = req.body;
+
+        Object.keys(updates).forEach(key => {
+            if (updates[key] !== undefined && updates[key] !== null) {
+                request[key] = updates[key];
+            }
+        });
+
+        request.status = "PENDING";
+        request.returnReason = undefined;
+
+        if (!request.editHistory) request.editHistory = [];
+        request.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: req.user.fullName || req.user.name || 'Technician',
+            action: "RESUBMITTED",
+            previousStatus: previousStatus,
+            newStatus: "PENDING",
+            changesSummary: `Technician updated details and resubmitted PR to Workshop Manager for review.`
+        });
+
+        await request.save();
+
+        res.status(200).json({ success: true, data: request, message: "Purchase Request resubmitted successfully." });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
