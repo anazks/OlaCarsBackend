@@ -549,6 +549,12 @@ const importStatement = async (id, options) => {
     account.currentBalance = Number(account.currentBalance || 0) + totalBalanceChange;
     await account.save();
 
+    try {
+        await recalculateRunningBalances(account._id);
+    } catch (recalcErr) {
+        console.error("Failed to recalculate running balances after import statement:", recalcErr);
+    }
+
     return {
         importedCount,
         newBalance: account.currentBalance
@@ -636,6 +642,12 @@ const recordManualPayment = async (targetId, data) => {
         let targetBalanceChange = targetAccount.accountType === "Credit Card" ? -numericAmount : numericAmount;
         targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
         await targetAccount.save();
+
+        try {
+            await recalculateRunningBalances(targetAccount._id);
+        } catch (recalcErr) {
+            console.error("Failed to recalculate running balances after customer receipt auto set-off:", recalcErr);
+        }
 
         return {
             success: true,
@@ -906,8 +918,10 @@ const recordManualPayment = async (targetId, data) => {
     try {
         await syncAccountingCodeBalances(targetAccount.accountingCode);
         if (offsetAccountingCode) await syncAccountingCodeBalances(offsetAccountingCode);
+        await recalculateRunningBalances(targetAccount._id);
+        if (offsetAccount) await recalculateRunningBalances(offsetAccount._id);
     } catch (syncCodeErr) {
-        console.error("Failed to sync accounting code balances after manual payment:", syncCodeErr);
+        console.error("Failed to sync balances after manual payment:", syncCodeErr);
     }
 
     return {

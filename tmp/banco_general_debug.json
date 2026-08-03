@@ -20,13 +20,23 @@
     "creatorRole": "ADMIN",
     "isDeleted": false,
     "createdAt": "2026-06-09T12:57:20.278Z",
-    "updatedAt": "2026-07-31T18:09:14.129Z",
+    "updatedAt": "2026-08-03T04:44:06.862Z",
     "__v": 0,
     "creditTotal": 0,
-    "currentBalance": 0,
-    "debitTotal": 0
+    "currentBalance": 450,
+    "debitTotal": 450
   },
-  "balance": 0,
-  "entriesCount": 0,
-  "entries": []
+  "balance": 450,
+  "entriesCount": 1,
+  "entries": [
+    {
+      "id": "6a701c957c2e49df84b7e663",
+      "entryDate": "2026-07-31T04:44:05.531Z",
+      "type": "DEBIT",
+      "amount": 450,
+      "runningBalance": 450,
+      "description": "ACH - Customer Receipt - Invoice Payment Receipt",
+      "createdAt": "2026-08-03T04:44:05.841Z"
+    }
+  ]
 }
