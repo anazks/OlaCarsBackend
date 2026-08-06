@@ -1620,6 +1620,13 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 newCustomerDoc = await Customer.findOne({ _id: newCustomerId, isDeleted: false });
             }
 
+            const newSupplierId = update.supplierId || update.supplier || update.vendorId;
+            let newSupplierDoc = null;
+            if (newSupplierId) {
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                newSupplierDoc = await Supplier.findOne({ _id: newSupplierId, isDeleted: { $ne: true } });
+            };
+
             // Check if Amount, Customer, or Invoice is changed or unlinked
             const isAmountChanged = amount !== undefined && Math.abs(Number(amount) - oldAmount) > 0.001;
             const isCustomerChanged = String(oldCustomerId || '') !== String(newCustomerId || '');
@@ -1873,17 +1880,70 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 } else {
                     finalDesc = `Bank deposit - Customer: ${custName} | Advance Payment ($${setOffResult.excessAmount.toFixed(2)})`;
                 }
-            } else if (!newCustomerId) {
-                // Customer unlinked
+            } else if (newSupplierId && finalType === "CREDIT") {
+                const BankAccount = require("../Model/BankAccountModel");
+                const bankAccountDoc = await BankAccount.findById(bankAccountId);
+                const bankAccCodeId = bankAccountDoc ? bankAccountDoc.accountingCode : entry.accountingCode;
+
+                const billSetOffResult = await autoSetOffBills(newSupplierId, finalAmount, {
+                    bankAccountingCodeId: bankAccCodeId,
+                    bankTransactionId: bankTx._id,
+                    bankAccountId: bankAccountId,
+                    branchId: entry.branch,
+                    entryDate: finalEntryDate,
+                    description: finalDesc || `Bank statement edit vendor payment set-off`,
+                    transactionId: bankTx.transactionId || entry.transactionId,
+                    existingBankLedgerEntryId: entry._id,
+                    targetBillId: update.billId || update.bill,
+                    createdBy: entry.createdBy || bankTx.createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: entry.creatorRole || bankTx.creatorRole || "ADMIN"
+                });
+
+                const newFormattedBills = (billSetOffResult.billsSetOff || []).map(b => ({
+                    billId: b.billId,
+                    billNumber: b.billNumber,
+                    amountApplied: b.amountApplied
+                }));
+                const newSetOffSummary = {
+                    totalSetOff: billSetOffResult.totalSetOff,
+                    billCount: (billSetOffResult.billsSetOff || []).length,
+                    excessAmount: billSetOffResult.excessAmount
+                };
+
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                const supDoc = await Supplier.findById(newSupplierId);
+
+                bankTx.supplier = newSupplierId;
+                bankTx.supplierName = supDoc ? (supDoc.name || supDoc.companyName) : undefined;
+                bankTx.bills = newFormattedBills;
+                bankTx.setOffSummary = newSetOffSummary;
+
+                entry.supplier = newSupplierId;
+                entry.bills = newFormattedBills;
+                entry.setOffSummary = newSetOffSummary;
+
+                const billNumbers = (billSetOffResult.billsSetOff || []).map(b => b.billNumber).join(", ");
+                const supName = supDoc ? (supDoc.name || supDoc.companyName) : '';
+                if ((billSetOffResult.billsSetOff || []).length > 0) {
+                    finalDesc = `Vendor Payment - Vendor: ${supName} | Bills: ${billNumbers}`;
+                } else {
+                    finalDesc = `Vendor Payment - Vendor: ${supName} | Vendor Advance ($${billSetOffResult.excessAmount.toFixed(2)})`;
+                }
+            } else if (!newCustomerId && !newSupplierId) {
+                // Both Customer and Supplier unlinked
                 bankTx.customer = undefined;
                 bankTx.customerName = undefined;
+                bankTx.supplier = undefined;
+                bankTx.supplierName = undefined;
                 bankTx.invoice = undefined;
                 bankTx.invoices = [];
+                bankTx.bills = [];
                 bankTx.setOffSummary = undefined;
 
                 entry.invoices = [];
+                entry.bills = [];
                 entry.setOffSummary = undefined;
-                finalDesc = `Bank statement deposit`;
+                finalDesc = `Bank statement transaction`;
             }
 
             // Sync contact (customer) field, description, amount and editing date/time on the LedgerEntries
@@ -2461,21 +2521,255 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
 };
 
 /**
- * Reverse invoice set-offs for a bank transaction using the InvoiceSetOffHistory.
- * Restores each invoice to its exact BEFORE state from the history record.
- * Deletes associated PaymentReceived and ledger entries.
+ * Auto set-off Supplier Bills for outgoing credit bank transactions (withdrawals / payments to vendor).
+ * Automatically applies payment to open/partially-paid Bills (oldest due date first).
+ * Records an InvoiceBillSetOffHistory document with targetType: "SUPPLIER".
+ *
+ * @param {ObjectId} supplierId - The Supplier document _id
+ * @param {Number} amount - The transaction amount (credit / withdrawal)
+ * @param {Object} options - Branch, entryDate, description, transactionId, etc.
+ */
+const autoSetOffBills = async (supplierId, amount, options = {}) => {
+    const Supplier = require("../../Supplier/Model/SupplierModel");
+    const Bill = require("../../Bill/Model/BillModel");
+    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+
+    const {
+        bankAccountingCodeId,
+        bankTransactionId,
+        bankAccountId,
+        branchId,
+        entryDate,
+        description,
+        transactionId,
+        createdBy,
+        creatorRole,
+        inputBankAccountId
+    } = options;
+
+    const supplierDoc = await Supplier.findById(supplierId);
+    const supplierName = supplierDoc ? (supplierDoc.name || supplierDoc.companyName || "Unknown Vendor") : "Unknown Vendor";
+
+    console.log(`\n===============================================================`);
+    console.log(`[VENDOR AUTO SET-OFF ENGINE] Initializing Auto Set-off for Bills`);
+    console.log(`  • Supplier ID: ${supplierId}`);
+    console.log(`  • Supplier Name: "${supplierName}"`);
+    console.log(`  • Payment Amount: $${amount}`);
+    console.log(`  • Transaction Ref: ${transactionId || 'N/A'}`);
+    console.log(`  • Entry Date: ${entryDate ? new Date(entryDate).toISOString() : new Date().toISOString()}`);
+    console.log(`---------------------------------------------------------------`);
+
+    // Fetch unpaid bills for supplier: OPEN, PARTIALLY_PAID, DRAFT with balanceDue > 0.01
+    const unpaidBills = await Bill.find({
+        supplier: supplierId,
+        status: { $in: ["OPEN", "PARTIALLY_PAID", "DRAFT", "open", "partially_paid", "draft"] },
+        balanceDue: { $gt: 0.01 },
+        isDeleted: { $ne: true }
+    });
+
+    console.log(`[VENDOR SET-OFF STAGE 1] DB Query for vendor "${supplierName}": Found ${unpaidBills.length} unpaid bill(s).`);
+
+    const timestamp = entryDate ? (entryDate instanceof Date ? entryDate : new Date(entryDate)) : new Date();
+
+    const isOverdue = (bill) => {
+        if (bill.dueDate) {
+            return new Date(bill.dueDate) < timestamp;
+        }
+        return false;
+    };
+
+    // Priority 1: Overdue bills (oldest dueDate first)
+    const overdueBills = unpaidBills
+        .filter(b => isOverdue(b))
+        .sort((a, b) => new Date(a.dueDate || a.billDate || 0) - new Date(b.dueDate || b.billDate || 0));
+
+    // Priority 2: Non-overdue PARTIALLY_PAID bills
+    const partialBills = unpaidBills
+        .filter(b => !isOverdue(b) && String(b.status).toUpperCase().includes("PARTIAL"))
+        .sort((a, b) => new Date(a.dueDate || a.billDate || 0) - new Date(b.dueDate || b.billDate || 0));
+
+    // Priority 3: Non-overdue OPEN/DRAFT bills
+    const openBills = unpaidBills
+        .filter(b => !isOverdue(b) && !String(b.status).toUpperCase().includes("PARTIAL"))
+        .sort((a, b) => new Date(a.dueDate || a.billDate || 0) - new Date(b.dueDate || b.billDate || 0));
+
+    let sortedBills = [...overdueBills, ...partialBills, ...openBills];
+
+    // Priority 0: Explicitly targeted bill if specified
+    const targetBillId = options.targetBillId || options.billId;
+    if (targetBillId) {
+        const targetIdx = sortedBills.findIndex(b => String(b._id) === String(targetBillId));
+        if (targetIdx > -1) {
+            const [targetB] = sortedBills.splice(targetIdx, 1);
+            sortedBills.unshift(targetB);
+        }
+    }
+
+    let remainingAmount = Number(amount);
+    const billsSetOff = [];
+    let totalSetOff = 0;
+
+    for (const billDoc of sortedBills) {
+        if (remainingAmount <= 0.01) break;
+
+        const billBalance = billDoc.balanceDue !== undefined ? billDoc.balanceDue : (billDoc.totalAmount - (billDoc.amountPaid || 0));
+        if (billBalance <= 0.01 || String(billDoc.status).toUpperCase() === "PAID") continue;
+
+        const amountToApply = Math.min(remainingAmount, billBalance);
+
+        // Capture BEFORE state
+        const beforeState = {
+            amountPaid: billDoc.amountPaid || 0,
+            balance: billBalance,
+            status: billDoc.status || "OPEN",
+            paidAt: billDoc.paidAt || null,
+        };
+
+        const newPaid = (billDoc.amountPaid || 0) + amountToApply;
+        const newBalance = Math.max(0, billDoc.totalAmount - newPaid);
+        let newStatus = "OPEN";
+        if (newBalance <= 0.01) {
+            newStatus = "PAID";
+        } else if (newPaid > 0) {
+            newStatus = "PARTIALLY_PAID";
+        }
+
+        billDoc.amountPaid = newPaid;
+        billDoc.balanceDue = newBalance;
+        billDoc.status = newStatus;
+        if (newStatus === "PAID") {
+            billDoc.paidAt = timestamp;
+        }
+
+        await billDoc.save();
+
+        const afterState = {
+            amountPaid: newPaid,
+            balance: newBalance,
+            status: newStatus,
+            paidAt: billDoc.paidAt || null,
+        };
+
+        billsSetOff.push({
+            billId: billDoc._id,
+            billNumber: billDoc.billNumber,
+            amountApplied: amountToApply,
+            beforeState,
+            afterState,
+        });
+
+        remainingAmount -= amountToApply;
+        totalSetOff += amountToApply;
+    }
+
+    const excessAmount = Math.max(0, remainingAmount);
+
+    // Save PaymentMade record
+    let paymentMadeDoc = null;
+    try {
+        const pmNumber = `PM-${Date.now()}`;
+        paymentMadeDoc = await PaymentMade.create({
+            paymentNumber: pmNumber,
+            supplier: supplierId,
+            amount: Number(amount),
+            paymentDate: timestamp,
+            paymentMethod: "Bank Transfer",
+            referenceNumber: transactionId || undefined,
+            notes: description || `Auto set-off from bank statement upload`,
+            bills: billsSetOff.map(b => ({
+                billId: b.billId,
+                billNumber: b.billNumber,
+                amountApplied: b.amountApplied
+            }))
+        });
+    } catch (pmErr) {
+        console.error("[autoSetOffBills] Failed to create PaymentMade record:", pmErr);
+    }
+
+    // Save InvoiceBillSetOffHistory with targetType: "SUPPLIER"
+    let historyDoc = null;
+    const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
+    if (primaryTxId) {
+        try {
+            const billSnapshots = billsSetOff.map(b => ({
+                bill: b.billId,
+                billNumber: b.billNumber,
+                amountApplied: b.amountApplied,
+                before: b.beforeState,
+                after: b.afterState,
+            }));
+
+            const existingHistory = await InvoiceBillSetOffHistory.findOne({
+                $or: [
+                    { primaryLedgerEntry: primaryTxId },
+                    { partnerLedgerEntries: primaryTxId },
+                    ...(transactionId ? [{ transactionId: String(transactionId) }] : [])
+                ]
+            });
+
+            if (existingHistory) {
+                existingHistory.primaryLedgerEntry = primaryTxId;
+                existingHistory.targetType = "SUPPLIER";
+                existingHistory.supplier = supplierId;
+                existingHistory.transactionAmount = Number(amount);
+                existingHistory.entryDate = timestamp;
+                existingHistory.transactionId = transactionId;
+                existingHistory.billSnapshots = billSnapshots;
+                existingHistory.excessAmount = excessAmount;
+                existingHistory.vendorPayment = paymentMadeDoc ? paymentMadeDoc._id : undefined;
+                await existingHistory.save();
+                historyDoc = existingHistory;
+            } else {
+                historyDoc = await InvoiceBillSetOffHistory.create({
+                    primaryLedgerEntry: primaryTxId,
+                    bankAccount: inputBankAccountId || undefined,
+                    targetType: "SUPPLIER",
+                    supplier: supplierId,
+                    transactionAmount: Number(amount),
+                    entryDate: timestamp,
+                    transactionId: transactionId,
+                    billSnapshots: billSnapshots,
+                    excessAmount: excessAmount,
+                    vendorPayment: paymentMadeDoc ? paymentMadeDoc._id : undefined,
+                    createdBy: createdBy || "6a2290019fa01283dd165204",
+                    creatorRole: (creatorRole || "ADMIN").toUpperCase()
+                });
+            }
+        } catch (histErr) {
+            console.error("[autoSetOffBills] Failed to save InvoiceBillSetOffHistory:", histErr);
+        }
+    }
+
+    return {
+        billsSetOff,
+        totalSetOff,
+        excessAmount,
+        vendorPayment: paymentMadeDoc ? { paymentNumber: paymentMadeDoc.paymentNumber, _id: paymentMadeDoc._id } : null,
+        historyId: historyDoc ? historyDoc._id : null
+    };
+};
+
+/**
+ * Reverse invoice or bill set-offs for a bank transaction using InvoiceBillSetOffHistory.
+ * Restores each invoice or bill to its exact BEFORE state from the history record.
+ * Deletes associated PaymentReceived / PaymentMade and ledger entries.
  *
  * @param {ObjectId} bankTransactionId - The Primary LedgerEntry _id or transaction ID
  * @returns {Object|null} The history document, or null if no history found
  */
 const reverseSetOffFromHistory = async (bankTransactionId) => {
-    const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
     const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+    const Bill = require("../../Bill/Model/BillModel");
     const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
     const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
-    const history = await InvoiceSetOffHistory.findOne({
+    const history = await InvoiceBillSetOffHistory.findOne({
         $or: [
             { primaryLedgerEntry: bankTransactionId },
             { partnerLedgerEntries: bankTransactionId },
@@ -2484,132 +2778,117 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
     });
 
     if (!history) {
-        console.log(`[reverseSetOffFromHistory] No InvoiceSetOffHistory found for BankTransaction/LedgerEntry ${bankTransactionId}. Returning null (caller should use fallback).`);
+        console.log(`[reverseSetOffFromHistory] No InvoiceBillSetOffHistory found for BankTransaction/LedgerEntry ${bankTransactionId}. Returning null.`);
         return null;
     }
 
     console.log(`\n===============================================================`);
     console.log(`[REVERSE SET-OFF] Reversing set-off for BankTransaction ${bankTransactionId}`);
     console.log(`  • History ID: ${history._id}`);
-    console.log(`  • Customer: ${history.customer}`);
+    console.log(`  • Target Type: ${history.targetType || 'CUSTOMER'}`);
     console.log(`  • Transaction Amount: $${history.transactionAmount}`);
-    console.log(`  • Invoice Snapshots: ${history.invoiceSnapshots.length}`);
     console.log(`---------------------------------------------------------------`);
 
-    // 1. Restore each invoice to its BEFORE state
-    for (const snapshot of history.invoiceSnapshots) {
-        try {
-            const invoiceDoc = await Invoice.findById(snapshot.invoice);
-            if (!invoiceDoc) {
-                console.log(`  ⚠ Invoice ${snapshot.invoiceNumber} (${snapshot.invoice}) not found, skipping.`);
-                continue;
-            }
-
-            console.log(`  ↩ Restoring Invoice #${snapshot.invoiceNumber}:`);
-            console.log(`    Before restore: amountPaid=$${invoiceDoc.amountPaid}, balance=$${invoiceDoc.balance}, status=${invoiceDoc.status}`);
-            console.log(`    Restoring to:   amountPaid=$${snapshot.before.amountPaid}, balance=$${snapshot.before.balance}, status=${snapshot.before.status}`);
-
-            // Remove the payment record associated with this transaction
-            const txId = history.transactionId;
-            if (txId) {
-                invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => {
-                    return String(p.transactionId) !== String(txId);
-                });
-            }
-
-            // Restore exact before-state values
-            invoiceDoc.amountPaid = snapshot.before.amountPaid;
-            invoiceDoc.balance = snapshot.before.balance;
-            invoiceDoc.status = snapshot.before.status;
-            invoiceDoc.paidAt = snapshot.before.paidAt || undefined;
-
-            if (invoiceDoc.status !== "PAID") {
-                invoiceDoc.paidAt = undefined;
-            }
-
-            await invoiceDoc.save();
-            console.log(`    ✓ Invoice #${snapshot.invoiceNumber} restored successfully.`);
-
-            // Sync ServiceBill if workshop invoice
-            if (invoiceDoc.invoiceType === 'WORKSHOP' && invoiceDoc.serviceBill) {
-                try {
-                    const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
-                    const bill = await ServiceBill.findById(invoiceDoc.serviceBill);
-                    if (bill) {
-                        const revertedBillPaid = Math.max(0, (bill.amountPaid || 0) - snapshot.amountApplied);
-                        const newBillPaymentStatus = revertedBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (revertedBillPaid > 0 ? "PARTIAL" : "PENDING");
-                        await ServiceBill.findByIdAndUpdate(bill._id, {
-                            $set: {
-                                amountPaid: revertedBillPaid,
-                                paymentStatus: newBillPaymentStatus,
-                                status: newBillPaymentStatus === "PAID" ? "PAID" : bill.status
-                            }
-                        });
-                        console.log(`    ✓ Synced ServiceBill for Invoice #${snapshot.invoiceNumber}`);
-                    }
-                } catch (sbErr) {
-                    console.error(`    ✗ Failed to revert ServiceBill for Invoice #${snapshot.invoiceNumber}:`, sbErr);
+    if (history.targetType === "SUPPLIER" || (history.billSnapshots && history.billSnapshots.length > 0)) {
+        // Reverse Supplier Bill Set-Off
+        for (const snapshot of (history.billSnapshots || [])) {
+            try {
+                const billDoc = await Bill.findById(snapshot.bill);
+                if (billDoc && snapshot.before) {
+                    console.log(`  ↩ Restoring Bill #${snapshot.billNumber}: balanceDue=$${snapshot.before.balance}, status=${snapshot.before.status}`);
+                    billDoc.amountPaid = snapshot.before.amountPaid;
+                    billDoc.balanceDue = snapshot.before.balance;
+                    billDoc.status = snapshot.before.status;
+                    billDoc.paidAt = snapshot.before.paidAt || undefined;
+                    await billDoc.save();
                 }
+            } catch (bErr) {
+                console.error(`  ✗ Failed to restore Bill ${snapshot.billNumber}:`, bErr);
             }
-        } catch (invErr) {
-            console.error(`  ✗ Failed to restore Invoice ${snapshot.invoiceNumber}:`, invErr);
+        }
+
+        if (history.vendorPayment) {
+            try {
+                await PaymentMade.deleteOne({ _id: history.vendorPayment });
+                console.log(`  ✓ Deleted PaymentMade ${history.vendorPayment}`);
+            } catch (pmErr) {
+                console.error(`  ✗ Failed to delete PaymentMade:`, pmErr);
+            }
+        }
+    } else {
+        // Reverse Customer Invoice Set-Off
+        for (const snapshot of (history.invoiceSnapshots || [])) {
+            try {
+                const invoiceDoc = await Invoice.findById(snapshot.invoice);
+                if (!invoiceDoc) continue;
+
+                const txId = history.transactionId;
+                if (txId) {
+                    invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => String(p.transactionId) !== String(txId));
+                }
+
+                invoiceDoc.amountPaid = snapshot.before.amountPaid;
+                invoiceDoc.balance = snapshot.before.balance;
+                invoiceDoc.status = snapshot.before.status;
+                invoiceDoc.paidAt = snapshot.before.paidAt || undefined;
+
+                if (invoiceDoc.status !== "PAID") {
+                    invoiceDoc.paidAt = undefined;
+                }
+
+                await invoiceDoc.save();
+
+                if (invoiceDoc.invoiceType === 'WORKSHOP' && invoiceDoc.serviceBill) {
+                    try {
+                        const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
+                        const bill = await ServiceBill.findById(invoiceDoc.serviceBill);
+                        if (bill) {
+                            const revertedBillPaid = Math.max(0, (bill.amountPaid || 0) - snapshot.amountApplied);
+                            const newBillPaymentStatus = revertedBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (revertedBillPaid > 0 ? "PARTIAL" : "PENDING");
+                            await ServiceBill.findByIdAndUpdate(bill._id, {
+                                $set: {
+                                    amountPaid: revertedBillPaid,
+                                    paymentStatus: newBillPaymentStatus,
+                                    status: newBillPaymentStatus === "PAID" ? "PAID" : bill.status
+                                }
+                            });
+                        }
+                    } catch (sbErr) {
+                        console.error(`    ✗ Failed to revert ServiceBill for Invoice #${snapshot.invoiceNumber}:`, sbErr);
+                    }
+                }
+            } catch (invErr) {
+                console.error(`  ✗ Failed to restore Invoice ${snapshot.invoiceNumber}:`, invErr);
+            }
+        }
+
+        if (history.paymentReceived) {
+            try {
+                await PaymentReceived.deleteOne({ _id: history.paymentReceived });
+                console.log(`  ✓ Deleted PaymentReceived ${history.paymentReceived}`);
+            } catch (prErr) {
+                console.error(`  ✗ Failed to delete PaymentReceived:`, prErr);
+            }
         }
     }
 
-    // 2. Delete associated PaymentReceived record
-    if (history.paymentReceived) {
-        try {
-            await PaymentReceived.deleteOne({ _id: history.paymentReceived });
-            console.log(`  ✓ Deleted PaymentReceived ${history.paymentReceived}`);
-        } catch (prErr) {
-            console.error(`  ✗ Failed to delete PaymentReceived:`, prErr);
-        }
-    }
-
-    // 3. Delete associated set-off partner ledger entries strictly by ObjectId (_id)
+    // Delete partner ledger entries
     try {
         if (history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
             const delRes = await LedgerEntry.deleteMany({ _id: { $in: history.partnerLedgerEntries } });
-            console.log(`  ✓ Deleted ${delRes.deletedCount} partner set-off LedgerEntries strictly by _id`);
-        } else if (history.customer) {
-            // Legacy fallback: delete non-primary credit entries for this customer
-            const delRes = await LedgerEntry.deleteMany({
-                _id: { $ne: bankTransactionId },
-                contact: history.customer,
-                type: "CREDIT"
-            });
-            console.log(`  ✓ Deleted ${delRes.deletedCount} legacy partner set-off LedgerEntries`);
+            console.log(`  ✓ Deleted ${delRes.deletedCount} partner set-off LedgerEntries`);
         }
     } catch (lErr) {
         console.error(`  ✗ Failed to delete partner ledger entries:`, lErr);
     }
 
-    // 4. Delete the history document itself after successful reversal
+    // Delete history document
     try {
-        await InvoiceSetOffHistory.deleteOne({ _id: history._id });
-        console.log(`  ✓ Deleted InvoiceSetOffHistory ${history._id}`);
+        await InvoiceBillSetOffHistory.deleteOne({ _id: history._id });
+        console.log(`  ✓ Deleted InvoiceBillSetOffHistory ${history._id}`);
     } catch (hErr) {
-        console.error(`  ✗ Failed to delete InvoiceSetOffHistory:`, hErr);
+        console.error(`  ✗ Failed to delete InvoiceBillSetOffHistory:`, hErr);
     }
-
-    // 4. Sync accounting code balances
-    try {
-        const arCode = await AccountingCode.findOne({
-            $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }],
-            isDeleted: { $ne: true }
-        });
-        const advCode = await AccountingCode.findOne({
-            $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }],
-            isDeleted: { $ne: true }
-        });
-        if (arCode) await syncAccountingCodeBalances(arCode._id);
-        if (advCode) await syncAccountingCodeBalances(advCode._id);
-    } catch (syncErr) {
-        console.error(`  ✗ Failed to sync accounting code balances:`, syncErr);
-    }
-
-    console.log(`[REVERSE SET-OFF] Reversal complete for BankTransaction ${bankTransactionId}`);
-    console.log(`===============================================================\n`);
 
     return history;
 };
@@ -2630,5 +2909,6 @@ module.exports = {
     ensureSubAccountingCode,
     syncAccountingCodeBalances,
     autoSetOffInvoices,
+    autoSetOffBills,
     reverseSetOffFromHistory
 };

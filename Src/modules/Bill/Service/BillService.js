@@ -136,7 +136,11 @@ exports.getAllBills = async (query = {}) => {
 
     // 1. Status Filter
     if (query.status && query.status !== 'ALL') {
-        mongooseQuery.status = query.status;
+        if (typeof query.status === 'string' && query.status.includes(',')) {
+            mongooseQuery.status = { $in: query.status.split(',').map(s => s.trim()) };
+        } else {
+            mongooseQuery.status = query.status;
+        }
     }
 
     // 2. Branch Filter
@@ -198,7 +202,7 @@ exports.getAllBills = async (query = {}) => {
     const hasDateFilter = !!(query.fromDate || query.toDate || query.startDate || query.endDate || query.month || query.year);
 
     // Default to start of current month to today's date if no date filters are supplied and no supplier is targeted, and not explicitly ignored
-    if (!hasDateFilter && !query.supplier && !query.search && query.ignoreDefaultDates !== 'true') {
+    if (!hasDateFilter && !query.supplier && !query.search && query.ignoreDefaultDates !== 'true' && query.ignoreDefaultDates !== true) {
         const now = new Date();
         const startOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0));
         const endOfToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));

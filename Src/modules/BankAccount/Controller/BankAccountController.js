@@ -646,11 +646,64 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
             } else if (customerNameVal && String(customerNameVal).trim()) {
                 const Customer = require("../../Customer/Model/CustomerModel");
-                const escapedName = String(customerNameVal).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const Driver = require("../../Driver/Model/DriverModel");
+                const rawName = String(customerNameVal).trim();
+                const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                
+                // 1. Primary: Exact case-insensitive match on name, companyName, displayName, customerNumber
                 customerDoc = await Customer.findOne({
-                    name: { $regex: new RegExp("^" + escapedName + "$", "i") },
+                    $or: [
+                        { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                    ],
                     isDeleted: false
                 });
+
+                // 2. Secondary: Substring case-insensitive match
+                if (!customerDoc) {
+                    customerDoc = await Customer.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp(escapedName, "i") } },
+                            { companyName: { $regex: new RegExp(escapedName, "i") } },
+                            { displayName: { $regex: new RegExp(escapedName, "i") } }
+                        ],
+                        isDeleted: false
+                    });
+                }
+
+                // 3. Tertiary: Punctuation-insensitive fuzzy match (ignores dots, commas, extra spaces like "S.A." vs "S.A")
+                if (!customerDoc) {
+                    const cleanWords = rawName.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (cleanWords) {
+                        const fuzzyPattern = cleanWords.split(' ').filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s,.-]*');
+                        customerDoc = await Customer.findOne({
+                            $or: [
+                                { name: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                { companyName: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                { displayName: { $regex: new RegExp(fuzzyPattern, "i") } }
+                            ],
+                            isDeleted: false
+                        });
+                    }
+                }
+
+                // 4. Fallback: Search Driver model by name or driverId and find connected Customer
+                if (!customerDoc) {
+                    const driverDoc = await Driver.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp(escapedName, "i") } },
+                            { firstName: { $regex: new RegExp(escapedName, "i") } },
+                            { driverId: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        ],
+                        isDeleted: { $ne: true }
+                    });
+
+                    if (driverDoc) {
+                        customerDoc = await Customer.findOne({ driver: driverDoc._id, isDeleted: false });
+                    }
+                }
             }
 
             if (supplierIdVal) {
@@ -658,15 +711,29 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
             } else if (supplierNameVal && String(supplierNameVal).trim()) {
                 const Supplier = require("../../Supplier/Model/SupplierModel");
-                const escapedSupName = String(supplierNameVal).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const rawSupName = String(supplierNameVal).trim();
+                const escapedSupName = rawSupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                
                 supplierDoc = await Supplier.findOne({
                     $or: [
                         { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
                         { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                        { displayName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                        { vendorNumber: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
                         { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
                     ],
                     isDeleted: { $ne: true }
                 });
+
+                if (!supplierDoc) {
+                    supplierDoc = await Supplier.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp(escapedSupName, "i") } },
+                            { companyName: { $regex: new RegExp(escapedSupName, "i") } }
+                        ],
+                        isDeleted: { $ne: true }
+                    });
+                }
             }
 
             const isCreditCard = account.accountType === "Credit Card";
