@@ -2360,6 +2360,10 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         }
         await invoice.save();
 
+        const addedPayment = invoice.payments && invoice.payments.length > 0
+            ? invoice.payments[invoice.payments.length - 1]
+            : null;
+
         // Capture AFTER state (after this transaction is applied)
         const afterState = {
             amountPaid: newPaid,
@@ -2405,6 +2409,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             invoiceId: invoice._id,
             invoiceNumber: invoice.invoiceNumber,
             amountApplied: amountToApply,
+            paymentId: addedPayment ? addedPayment._id : undefined,
             newStatus,
             newBalance,
             beforeState,
@@ -2466,7 +2471,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         || targetArCode;
 
     let createdJournalId = null;
-    if (bankAccountingCodeId && (targetArCode || targetAdvCode)) {
+    if (targetArCode || targetAdvCode) {
         try {
             const invoiceNumbers = invoicesSetOff.length > 0
                 ? invoicesSetOff.map(inv => inv.invoiceNumber).join(", ")
@@ -2525,7 +2530,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             console.log(`[AUTO SET-OFF STAGE 6] Direct Double-Entry Ledger Created successfully (Bank DR $${amount}, AR CR $${totalSetOff}, Advance 2.1.02 CR $${excessAmount})`);
 
             // Sync accounting code balances
-            await syncAccountingCodeBalances(bankAccountingCodeId);
+            if (bankAccountingCodeId) await syncAccountingCodeBalances(bankAccountingCodeId);
             if (targetArCode) await syncAccountingCodeBalances(targetArCode._id);
             if (targetAdvCode) await syncAccountingCodeBalances(targetAdvCode._id);
 
@@ -2546,7 +2551,10 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             const historySnapshots = invoicesSetOff.map(inv => ({
                 invoice: inv.invoiceId,
                 invoiceNumber: inv.invoiceNumber,
-                amountApplied: inv.amountApplied
+                amountApplied: inv.amountApplied,
+                paymentId: inv.paymentId,
+                before: inv.beforeState,
+                after: inv.afterState
             }));
 
             const partnerEntryIds = options.createdPartnerEntryIds || [];
@@ -2641,6 +2649,8 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
         creatorRole,
         inputBankAccountId
     } = options;
+
+    const inputBranchId = branchId || options.branchId || options.branch || undefined;
 
     const supplierDoc = await Supplier.findById(supplierId);
     const supplierName = supplierDoc ? (supplierDoc.name || supplierDoc.companyName || "Unknown Vendor") : "Unknown Vendor";
@@ -2747,6 +2757,10 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
 
         await billDoc.save();
 
+        const addedPayment = billDoc.payments && billDoc.payments.length > 0
+            ? billDoc.payments[billDoc.payments.length - 1]
+            : null;
+
         const afterState = {
             amountPaid: newPaid,
             balance: newBalance,
@@ -2758,6 +2772,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
             billId: billDoc._id,
             billNumber: billDoc.billNumber,
             amountApplied: amountToApply,
+            paymentId: addedPayment ? addedPayment._id : undefined,
             beforeState,
             afterState,
         });
@@ -2790,6 +2805,68 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
         console.error("[autoSetOffBills] Failed to create PaymentMade record:", pmErr);
     }
 
+    // Create double-entry ledger for Vendor payment:
+    // Leg 2: DEBIT Accounts Payable (2.1.01) -> totalSetOff amount
+    // Leg 3: DEBIT Vendor Advance (1.1.04) -> excessAmount
+    const apCodeDoc = await AccountingCode.findOne({
+        $or: [
+            { code: "2.1.01" },
+            { name: { $regex: /Accounts Payable|Cuentas por Pagar/i } }
+        ],
+        isDeleted: { $ne: true }
+    });
+
+    const vendorAdvCodeDoc = await AccountingCode.findOne({
+        $or: [
+            { code: "1.1.04" },
+            { name: { $regex: /Vendor Advance|Anticipo a Proveedores/i } }
+        ],
+        isDeleted: { $ne: true }
+    });
+
+    const createdPartnerEntryIds = [];
+    if (totalSetOff > 0 && apCodeDoc) {
+        try {
+            const billNumbers = billsSetOff.map(b => b.billNumber).join(", ");
+            const apEntry = await LedgerEntry.create({
+                branch: inputBranchId,
+                accountingCode: apCodeDoc._id,
+                type: "DEBIT",
+                amount: totalSetOff,
+                description: `Vendor Bill set-off payment (${billNumbers})`,
+                supplier: supplierId,
+                transactionId: transactionId,
+                entryDate: timestamp,
+                createdBy: createdBy || "6a2290019fa01283dd165204",
+                creatorRole: (creatorRole || "ADMIN").toUpperCase()
+            });
+            if (apEntry) createdPartnerEntryIds.push(apEntry._id);
+        } catch (apErr) {
+            console.error("[autoSetOffBills] Failed to create AP ledger entry:", apErr);
+        }
+    }
+
+    if (excessAmount > 0 && vendorAdvCodeDoc) {
+        try {
+            const pmNum = paymentMadeDoc ? paymentMadeDoc.paymentNumber : "PM-Pending";
+            const advEntry = await LedgerEntry.create({
+                branch: inputBranchId,
+                accountingCode: vendorAdvCodeDoc._id,
+                type: "DEBIT",
+                amount: excessAmount,
+                description: `Vendor Advance Payment | Ref: ${pmNum} | Amount: $${excessAmount.toFixed(2)}`,
+                supplier: supplierId,
+                transactionId: transactionId,
+                entryDate: timestamp,
+                createdBy: createdBy || "6a2290019fa01283dd165204",
+                creatorRole: (creatorRole || "ADMIN").toUpperCase()
+            });
+            if (advEntry) createdPartnerEntryIds.push(advEntry._id);
+        } catch (advErr) {
+            console.error("[autoSetOffBills] Failed to create Vendor Advance ledger entry:", advErr);
+        }
+    }
+
     // Save InvoiceBillSetOffHistory with targetType: "SUPPLIER"
     let historyDoc = null;
     const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
@@ -2798,7 +2875,10 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
             const billSnapshots = billsSetOff.map(b => ({
                 bill: b.billId,
                 billNumber: b.billNumber,
-                amountApplied: b.amountApplied
+                amountApplied: b.amountApplied,
+                paymentId: b.paymentId,
+                before: b.beforeState,
+                after: b.afterState
             }));
 
             const existingHistory = await InvoiceBillSetOffHistory.findOne({
@@ -2819,6 +2899,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
                 existingHistory.billSnapshots = billSnapshots;
                 existingHistory.excessAmount = excessAmount;
                 existingHistory.vendorPayment = paymentMadeDoc ? paymentMadeDoc._id : undefined;
+                existingHistory.partnerLedgerEntries = createdPartnerEntryIds.length > 0 ? createdPartnerEntryIds : existingHistory.partnerLedgerEntries;
                 await existingHistory.save();
                 historyDoc = existingHistory;
             } else {
@@ -2833,6 +2914,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
                     billSnapshots: billSnapshots,
                     excessAmount: excessAmount,
                     vendorPayment: paymentMadeDoc ? paymentMadeDoc._id : undefined,
+                    partnerLedgerEntries: createdPartnerEntryIds,
                     createdBy: createdBy || "6a2290019fa01283dd165204",
                     creatorRole: (creatorRole || "ADMIN").toUpperCase()
                 });
@@ -2861,23 +2943,82 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
  */
 const reverseSetOffFromHistory = async (bankTransactionId) => {
     const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
     const { Invoice } = require("../../Invoice/Model/InvoiceModel");
     const Bill = require("../../Bill/Model/BillModel");
     const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
     const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
-    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
-    const history = await InvoiceBillSetOffHistory.findOne({
-        $or: [
-            { primaryLedgerEntry: bankTransactionId },
-            { partnerLedgerEntries: bankTransactionId },
-            { transactionId: String(bankTransactionId) }
-        ]
-    });
+    if (!bankTransactionId) return null;
+
+    let bankTx = null;
+    let primaryEntry = null;
+    const txStringId = String(bankTransactionId);
+
+    if (mongoose.Types.ObjectId.isValid(bankTransactionId)) {
+        bankTx = await BankTransaction.findById(bankTransactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(bankTransactionId);
+            if (primaryEntry) {
+                bankTx = await BankTransaction.findOne({
+                    $or: [
+                        { ledgerEntry: primaryEntry._id },
+                        { transactionId: primaryEntry.transactionId }
+                    ]
+                });
+            }
+        }
+    }
+
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+        if (primaryEntry) {
+            bankTx = await BankTransaction.findOne({
+                $or: [
+                    { ledgerEntry: primaryEntry._id },
+                    { transactionId: primaryEntry.transactionId }
+                ]
+            });
+        }
+    }
+
+    const searchConditions = [];
+    if (mongoose.Types.ObjectId.isValid(bankTransactionId)) {
+        searchConditions.push({ _id: bankTransactionId });
+        searchConditions.push({ primaryLedgerEntry: bankTransactionId });
+        searchConditions.push({ partnerLedgerEntries: bankTransactionId });
+        searchConditions.push({ bankTransaction: bankTransactionId });
+    }
+    if (primaryEntry) {
+        searchConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        searchConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        searchConditions.push({ bankTransaction: bankTx._id });
+        if (bankTx.ledgerEntry) searchConditions.push({ primaryLedgerEntry: bankTx.ledgerEntry });
+    }
+    if (txStringId) searchConditions.push({ transactionId: txStringId });
+    if (primaryEntry && primaryEntry.transactionId) searchConditions.push({ transactionId: primaryEntry.transactionId });
+    if (bankTx && bankTx.transactionId) searchConditions.push({ transactionId: bankTx.transactionId });
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions });
 
     if (!history) {
-        console.log(`[reverseSetOffFromHistory] No InvoiceBillSetOffHistory found for BankTransaction/LedgerEntry ${bankTransactionId}. Returning null.`);
+        console.log(`[reverseSetOffFromHistory] No InvoiceBillSetOffHistory found for ${bankTransactionId}. Cleaning orphan partner entries if any.`);
+        const orphanTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
+        const primaryId = primaryEntry ? primaryEntry._id : (bankTx ? bankTx.ledgerEntry : null);
+        if (orphanTxId && primaryId) {
+            await LedgerEntry.deleteMany({
+                transactionId: String(orphanTxId),
+                _id: { $ne: primaryId }
+            });
+        }
         return null;
     }
 
@@ -2890,7 +3031,7 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
 
     if (history.targetType === "SUPPLIER" || (history.billSnapshots && history.billSnapshots.length > 0)) {
         // Reverse Supplier Bill Set-Off
-        const txId = history.transactionId || String(bankTransactionId);
+        const txId = history.transactionId || (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || String(bankTransactionId);
         const billIdsToUpdate = new Set();
 
         (history.billSnapshots || []).forEach(b => {
@@ -2915,12 +3056,14 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
             try {
                 const billDoc = await Bill.findById(bId);
                 if (billDoc) {
+                    const bSnapshot = (history.billSnapshots || []).find(s => String(s.bill) === String(bId));
                     // Remove exact connected payment from bill.payments
                     billDoc.payments = (billDoc.payments || []).filter(p => {
+                        const matchSnapshotPayment = bSnapshot && bSnapshot.paymentId && String(p._id) === String(bSnapshot.paymentId);
                         const matchTxId = txId && String(p.transactionId) === String(txId);
                         const matchBankTxId = String(p.transactionId) === String(bankTransactionId);
                         const matchVendorPaymentId = history.vendorPayment && String(p.paymentMadeId || p.transactionId || '') === String(history.vendorPayment);
-                        return !(matchTxId || matchBankTxId || matchVendorPaymentId);
+                        return !(matchSnapshotPayment || matchTxId || matchBankTxId || matchVendorPaymentId);
                     });
 
                     // Recalculate total amount paid & balance due from remaining payments
@@ -2969,7 +3112,7 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
         }
     } else {
         // Reverse Customer Invoice Set-Off
-        const txId = history.transactionId || String(bankTransactionId);
+        const txId = history.transactionId || (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || String(bankTransactionId);
         for (const snapshot of (history.invoiceSnapshots || [])) {
             try {
                 const invoiceDoc = await Invoice.findById(snapshot.invoice);
@@ -2977,10 +3120,11 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
 
                 // Remove exact connected payment from invoice.payments
                 invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => {
+                    const matchSnapshotPayment = snapshot.paymentId && String(p._id) === String(snapshot.paymentId);
                     const matchTxId = txId && String(p.transactionId) === String(txId);
                     const matchBankTxId = String(p.transactionId) === String(bankTransactionId);
                     const matchPRId = history.paymentReceived && String(p.paymentReceivedId || p.transactionId || '') === String(history.paymentReceived);
-                    return !(matchTxId || matchBankTxId || matchPRId);
+                    return !(matchSnapshotPayment || matchTxId || matchBankTxId || matchPRId);
                 });
 
                 // Recalculate total amount paid & balance from remaining payments
@@ -3044,10 +3188,20 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
 
     // Delete partner ledger entries
     try {
-        if (history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
-            const delRes = await LedgerEntry.deleteMany({ _id: { $in: history.partnerLedgerEntries } });
-            console.log(`  ✓ Deleted ${delRes.deletedCount} partner set-off LedgerEntries`);
+        const partnerIdsToDelete = [...(history.partnerLedgerEntries || [])];
+        const resolvedTxId = history.transactionId || (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId);
+        const primaryId = primaryEntry ? primaryEntry._id : history.primaryLedgerEntry;
+
+        if (partnerIdsToDelete.length > 0) {
+            await LedgerEntry.deleteMany({ _id: { $in: partnerIdsToDelete } });
         }
+        if (resolvedTxId && primaryId) {
+            await LedgerEntry.deleteMany({
+                transactionId: String(resolvedTxId),
+                _id: { $ne: primaryId }
+            });
+        }
+        console.log(`  ✓ Deleted partner set-off LedgerEntries for ${bankTransactionId}`);
     } catch (lErr) {
         console.error(`  ✗ Failed to delete partner ledger entries:`, lErr);
     }
@@ -3061,6 +3215,446 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
     }
 
     return history;
+};
+
+/**
+ * Dedicated Service 1: Update Customer Transaction Amount
+ */
+const updateCustomerTransactionAmount = async (transactionId, newAmount, options = {}) => {
+    const numAmount = Number(newAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Amount must be a positive number");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+
+    let bankTx = null;
+    let primaryEntry = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(transactionId);
+        }
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    const searchConditions = [];
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        searchConditions.push({ _id: transactionId });
+        searchConditions.push({ primaryLedgerEntry: transactionId });
+        searchConditions.push({ partnerLedgerEntries: transactionId });
+        searchConditions.push({ bankTransaction: transactionId });
+    }
+    if (primaryEntry) {
+        searchConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        searchConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        searchConditions.push({ bankTransaction: bankTx._id });
+        if (bankTx.ledgerEntry) searchConditions.push({ primaryLedgerEntry: bankTx.ledgerEntry });
+    }
+    if (txStringId) searchConditions.push({ transactionId: txStringId });
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions });
+
+    const targetCustomerId = (history && history.customer)
+        || (bankTx && bankTx.customer)
+        || (primaryEntry && primaryEntry.contact);
+
+    if (!targetCustomerId) {
+        throw new Error("No Customer associated with this transaction");
+    }
+
+    // 1. Reverse existing set-off cleanly
+    await reverseSetOffFromHistory(primaryEntry ? primaryEntry._id : (bankTx ? bankTx._id : transactionId));
+
+    // 2. Update BankTransaction & LedgerEntry amounts
+    if (primaryEntry) {
+        primaryEntry.amount = numAmount;
+        await primaryEntry.save();
+    }
+    if (bankTx) {
+        bankTx.amount = numAmount;
+        await bankTx.save();
+    }
+
+    // 3. Re-run autoSetOffInvoices for Customer with new amount
+    const resolvedTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
+    const setOffResult = await autoSetOffInvoices(targetCustomerId, numAmount, {
+        ...options,
+        bankTransactionId: bankTx ? bankTx._id : undefined,
+        existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
+        primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
+        entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : (bankTx ? bankTx.entryDate : new Date())),
+        transactionId: resolvedTxId,
+        createdBy: options.createdBy,
+        creatorRole: options.creatorRole
+    });
+
+    // 4. Recalculate running balances
+    const bankAccountId = (bankTx && bankTx.bankAccount) || (primaryEntry && primaryEntry.bankAccount);
+    if (bankAccountId) {
+        await recalculateRunningBalances(bankAccountId);
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newAmount: numAmount,
+        customerId: targetCustomerId,
+        setOffResult
+    };
+};
+
+/**
+ * Dedicated Service 2: Update Customer Contact
+ */
+const updateCustomerContact = async (transactionId, newCustomerId, options = {}) => {
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const Customer = require("../../Customer/Model/CustomerModel");
+
+    let bankTx = null;
+    let primaryEntry = null;
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(transactionId);
+        }
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: String(transactionId) });
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    // 1. Reverse existing set-off (Customer or Vendor)
+    await reverseSetOffFromHistory(transactionId);
+
+    const txAmount = bankTx ? bankTx.amount : (primaryEntry ? primaryEntry.amount : 0);
+
+    let setOffResult = null;
+    if (newCustomerId) {
+        const custDoc = await Customer.findById(newCustomerId);
+        if (!custDoc) {
+            throw new Error("Customer not found");
+        }
+
+        // Apply set-off to new Customer
+        setOffResult = await autoSetOffInvoices(newCustomerId, txAmount, {
+            ...options,
+            bankTransactionId: bankTx ? bankTx._id : undefined,
+            existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
+            primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
+            entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : new Date()),
+            transactionId: (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || String(transactionId),
+            createdBy: options.createdBy,
+            creatorRole: options.creatorRole
+        });
+
+        // Update contact & names
+        if (bankTx) {
+            bankTx.customer = newCustomerId;
+            bankTx.customerName = custDoc.name;
+            bankTx.supplier = undefined;
+            bankTx.supplierName = undefined;
+            await bankTx.save();
+        }
+        if (primaryEntry) {
+            primaryEntry.contact = newCustomerId;
+            primaryEntry.supplier = undefined;
+            await primaryEntry.save();
+        }
+    } else {
+        // Unlink contact
+        if (bankTx) {
+            bankTx.customer = undefined;
+            bankTx.customerName = undefined;
+            bankTx.supplier = undefined;
+            bankTx.supplierName = undefined;
+            bankTx.invoices = [];
+            bankTx.bills = [];
+            bankTx.setOffSummary = undefined;
+            await bankTx.save();
+        }
+        if (primaryEntry) {
+            primaryEntry.contact = undefined;
+            primaryEntry.supplier = undefined;
+            primaryEntry.invoices = [];
+            primaryEntry.bills = [];
+            primaryEntry.setOffSummary = undefined;
+            await primaryEntry.save();
+        }
+    }
+
+    // Recalculate running balances
+    if (bankTx && bankTx.bankAccount) {
+        await recalculateRunningBalances(bankTx.bankAccount);
+    } else if (primaryEntry && primaryEntry.bankAccount) {
+        await recalculateRunningBalances(primaryEntry.bankAccount);
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newCustomerId,
+        setOffResult
+    };
+};
+
+/**
+ * Dedicated Service 3: Update Vendor Transaction Amount
+ */
+const updateVendorTransactionAmount = async (transactionId, newAmount, options = {}) => {
+    const numAmount = Number(newAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Amount must be a positive number");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+
+    let bankTx = null;
+    let primaryEntry = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(transactionId);
+        }
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    const searchConditions = [];
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        searchConditions.push({ _id: transactionId });
+        searchConditions.push({ primaryLedgerEntry: transactionId });
+        searchConditions.push({ partnerLedgerEntries: transactionId });
+        searchConditions.push({ bankTransaction: transactionId });
+    }
+    if (primaryEntry) {
+        searchConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        searchConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        searchConditions.push({ bankTransaction: bankTx._id });
+        if (bankTx.ledgerEntry) searchConditions.push({ primaryLedgerEntry: bankTx.ledgerEntry });
+    }
+    if (txStringId) searchConditions.push({ transactionId: txStringId });
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions });
+
+    const targetSupplierId = (history && history.supplier)
+        || (bankTx && bankTx.supplier)
+        || (primaryEntry && primaryEntry.supplier);
+
+    if (!targetSupplierId) {
+        throw new Error("No Vendor/Supplier associated with this transaction");
+    }
+
+    // 1. Reverse existing set-off cleanly
+    await reverseSetOffFromHistory(primaryEntry ? primaryEntry._id : (bankTx ? bankTx._id : transactionId));
+
+    // 2. Update BankTransaction & LedgerEntry amounts
+    if (primaryEntry) {
+        primaryEntry.amount = numAmount;
+        await primaryEntry.save();
+    }
+    if (bankTx) {
+        bankTx.amount = numAmount;
+        await bankTx.save();
+    }
+
+    // 3. Re-run autoSetOffBills for Supplier with new amount
+    const resolvedTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
+    const setOffResult = await autoSetOffBills(targetSupplierId, numAmount, {
+        ...options,
+        bankTransactionId: bankTx ? bankTx._id : undefined,
+        existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
+        primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
+        entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : (bankTx ? bankTx.entryDate : new Date())),
+        transactionId: resolvedTxId,
+        createdBy: options.createdBy,
+        creatorRole: options.creatorRole
+    });
+
+    // 4. Recalculate running balances
+    const bankAccountId = (bankTx && bankTx.bankAccount) || (primaryEntry && primaryEntry.bankAccount);
+    if (bankAccountId) {
+        await recalculateRunningBalances(bankAccountId);
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newAmount: numAmount,
+        supplierId: targetSupplierId,
+        setOffResult
+    };
+};
+
+/**
+ * Dedicated Service 4: Update Vendor Contact
+ */
+const updateVendorContact = async (transactionId, newSupplierId, options = {}) => {
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const Supplier = require("../../Supplier/Model/SupplierModel");
+
+    let bankTx = null;
+    let primaryEntry = null;
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(transactionId);
+        }
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: String(transactionId) });
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    // 1. Reverse existing set-off (Vendor or Customer)
+    await reverseSetOffFromHistory(transactionId);
+
+    const txAmount = bankTx ? bankTx.amount : (primaryEntry ? primaryEntry.amount : 0);
+
+    let setOffResult = null;
+    if (newSupplierId) {
+        const supDoc = await Supplier.findById(newSupplierId);
+        if (!supDoc) {
+            throw new Error("Supplier not found");
+        }
+
+        // Apply set-off to new Supplier
+        setOffResult = await autoSetOffBills(newSupplierId, txAmount, {
+            ...options,
+            bankTransactionId: bankTx ? bankTx._id : undefined,
+            existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
+            primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
+            entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : new Date()),
+            transactionId: (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || String(transactionId),
+            createdBy: options.createdBy,
+            creatorRole: options.creatorRole
+        });
+
+        // Update supplier & names
+        if (bankTx) {
+            bankTx.supplier = newSupplierId;
+            bankTx.supplierName = supDoc.name || supDoc.companyName;
+            bankTx.customer = undefined;
+            bankTx.customerName = undefined;
+            await bankTx.save();
+        }
+        if (primaryEntry) {
+            primaryEntry.supplier = newSupplierId;
+            primaryEntry.contact = undefined;
+            await primaryEntry.save();
+        }
+    } else {
+        // Unlink contact
+        if (bankTx) {
+            bankTx.supplier = undefined;
+            bankTx.supplierName = undefined;
+            bankTx.customer = undefined;
+            bankTx.customerName = undefined;
+            bankTx.invoices = [];
+            bankTx.bills = [];
+            bankTx.setOffSummary = undefined;
+            await bankTx.save();
+        }
+        if (primaryEntry) {
+            primaryEntry.supplier = undefined;
+            primaryEntry.contact = undefined;
+            primaryEntry.invoices = [];
+            primaryEntry.bills = [];
+            primaryEntry.setOffSummary = undefined;
+            await primaryEntry.save();
+        }
+    }
+
+    // Recalculate running balances
+    if (bankTx && bankTx.bankAccount) {
+        await recalculateRunningBalances(bankTx.bankAccount);
+    } else if (primaryEntry && primaryEntry.bankAccount) {
+        await recalculateRunningBalances(primaryEntry.bankAccount);
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newSupplierId,
+        setOffResult
+    };
 };
 
 module.exports = {
@@ -3080,5 +3674,9 @@ module.exports = {
     syncAccountingCodeBalances,
     autoSetOffInvoices,
     autoSetOffBills,
-    reverseSetOffFromHistory
+    reverseSetOffFromHistory,
+    updateCustomerTransactionAmount,
+    updateCustomerContact,
+    updateVendorTransactionAmount,
+    updateVendorContact
 };

@@ -24,6 +24,10 @@ const invoiceSnapshotSchema = new mongoose.Schema({
         type: Number,
         required: true,
     },
+    paymentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: false,
+    },
     before: {
         amountPaid: { type: Number },
         balance: { type: Number },
@@ -51,6 +55,10 @@ const billSnapshotSchema = new mongoose.Schema({
     amountApplied: {
         type: Number,
         required: true,
+    },
+    paymentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        required: false,
     },
     before: {
         amountPaid: { type: Number },

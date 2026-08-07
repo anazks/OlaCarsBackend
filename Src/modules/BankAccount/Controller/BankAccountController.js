@@ -1248,7 +1248,8 @@ exports.getBankTransactions = async (req, res, next) => {
                         obj.bills = (history.billSnapshots || []).map(snap => ({
                             billId: snap.bill,
                             billNumber: snap.billNumber,
-                            amountApplied: snap.amountApplied
+                            amountApplied: snap.amountApplied,
+                            paymentId: snap.paymentId
                         }));
                     }
                     if (!obj.setOffSummary) {
@@ -1258,7 +1259,8 @@ exports.getBankTransactions = async (req, res, next) => {
                             bills: (history.billSnapshots || []).map(snap => ({
                                 billId: snap.bill,
                                 billNumber: snap.billNumber,
-                                amountApplied: snap.amountApplied
+                                amountApplied: snap.amountApplied,
+                                paymentId: snap.paymentId
                             })),
                             excessAmount: history.excessAmount || 0
                         };
@@ -1277,7 +1279,8 @@ exports.getBankTransactions = async (req, res, next) => {
                         obj.invoices = (history.invoiceSnapshots || []).map(snap => ({
                             invoiceId: snap.invoice,
                             invoiceNumber: snap.invoiceNumber,
-                            amountApplied: snap.amountApplied
+                            amountApplied: snap.amountApplied,
+                            paymentId: snap.paymentId
                         }));
                     }
                     if (!obj.setOffSummary) {
@@ -1287,7 +1290,8 @@ exports.getBankTransactions = async (req, res, next) => {
                             invoices: (history.invoiceSnapshots || []).map(snap => ({
                                 invoiceId: snap.invoice,
                                 invoiceNumber: snap.invoiceNumber,
-                                amountApplied: snap.amountApplied
+                                amountApplied: snap.amountApplied,
+                                paymentId: snap.paymentId
                             })),
                             excessAmount: history.excessAmount || 0
                         };
@@ -1406,93 +1410,89 @@ exports.getBankTransactionById = async (req, res, next) => {
     try {
         const { transactionId } = req.params;
         const mongoose = require("mongoose");
-        const BankTransaction = require("../Model/BankTransactionModel");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-        const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
+        const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+        const BankAccount = require("../Model/BankAccountModel");
 
-        let bankTxDoc = null;
+        let ledgerEntry = null;
+
         if (mongoose.Types.ObjectId.isValid(transactionId)) {
-            bankTxDoc = await BankTransaction.findById(transactionId)
-                .populate("bankAccount", "accountName bankName accountNumber currency status")
+            ledgerEntry = await LedgerEntry.findById(transactionId)
                 .populate("branch", "name code")
                 .populate("accountingCode", "code name category")
-                .populate("createdBy", "name email");
+                .populate("createdBy", "name email")
+                .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId");
         }
 
-        let transactionObj = null;
-        let searchTxId = null;
-        let searchJournalId = null;
-
-        if (bankTxDoc) {
-            transactionObj = bankTxDoc.toObject();
-            searchTxId = bankTxDoc.transactionId;
-        } else {
-            const ledgerEntry = await LedgerEntry.findById(transactionId)
+        if (!ledgerEntry) {
+            ledgerEntry = await LedgerEntry.findOne({ transactionId: String(transactionId) })
                 .populate("branch", "name code")
                 .populate("accountingCode", "code name category")
-                .populate("createdBy", "name email");
-
-            if (ledgerEntry) {
-                transactionObj = ledgerEntry.toObject();
-                transactionObj.entryDate = ledgerEntry.entryDate;
-                transactionObj.transactionId = ledgerEntry.transactionId;
-                searchTxId = ledgerEntry.transactionId;
-                searchJournalId = ledgerEntry.manualJournal;
-
-                const BankAccount = require("../Model/BankAccountModel");
-                const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode, isDeleted: false });
-                transactionObj.bankAccount = matchedAccount ? {
-                    _id: matchedAccount._id,
-                    accountName: matchedAccount.accountName || matchedAccount.bankName,
-                    bankName: matchedAccount.bankName,
-                    accountNumber: matchedAccount.accountNumber,
-                    currency: matchedAccount.currency,
-                    status: matchedAccount.status
-                } : null;
-            }
+                .populate("createdBy", "name email")
+                .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId");
         }
 
-        if (!transactionObj) {
+        if (!ledgerEntry) {
             return res.status(404).json({ success: false, message: "Bank transaction not found" });
         }
 
-        // Strictly target the double-entry journal lines for THIS specific transaction
-        const targetJournalId = transactionObj.manualJournal || searchJournalId;
-        const targetPrimaryEntryId = transactionObj.ledgerEntry || (bankTxDoc ? null : transactionObj._id);
+        const transactionObj = ledgerEntry.toObject();
+        const searchTxId = ledgerEntry.transactionId || String(transactionId);
+
+        if (ledgerEntry.accountingCode) {
+            const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode._id || ledgerEntry.accountingCode, isDeleted: false });
+            transactionObj.bankAccount = matchedAccount ? {
+                _id: matchedAccount._id,
+                accountName: matchedAccount.accountName || matchedAccount.bankName,
+                bankName: matchedAccount.bankName,
+                accountNumber: matchedAccount.accountNumber,
+                currency: matchedAccount.currency,
+                status: matchedAccount.status
+            } : null;
+        }
+
+        // Fetch set-off history if available
+        const searchConditions = [
+            { primaryLedgerEntry: ledgerEntry._id },
+            { partnerLedgerEntries: ledgerEntry._id },
+        ];
+        if (searchTxId) {
+            searchConditions.push({ transactionId: String(searchTxId) });
+        }
+
+        const historyDoc = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions })
+            .populate("customer", "name customerId")
+            .populate("supplier", "name supplierId")
+            .populate("paymentReceived", "paymentNumber amountReceived")
+            .populate("vendorPayment", "paymentNumber amount");
+
+        transactionObj.setOffHistory = historyDoc || null;
+
+        // Collect all connected double-entry ledger entries (Both Credit & Debit legs)
+        const connectedConditions = [];
+
+        if (ledgerEntry.manualJournal) {
+            connectedConditions.push({ manualJournal: ledgerEntry.manualJournal });
+        }
+        if (searchTxId) {
+            connectedConditions.push({ transactionId: String(searchTxId) });
+        }
+        if (historyDoc && historyDoc.partnerLedgerEntries && historyDoc.partnerLedgerEntries.length > 0) {
+            connectedConditions.push({ _id: { $in: historyDoc.partnerLedgerEntries } });
+        }
+        connectedConditions.push({ _id: ledgerEntry._id });
 
         let connectedLedgerEntries = [];
-
-        if (targetJournalId) {
-            // Find all entries belonging to this specific ManualJournal
-            connectedLedgerEntries = await LedgerEntry.find({ manualJournal: targetJournalId })
+        if (connectedConditions.length > 0) {
+            connectedLedgerEntries = await LedgerEntry.find({ $or: connectedConditions })
                 .populate("accountingCode", "code name category accountType")
                 .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId")
                 .sort({ type: -1, createdAt: 1 });
-        } else if (targetPrimaryEntryId) {
-            // Find the primary entry and any direct partner linked by manualJournal
-            const primary = await LedgerEntry.findById(targetPrimaryEntryId);
-            if (primary && primary.manualJournal) {
-                connectedLedgerEntries = await LedgerEntry.find({ manualJournal: primary.manualJournal })
-                    .populate("accountingCode", "code name category accountType")
-                    .populate("contact", "name customerId")
-                    .sort({ type: -1, createdAt: 1 });
-            } else if (primary) {
-                const populated = await LedgerEntry.findById(primary._id)
-                    .populate("accountingCode", "code name category accountType")
-                    .populate("contact", "name customerId");
-                if (populated) connectedLedgerEntries = [populated];
-            }
         }
         transactionObj.connectedLedgerEntries = connectedLedgerEntries;
-
-        // Fetch InvoiceSetOffHistory if available
-        let historyDoc = null;
-        if (bankTxDoc) {
-            historyDoc = await InvoiceSetOffHistory.findOne({ bankTransaction: bankTxDoc._id })
-                .populate("customer", "name customerId")
-                .populate("paymentReceived", "paymentNumber amountReceived");
-        }
-        transactionObj.setOffHistory = historyDoc || null;
 
         res.status(200).json({
             success: true,
@@ -1649,6 +1649,110 @@ exports.getBankAccountLedgerPdf = async (req, res, next) => {
         );
     } catch (error) {
         console.error("Error in getBankAccountLedgerPdf controller:", error);
+        next(error);
+    }
+};
+
+exports.changeCustomerTransactionAmount = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { amount, notes, entryDate } = req.body;
+
+        if (amount === undefined || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: "Valid positive amount is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role,
+            description: notes,
+            entryDate: entryDate ? new Date(entryDate) : undefined
+        };
+
+        const result = await BankAccountService.updateCustomerTransactionAmount(transactionId, amount, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated customer transaction amount and set-off history",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeCustomerTransactionAmount controller:", error);
+        next(error);
+    }
+};
+
+exports.changeCustomerContact = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { newCustomerId } = req.body;
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateCustomerContact(transactionId, newCustomerId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated customer contact and re-applied set-off",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeCustomerContact controller:", error);
+        next(error);
+    }
+};
+
+exports.changeVendorTransactionAmount = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { amount, notes, entryDate } = req.body;
+
+        if (amount === undefined || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: "Valid positive amount is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role,
+            description: notes,
+            entryDate: entryDate ? new Date(entryDate) : undefined
+        };
+
+        const result = await BankAccountService.updateVendorTransactionAmount(transactionId, amount, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated vendor transaction amount and bill set-off history",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeVendorTransactionAmount controller:", error);
+        next(error);
+    }
+};
+
+exports.changeVendorContact = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { newSupplierId } = req.body;
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateVendorContact(transactionId, newSupplierId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated vendor contact and re-applied bill set-off",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeVendorContact controller:", error);
         next(error);
     }
 };

@@ -95,6 +95,35 @@ router.post(
     BankAccountController.bulkEditTransactions
 );
 
+// Dedicated Transaction Edit Routes:
+// 1. Change Customer Transaction Amount
+router.put(
+    "/transactions/:transactionId/customer-amount",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeCustomerTransactionAmount
+);
+
+// 2. Change Customer Contact
+router.put(
+    "/transactions/:transactionId/customer-contact",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeCustomerContact
+);
+
+// 3. Change Vendor Transaction Amount
+router.put(
+    "/transactions/:transactionId/vendor-amount",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeVendorTransactionAmount
+);
+
+// 4. Change Vendor Contact
+router.put(
+    "/transactions/:transactionId/vendor-contact",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeVendorContact
+);
+
 // Record manual payment
 router.post(
     "/:id/manual-payment",

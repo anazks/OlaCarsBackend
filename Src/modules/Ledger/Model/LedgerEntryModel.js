@@ -57,6 +57,11 @@ const ledgerEntrySchema = new mongoose.Schema(
             ref: "Customer",
             required: false,
         },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
+            required: false,
+        },
         transactionType: {
             type: String,
             required: false,
