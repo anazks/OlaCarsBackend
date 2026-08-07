@@ -221,6 +221,50 @@ const NO_ACCOUNT_RESPONSE = {
     message: "NO_ACCOUNT: No account is linked to this number. Do not retry this tool. Tell the caller you don't see an account on file and offer to take their details for a team callback."
 };
 
+// Recompute what's actually owed right now from each week's own `amount` and
+// `amountPaid` — NOT the stored `carryOver`/`totalDue`/`balance`. Those get
+// written by DriverService's rollover job, which folds an overdue week's
+// leftover balance into the next week but never clears the old week's own
+// balance/status, so summing stored balances across all pending weeks can
+// double-count. `amount` and `amountPaid` are untouched by that rollover, so
+// walking them ourselves gives a correct number regardless of rollover state.
+const computeCurrentDue = (rentTracking) => {
+    const unpaid = [...(rentTracking || [])]
+        .filter(week => week.status !== "PAID")
+        .sort((a, b) => (a.weekNumber || 0) - (b.weekNumber || 0));
+
+    if (unpaid.length === 0) {
+        return { previousBalance: 0, currentPeriodAmount: 0, currentPeriodDueDate: null, totalDue: 0 };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let previousBalance = 0;
+    for (let i = 0; i < unpaid.length; i++) {
+        const week = unpaid[i];
+        const ownResidual = Math.max(0, (week.amount || 0) - (week.amountPaid || 0));
+        const dueDate = week.dueDate ? new Date(week.dueDate) : null;
+        const isOverdue = dueDate && dueDate < today;
+
+        // Fold every overdue period except the last unpaid one into
+        // previous_balance; the last one (overdue or not) is "due now".
+        if (isOverdue && i < unpaid.length - 1) {
+            previousBalance += ownResidual;
+            continue;
+        }
+
+        return {
+            previousBalance,
+            currentPeriodAmount: week.amount || 0,
+            currentPeriodDueDate: week.dueDate ? week.dueDate.toISOString().split("T")[0] : null,
+            totalDue: previousBalance + ownResidual
+        };
+    }
+
+    return { previousBalance, currentPeriodAmount: 0, currentPeriodDueDate: null, totalDue: previousBalance };
+};
+
 exports.getAccountStatus = async (req, res, next) => {
     try {
         const { customerId } = req.params;
@@ -256,17 +300,22 @@ exports.getAccountStatus = async (req, res, next) => {
                 status: week.status
             })) || [];
 
-        const totalDue = pendingWeeks.reduce((sum, week) => sum + (week.amount_due || 0), 0);
-        const nextDueDate = pendingWeeks.length > 0 ? pendingWeeks[0].due_date : null;
+        const { previousBalance, currentPeriodAmount, currentPeriodDueDate, totalDue } =
+            computeCurrentDue(driver.rentTracking);
 
         res.status(200).json({
             success: true,
             has_account: true,
             customer_name: driver.personalInfo?.fullName || "Cliente",
             leased_vehicle: leasedVehicle,
-            pending_weeks: pendingWeeks,
+            previous_balance: previousBalance,
+            current_period_amount: currentPeriodAmount,
             total_due: totalDue,
-            next_due_date: nextDueDate
+            next_due_date: currentPeriodDueDate,
+            pending_weeks: pendingWeeks,
+            message: previousBalance > 0
+                ? `PAYMENT_BREAKDOWN: $${previousBalance} was left over from a previous payment, plus $${currentPeriodAmount} due for the current period. That totals $${totalDue}. Clearly state both parts, not just the total.`
+                : undefined
         });
 
     } catch (error) {
