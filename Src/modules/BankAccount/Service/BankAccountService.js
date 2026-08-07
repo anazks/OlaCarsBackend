@@ -21,84 +21,65 @@ const ensureDateTimeWithCurrentTime = (dateInput) => {
 };
 
 const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creatorId, creatorRole, supplierDoc = null) => {
+    const mongoose = require("mongoose");
     let parentName = String(parentAccountVal || "").trim();
     const subName = String(accountsNameVal || "").trim();
 
-    // Intelligent parent mapping
-    let parentDoc = null;
+    const searchTarget = subName || parentName;
+    if (!searchTarget) return null;
 
-    if (parentName) {
-        // 1. Try exact match on code or name (case-insensitive with regex escape)
+    const cleanTarget = searchTarget.replace(/\u00a0/g, ' ').replace(/[\/\\_-]/g, ' ').replace(/\s+/g, ' ').trim();
+    const escapedTarget = escapeRegExp(cleanTarget);
+
+    // 1. Direct match on code, _id, or exact name in Chart of Accounts
+    let parentDoc = await AccountingCode.findOne({
+        $or: [
+            { code: searchTarget },
+            { code: cleanTarget },
+            { _id: mongoose.Types.ObjectId.isValid(searchTarget) ? searchTarget : null },
+            { name: { $regex: new RegExp(`^${escapedTarget}$`, "i") } }
+        ],
+        isDeleted: false
+    });
+
+    // 2. Substring match on AccountingCode name
+    if (!parentDoc) {
         parentDoc = await AccountingCode.findOne({
-            $or: [
-                { code: parentName },
-                { name: { $regex: new RegExp(`^${escapeRegExp(parentName)}$`, "i") } }
-            ],
+            name: { $regex: new RegExp(escapedTarget, "i") },
             isDeleted: false
         });
+    }
 
-        // 2. Try partial match (substring) on parent accounts (no parentAccount field)
-        if (!parentDoc) {
+    // 3. Multi-word token search (e.g. "Banco", "General", "AH", "1601")
+    if (!parentDoc && cleanTarget.includes(' ')) {
+        const tokens = cleanTarget.split(' ').filter(Boolean);
+        const tokenRegexes = tokens.map(t => new RegExp(escapeRegExp(t), 'i'));
+        parentDoc = await AccountingCode.findOne({
+            $and: tokenRegexes.map(r => ({ name: r })),
+            isDeleted: false
+        });
+    }
+
+    // 4. Key/Category fallbacks (Receivable / Payable / etc.)
+    if (!parentDoc) {
+        const lower = cleanTarget.toLowerCase();
+        let fallbackCode = null;
+        if (lower.includes("payable") || lower.includes("pagar")) {
+            fallbackCode = "2.1.01";
+        } else if (lower.includes("receivable") || lower.includes("cobrar")) {
+            fallbackCode = "1.1.03";
+        }
+        if (fallbackCode) {
             parentDoc = await AccountingCode.findOne({
-                name: { $regex: new RegExp(escapeRegExp(parentName), "i") },
-                parentAccount: null,
+                code: fallbackCode,
                 isDeleted: false
             });
         }
-
-        // 3. Try key match
-        if (!parentDoc) {
-            const lowerParent = parentName.toLowerCase();
-            let fallbackCode = null;
-            if (lowerParent.includes("receivable") || lowerParent.includes("cobrar")) {
-                fallbackCode = "1.1.03";
-            } else if (lowerParent.includes("payable") || lowerParent.includes("pagar")) {
-                fallbackCode = "2.1.01";
-            } else if (lowerParent.includes("income") || lowerParent.includes("revenue") || lowerParent.includes("ingreso") || lowerParent.includes("venta")) {
-                fallbackCode = "4.1.01";
-            } else if (lowerParent.includes("expense") || lowerParent.includes("gasto")) {
-                fallbackCode = "6.1.01";
-            }
-
-            if (fallbackCode) {
-                parentDoc = await AccountingCode.findOne({
-                    code: fallbackCode,
-                    isDeleted: false
-                });
-            }
-        }
     }
 
-    // Try matching accountsNameVal / subName directly against Chart of Accounts
-    if (!parentDoc && subName) {
-        parentDoc = await AccountingCode.findOne({
-            $or: [
-                { code: subName },
-                { name: { $regex: new RegExp(`^${escapeRegExp(subName)}$`, "i") } }
-            ],
-            isDeleted: false
-        });
-
-        if (!parentDoc) {
-            const lowerSub = subName.toLowerCase();
-            let fallbackCode = null;
-            if (lowerSub.includes("payable") || lowerSub.includes("pagar")) {
-                fallbackCode = "2.1.01";
-            } else if (lowerSub.includes("receivable") || lowerSub.includes("cobrar")) {
-                fallbackCode = "1.1.03";
-            }
-            if (fallbackCode) {
-                parentDoc = await AccountingCode.findOne({
-                    code: fallbackCode,
-                    isDeleted: false
-                });
-            }
-        }
-    }
-
-    // Default fallbacks if parent still not found
+    // 5. Default fallbacks if account still not found
     if (!parentDoc) {
-        const isSupplierOrPayable = Boolean(supplierDoc) || subName.toLowerCase().includes("payable") || subName.toLowerCase().includes("pagar");
+        const isSupplierOrPayable = Boolean(supplierDoc) || searchTarget.toLowerCase().includes("payable") || searchTarget.toLowerCase().includes("pagar");
         const defaultCode = isSupplierOrPayable ? "2.1.01" : "1.1.03";
         parentDoc = await AccountingCode.findOne({
             code: defaultCode,
@@ -107,7 +88,6 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
     }
 
     if (!parentDoc) {
-        // Fallback to first primary account
         parentDoc = await AccountingCode.findOne({
             parentAccount: null,
             isDeleted: false
@@ -115,46 +95,10 @@ const ensureSubAccountingCode = async (parentAccountVal, accountsNameVal, creato
     }
 
     if (!parentDoc) {
-        throw new AppError("Parent Account is required and could not be resolved in Chart of Accounts.", 400);
+        throw new AppError("Accounting code for '" + searchTarget + "' could not be resolved in Chart of Accounts.", 400);
     }
 
-    // Always return parent account directly; do not create sub-accounts for customers/names
     return parentDoc;
-
-    // 5. Find existing sub-accounting code under this parent
-    let subDoc = await AccountingCode.findOne({
-        parentAccount: parentDoc._id,
-        name: { $regex: new RegExp(`^${escapeRegExp(subName)}$`, "i") },
-        isDeleted: false
-    });
-
-    if (!subDoc) {
-        console.log(`[BankAccountService] Creating new sub-accounting code: ${subName}`);
-        const subCount = await AccountingCode.countDocuments({ parentAccount: parentDoc._id });
-        let suffix = subCount + 1;
-        let uniqueCode = `${parentDoc.code}-${String(suffix).padStart(3, '0')}`;
-        let exists = await AccountingCode.findOne({ code: uniqueCode });
-        while (exists) {
-            suffix++;
-            uniqueCode = `${parentDoc.code}-${String(suffix).padStart(3, '0')}`;
-            exists = await AccountingCode.findOne({ code: uniqueCode });
-        }
-
-        subDoc = await AccountingCode.create({
-            code: uniqueCode,
-            name: subName,
-            parentAccount: parentDoc._id,
-            category: parentDoc.category,
-            accountType: parentDoc.accountType,
-            description: `Auto-created sub-account for ${subName} under parent ${parentDoc.name}`,
-            currency: parentDoc.currency || "USD",
-            accountStatus: "Active",
-            createdBy: creatorId,
-            creatorRole: creatorRole || "ADMIN"
-        });
-    }
-
-    return subDoc;
 };
 
 const isDebitNormalCategory = (category) => {

@@ -624,122 +624,145 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
-            // Resolve Customer if CUSTOMER NAME or customerId is provided
-            let customerDoc = null;
-            const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
-            const customerIdVal = tx.customerId || tx.customer;
-
-            // Resolve Supplier if SUPPLIER NAME or supplierId is provided
-            let supplierDoc = null;
+            // Resolve entity names from transaction row
+            const driverNameVal = tx["DRIVER NAME"] || tx["DRIVER"] || tx.driverName || tx.driver_name;
             const supplierNameVal = tx["SUPPLIER NAME"] || tx.supplierName || tx.supplier_name;
+            const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
+
+            const customerIdVal = tx.customerId || tx.customer;
             const supplierIdVal = tx.supplierId || tx.supplier;
 
-            if (customerNameVal && String(customerNameVal).trim() && supplierNameVal && String(supplierNameVal).trim()) {
+            const filledEntityCount = [
+                driverNameVal && String(driverNameVal).trim(),
+                supplierNameVal && String(supplierNameVal).trim(),
+                customerNameVal && String(customerNameVal).trim()
+            ].filter(Boolean).length;
+
+            if (filledEntityCount > 1) {
                 return res.status(400).json({
                     success: false,
-                    message: `Row cannot contain both CUSTOMER NAME ("${customerNameVal}") and SUPPLIER NAME ("${supplierNameVal}") simultaneously.`
+                    message: `Row cannot contain more than one entity (DRIVER NAME, SUPPLIER NAME, CUSTOMER NAME) simultaneously.`
                 });
             }
 
-            if (customerIdVal) {
-                const Customer = require("../../Customer/Model/CustomerModel");
-                customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
-            } else if (customerNameVal && String(customerNameVal).trim()) {
+            let customerDoc = null;
+            let supplierDoc = null;
+            let isDriver = false;
+            let isCustomer = false;
+
+            if (driverNameVal && String(driverNameVal).trim()) {
+                isDriver = true;
                 const Customer = require("../../Customer/Model/CustomerModel");
                 const Driver = require("../../Driver/Model/DriverModel");
-                const rawName = String(customerNameVal).trim();
+                const rawName = String(driverNameVal).trim();
                 const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                
-                // 1. Primary: Exact case-insensitive match on name, companyName, displayName, customerNumber
-                customerDoc = await Customer.findOne({
+
+                const driverDoc = await Driver.findOne({
                     $or: [
                         { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                        { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                        { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                        { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
-                    ],
-                    isDeleted: false
-                });
-
-                // 2. Secondary: Substring case-insensitive match
-                if (!customerDoc) {
-                    customerDoc = await Customer.findOne({
-                        $or: [
-                            { name: { $regex: new RegExp(escapedName, "i") } },
-                            { companyName: { $regex: new RegExp(escapedName, "i") } },
-                            { displayName: { $regex: new RegExp(escapedName, "i") } }
-                        ],
-                        isDeleted: false
-                    });
-                }
-
-                // 3. Tertiary: Punctuation-insensitive fuzzy match (ignores dots, commas, extra spaces like "S.A." vs "S.A")
-                if (!customerDoc) {
-                    const cleanWords = rawName.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
-                    if (cleanWords) {
-                        const fuzzyPattern = cleanWords.split(' ').filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s,.-]*');
-                        customerDoc = await Customer.findOne({
-                            $or: [
-                                { name: { $regex: new RegExp(fuzzyPattern, "i") } },
-                                { companyName: { $regex: new RegExp(fuzzyPattern, "i") } },
-                                { displayName: { $regex: new RegExp(fuzzyPattern, "i") } }
-                            ],
-                            isDeleted: false
-                        });
-                    }
-                }
-
-                // 4. Fallback: Search Driver model by name or driverId and find connected Customer
-                if (!customerDoc) {
-                    const driverDoc = await Driver.findOne({
-                        $or: [
-                            { name: { $regex: new RegExp(escapedName, "i") } },
-                            { firstName: { $regex: new RegExp(escapedName, "i") } },
-                            { driverId: { $regex: new RegExp("^" + escapedName + "$", "i") } }
-                        ],
-                        isDeleted: { $ne: true }
-                    });
-
-                    if (driverDoc) {
-                        customerDoc = await Customer.findOne({ driver: driverDoc._id, isDeleted: false });
-                    }
-                }
-            }
-
-            if (supplierIdVal) {
-                const Supplier = require("../../Supplier/Model/SupplierModel");
-                supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
-            } else if (supplierNameVal && String(supplierNameVal).trim()) {
-                const Supplier = require("../../Supplier/Model/SupplierModel");
-                const rawSupName = String(supplierNameVal).trim();
-                const escapedSupName = rawSupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                
-                supplierDoc = await Supplier.findOne({
-                    $or: [
-                        { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                        { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                        { displayName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                        { vendorNumber: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                        { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
+                        { firstName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { driverId: { $regex: new RegExp("^" + escapedName + "$", "i") } }
                     ],
                     isDeleted: { $ne: true }
                 });
 
-                if (!supplierDoc) {
+                if (driverDoc) {
+                    customerDoc = await Customer.findOne({ driver: driverDoc._id, isDeleted: false });
+                }
+
+                if (!customerDoc) {
+                    customerDoc = await Customer.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        ],
+                        isDeleted: false
+                    });
+                }
+            } else if (customerIdVal || (customerNameVal && String(customerNameVal).trim())) {
+                isCustomer = true;
+                const Customer = require("../../Customer/Model/CustomerModel");
+                if (customerIdVal) {
+                    customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
+                } else {
+                    const rawName = String(customerNameVal).trim();
+                    const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    customerDoc = await Customer.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        ],
+                        isDeleted: false
+                    });
+
+                    if (!customerDoc) {
+                        customerDoc = await Customer.findOne({
+                            $or: [
+                                { name: { $regex: new RegExp(escapedName, "i") } },
+                                { companyName: { $regex: new RegExp(escapedName, "i") } },
+                                { displayName: { $regex: new RegExp(escapedName, "i") } }
+                            ],
+                            isDeleted: false
+                        });
+                    }
+
+                    if (!customerDoc) {
+                        const cleanWords = rawName.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+                        if (cleanWords) {
+                            const fuzzyPattern = cleanWords.split(' ').filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s,.-]*');
+                            customerDoc = await Customer.findOne({
+                                $or: [
+                                    { name: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                    { companyName: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                    { displayName: { $regex: new RegExp(fuzzyPattern, "i") } }
+                                ],
+                                isDeleted: false
+                            });
+                        }
+                    }
+                }
+            }
+
+            if (supplierIdVal || (supplierNameVal && String(supplierNameVal).trim())) {
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                if (supplierIdVal) {
+                    supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
+                } else {
+                    const rawSupName = String(supplierNameVal).trim();
+                    const escapedSupName = rawSupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
                     supplierDoc = await Supplier.findOne({
                         $or: [
-                            { name: { $regex: new RegExp(escapedSupName, "i") } },
-                            { companyName: { $regex: new RegExp(escapedSupName, "i") } }
+                            { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { vendorNumber: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
                         ],
                         isDeleted: { $ne: true }
                     });
+
+                    if (!supplierDoc) {
+                        supplierDoc = await Supplier.findOne({
+                            $or: [
+                                { name: { $regex: new RegExp(escapedSupName, "i") } },
+                                { companyName: { $regex: new RegExp(escapedSupName, "i") } }
+                            ],
+                            isDeleted: { $ne: true }
+                        });
+                    }
                 }
             }
 
             const isCreditCard = account.accountType === "Credit Card";
 
-            // If customer is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
-            if (customerDoc && typeVal === "DEBIT") {
+            // If driver is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
+            if (customerDoc && isDriver && typeVal === "DEBIT") {
                 if (typeVal === "DEBIT") {
                     balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
                     debitAccum += amountVal;
@@ -876,8 +899,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 continue;
             }
 
-            // If sub-account or parent-account is specified, perform double-entry booking
-            if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
+            // If sub-account, parent-account, or customer/supplier without auto set-off is specified, perform double-entry booking
+            if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim()) || customerDoc || supplierDoc) {
                 if (typeVal === "DEBIT") {
                     balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
                     debitAccum += amountVal;
@@ -887,9 +910,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
 
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+
+                // Determine target account name from ACCOUNTS NAME, or fallback to Accounts Receivable for customer / Accounts Payable for supplier
+                const targetAccountName = (accountsNameVal && String(accountsNameVal).trim())
+                    ? accountsNameVal
+                    : (customerDoc ? "Accounts Receivable" : (supplierDoc ? "Accounts Payable" : ""));
+
                 const subDoc = await ensureSubAccountingCode(
                     parentAccountVal,
-                    accountsNameVal,
+                    targetAccountName,
                     createdBy,
                     creatorRole,
                     supplierDoc
@@ -931,6 +960,36 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
                     // Trigger balance sync for sub-account immediately
                     await syncAccountingCodeBalances(subDoc._id);
+
+                    // If it's a customer receipt and offset account is Accounts Receivable, create PaymentReceived record so it maps under /customers/:id
+                    if (customerDoc && typeVal === "DEBIT") {
+                        const isAr = (subDoc.code === "1.1.03" || subDoc.code === "1.0.03" || /Accounts Receivable|Cuenta por Cobrar/i.test(subDoc.name) || /Accounts Receivable/i.test(accountsNameVal || ''));
+                        if (isAr) {
+                            try {
+                                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                                const prData = {
+                                    paymentNumber: `PR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                                    customerId: customerDoc._id,
+                                    driverId: customerDoc.driver || undefined,
+                                    amountReceived: amountVal,
+                                    paymentDate: finalEntryDate,
+                                    paymentMethod: "Bank Transfer",
+                                    referenceNumber: transactionIdVal || undefined,
+                                    notes: finalDescription || `Customer Bank Receipt (${customerDoc.name})`,
+                                    depositedTo: accCodeId,
+                                    branch: resolvedBranchId || branchId || undefined,
+                                    invoices: [],
+                                    status: "COMPLETED",
+                                    createdBy,
+                                    creatorRole
+                                };
+                                await PaymentReceived.create(prData);
+                            } catch (prErr) {
+                                console.error("Error creating PaymentReceived for customer bank deposit:", prErr);
+                            }
+                        }
+                    }
+
                     continue;
                 }
             }
