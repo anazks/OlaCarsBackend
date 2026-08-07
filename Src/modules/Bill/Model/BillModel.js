@@ -1,5 +1,13 @@
 const mongoose = require("mongoose");
 
+const billPaymentSchema = new mongoose.Schema({
+    amount: { type: Number, required: true },
+    paidAt: { type: Date, default: Date.now },
+    paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Mobile Money", "Prepayment Credit", "Cheque", "Other"], default: "Cash" },
+    transactionId: { type: String },
+    note: { type: String },
+}, { _id: true });
+
 const billSchema = new mongoose.Schema(
     {
         billNumber: {
@@ -33,8 +41,11 @@ const billSchema = new mongoose.Schema(
         dueDate: {
             type: Date,
         },
+        paidAt: {
+            type: Date,
+        },
         items: [
-            {
+            { 
                 itemName: { type: String, required: true },
                 quantity: { type: Number, required: true },
                 unitPrice: { type: Number, required: true },
@@ -59,6 +70,7 @@ const billSchema = new mongoose.Schema(
             enum: ["DRAFT", "OPEN", "PARTIALLY_PAID", "PAID", "VOID"],
             default: "OPEN",
         },
+        payments: [billPaymentSchema],
         isInclusiveTax: {
             type: Boolean,
             default: false,

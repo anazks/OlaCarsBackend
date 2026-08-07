@@ -1541,6 +1541,8 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             };
         }
 
+        let finalDesc = description !== undefined ? description : (entry.description || '');
+
         if (bankTx) {
             // Load partner ledger entry if double-entry is present
             let partner = null;
@@ -1556,8 +1558,18 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             const newInvoiceId = (typeof invoice === 'object' && invoice !== null) ? (invoice._id || invoice.id) : invoice;
             const oldCustomerId = (typeof bankTx.customer === 'object' && bankTx.customer !== null)
                 ? (bankTx.customer._id || bankTx.customer.id)
-                : (bankTx.customer || entry.contact || (partner && partner.contact));
+                : (bankTx.customer || entry.customer || entry.contact || (partner && partner.contact));
             const newCustomerId = (typeof customer === 'object' && customer !== null) ? (customer._id || customer.id) : customer;
+
+            const oldSupplierId = (typeof bankTx.supplier === 'object' && bankTx.supplier !== null)
+                ? (bankTx.supplier._id || bankTx.supplier.id)
+                : (bankTx.supplier || entry.supplier);
+            const newSupplierId = update.supplierId || update.supplier || update.vendorId || (typeof supplier !== 'undefined' && typeof supplier === 'object' && supplier !== null ? (supplier._id || supplier.id) : (typeof supplier !== 'undefined' ? supplier : undefined));
+
+            const oldBillId = (typeof bankTx.bill === 'object' && bankTx.bill !== null)
+                ? (bankTx.bill._id || bankTx.bill.id)
+                : (bankTx.bill || entry.bill);
+            const newBillId = update.billId || update.bill || (typeof bill !== 'undefined' && typeof bill === 'object' && bill !== null ? (bill._id || bill.id) : (typeof bill !== 'undefined' ? bill : undefined));
 
             const finalAmount = amount !== undefined ? Number(amount) : oldAmount;
 
@@ -1590,7 +1602,6 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
 
             // Automatically sync invoice number in description
             const invoiceRegex = /((?:INV|MAN|WRK)-\w+(?:-\w+)*)/i;
-            let finalDesc = description !== undefined ? description : entry.description;
 
             if (newInvoiceId && String(newInvoiceId) !== String(oldInvoiceId)) {
                 const newInvoice = await Invoice.findById(newInvoiceId);
@@ -1620,21 +1631,25 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 newCustomerDoc = await Customer.findOne({ _id: newCustomerId, isDeleted: false });
             }
 
-            const newSupplierId = update.supplierId || update.supplier || update.vendorId;
             let newSupplierDoc = null;
             if (newSupplierId) {
                 const Supplier = require("../../Supplier/Model/SupplierModel");
                 newSupplierDoc = await Supplier.findOne({ _id: newSupplierId, isDeleted: { $ne: true } });
             };
 
-            // Check if Amount, Customer, or Invoice is changed or unlinked
+            // Check if Amount, Customer, Supplier, Invoice, or Bill is changed or unlinked
             const isAmountChanged = amount !== undefined && Math.abs(Number(amount) - oldAmount) > 0.001;
             const isCustomerChanged = String(oldCustomerId || '') !== String(newCustomerId || '');
+            const isSupplierChanged = String(oldSupplierId || '') !== String(newSupplierId || '');
             const isInvoiceChanged = String(oldInvoiceId || '') !== String(newInvoiceId || '');
-            const hasExistingSetOff = (bankTx.invoices && bankTx.invoices.length > 0) || oldInvoiceId || oldCustomerId;
+            const isBillChanged = String(oldBillId || '') !== String(newBillId || '');
 
-            if (hasExistingSetOff && (isAmountChanged || isCustomerChanged || isInvoiceChanged || !newCustomerId)) {
-                console.log(`[bulkEditTransactions] Reversing previous customer set-off / invoice linking for transaction ${bankTx._id}, oldCustomer=${oldCustomerId}`);
+            const hasExistingSetOff = (bankTx.invoices && bankTx.invoices.length > 0) ||
+                (bankTx.bills && bankTx.bills.length > 0) ||
+                oldInvoiceId || oldCustomerId || oldSupplierId || oldBillId;
+
+            if (hasExistingSetOff && (isAmountChanged || isCustomerChanged || isSupplierChanged || isInvoiceChanged || isBillChanged || (!newCustomerId && !newSupplierId))) {
+                console.log(`[bulkEditTransactions] Reversing previous set-off / linking for transaction ${bankTx._id}, oldCustomer=${oldCustomerId}, oldSupplier=${oldSupplierId}`);
 
                 // Use history-based reversal (precise undo using before-state)
                 let reversalResult = await reverseSetOffFromHistory(bankTx._id);
@@ -1644,34 +1659,94 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 if (!reversalResult && bankTx.transactionId) {
                     reversalResult = await reverseSetOffFromHistory(bankTx.transactionId);
                 }
+                if (!reversalResult && entry.transactionId) {
+                    reversalResult = await reverseSetOffFromHistory(entry.transactionId);
+                }
 
                 if (!reversalResult) {
-                    // FALLBACK: No history exists (pre-feature transaction), use legacy reversal
+                    // FALLBACK: No history exists, use legacy reversal for both customer (PaymentReceived) and supplier (PaymentMade)
                     console.log(`[bulkEditTransactions] No set-off history found, using legacy reversal for bankTx ${bankTx._id}`);
 
                     const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+                    const Bill = require("../../Bill/Model/BillModel");
 
-                    // Find PaymentReceived documents associated with this transaction
-                    const searchConditions = [];
-                    if (bankTx.transactionId) {
-                        searchConditions.push({ referenceNumber: bankTx.transactionId });
-                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx.transactionId), "i") } });
+                    const searchConditionsPR = [];
+                    const searchConditionsPM = [];
+                    const txIdForSearch = bankTx.transactionId || entry.transactionId;
+
+                    if (txIdForSearch) {
+                        searchConditionsPR.push({ referenceNumber: txIdForSearch });
+                        searchConditionsPR.push({ notes: { $regex: new RegExp(escapeRegExp(String(txIdForSearch)), "i") } });
+
+                        searchConditionsPM.push({ referenceNumber: txIdForSearch });
+                        searchConditionsPM.push({ notes: { $regex: new RegExp(escapeRegExp(String(txIdForSearch)), "i") } });
                     }
                     if (entry._id) {
-                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(entry._id.toString()), "i") } });
+                        searchConditionsPR.push({ notes: { $regex: new RegExp(escapeRegExp(entry._id.toString()), "i") } });
+                        searchConditionsPM.push({ referenceNumber: entry._id.toString() });
+                        searchConditionsPM.push({ notes: { $regex: new RegExp(escapeRegExp(entry._id.toString()), "i") } });
                     }
                     if (bankTx._id) {
-                        searchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx._id.toString()), "i") } });
+                        searchConditionsPR.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx._id.toString()), "i") } });
+                        searchConditionsPM.push({ referenceNumber: bankTx._id.toString() });
+                        searchConditionsPM.push({ notes: { $regex: new RegExp(escapeRegExp(bankTx._id.toString()), "i") } });
                     }
                     if (oldCustomerId) {
-                        searchConditions.push({ customerId: oldCustomerId, amountReceived: oldAmount });
+                        searchConditionsPR.push({ customerId: oldCustomerId, amountReceived: oldAmount });
+                    }
+                    if (oldSupplierId) {
+                        searchConditionsPM.push({ supplier: oldSupplierId, amount: oldAmount });
                     }
 
-                    const prDocs = searchConditions.length > 0
-                        ? await PaymentReceived.find({ $or: searchConditions })
-                        : [];
+                    const [prDocs, pmDocs] = await Promise.all([
+                        searchConditionsPR.length > 0 ? PaymentReceived.find({ $or: searchConditionsPR }) : [],
+                        searchConditionsPM.length > 0 ? PaymentMade.find({ $or: searchConditionsPM }) : []
+                    ]);
+
                     const prNumbers = prDocs.map(p => p.paymentNumber).filter(Boolean);
                     const prIds = prDocs.map(p => p._id.toString());
+                    const pmIds = pmDocs.map(p => p._id.toString());
+
+                    // Revert supplier bills
+                    const prevBillIds = new Set();
+                    if (bankTx.bills && bankTx.bills.length > 0) {
+                        bankTx.bills.forEach(b => prevBillIds.add(String(b.billId)));
+                    }
+                    if (oldBillId) prevBillIds.add(String(oldBillId));
+                    pmDocs.forEach(pm => {
+                        if (pm.bills && pm.bills.length > 0) {
+                            pm.bills.forEach(b => prevBillIds.add(String(b.billId)));
+                        }
+                    });
+
+                    for (const bId of prevBillIds) {
+                        const billDoc = await Bill.findById(bId);
+                        if (billDoc) {
+                            billDoc.payments = (billDoc.payments || []).filter(p => {
+                                const matchTxId = txIdForSearch && String(p.transactionId) === String(txIdForSearch);
+                                const matchEntryId = String(p.transactionId) === String(entry._id);
+                                const matchBankTxId = String(p.transactionId) === String(bankTx._id);
+                                const matchPMId = pmIds.includes(String(p.paymentMadeId || p.transactionId || ''));
+                                return !(matchTxId || matchEntryId || matchBankTxId || matchPMId);
+                            });
+                            const newPaid = (billDoc.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+                            const newBalance = Math.max(0, billDoc.totalAmount - newPaid);
+                            let newStatus = "OPEN";
+                            if (newBalance <= 0) { newStatus = "PAID"; }
+                            else if (newPaid > 0) { newStatus = "PARTIALLY_PAID"; }
+                            billDoc.amountPaid = newPaid;
+                            billDoc.balanceDue = newBalance;
+                            billDoc.status = newStatus;
+                            if (newStatus !== "PAID") { billDoc.paidAt = undefined; }
+                            await billDoc.save();
+                        }
+                    }
+
+                    if (pmIds.length > 0) {
+                        await PaymentMade.deleteMany({ _id: { $in: pmIds } });
+                        console.log(`[bulkEditTransactions] Deleted ${pmIds.length} PaymentMade record(s) for supplier ${oldSupplierId}`);
+                    }
 
                     // Collect previous invoice IDs to revert
                     const prevInvoiceIds = new Set();
@@ -1779,8 +1854,12 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
                         const arCode = await AccountingCode.findOne({ $or: [{ code: "1.1.03" }, { name: { $regex: /Accounts Receivable|Cuenta por Cobrar/i } }], isDeleted: { $ne: true } });
                         const advCode = await AccountingCode.findOne({ $or: [{ code: "2.1.02" }, { name: { $regex: /Advance Received|Anticipo/i } }], isDeleted: { $ne: true } });
+                        const apCode = await AccountingCode.findOne({ $or: [{ code: "2.1.01" }, { name: { $regex: /Accounts Payable|Cuenta por Pagar/i } }], isDeleted: { $ne: true } });
+                        const advPaidCode = await AccountingCode.findOne({ $or: [{ code: "1.1.05" }, { name: { $regex: /Advance Paid|Anticipo/i } }], isDeleted: { $ne: true } });
                         if (arCode) await syncAccountingCodeBalances(arCode._id);
                         if (advCode) await syncAccountingCodeBalances(advCode._id);
+                        if (apCode) await syncAccountingCodeBalances(apCode._id);
+                        if (advPaidCode) await syncAccountingCodeBalances(advPaidCode._id);
                     } catch (mjErr) {
                         console.error("[bulkEditTransactions] Error deleting old ledger journal:", mjErr);
                     }
@@ -1791,6 +1870,21 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                         partner = null;
                     }
                 }
+
+                // Clear bankTx & entry invoice/bill/setOff metadata
+                bankTx.invoices = [];
+                bankTx.invoice = undefined;
+                bankTx.bills = [];
+                bankTx.bill = undefined;
+                bankTx.customer = undefined;
+                bankTx.supplier = undefined;
+                bankTx.setOffSummary = undefined;
+
+                entry.invoices = [];
+                entry.bills = [];
+                entry.customer = undefined;
+                entry.supplier = undefined;
+                entry.setOffSummary = undefined;
 
                 // Strip unlinked invoice numbers from descriptions
                 const prevInvoiceIdsForDesc = new Set();
@@ -2452,9 +2546,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             const historySnapshots = invoicesSetOff.map(inv => ({
                 invoice: inv.invoiceId,
                 invoiceNumber: inv.invoiceNumber,
-                amountApplied: inv.amountApplied,
-                before: inv.beforeState,
-                after: inv.afterState,
+                amountApplied: inv.amountApplied
             }));
 
             const partnerEntryIds = options.createdPartnerEntryIds || [];
@@ -2644,6 +2736,15 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
             billDoc.paidAt = timestamp;
         }
 
+        billDoc.payments = billDoc.payments || [];
+        billDoc.payments.push({
+            amount: amountToApply,
+            paidAt: timestamp,
+            paymentMethod: options.paymentMethod || "Bank Transfer",
+            transactionId: transactionId || undefined,
+            note: description || "Auto set-off from bank statement upload"
+        });
+
         await billDoc.save();
 
         const afterState = {
@@ -2697,9 +2798,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
             const billSnapshots = billsSetOff.map(b => ({
                 bill: b.billId,
                 billNumber: b.billNumber,
-                amountApplied: b.amountApplied,
-                before: b.beforeState,
-                after: b.afterState,
+                amountApplied: b.amountApplied
             }));
 
             const existingHistory = await InvoiceBillSetOffHistory.findOne({
@@ -2791,48 +2890,119 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
 
     if (history.targetType === "SUPPLIER" || (history.billSnapshots && history.billSnapshots.length > 0)) {
         // Reverse Supplier Bill Set-Off
-        for (const snapshot of (history.billSnapshots || [])) {
+        const txId = history.transactionId || String(bankTransactionId);
+        const billIdsToUpdate = new Set();
+
+        (history.billSnapshots || []).forEach(b => {
+            if (b.bill) billIdsToUpdate.add(String(b.bill));
+        });
+
+        if (history.supplier) {
+            const suppBills = await Bill.find({ supplier: history.supplier });
+            suppBills.forEach(b => {
+                const hasMatchingPayment = (b.payments || []).some(p =>
+                    (txId && String(p.transactionId) === String(txId)) ||
+                    (bankTransactionId && String(p.transactionId) === String(bankTransactionId)) ||
+                    (history.vendorPayment && String(p.paymentMadeId || p.transactionId || '') === String(history.vendorPayment))
+                );
+                if (hasMatchingPayment) {
+                    billIdsToUpdate.add(String(b._id));
+                }
+            });
+        }
+
+        for (const bId of billIdsToUpdate) {
             try {
-                const billDoc = await Bill.findById(snapshot.bill);
-                if (billDoc && snapshot.before) {
-                    console.log(`  ↩ Restoring Bill #${snapshot.billNumber}: balanceDue=$${snapshot.before.balance}, status=${snapshot.before.status}`);
-                    billDoc.amountPaid = snapshot.before.amountPaid;
-                    billDoc.balanceDue = snapshot.before.balance;
-                    billDoc.status = snapshot.before.status;
-                    billDoc.paidAt = snapshot.before.paidAt || undefined;
+                const billDoc = await Bill.findById(bId);
+                if (billDoc) {
+                    // Remove exact connected payment from bill.payments
+                    billDoc.payments = (billDoc.payments || []).filter(p => {
+                        const matchTxId = txId && String(p.transactionId) === String(txId);
+                        const matchBankTxId = String(p.transactionId) === String(bankTransactionId);
+                        const matchVendorPaymentId = history.vendorPayment && String(p.paymentMadeId || p.transactionId || '') === String(history.vendorPayment);
+                        return !(matchTxId || matchBankTxId || matchVendorPaymentId);
+                    });
+
+                    // Recalculate total amount paid & balance due from remaining payments
+                    const newAmountPaid = (billDoc.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+                    const newBalanceDue = Math.max(0, (billDoc.totalAmount || 0) - newAmountPaid);
+                    let newStatus = "OPEN";
+                    if (newBalanceDue <= 0) {
+                        newStatus = "PAID";
+                    } else if (newAmountPaid > 0) {
+                        newStatus = "PARTIALLY_PAID";
+                    }
+
+                    console.log(`  ↩ Dynamic Set-off Reversal on Bill #${billDoc.billNumber || bId}: amountPaid=$${newAmountPaid}, balanceDue=$${newBalanceDue}, status=${newStatus}`);
+                    billDoc.amountPaid = newAmountPaid;
+                    billDoc.balanceDue = newBalanceDue;
+                    billDoc.status = newStatus;
+                    if (newStatus !== "PAID") {
+                        billDoc.paidAt = undefined;
+                    }
                     await billDoc.save();
                 }
             } catch (bErr) {
-                console.error(`  ✗ Failed to restore Bill ${snapshot.billNumber}:`, bErr);
+                console.error(`  ✗ Failed to update Bill ${bId}:`, bErr);
             }
         }
 
+        const pmSearchConditions = [];
         if (history.vendorPayment) {
+            pmSearchConditions.push({ _id: history.vendorPayment });
+        }
+        if (txId) {
+            pmSearchConditions.push({ referenceNumber: String(txId) });
+            pmSearchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(String(txId)), "i") } });
+        }
+        if (bankTransactionId) {
+            pmSearchConditions.push({ referenceNumber: String(bankTransactionId) });
+            pmSearchConditions.push({ notes: { $regex: new RegExp(escapeRegExp(String(bankTransactionId)), "i") } });
+        }
+        if (pmSearchConditions.length > 0) {
             try {
-                await PaymentMade.deleteOne({ _id: history.vendorPayment });
-                console.log(`  ✓ Deleted PaymentMade ${history.vendorPayment}`);
+                const delRes = await PaymentMade.deleteMany({ $or: pmSearchConditions });
+                console.log(`  ✓ Deleted ${delRes.deletedCount} PaymentMade record(s) matching vendor payment / reference ${txId}`);
             } catch (pmErr) {
                 console.error(`  ✗ Failed to delete PaymentMade:`, pmErr);
             }
         }
     } else {
         // Reverse Customer Invoice Set-Off
+        const txId = history.transactionId || String(bankTransactionId);
         for (const snapshot of (history.invoiceSnapshots || [])) {
             try {
                 const invoiceDoc = await Invoice.findById(snapshot.invoice);
                 if (!invoiceDoc) continue;
 
-                const txId = history.transactionId;
-                if (txId) {
-                    invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => String(p.transactionId) !== String(txId));
+                // Remove exact connected payment from invoice.payments
+                invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => {
+                    const matchTxId = txId && String(p.transactionId) === String(txId);
+                    const matchBankTxId = String(p.transactionId) === String(bankTransactionId);
+                    const matchPRId = history.paymentReceived && String(p.paymentReceivedId || p.transactionId || '') === String(history.paymentReceived);
+                    return !(matchTxId || matchBankTxId || matchPRId);
+                });
+
+                // Recalculate total amount paid & balance from remaining payments
+                const newAmountPaid = (invoiceDoc.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+                const newBalance = Math.max(0, (invoiceDoc.totalAmountDue || 0) - newAmountPaid);
+                let newStatus = "PENDING";
+                if (newBalance <= 0) {
+                    newStatus = "PAID";
+                } else if (newAmountPaid > 0) {
+                    newStatus = "PARTIAL";
+                } else {
+                    const now = new Date();
+                    if (invoiceDoc.dueDate && new Date(invoiceDoc.dueDate) < now) {
+                        newStatus = "OVERDUE";
+                    }
                 }
 
-                invoiceDoc.amountPaid = snapshot.before.amountPaid;
-                invoiceDoc.balance = snapshot.before.balance;
-                invoiceDoc.status = snapshot.before.status;
-                invoiceDoc.paidAt = snapshot.before.paidAt || undefined;
-
-                if (invoiceDoc.status !== "PAID") {
+                console.log(`  ↩ Dynamic Set-off Reversal on Invoice #${snapshot.invoiceNumber}: amountPaid=$${newAmountPaid}, balance=$${newBalance}, status=${newStatus}`);
+                invoiceDoc.amountPaid = newAmountPaid;
+                invoiceDoc.balance = newBalance;
+                invoiceDoc.status = newStatus;
+                if (newStatus !== "PAID") {
                     invoiceDoc.paidAt = undefined;
                 }
 
@@ -2843,7 +3013,7 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
                         const { ServiceBill } = require("../../ServiceBill/Model/ServiceBillModel");
                         const bill = await ServiceBill.findById(invoiceDoc.serviceBill);
                         if (bill) {
-                            const revertedBillPaid = Math.max(0, (bill.amountPaid || 0) - snapshot.amountApplied);
+                            const revertedBillPaid = Math.max(0, (bill.amountPaid || 0) - (snapshot.amountApplied || 0));
                             const newBillPaymentStatus = revertedBillPaid >= bill.totalAmount - 0.01 ? "PAID" : (revertedBillPaid > 0 ? "PARTIAL" : "PENDING");
                             await ServiceBill.findByIdAndUpdate(bill._id, {
                                 $set: {

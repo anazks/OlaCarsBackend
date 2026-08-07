@@ -809,6 +809,73 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 continue;
             }
 
+            // If supplier is resolved and it's a CREDIT (money outgoing / vendor payment), auto set-off against unpaid bills
+            if (supplierDoc && typeVal === "CREDIT") {
+                balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
+                creditAccum += amountVal;
+
+                const { autoSetOffBills } = require("../Service/BankAccountService");
+                const mongoose = require("mongoose");
+                const bankTxId = new mongoose.Types.ObjectId();
+
+                const setOffResult = await autoSetOffBills(supplierDoc._id, amountVal, {
+                    bankAccountingCodeId: accCodeId,
+                    bankTransactionId: bankTxId,
+                    bankAccountId: id,
+                    branchId: resolvedBranchId || branchId,
+                    entryDate: finalEntryDate,
+                    description: finalDescription || `Bank statement vendor payment`,
+                    transactionId: transactionIdVal,
+                    paymentMethod: "Bank Transfer",
+                    createdBy,
+                    creatorRole
+                });
+
+                // Build bill numbers string for description
+                const billNumbers = (setOffResult.billsSetOff || []).map(b => b.billNumber).join(", ");
+                const setOffDesc = setOffResult.billsSetOff && setOffResult.billsSetOff.length > 0
+                    ? `${finalDescription || "Payment"} - Set off: ${billNumbers}`
+                    : finalDescription || "Payment - No open bills to set off";
+
+                const entry = new LedgerEntry({
+                    _id: bankTxId,
+                    branch: resolvedBranchId || branchId || undefined,
+                    accountingCode: accCodeId,
+                    type: typeVal,
+                    amount: amountVal,
+                    description: setOffDesc,
+                    entryDate: finalEntryDate,
+                    transactionId: transactionIdVal,
+                    runningBalance: balanceAccum,
+                    contact: supplierDoc._id,
+                    contactModel: "Supplier",
+                    bills: (setOffResult.billsSetOff || []).map(b => ({
+                        billId: b.billId,
+                        billNumber: b.billNumber,
+                        amountApplied: b.amountApplied
+                    })),
+                    setOffSummary: {
+                        totalSetOff: setOffResult.totalSetOff,
+                        billCount: (setOffResult.billsSetOff || []).length,
+                        excessAmount: setOffResult.excessAmount
+                    },
+                    createdBy,
+                    creatorRole
+                });
+                await entry.save();
+                createdEntries.push(entry);
+
+                // Track set-off results for response
+                setOffResults.push({
+                    transactionId: transactionIdVal,
+                    supplierName: supplierDoc.name || supplierDoc.companyName,
+                    amount: amountVal,
+                    ...setOffResult
+                });
+
+                continue;
+            }
+
             // If sub-account or parent-account is specified, perform double-entry booking
             if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
                 if (typeVal === "DEBIT") {
@@ -928,9 +995,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         // Fetch updated bank account to return correct balance
         const updatedAccount = await BankAccount.findById(id);
 
+        const totalSetOffCount = setOffResults.reduce((sum, r) => {
+            if (!r) return sum;
+            const invCount = Array.isArray(r.invoicesSetOff) ? r.invoicesSetOff.length : 0;
+            const billCount = Array.isArray(r.billsSetOff) ? r.billsSetOff.length : 0;
+            return sum + invCount + billCount;
+        }, 0);
+
         res.status(200).json({
             success: true,
-            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${setOffResults.reduce((sum, r) => sum + r.invoicesSetOff.length, 0)} invoice(s).` : ''}`,
+            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''}`,
             data: {
                 count: createdEntries.length,
                 newBalance: updatedAccount.currentBalance,
@@ -1094,14 +1168,26 @@ exports.getBankTransactions = async (req, res, next) => {
             );
         };
 
-        const InvoiceSetOffHistory = require("../Model/InvoiceSetOffHistoryModel");
-        const setOffHistories = await InvoiceSetOffHistory.find({
-            $or: [
-                { bankTransaction: { $in: transactions.map(t => t._id) } },
-                { ledgerJournal: { $in: manualJournalIds } },
-                { transactionId: { $in: txIds } }
-            ]
-        });
+        const InvoiceSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+
+        const contactIds = transactions.map(t => t.contact).filter(Boolean);
+        const [customersList, suppliersList, setOffHistories] = await Promise.all([
+            Customer.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
+            Supplier.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
+            InvoiceSetOffHistory.find({
+                $or: [
+                    { primaryLedgerEntry: { $in: transactions.map(t => t._id) } },
+                    { bankTransaction: { $in: transactions.map(t => t._id) } },
+                    { ledgerJournal: { $in: manualJournalIds } },
+                    { transactionId: { $in: txIds } }
+                ]
+            }).populate("customer", "name companyName displayName").populate("supplier", "name companyName displayName").lean()
+        ]);
+
+        const customerMap = new Map(customersList.map(c => [String(c._id), c.name || c.companyName || c.displayName || ""]));
+        const supplierMap = new Map(suppliersList.map(s => [String(s._id), s.name || s.companyName || s.displayName || ""]));
 
         // Map transactions to mimic LedgerEntry fields for frontend compatibility
         const mappedTransactions = transactions.map(tx => {
@@ -1112,6 +1198,22 @@ exports.getBankTransactions = async (req, res, next) => {
             obj.bankAccountName = account.accountName || account.bankName;
             obj.bankAccountingCode = account.accountingCode;
 
+            // Enrich contact name directly from contact ID
+            if (tx.contact) {
+                const contactIdStr = String(tx.contact._id || tx.contact);
+                if (supplierMap.has(contactIdStr)) {
+                    obj.contactModel = "Supplier";
+                    obj.supplier = contactIdStr;
+                    obj.supplierName = supplierMap.get(contactIdStr);
+                    obj.contactName = supplierMap.get(contactIdStr);
+                } else if (customerMap.has(contactIdStr)) {
+                    obj.contactModel = "Customer";
+                    obj.customer = contactIdStr;
+                    obj.customerName = customerMap.get(contactIdStr);
+                    obj.contactName = customerMap.get(contactIdStr);
+                }
+            }
+
             // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists
             const bt = findBankTx(tx);
             if (bt) {
@@ -1119,30 +1221,77 @@ exports.getBankTransactions = async (req, res, next) => {
                 obj.customerName = bt.customerName || obj.customerName;
                 obj.invoice = bt.invoice || obj.invoice;
                 obj.invoices = (bt.invoices && bt.invoices.length > 0) ? bt.invoices : obj.invoices;
+                obj.bills = (bt.bills && bt.bills.length > 0) ? bt.bills : obj.bills;
                 obj.setOffSummary = bt.setOffSummary || obj.setOffSummary;
             }
 
-            // Enrich from InvoiceSetOffHistory if invoices is still empty
+            // Enrich from InvoiceSetOffHistory
             const history = setOffHistories.find(h =>
+                (h.primaryLedgerEntry && String(h.primaryLedgerEntry) === String(tx._id)) ||
                 (h.bankTransaction && String(h.bankTransaction) === String(tx._id)) ||
                 (h.ledgerJournal && String(h.ledgerJournal) === String(tx.manualJournal)) ||
                 (tx.transactionId && h.transactionId && String(h.transactionId) === String(tx.transactionId))
             );
 
             if (history) {
-                if (!obj.invoices || obj.invoices.length === 0) {
-                    obj.invoices = (history.invoiceSnapshots || []).map(snap => ({
-                        invoiceId: snap.invoice,
-                        invoiceNumber: snap.invoiceNumber,
-                        amountApplied: snap.amountApplied
-                    }));
-                }
-                if (!obj.setOffSummary) {
-                    obj.setOffSummary = {
-                        totalSetOff: (history.invoiceSnapshots || []).reduce((acc, s) => acc + (s.amountApplied || 0), 0),
-                        invoiceCount: (history.invoiceSnapshots || []).length,
-                        excessAmount: history.excessAmount || 0
-                    };
+                if (history.targetType === "SUPPLIER" || history.supplier) {
+                    obj.contactModel = "Supplier";
+                    obj.supplier = history.supplier?._id || history.supplier;
+                    const supName = typeof history.supplier === "object" && history.supplier
+                        ? (history.supplier.name || history.supplier.companyName || history.supplier.displayName)
+                        : "";
+                    if (supName) {
+                        obj.supplierName = supName;
+                        obj.contactName = supName;
+                    }
+                    if (!obj.bills || obj.bills.length === 0) {
+                        obj.bills = (history.billSnapshots || []).map(snap => ({
+                            billId: snap.bill,
+                            billNumber: snap.billNumber,
+                            amountApplied: snap.amountApplied
+                        }));
+                    }
+                    if (!obj.setOffSummary) {
+                        obj.setOffSummary = {
+                            totalSetOff: (history.billSnapshots || []).reduce((acc, s) => acc + (s.amountApplied || 0), 0),
+                            billCount: (history.billSnapshots || []).length,
+                            bills: (history.billSnapshots || []).map(snap => ({
+                                billId: snap.bill,
+                                billNumber: snap.billNumber,
+                                amountApplied: snap.amountApplied
+                            })),
+                            excessAmount: history.excessAmount || 0
+                        };
+                    }
+                } else {
+                    obj.contactModel = "Customer";
+                    obj.customer = history.customer?._id || history.customer;
+                    const custName = typeof history.customer === "object" && history.customer
+                        ? (history.customer.name || history.customer.companyName || history.customer.displayName)
+                        : "";
+                    if (custName) {
+                        obj.customerName = custName;
+                        obj.contactName = custName;
+                    }
+                    if (!obj.invoices || obj.invoices.length === 0) {
+                        obj.invoices = (history.invoiceSnapshots || []).map(snap => ({
+                            invoiceId: snap.invoice,
+                            invoiceNumber: snap.invoiceNumber,
+                            amountApplied: snap.amountApplied
+                        }));
+                    }
+                    if (!obj.setOffSummary) {
+                        obj.setOffSummary = {
+                            totalSetOff: (history.invoiceSnapshots || []).reduce((acc, s) => acc + (s.amountApplied || 0), 0),
+                            invoiceCount: (history.invoiceSnapshots || []).length,
+                            invoices: (history.invoiceSnapshots || []).map(snap => ({
+                                invoiceId: snap.invoice,
+                                invoiceNumber: snap.invoiceNumber,
+                                amountApplied: snap.amountApplied
+                            })),
+                            excessAmount: history.excessAmount || 0
+                        };
+                    }
                 }
             }
 

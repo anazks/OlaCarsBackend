@@ -284,13 +284,24 @@ exports.recordBillPayment = async (billId, paymentData, userData) => {
         
         await autoGenerateLedgerEntry(populatedTx);
 
-        // Update bill balance
+        // Update bill balance & payment history
         bill.amountPaid += payment.totalAmount;
         if (bill.balanceDue <= 0) {
             bill.status = "PAID";
+            bill.paidAt = payment.paymentDate || new Date();
         } else {
             bill.status = "PARTIALLY_PAID";
         }
+
+        bill.payments = bill.payments || [];
+        bill.payments.push({
+            amount: payment.totalAmount,
+            paidAt: payment.paymentDate || new Date(),
+            paymentMethod: payment.paymentMethod || "Bank Transfer",
+            transactionId: payment.referenceNumber || payment.transactionId || undefined,
+            note: payment.notes || `Bill Payment (${bill.billNumber})`
+        });
+
         await bill.save();
 
         // Trigger draft Fixed Asset creation if the bill is fully paid

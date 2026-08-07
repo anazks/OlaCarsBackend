@@ -25,15 +25,15 @@ const invoiceSnapshotSchema = new mongoose.Schema({
         required: true,
     },
     before: {
-        amountPaid: { type: Number, required: true },
-        balance: { type: Number, required: true },
-        status: { type: String, required: true },
+        amountPaid: { type: Number },
+        balance: { type: Number },
+        status: { type: String },
         paidAt: { type: Date, default: null },
     },
     after: {
-        amountPaid: { type: Number, required: true },
-        balance: { type: Number, required: true },
-        status: { type: String, required: true },
+        amountPaid: { type: Number },
+        balance: { type: Number },
+        status: { type: String },
         paidAt: { type: Date, default: null },
     },
 }, { _id: false });
@@ -53,15 +53,15 @@ const billSnapshotSchema = new mongoose.Schema({
         required: true,
     },
     before: {
-        amountPaid: { type: Number, required: true },
-        balance: { type: Number, required: true },
-        status: { type: String, required: true },
+        amountPaid: { type: Number },
+        balance: { type: Number },
+        status: { type: String },
         paidAt: { type: Date, default: null },
     },
     after: {
-        amountPaid: { type: Number, required: true },
-        balance: { type: Number, required: true },
-        status: { type: String, required: true },
+        amountPaid: { type: Number },
+        balance: { type: Number },
+        status: { type: String },
         paidAt: { type: Date, default: null },
     },
 }, { _id: false });

@@ -65,9 +65,20 @@ exports.createPaymentMade = async (req, res) => {
                     bill.amountPaid = (bill.amountPaid || 0) + b.amountApplied;
                     if (bill.balanceDue <= 0) {
                         bill.status = "PAID";
+                        bill.paidAt = rawPaymentDate || new Date();
                     } else {
                         bill.status = "PARTIALLY_PAID";
                     }
+
+                    bill.payments = bill.payments || [];
+                    bill.payments.push({
+                        amount: b.amountApplied,
+                        paidAt: rawPaymentDate || new Date(),
+                        paymentMethod: paymentMethod || "Bank Transfer",
+                        transactionId: referenceNumber || undefined,
+                        note: notes || `Payment Made (${savedDoc.paymentNumber})`
+                    });
+
                     await bill.save();
                     console.log(`[PaymentMadeController] Settled $${b.amountApplied} on Bill ${bill.billNumber}. Remaining Balance: $${bill.balanceDue}`);
                 }
