@@ -581,7 +581,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 seenTxIdsInFile.add(cleanTxId);
 
                 const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId });
+                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId, isDeleted: { $ne: true } });
                 if (existingEntry) {
                     return res.status(400).json({
                         success: false,
@@ -653,7 +653,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             if (driverNameVal && String(driverNameVal).trim()) {
                 isDriver = true;
                 const Customer = require("../../Customer/Model/CustomerModel");
-                const Driver = require("../../Driver/Model/DriverModel");
+                const { Driver } = require("../../Driver/Model/DriverModel");
                 const rawName = String(driverNameVal).trim();
                 const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -805,6 +805,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     runningBalance: balanceAccum,
                     contact: customerDoc._id,
                     contactModel: "Customer",
+                    bankTxType: "DRIVER",
                     invoices: setOffResult.invoicesSetOff.map(inv => ({
                         invoiceId: inv.invoiceId,
                         invoiceNumber: inv.invoiceNumber,
@@ -872,6 +873,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     runningBalance: balanceAccum,
                     contact: supplierDoc._id,
                     contactModel: "Supplier",
+                    bankTxType: "VENDOR",
                     bills: (setOffResult.billsSetOff || []).map(b => ({
                         billId: b.billId,
                         billNumber: b.billNumber,
@@ -925,6 +927,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 );
 
                 if (subDoc) {
+                    const BankAccount = require("../Model/BankAccountModel");
+                    const isTargetBankAccount = Boolean(await BankAccount.exists({ accountingCode: subDoc._id, isDeleted: { $ne: true } }));
+
+                    let uploadTxType = "NON_DRIVER_CUSTOMER";
+                    if (isTargetBankAccount) {
+                        uploadTxType = "INTER_BANK";
+                    } else if (supplierDoc) {
+                        uploadTxType = "VENDOR";
+                    } else if (customerDoc) {
+                        uploadTxType = isDriver ? "DRIVER" : "NON_DRIVER_CUSTOMER";
+                    }
+
                     const entry = new LedgerEntry({
                         branch: resolvedBranchId || branchId || undefined,
                         accountingCode: accCodeId,
@@ -936,6 +950,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         runningBalance: balanceAccum,
                         contact: customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined),
                         contactModel: customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined),
+                        bankTxType: uploadTxType,
                         createdBy,
                         creatorRole
                     });
@@ -951,6 +966,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         transactionId: transactionIdVal,
                         contact: customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined),
                         contactModel: customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined),
+                        bankTxType: uploadTxType,
                         createdBy,
                         creatorRole
                     });
@@ -1552,6 +1568,64 @@ exports.getBankTransactionById = async (req, res, next) => {
                 .sort({ type: -1, createdAt: 1 });
         }
         transactionObj.connectedLedgerEntries = connectedLedgerEntries;
+
+        // Determine transaction classification
+        let detectedType = ledgerEntry.bankTxType || "NON_DRIVER_CUSTOMER";
+
+        if (!ledgerEntry.bankTxType) {
+            const hasSupplier = Boolean(
+                ledgerEntry.supplier ||
+                ledgerEntry.contactModel === "Supplier" ||
+                (historyDoc && historyDoc.targetType === "SUPPLIER") ||
+                connectedLedgerEntries.some(e => e.supplier || e.contactModel === "Supplier")
+            );
+
+        // Check if partner leg belongs to another Bank Account (Inter-Bank Transfer)
+        const allBankAccounts = await BankAccount.find({ isDeleted: { $ne: true } });
+        const bankAccountingCodeIds = new Set(allBankAccounts.map(b => String(b.accountingCode)));
+
+        const primaryCodeId = String(ledgerEntry.accountingCode?._id || ledgerEntry.accountingCode || '');
+
+        const isInterBank = connectedLedgerEntries.some(lEntry => {
+            const codeId = String(lEntry.accountingCode?._id || lEntry.accountingCode || '');
+            const accType = lEntry.accountingCode?.accountType;
+            return codeId !== primaryCodeId && (bankAccountingCodeIds.has(codeId) || accType === "Bank" || accType === "Cash");
+        }) || (ledgerEntry.description && /inter-bank|transfer.*bank|transferencia.*banco/i.test(ledgerEntry.description));
+
+        if (isInterBank) {
+            detectedType = "INTER_BANK";
+        } else if (hasSupplier) {
+            detectedType = "VENDOR";
+        } else {
+            // Check if Customer is Driver
+            const Customer = require("../../Customer/Model/CustomerModel");
+            let isDriver = false;
+
+            const contactId = ledgerEntry.contact?._id || ledgerEntry.contact;
+            if (contactId) {
+                const custDoc = await Customer.findById(contactId);
+                if (custDoc && (custDoc.driver || custDoc.driverId || custDoc.isDriver)) {
+                    isDriver = true;
+                }
+            }
+            if (historyDoc && historyDoc.targetType === "CUSTOMER") {
+                isDriver = true;
+            }
+            if (ledgerEntry.description && /driver|conductor|chofer/i.test(ledgerEntry.description)) {
+                isDriver = true;
+            }
+
+            if (isDriver) {
+                detectedType = "DRIVER";
+            } else if (contactId || ledgerEntry.contactModel === "Customer") {
+                detectedType = "NON_DRIVER_CUSTOMER";
+            } else {
+                detectedType = ledgerEntry.type === "CREDIT" ? "VENDOR" : "DRIVER";
+            }
+        }
+    }
+
+    transactionObj.detectedType = detectedType;
 
         res.status(200).json({
             success: true,

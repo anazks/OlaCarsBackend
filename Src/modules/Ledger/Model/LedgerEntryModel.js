@@ -62,6 +62,11 @@ const ledgerEntrySchema = new mongoose.Schema(
             ref: "Supplier",
             required: false,
         },
+        bankTxType: {
+            type: String,
+            enum: ["DRIVER", "VENDOR", "INTER_BANK", "NON_DRIVER_CUSTOMER"],
+            required: false,
+        },
         transactionType: {
             type: String,
             required: false,
