@@ -558,7 +558,7 @@ const dataMigrateDrivers = async (req, res) => {
                     // Create new vehicle
                     const vehicleData = {
                         status: "ACTIVE — RENTED",
-                        handlingStaff: handlingStaff || undefined,
+                        handlingStaff: handlingStaff || null,
                         purchaseDetails: { branch: branch },
                         basicDetails: {
                             make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
@@ -568,7 +568,7 @@ const dataMigrateDrivers = async (req, res) => {
                             fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                             colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
                             vin: row.vehicleVin ? String(row.vehicleVin || "").trim().toUpperCase() : undefined,
-                            fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
+                            fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || null,
                         },
                         legalDocs: {
                             registrationNumber: row.vehicleNumber.trim(),
@@ -699,7 +699,7 @@ const dataMigrateDrivers = async (req, res) => {
                             relationship: row.emergencyRelationship ? String(row.emergencyRelationship || "").trim() : undefined,
                             phone: row.emergencyPhone ? String(row.emergencyPhone || "").trim() : undefined,
                         },
-                        handlingStaff: row.handlingStaffId || handlingStaff || undefined,
+                        handlingStaff: row.handlingStaffId || handlingStaff || null,
                         activationDate: row.activationDate || undefined,
                         deactivationDate: row.deactivationDate || undefined,
                         remarks: row.remarks ? String(row.remarks || "").trim() : undefined,
