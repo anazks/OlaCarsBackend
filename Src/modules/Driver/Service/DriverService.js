@@ -502,12 +502,17 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
  * the installments that have due dates >= today. 
  * Does NOT generate past invoices (these will be done via a separate upload).
  */
-exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate }, session = null) => {
+exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate, deactivationDate }, session = null) => {
     const installments = [];
     
     // Fallback to today if activationDate is not provided
     const parsedActivationDate = activationDate ? new Date(activationDate) : new Date();
     parsedActivationDate.setHours(0, 0, 0, 0);
+
+    const parsedDeactivationDate = deactivationDate ? new Date(deactivationDate) : null;
+    if (parsedDeactivationDate) {
+        parsedDeactivationDate.setHours(23, 59, 59, 999);
+    }
 
     let nextDueDate = new Date(parsedActivationDate);
 
@@ -521,19 +526,16 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
     const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
     nextDueDate.setDate(nextDueDate.getDate() + offset);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
     for (let i = 0; i < durationWeeks; i++) {
         const dueDate = new Date(nextDueDate);
         dueDate.setDate(nextDueDate.getDate() + (i * 7));
         
-        const periodNum = i + 1;
-
-        // Skip installments before today
-        if (dueDate < today) {
-            continue;
+        // Stop generating installments if past deactivationDate
+        if (parsedDeactivationDate && dueDate > parsedDeactivationDate) {
+            break;
         }
+
+        const periodNum = i + 1;
 
         installments.push({
             weekNumber: periodNum,
