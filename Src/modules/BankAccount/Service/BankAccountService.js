@@ -726,6 +726,26 @@ const recordManualPayment = async (targetId, data) => {
         invoiceDoc = await Invoice.findOne({ _id: invoiceId, isDeleted: false });
     }
 
+    let isOffsetBank = Boolean(offsetAccount);
+    if (!isOffsetBank && offsetAccountingCode) {
+        isOffsetBank = Boolean(await BankAccount.exists({ accountingCode: offsetAccountingCode, isDeleted: { $ne: true } }));
+        if (!isOffsetBank) {
+            const accDoc = await AccountingCode.findById(offsetAccountingCode);
+            if (accDoc && (accDoc.accountType === "Bank" || accDoc.accountType === "Cash" || /bank|banco/i.test(accDoc.name))) {
+                isOffsetBank = true;
+            }
+        }
+    }
+
+    let manualTxType;
+    if (isOffsetBank) {
+        manualTxType = "INTER_BANK";
+    } else if (cleanCustomerId) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const cust = await Customer.findById(cleanCustomerId);
+        manualTxType = (cust && (cust.driver || cust.driverId || cust.isDriver)) ? "DRIVER" : "NON_DRIVER_CUSTOMER";
+    }
+
     let journalPayload;
     if (normalizedEntryType === "PAYMENT") {
         // PAYMENT (Money Out): DEBIT Offset Account (Expense/Vendor), CREDIT Bank Account
@@ -744,14 +764,16 @@ const recordManualPayment = async (targetId, data) => {
                     type: "DEBIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Sent - Mode: ${paymentMode}`,
-                    contact: cleanCustomerId || undefined
+                    contact: cleanCustomerId || undefined,
+                    bankTxType: manualTxType
                 },
                 {
                     accountingCode: targetAccount.accountingCode,
                     type: "CREDIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Sent via Bank - Mode: ${paymentMode}`,
-                    contact: cleanCustomerId || undefined
+                    contact: cleanCustomerId || undefined,
+                    bankTxType: manualTxType
                 }
             ],
             createdBy: userId,
@@ -774,14 +796,16 @@ const recordManualPayment = async (targetId, data) => {
                     type: "DEBIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                    contact: cleanCustomerId || undefined
+                    contact: cleanCustomerId || undefined,
+                    bankTxType: manualTxType
                 },
                 {
                     accountingCode: offsetAccountingCode,
                     type: "CREDIT",
                     amount: numericAmount,
                     description: description || `Manual Payment Received - Mode: ${paymentMode}${invoiceDoc ? ` (INV: ${invoiceDoc.invoiceNumber})` : ''}`,
-                    contact: cleanCustomerId || undefined
+                    contact: cleanCustomerId || undefined,
+                    bankTxType: manualTxType
                 }
             ],
             createdBy: userId,

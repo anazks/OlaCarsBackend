@@ -56,6 +56,7 @@ exports.createManualJournal = async (data) => {
 
         const entry = await createLedgerEntry({
             ...sanitizedLine,
+            bankTxType: sanitizedLine.bankTxType || journalData.bankTxType,
             description: sanitizedLine.description || journalData.description, // Ensure description is never empty
             manualJournal: journal._id,
             branch: journalData.branch,
