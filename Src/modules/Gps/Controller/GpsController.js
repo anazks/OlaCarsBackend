@@ -221,6 +221,19 @@ const getFleetSummaryReport = async (req, res, next) => {
     }
 };
 
+const getGpsDeviceDetail = async (req, res, next) => {
+    try {
+        const { imei } = req.query;
+        if (!imei) {
+            return res.status(400).json({ success: false, message: 'IMEI parameter is required' });
+        }
+        const data = await GpsService.getDeviceDetail(imei);
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getGpsVehicles,
     getGpsLocations,
@@ -232,5 +245,6 @@ module.exports = {
     receiveGpsNotification,
     getGpsNotifications,
     getGpsObdData,
-    getFleetSummaryReport
+    getFleetSummaryReport,
+    getGpsDeviceDetail
 };
