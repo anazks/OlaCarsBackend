@@ -493,7 +493,7 @@ class GpsService {
             const t2MaxSpeed = 65 + (numSeed * 29) % 40;
             const t1AvgSpeed = Math.round(t1MaxSpeed * 0.65);
             const t2AvgSpeed = Math.round(t2MaxSpeed * 0.62);
-            const baseOdo = 15000 + (numSeed * 313) % 150000;
+            const baseOdo = 0;
             const t1Fuel = Number(((t1Dist / 1000) * 0.08).toFixed(1));
             const t2Fuel = Number(((t2Dist / 1000) * 0.085).toFixed(1));
 
@@ -573,6 +573,17 @@ class GpsService {
         } catch (e) {
             console.error("Media event URL mock");
             return { url: 'https://demo.tracksolidpro.com/media/mock' };
+        }
+    }
+
+    async getDeviceDetail(imei) {
+        try {
+            console.log(`[GPS Service] Fetching device detail for IMEI: ${imei}`);
+            const result = await this.requestApi('jimi.track.device.detail', { imei });
+            return result;
+        } catch (e) {
+            console.error(`[GPS Service] Error fetching device detail for IMEI ${imei}:`, e.message);
+            throw e;
         }
     }
 
@@ -807,7 +818,22 @@ class GpsService {
                     console.warn(`[GPS Service] Failed to fetch trips for IMEI ${v.imei}:`, err.message);
                 }
 
+                let detailObj = null;
+                try {
+                    detailObj = await this.getDeviceDetail(v.imei);
+                } catch (err) {
+                    console.warn(`[GPS Service] Could not fetch detail for IMEI ${v.imei}:`, err.message);
+                }
+
+                const currentMileageFromApi = (detailObj && detailObj.currentMileage !== undefined && detailObj.currentMileage !== null)
+                    ? parseFloat(detailObj.currentMileage)
+                    : null;
+
                 if (!trips || trips.length === 0) {
+                    const fallbackOdo = currentMileageFromApi !== null 
+                        ? currentMileageFromApi 
+                        : (matchedDbVeh?.basicDetails?.odometer || 0);
+
                     return {
                         imei: v.imei,
                         device: deviceName,
@@ -822,8 +848,8 @@ class GpsService {
                         engineHoursFormatted: "0 h 0 m",
                         fuelConsumed: 0,
                         startDate: "N/A",
-                        odometerStart: 0,
-                        odometerEnd: 0,
+                        odometerStart: Number(fallbackOdo.toFixed(2)),
+                        odometerEnd: Number(fallbackOdo.toFixed(2)),
                         averageSpeed: 0,
                         tripCount: 0
                     };
@@ -844,7 +870,21 @@ class GpsService {
                     const spd = Number(t.maxSpeed || t.topSpeed || t.speed || 0);
                     if (spd > highestMaxSpeed) highestMaxSpeed = spd;
 
-                    const rt = Number(t.runTimeSecond || t.travelTime || 0);
+                    // Support HH:MM:SS string travelTime or integer seconds
+                    let rt = 0;
+                    const rawRt = t.runTimeSecond !== undefined ? t.runTimeSecond : t.travelTime;
+                    if (typeof rawRt === 'number') {
+                        rt = isNaN(rawRt) ? 0 : rawRt;
+                    } else if (typeof rawRt === 'string') {
+                        const trimmed = rawRt.trim();
+                        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+                            rt = parseFloat(trimmed);
+                        } else if (trimmed.includes(':')) {
+                            const parts = trimmed.split(':').map(Number);
+                            if (parts.length === 3) rt = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+                            else if (parts.length === 2) rt = (parts[0] * 60) + parts[1];
+                        }
+                    }
                     totalRuntimeSec += rt;
 
                     const fl = Number(t.fuel || t.fuelConsumption || t.oil || 0);
@@ -855,11 +895,36 @@ class GpsService {
                 const firstTrip = trips[0];
                 const lastTrip = trips[trips.length - 1];
 
-                const rawStartMil = Number(firstTrip.startMileage || firstTrip.odometerStart || 0);
-                const odometerStart = rawStartMil > 1000000 ? Number((rawStartMil / 1000).toFixed(2)) : Number(rawStartMil.toFixed(2));
+                // Calculate Odometer End:
+                // 1. Direct API Method (jimi.track.device.detail currentMileage)
+                // 2. Manual Formula Method: endMileage / 1000 (if reported in meters by trip segment)
+                let odometerEnd = 0;
+                let odometerStart = 0;
 
-                const rawEndMil = Number(lastTrip.endMileage || lastTrip.odometerEnd || (rawStartMil + totalDistMetersOrKm * 1000));
-                const odometerEnd = rawEndMil > 1000000 ? Number((rawEndMil / 1000).toFixed(2)) : Number(rawEndMil.toFixed(2));
+                const rawEndMil = Number(lastTrip.endMileage || lastTrip.endMileageMeters || 0);
+                const rawStartMil = Number(firstTrip.startMileage || firstTrip.startMileageMeters || 0);
+
+                if (currentMileageFromApi !== null && !isNaN(currentMileageFromApi) && currentMileageFromApi > 0) {
+                    odometerEnd = currentMileageFromApi;
+                    odometerStart = Math.max(0, odometerEnd - totalDistKm);
+                } else if (rawEndMil > 0) {
+                    // endMileage returned by API in meters or km
+                    odometerEnd = rawEndMil > 50000 ? rawEndMil / 1000 : rawEndMil;
+                    if (rawStartMil > 0) {
+                        odometerStart = rawStartMil > 50000 ? rawStartMil / 1000 : rawStartMil;
+                    } else {
+                        odometerStart = Math.max(0, odometerEnd - totalDistKm);
+                    }
+                } else if (matchedDbVeh?.basicDetails?.odometer) {
+                    odometerStart = matchedDbVeh.basicDetails.odometer;
+                    odometerEnd = odometerStart + totalDistKm;
+                } else {
+                    odometerStart = 0;
+                    odometerEnd = totalDistKm;
+                }
+
+                odometerStart = Number(odometerStart.toFixed(2));
+                odometerEnd = Number(odometerEnd.toFixed(2));
 
                 const startDate = firstTrip.startTime ? firstTrip.startTime.split(' ')[0] : 'N/A';
 
