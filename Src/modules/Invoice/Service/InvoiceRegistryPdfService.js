@@ -89,6 +89,8 @@ exports.generateInvoiceRegistryPdf = (invoices = [], metrics = {}, periodParams 
         }
 
         // Statement Title Header
+        const totalCountVal = (metrics.totalInvoicesCount || invoices.length || 0).toLocaleString();
+
         doc.fillColor(primaryColor)
            .font("Helvetica-Bold")
            .fontSize(14)
@@ -97,15 +99,16 @@ exports.generateInvoiceRegistryPdf = (invoices = [], metrics = {}, periodParams 
         doc.fillColor(secondaryColor)
            .font("Helvetica")
            .fontSize(8)
-           .text(`Period: ${periodLabel}`, 480, 43, { align: "right" })
-           .text(`Generated: ${formatDateOnly(new Date())}`, 480, 53, { align: "right" });
+           .text(`Period: ${periodLabel}`, 480, 41, { align: "right" })
+           .text(`Total Records: ${totalCountVal} Invoices`, 480, 51, { align: "right" })
+           .text(`Generated: ${formatDateOnly(new Date())}`, 480, 61, { align: "right" });
 
         if (status && status !== 'ALL') {
-            doc.text(`Status Filter: ${status}`, 480, 63, { align: "right" });
+            doc.text(`Status Filter: ${status}`, 480, 71, { align: "right" });
         }
 
-        doc.moveTo(leftMargin, 75)
-           .lineTo(rightMargin, 75)
+        doc.moveTo(leftMargin, 77)
+           .lineTo(rightMargin, 77)
            .strokeColor(borderMain)
            .lineWidth(1)
            .stroke();
@@ -115,25 +118,36 @@ exports.generateInvoiceRegistryPdf = (invoices = [], metrics = {}, periodParams 
     const drawSummaryPanel = () => {
         const boxY = 82;
         const boxH = 45;
-        const cardW = 230;
+        const cardW = 172;
+        const gap = 11;
+        const totalCountVal = (metrics.totalInvoicesCount || invoices.length || 0).toLocaleString();
 
-        // Card 1: Total Gross Billed
+        // Card 1: Total Invoices Count
         doc.fillColor("#F9FAFB").rect(leftMargin, boxY, cardW, boxH).fill();
         doc.rect(leftMargin, boxY, cardW, boxH).strokeColor(borderMain).stroke();
-        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL GROSS BILLED", leftMargin + 10, boxY + 8);
-        doc.fillColor("#059669").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalGrossBilled || 0)}`, leftMargin + 10, boxY + 22);
+        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL INVOICES COUNT", leftMargin + 8, boxY + 8);
+        doc.fillColor("#6B21A8").font("Helvetica-Bold").fontSize(12).text(`${totalCountVal} Inv.`, leftMargin + 8, boxY + 22);
 
-        // Card 2: Total Net Settled
-        doc.fillColor("#F9FAFB").rect(leftMargin + cardW + 15, boxY, cardW, boxH).fill();
-        doc.rect(leftMargin + cardW + 15, boxY, cardW, boxH).strokeColor(borderMain).stroke();
-        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL NET SETTLED", leftMargin + cardW + 25, boxY + 8);
-        doc.fillColor("#2563EB").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalNetSettled || 0)}`, leftMargin + cardW + 25, boxY + 22);
+        // Card 2: Total Gross Billed
+        const c2X = leftMargin + cardW + gap;
+        doc.fillColor("#F9FAFB").rect(c2X, boxY, cardW, boxH).fill();
+        doc.rect(c2X, boxY, cardW, boxH).strokeColor(borderMain).stroke();
+        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL GROSS BILLED", c2X + 8, boxY + 8);
+        doc.fillColor("#059669").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalGrossBilled || 0)}`, c2X + 8, boxY + 22);
 
-        // Card 3: Total Current Balance
-        doc.fillColor("#F9FAFB").rect(leftMargin + (cardW + 15) * 2, boxY, cardW, boxH).fill();
-        doc.rect(leftMargin + (cardW + 15) * 2, boxY, cardW, boxH).strokeColor(borderMain).stroke();
-        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL CURRENT BALANCE", leftMargin + (cardW + 15) * 2 + 10, boxY + 8);
-        doc.fillColor("#DC2626").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalCurrentBalance || 0)}`, leftMargin + (cardW + 15) * 2 + 10, boxY + 22);
+        // Card 3: Total Net Settled
+        const c3X = leftMargin + (cardW + gap) * 2;
+        doc.fillColor("#F9FAFB").rect(c3X, boxY, cardW, boxH).fill();
+        doc.rect(c3X, boxY, cardW, boxH).strokeColor(borderMain).stroke();
+        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL NET SETTLED", c3X + 8, boxY + 8);
+        doc.fillColor("#2563EB").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalNetSettled || 0)}`, c3X + 8, boxY + 22);
+
+        // Card 4: Total Current Balance
+        const c4X = leftMargin + (cardW + gap) * 3;
+        doc.fillColor("#F9FAFB").rect(c4X, boxY, cardW, boxH).fill();
+        doc.rect(c4X, boxY, cardW, boxH).strokeColor(borderMain).stroke();
+        doc.fillColor(secondaryColor).font("Helvetica-Bold").fontSize(7).text("TOTAL CURRENT BALANCE", c4X + 8, boxY + 8);
+        doc.fillColor("#DC2626").font("Helvetica-Bold").fontSize(12).text(`$ ${formatCurrency(metrics.totalCurrentBalance || 0)}`, c4X + 8, boxY + 22);
     };
 
     // Table Header Drawing
@@ -172,7 +186,14 @@ exports.generateInvoiceRegistryPdf = (invoices = [], metrics = {}, periodParams 
     const pageHeight = doc.page.height;
     const marginBottom = 40;
 
-    invoices.forEach((inv, index) => {
+    // Ensure invoices are sorted in chronological order: latest to oldest
+    const sortedInvoices = [...invoices].sort((a, b) => {
+        const dateA = new Date(a.generatedAt || a.invoiceDate || a.createdAt || a.date || 0).getTime();
+        const dateB = new Date(b.generatedAt || b.invoiceDate || b.createdAt || b.date || 0).getTime();
+        return dateB - dateA; // Latest date first
+    });
+
+    sortedInvoices.forEach((inv, index) => {
         if (currentY + 20 > pageHeight - marginBottom) {
             doc.addPage();
             drawHeader();

@@ -558,7 +558,7 @@ const dataMigrateDrivers = async (req, res) => {
                     // Create new vehicle
                     const vehicleData = {
                         status: "ACTIVE — RENTED",
-                        handlingStaff: handlingStaff || undefined,
+                        handlingStaff: handlingStaff || null,
                         purchaseDetails: { branch: branch },
                         basicDetails: {
                             make: row.vehicleMake ? row.vehicleMake.trim() : undefined,
@@ -568,7 +568,7 @@ const dataMigrateDrivers = async (req, res) => {
                             fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                             colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
                             vin: row.vehicleVin ? String(row.vehicleVin || "").trim().toUpperCase() : undefined,
-                            fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || undefined,
+                            fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || null,
                         },
                         legalDocs: {
                             registrationNumber: row.vehicleNumber.trim(),
@@ -633,6 +633,8 @@ const dataMigrateDrivers = async (req, res) => {
                 let driverIdString;
                 let isUpdated = false;
 
+                const isDeactivated = row.deactivationDate && new Date(row.deactivationDate) <= new Date();
+
                 if (existingDriver) {
                     if (!updateExisting) {
                         throw new Error(`Driver '${row.fullName}' already exists in the database. Enable 'Update existing records' to modify.`);
@@ -664,7 +666,8 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.remarks) driverUpdateData["remarks"] = String(row.remarks || "").trim();
                     if (branch) driverUpdateData["branch"] = branch;
 
-                    driverUpdateData["currentVehicle"] = vehicleId;
+                    driverUpdateData["status"] = isDeactivated ? "INACTIVE" : "ACTIVE";
+                    driverUpdateData["currentVehicle"] = isDeactivated ? null : vehicleId;
 
                     if (Object.keys(driverUpdateData).length > 0) {
                         await updateDriverService(existingDriver._id, driverUpdateData);
@@ -676,7 +679,7 @@ const dataMigrateDrivers = async (req, res) => {
                 } else {
                     // Create new driver
                     const driverData = {
-                        status: "ACTIVE",
+                        status: isDeactivated ? "INACTIVE" : "ACTIVE",
                         personalInfo: {
                             fullName: String(row.fullName || "").trim(),
                             email: row.email ? String(row.email || "").trim().toLowerCase() : undefined,
@@ -699,11 +702,11 @@ const dataMigrateDrivers = async (req, res) => {
                             relationship: row.emergencyRelationship ? String(row.emergencyRelationship || "").trim() : undefined,
                             phone: row.emergencyPhone ? String(row.emergencyPhone || "").trim() : undefined,
                         },
-                        handlingStaff: row.handlingStaffId || handlingStaff || undefined,
+                        handlingStaff: row.handlingStaffId || handlingStaff || null,
                         activationDate: row.activationDate || undefined,
                         deactivationDate: row.deactivationDate || undefined,
                         remarks: row.remarks ? String(row.remarks || "").trim() : undefined,
-                        currentVehicle: vehicleId,
+                        currentVehicle: isDeactivated ? null : vehicleId,
                         branch: branch,
                         createdBy: userId,
                         creatorRole: userRole,
@@ -714,7 +717,7 @@ const dataMigrateDrivers = async (req, res) => {
                 }
 
                 // ── 3. Establish Bidirectional Link ──
-                if (vehicleId && driverId) {
+                if (vehicleId && driverId && !isDeactivated) {
                     await Vehicle.findByIdAndUpdate(vehicleId, { currentDriver: driverId });
                 }
 
@@ -723,7 +726,8 @@ const dataMigrateDrivers = async (req, res) => {
                     await DriverService.generateMigrationRentPlan(driverId, {
                         weeklyRent: Number(row.weeklyRent),
                         durationWeeks: Number(row.durationWeeks),
-                        activationDate: row.activationDate || undefined
+                        activationDate: row.activationDate || undefined,
+                        deactivationDate: row.deactivationDate || undefined
                     });
                 }
 

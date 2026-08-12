@@ -57,6 +57,16 @@ const ledgerEntrySchema = new mongoose.Schema(
             ref: "Customer",
             required: false,
         },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
+            required: false,
+        },
+        bankTxType: {
+            type: String,
+            enum: ["DRIVER", "VENDOR", "INTER_BANK", "NON_DRIVER_CUSTOMER"],
+            required: false,
+        },
         transactionType: {
             type: String,
             required: false,
@@ -88,6 +98,18 @@ const ledgerEntrySchema = new mongoose.Schema(
                 uploadedAt: { type: Date, default: Date.now }
             }
         ],
+        invoices: [
+            {
+                invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+                invoiceNumber: { type: String },
+                amountApplied: { type: Number }
+            }
+        ],
+        setOffSummary: {
+            totalSetOff: { type: Number, default: 0 },
+            invoiceCount: { type: Number, default: 0 },
+            excessAmount: { type: Number, default: 0 }
+        },
     },
     { timestamps: true }
 );

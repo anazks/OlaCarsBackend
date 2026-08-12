@@ -893,7 +893,7 @@ exports.getStaffPerformanceReport = async (filters) => {
 exports.getBankBalanceSheetReport = async (filters) => {
     const { startDate, endDate, bankAccount, branch } = filters;
     const BankAccount = require("../../BankAccount/Model/BankAccountModel");
-    const BankTransaction = require("../../BankAccount/Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
 
     const end = endDate ? new Date(endDate) : new Date();
     if (endDate) {
@@ -906,26 +906,48 @@ exports.getBankBalanceSheetReport = async (filters) => {
             throw new Error("Bank account not found");
         }
 
-        const txQuery = { bankAccount, isDeleted: { $ne: true } };
+        const accCodeId = account.accountingCode ? (account.accountingCode._id || account.accountingCode) : null;
+        if (!accCodeId) {
+            return {
+                reportType: "single-account",
+                account: {
+                    id: account._id,
+                    name: account.accountName || account.bankName,
+                    number: account.accountNumber,
+                    code: account.accountCode,
+                    type: account.accountType,
+                    currency: account.currency || "USD"
+                },
+                startingBalance: account.initialBalance || 0,
+                transactions: [],
+                endingBalance: account.initialBalance || 0
+            };
+        }
+
+        const txQuery = { accountingCode: accCodeId };
         if (branch) {
             txQuery.branch = branch;
         }
 
         txQuery.entryDate = { $lte: end };
         if (startDate) {
-            txQuery.entryDate.$gte = new Date(startDate);
+            const startD = new Date(startDate);
+            startD.setHours(0, 0, 0, 0);
+            txQuery.entryDate.$gte = startD;
         }
 
-        const transactions = await BankTransaction.find(txQuery).sort({ entryDate: 1, _id: 1 }).lean();
+        const transactions = await LedgerEntry.find(txQuery).sort({ entryDate: 1, _id: 1 }).lean();
 
         let startingBalance = account.initialBalance || 0;
         if (startDate) {
-            const preTxQuery = { bankAccount, entryDate: { $lt: new Date(startDate) } };
+            const startD = new Date(startDate);
+            startD.setHours(0, 0, 0, 0);
+            const preTxQuery = { accountingCode: accCodeId, entryDate: { $lt: startD } };
             if (branch) {
                 preTxQuery.branch = branch;
             }
-            const preTx = await BankTransaction.findOne(preTxQuery).sort({ entryDate: -1, _id: -1 });
-            if (preTx) {
+            const preTx = await LedgerEntry.findOne(preTxQuery).sort({ entryDate: -1, _id: -1 });
+            if (preTx && preTx.runningBalance !== undefined && preTx.runningBalance !== null) {
                 startingBalance = preTx.runningBalance;
             }
         }
@@ -950,7 +972,7 @@ exports.getBankBalanceSheetReport = async (filters) => {
                 amount: tx.amount,
                 runningBalance: tx.runningBalance
             })),
-            endingBalance: transactions.length > 0 ? transactions[transactions.length - 1].runningBalance : startingBalance
+            endingBalance: transactions.length > 0 ? (transactions[transactions.length - 1].runningBalance ?? startingBalance) : startingBalance
         };
     } else {
         const accountsQuery = { isDeleted: false };
@@ -962,12 +984,21 @@ exports.getBankBalanceSheetReport = async (filters) => {
         let bankTotal = 0;
 
         for (const account of accounts) {
-            const txQuery = { bankAccount: account._id, entryDate: { $lte: end } };
-            if (branch) {
-                txQuery.branch = branch;
+            const accCodeId = account.accountingCode ? (account.accountingCode._id || account.accountingCode) : null;
+            let balance = account.initialBalance || 0;
+
+            if (accCodeId) {
+                const txQuery = { accountingCode: accCodeId, entryDate: { $lte: end } };
+                if (branch) {
+                    txQuery.branch = branch;
+                }
+                const lastTx = await LedgerEntry.findOne(txQuery).sort({ entryDate: -1, _id: -1 });
+                if (lastTx && lastTx.runningBalance !== undefined && lastTx.runningBalance !== null) {
+                    balance = lastTx.runningBalance;
+                } else if (branch) {
+                    balance = 0;
+                }
             }
-            const lastTx = await BankTransaction.findOne(txQuery).sort({ entryDate: -1, _id: -1 });
-            const balance = lastTx ? lastTx.runningBalance : (branch ? 0 : (account.initialBalance || 0));
 
             const mappedAcc = {
                 id: account._id,

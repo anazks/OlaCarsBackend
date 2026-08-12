@@ -20,7 +20,9 @@ const createCreditNote = async (data, actor) => {
     }
 
     let finalCustomerId = customerId;
-    if (!finalCustomerId && driverId) {
+    let finalSupplierId = data.supplierId;
+
+    if (!finalCustomerId && !finalSupplierId && driverId) {
         const Customer = require("../../Customer/Model/CustomerModel");
         const customerDoc = await Customer.findOne({ driver: driverId });
         if (customerDoc) {
@@ -28,22 +30,33 @@ const createCreditNote = async (data, actor) => {
         }
     }
 
-    if (!finalCustomerId) {
-        throw new Error("Customer is required (directly or resolved via Driver).");
+    if (!finalCustomerId && !finalSupplierId) {
+        throw new Error("Customer or Supplier is required.");
     }
 
-    const Customer = require("../../Customer/Model/CustomerModel");
-    const customer = await Customer.findById(finalCustomerId);
-    if (!customer) {
-        throw new Error("Customer not found.");
+    if (finalCustomerId) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const customer = await Customer.findById(finalCustomerId);
+        if (!customer) {
+            throw new Error("Customer not found.");
+        }
+    }
+
+    if (finalSupplierId) {
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+        const supplier = await Supplier.findById(finalSupplierId);
+        if (!supplier) {
+            throw new Error("Supplier not found.");
+        }
     }
 
     const creditNoteNumber = `CN-${Date.now()}`;
 
-    // 1. Create the Credit Note Record directly in OPEN status (without applying yet)
+    // 1. Create the Credit Note Record directly in PENDING status (without applying yet)
     const creditNoteDoc = await CreditNote.create({
         creditNoteNumber,
-        customerId: finalCustomerId,
+        customerId: finalCustomerId || undefined,
+        supplierId: finalSupplierId || undefined,
         driverId: driverId || undefined,
         invoiceId: invoiceId || undefined,
         invoices: invoices || (invoiceId ? [invoiceId] : []),
@@ -52,7 +65,7 @@ const createCreditNote = async (data, actor) => {
         reason,
         notes,
         creditNoteDate: creditNoteDate || new Date(),
-        status: 'OPEN',
+        status: 'PENDING',
         supportingDocument,
         createdBy: actor.id || actor._id,
         creatorRole: actor.role
@@ -109,8 +122,8 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
         throw new Error("Credit Note not found.");
     }
 
-    if (!['OPEN', 'DRAFT'].includes(creditNote.status)) {
-        throw new Error("Only OPEN or DRAFT credit notes can be applied to invoices.");
+    if (!['PENDING', 'OPEN', 'DRAFT'].includes(creditNote.status)) {
+        throw new Error("Only PENDING, OPEN, or DRAFT credit notes can be applied to invoices.");
     }
 
     const invoice = await Invoice.findById(invoiceId);
@@ -171,11 +184,11 @@ const applyCreditNoteToInvoice = async (id, invoiceId) => {
         console.error("[CreditNoteService] Carry-over rollover failed during application:", rollErr.message);
     }
 
-    // Link invoice to Credit Note and CLOSE it (also bypass full-doc validation)
+    // Link invoice to Credit Note and mark as PAID (also bypass full-doc validation)
     const closedNote = await CreditNote.findByIdAndUpdate(
         id,
         { 
-            $set: { invoiceId, status: 'CLOSED' },
+            $set: { invoiceId, status: 'PAID' },
             $addToSet: { invoices: invoiceId }
         },
         { new: true, runValidators: false }
@@ -209,6 +222,10 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         }
     }
 
+    if (pagination.supplierId) {
+        filter.supplierId = pagination.supplierId;
+    }
+
     if (pagination.search) {
         const searchRegex = { $regex: pagination.search, $options: 'i' };
 
@@ -232,12 +249,22 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         }).select('_id');
         const customerIds = customers.map(c => c._id);
 
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+        const suppliers = await Supplier.find({
+            $or: [
+                { "name": searchRegex },
+                { "supplierCode": searchRegex }
+            ]
+        }).select('_id');
+        const supplierIds = suppliers.map(s => s._id);
+
         filter.$or = [
             { creditNoteNumber: searchRegex },
             { reason: searchRegex },
             { notes: searchRegex },
             { driverId: { $in: driverIds } },
-            { customerId: { $in: customerIds } }
+            { customerId: { $in: customerIds } },
+            { supplierId: { $in: supplierIds } }
         ];
     }
 
@@ -255,6 +282,10 @@ const getCreditNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =
         .populate({
             path: 'customerId',
             select: 'customerId name email phone branch'
+        })
+        .populate({
+            path: 'supplierId',
+            select: 'supplierCode name email phone companyName category'
         })
         .populate({
             path: 'driverId',
@@ -288,6 +319,10 @@ const getCreditNoteById = async (id) => {
             select: 'customerId name email phone branch address city state country status'
         })
         .populate({
+            path: 'supplierId',
+            select: 'supplierCode name email phone companyName category address city state country'
+        })
+        .populate({
             path: 'driverId',
             select: 'driverId personalInfo branch currentVehicle'
         })
@@ -308,12 +343,12 @@ const voidCreditNote = async (id) => {
         throw new Error("Credit Note not found.");
     }
 
-    if (creditNote.status === 'VOID') {
-        throw new Error("Credit Note is already voided.");
+    if (['CANCELLED', 'VOID'].includes(creditNote.status)) {
+        throw new Error("Credit Note is already cancelled/voided.");
     }
 
     // Reverse invoice impacts if applicable
-    if (creditNote.invoiceId && creditNote.status === 'CLOSED') {
+    if (creditNote.invoiceId && ['PAID', 'PARTIAL', 'CLOSED', 'APPLIED'].includes(creditNote.status)) {
         const invoice = await Invoice.findById(creditNote.invoiceId);
         if (invoice) {
             // Note: Be careful here, reverse amount up to what was actually applied originally.
@@ -331,12 +366,12 @@ const voidCreditNote = async (id) => {
         }
     }
 
-    creditNote.status = 'VOID';
+    creditNote.status = 'CANCELLED';
     return await creditNote.save();
 };
 
 /**
- * Updates an existing Credit Note (only allowed if status is OPEN or DRAFT).
+ * Updates an existing Credit Note (only allowed if status is PENDING, OPEN, or DRAFT).
  * Uses findByIdAndUpdate with $set to avoid triggering full document validation
  * on required fields (e.g. createdBy, creatorRole) that may be missing on legacy/migrated records.
  */
@@ -344,8 +379,8 @@ const updateCreditNote = async (id, data) => {
     const creditNote = await CreditNote.findById(id);
     if (!creditNote) throw new Error("Credit Note not found.");
 
-    if (!['OPEN', 'DRAFT'].includes(creditNote.status)) {
-        throw new Error("Only OPEN or DRAFT credit notes can be edited. CLOSED or VOID notes are frozen.");
+    if (!['PENDING', 'OPEN', 'DRAFT'].includes(creditNote.status)) {
+        throw new Error("Only PENDING, OPEN, or DRAFT credit notes can be edited. PAID or CANCELLED notes are frozen.");
     }
 
     // Build only the fields that are actually changing
@@ -362,8 +397,8 @@ const updateCreditNote = async (id, data) => {
     if (data.taxId !== undefined) $set.taxId = data.taxId || null;
     if (typeof data.amount === 'number' && data.amount > 0) $set.amount = data.amount;
 
-    // If this was a DRAFT (migrated record), also promote it to OPEN
-    if (creditNote.status === 'DRAFT') $set.status = 'OPEN';
+    // If this was a DRAFT (migrated record), also promote it to PENDING
+    if (creditNote.status === 'DRAFT') $set.status = 'PENDING';
 
     const updated = await CreditNote.findByIdAndUpdate(
         id,
@@ -375,7 +410,7 @@ const updateCreditNote = async (id, data) => {
 };
 
 /**
- * Processes a cash/direct payout refund for an OPEN Credit Note, closing it and balance auditing it.
+ * Processes a cash/direct payout refund for a PENDING Credit Note, closing it and balance auditing it.
  */
 const refundCreditNote = async (id, actor) => {
     const creditNote = await CreditNote.findById(id);
@@ -383,8 +418,8 @@ const refundCreditNote = async (id, actor) => {
         throw new Error("Credit Note not found.");
     }
 
-    if (!['OPEN', 'DRAFT'].includes(creditNote.status)) {
-        throw new Error("Only OPEN or DRAFT credit notes can be refunded.");
+    if (!['PENDING', 'OPEN', 'DRAFT'].includes(creditNote.status)) {
+        throw new Error("Only PENDING, OPEN, or DRAFT credit notes can be refunded.");
     }
 
     const Customer = require("../../Customer/Model/CustomerModel");
@@ -393,8 +428,8 @@ const refundCreditNote = async (id, actor) => {
         throw new Error("Customer not found for credit account.");
     }
 
-    // 1. Update status to CLOSED to signify final disposition
-    creditNote.status = 'CLOSED';
+    // 1. Update status to PAID to signify final disposition
+    creditNote.status = 'PAID';
     creditNote.notes = `${creditNote.notes || ""}\n[REFUNDED] Cleanly settled via direct cash payout on ${new Date().toLocaleDateString()}`.trim();
     await creditNote.save();
 

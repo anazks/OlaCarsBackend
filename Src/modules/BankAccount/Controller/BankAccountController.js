@@ -104,6 +104,11 @@ exports.deleteAllTransactions = async (req, res, next) => {
         account.currentBalance = account.initialBalance || 0;
         await account.save();
 
+        const { syncAccountingCodeBalances } = require("../Service/BankAccountService");
+        if (accCodeId) {
+            await syncAccountingCodeBalances(accCodeId);
+        }
+
         res.status(200).json({
             success: true,
             message: `Deleted ${deleteResult.deletedCount} ledger entries and ${bankTxDeleteResult.deletedCount} bank transactions. Balance reset to ${account.currentBalance}.`
@@ -335,6 +340,7 @@ exports.recordManualPayment = async (req, res, next) => {
 
 const parseDateFlexible = (val) => {
     if (val === undefined || val === null) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
     if (typeof val === 'number') {
         const totalDays = Math.floor(val - 25569);
         const date = new Date(Date.UTC(1970, 0, 1 + totalDays));
@@ -350,19 +356,30 @@ const parseDateFlexible = (val) => {
     }
     const parts = str.split(/[\/\-.]/);
     if (parts.length === 3) {
+        let year = 0, month = 0, day = 0;
         if (parts[0].length === 4) {
-            const year = parseInt(parts[0], 10);
-            const month = parseInt(parts[1], 10) - 1;
-            const day = parseInt(parts[2], 10);
-            const date = new Date(Date.UTC(year, month, day));
-            if (!isNaN(date.getTime())) return date;
-        } else {
-            const part1 = parseInt(parts[0], 10);
-            const part2 = parseInt(parts[1], 10);
-            const part3 = parseInt(parts[2], 10);
-            const year = part3 < 100 ? 2000 + part3 : part3;
-            const day = part1;
-            const month = part2;
+            year = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10);
+            day = parseInt(parts[2], 10);
+        } else if (parts[2].length === 4 || parts[2].length === 2) {
+            const p1 = parseInt(parts[0], 10);
+            const p2 = parseInt(parts[1], 10);
+            const p3 = parseInt(parts[2], 10);
+            year = p3 < 100 ? 2000 + p3 : p3;
+
+            if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2;
+            } else if (p1 <= 12 && p2 > 12) {
+                month = p1;
+                day = p2;
+            } else {
+                // Default to DD-MM-YYYY format
+                day = p1;
+                month = p2;
+            }
+        }
+        if (year && month && day) {
             const date = new Date(Date.UTC(year, month - 1, day));
             if (!isNaN(date.getTime())) return date;
         }
@@ -418,6 +435,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             isDeleted: { $ne: true }
         });
 
+        const apCodeDoc = await AccountingCode.findOne({
+            $or: [
+                { code: "2.1.01" },
+                { code: "2000" },
+                { name: { $regex: /Accounts Payable/i } },
+                { name: { $regex: /Cuenta por Pagar/i } }
+            ],
+            isDeleted: { $ne: true }
+        });
+
 
         let balanceAccum = 0;
         let debitAccum = 0;
@@ -448,11 +475,30 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         }
         const createdEntries = [];
         let setOffResults = [];
+        const seenTxIdsInFile = new Set();
+
+        const getISTNow = () => {
+            const now = new Date();
+            return new Date(now.getTime() + (5.5 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60 * 1000));
+        };
 
         for (const tx of transactions) {
             // Parse custom template headings and support the new sample file headings:
             const dateVal = tx.DATE || tx.Date || tx.date;
-            const finalEntryDate = parseDateFlexible(dateVal) || new Date();
+            const baseDate = parseDateFlexible(dateVal);
+            let finalEntryDate = getISTNow();
+            if (baseDate) {
+                const uploadTimeIST = getISTNow();
+                finalEntryDate = new Date(
+                    baseDate.getUTCFullYear(),
+                    baseDate.getUTCMonth(),
+                    baseDate.getUTCDate(),
+                    uploadTimeIST.getHours(),
+                    uploadTimeIST.getMinutes(),
+                    uploadTimeIST.getSeconds(),
+                    uploadTimeIST.getMilliseconds()
+                );
+            }
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
             const bankNameVal = tx["BANK NAME"] || tx.bankName || tx.bank_name;
@@ -522,6 +568,28 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 transactionIdVal = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
             }
 
+            // Validate Transaction ID uniqueness against DB and upload file
+            if (transactionIdVal && String(transactionIdVal).trim()) {
+                const cleanTxId = String(transactionIdVal).trim();
+
+                if (seenTxIdsInFile.has(cleanTxId)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid upload: Duplicate Transaction ID "${cleanTxId}" appears multiple times in the upload file.`
+                    });
+                }
+                seenTxIdsInFile.add(cleanTxId);
+
+                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId, isDeleted: { $ne: true } });
+                if (existingEntry) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Invalid upload: Transaction ID "${cleanTxId}" already exists in ledger entries.`
+                    });
+                }
+            }
+
             // Polarity: RECEIPT = DEBIT, PAYMENT = CREDIT
             let typeVal = "DEBIT";
             if (receiptVal > 0 && paymentVal === 0) {
@@ -556,27 +624,145 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
             }
 
-            // Resolve Customer if CUSTOMER NAME or customerId is provided
-            let customerDoc = null;
+            // Resolve entity names from transaction row
+            const driverNameVal = tx["DRIVER NAME"] || tx["DRIVER"] || tx.driverName || tx.driver_name;
+            const supplierNameVal = tx["SUPPLIER NAME"] || tx.supplierName || tx.supplier_name;
             const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
-            const customerIdVal = tx.customerId || tx.customer;
 
-            if (customerIdVal) {
-                const Customer = require("../../Customer/Model/CustomerModel");
-                customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
-            } else if (customerNameVal && String(customerNameVal).trim()) {
-                const Customer = require("../../Customer/Model/CustomerModel");
-                const escapedName = String(customerNameVal).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                customerDoc = await Customer.findOne({
-                    name: { $regex: new RegExp("^" + escapedName + "$", "i") },
-                    isDeleted: false
+            const customerIdVal = tx.customerId || tx.customer;
+            const supplierIdVal = tx.supplierId || tx.supplier;
+
+            const filledEntityCount = [
+                driverNameVal && String(driverNameVal).trim(),
+                supplierNameVal && String(supplierNameVal).trim(),
+                customerNameVal && String(customerNameVal).trim()
+            ].filter(Boolean).length;
+
+            if (filledEntityCount > 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Row cannot contain more than one entity (DRIVER NAME, SUPPLIER NAME, CUSTOMER NAME) simultaneously.`
                 });
+            }
+
+            let customerDoc = null;
+            let supplierDoc = null;
+            let isDriver = false;
+            let isCustomer = false;
+
+            if (driverNameVal && String(driverNameVal).trim()) {
+                isDriver = true;
+                const Customer = require("../../Customer/Model/CustomerModel");
+                const { Driver } = require("../../Driver/Model/DriverModel");
+                const rawName = String(driverNameVal).trim();
+                const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                const driverDoc = await Driver.findOne({
+                    $or: [
+                        { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { firstName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                        { driverId: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                    ],
+                    isDeleted: { $ne: true }
+                });
+
+                if (driverDoc) {
+                    customerDoc = await Customer.findOne({ driver: driverDoc._id, isDeleted: false });
+                }
+
+                if (!customerDoc) {
+                    customerDoc = await Customer.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        ],
+                        isDeleted: false
+                    });
+                }
+            } else if (customerIdVal || (customerNameVal && String(customerNameVal).trim())) {
+                isCustomer = true;
+                const Customer = require("../../Customer/Model/CustomerModel");
+                if (customerIdVal) {
+                    customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
+                } else {
+                    const rawName = String(customerNameVal).trim();
+                    const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    customerDoc = await Customer.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
+                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        ],
+                        isDeleted: false
+                    });
+
+                    if (!customerDoc) {
+                        customerDoc = await Customer.findOne({
+                            $or: [
+                                { name: { $regex: new RegExp(escapedName, "i") } },
+                                { companyName: { $regex: new RegExp(escapedName, "i") } },
+                                { displayName: { $regex: new RegExp(escapedName, "i") } }
+                            ],
+                            isDeleted: false
+                        });
+                    }
+
+                    if (!customerDoc) {
+                        const cleanWords = rawName.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+                        if (cleanWords) {
+                            const fuzzyPattern = cleanWords.split(' ').filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s,.-]*');
+                            customerDoc = await Customer.findOne({
+                                $or: [
+                                    { name: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                    { companyName: { $regex: new RegExp(fuzzyPattern, "i") } },
+                                    { displayName: { $regex: new RegExp(fuzzyPattern, "i") } }
+                                ],
+                                isDeleted: false
+                            });
+                        }
+                    }
+                }
+            }
+
+            if (supplierIdVal || (supplierNameVal && String(supplierNameVal).trim())) {
+                const Supplier = require("../../Supplier/Model/SupplierModel");
+                if (supplierIdVal) {
+                    supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
+                } else {
+                    const rawSupName = String(supplierNameVal).trim();
+                    const escapedSupName = rawSupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    supplierDoc = await Supplier.findOne({
+                        $or: [
+                            { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { displayName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { vendorNumber: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
+                            { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
+                        ],
+                        isDeleted: { $ne: true }
+                    });
+
+                    if (!supplierDoc) {
+                        supplierDoc = await Supplier.findOne({
+                            $or: [
+                                { name: { $regex: new RegExp(escapedSupName, "i") } },
+                                { companyName: { $regex: new RegExp(escapedSupName, "i") } }
+                            ],
+                            isDeleted: { $ne: true }
+                        });
+                    }
+                }
             }
 
             const isCreditCard = account.accountType === "Credit Card";
 
-            // If customer is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
-            if (customerDoc && typeVal === "DEBIT") {
+            // If driver is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
+            if (customerDoc && isDriver && typeVal === "DEBIT") {
                 if (typeVal === "DEBIT") {
                     balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
                     debitAccum += amountVal;
@@ -586,9 +772,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
 
                 const { autoSetOffInvoices } = require("../Service/BankAccountService");
+                const mongoose = require("mongoose");
+                const bankTxId = new mongoose.Types.ObjectId();
 
                 const setOffResult = await autoSetOffInvoices(customerDoc._id, amountVal, {
                     bankAccountingCodeId: accCodeId,
+                    bankTransactionId: bankTxId,
+                    bankAccountId: id,
                     branchId: resolvedBranchId || branchId,
                     entryDate: finalEntryDate,
                     description: finalDescription || `Bank statement receipt`,
@@ -603,20 +793,19 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     ? `${finalDescription || "Receipt"} - Set off: ${invoiceNumbers}`
                     : finalDescription || "Receipt - No unpaid invoices to set off";
 
-                const entry = new BankTransaction({
-                    bankAccount: id,
+                const entry = new LedgerEntry({
+                    _id: bankTxId,
                     branch: resolvedBranchId || branchId || undefined,
                     accountingCode: accCodeId,
                     type: typeVal,
                     amount: amountVal,
                     description: setOffDesc,
                     entryDate: finalEntryDate,
-                    transactionType: typeVal,
                     transactionId: transactionIdVal,
                     runningBalance: balanceAccum,
-                    customer: customerDoc._id,
-                    customerName: customerDoc.name,
-                    invoice: setOffResult.invoicesSetOff.length > 0 ? setOffResult.invoicesSetOff[0].invoiceId : undefined,
+                    contact: customerDoc._id,
+                    contactModel: "Customer",
+                    bankTxType: "DRIVER",
                     invoices: setOffResult.invoicesSetOff.map(inv => ({
                         invoiceId: inv.invoiceId,
                         invoiceNumber: inv.invoiceNumber,
@@ -644,8 +833,76 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 continue;
             }
 
-            // If sub-account or parent-account is specified, perform double-entry booking
-            if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim())) {
+            // If supplier is resolved and it's a CREDIT (money outgoing / vendor payment), auto set-off against unpaid bills
+            if (supplierDoc && typeVal === "CREDIT") {
+                balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
+                creditAccum += amountVal;
+
+                const { autoSetOffBills } = require("../Service/BankAccountService");
+                const mongoose = require("mongoose");
+                const bankTxId = new mongoose.Types.ObjectId();
+
+                const setOffResult = await autoSetOffBills(supplierDoc._id, amountVal, {
+                    bankAccountingCodeId: accCodeId,
+                    bankTransactionId: bankTxId,
+                    bankAccountId: id,
+                    branchId: resolvedBranchId || branchId,
+                    entryDate: finalEntryDate,
+                    description: finalDescription || `Bank statement vendor payment`,
+                    transactionId: transactionIdVal,
+                    paymentMethod: "Bank Transfer",
+                    createdBy,
+                    creatorRole
+                });
+
+                // Build bill numbers string for description
+                const billNumbers = (setOffResult.billsSetOff || []).map(b => b.billNumber).join(", ");
+                const setOffDesc = setOffResult.billsSetOff && setOffResult.billsSetOff.length > 0
+                    ? `${finalDescription || "Payment"} - Set off: ${billNumbers}`
+                    : finalDescription || "Payment - No open bills to set off";
+
+                const entry = new LedgerEntry({
+                    _id: bankTxId,
+                    branch: resolvedBranchId || branchId || undefined,
+                    accountingCode: accCodeId,
+                    type: typeVal,
+                    amount: amountVal,
+                    description: setOffDesc,
+                    entryDate: finalEntryDate,
+                    transactionId: transactionIdVal,
+                    runningBalance: balanceAccum,
+                    contact: supplierDoc._id,
+                    contactModel: "Supplier",
+                    bankTxType: "VENDOR",
+                    bills: (setOffResult.billsSetOff || []).map(b => ({
+                        billId: b.billId,
+                        billNumber: b.billNumber,
+                        amountApplied: b.amountApplied
+                    })),
+                    setOffSummary: {
+                        totalSetOff: setOffResult.totalSetOff,
+                        billCount: (setOffResult.billsSetOff || []).length,
+                        excessAmount: setOffResult.excessAmount
+                    },
+                    createdBy,
+                    creatorRole
+                });
+                await entry.save();
+                createdEntries.push(entry);
+
+                // Track set-off results for response
+                setOffResults.push({
+                    transactionId: transactionIdVal,
+                    supplierName: supplierDoc.name || supplierDoc.companyName,
+                    amount: amountVal,
+                    ...setOffResult
+                });
+
+                continue;
+            }
+
+            // If sub-account, parent-account, or customer/supplier without auto set-off is specified, perform double-entry booking
+            if ((accountsNameVal && String(accountsNameVal).trim()) || (parentAccountVal && String(parentAccountVal).trim()) || customerDoc || supplierDoc) {
                 if (typeVal === "DEBIT") {
                     balanceAccum = isCreditCard ? (balanceAccum - amountVal) : (balanceAccum + amountVal);
                     debitAccum += amountVal;
@@ -655,60 +912,100 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
 
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+
+                // Determine target account name from ACCOUNTS NAME, or fallback to Accounts Receivable for customer / Accounts Payable for supplier
+                const targetAccountName = (accountsNameVal && String(accountsNameVal).trim())
+                    ? accountsNameVal
+                    : (customerDoc ? "Accounts Receivable" : (supplierDoc ? "Accounts Payable" : ""));
+
                 const subDoc = await ensureSubAccountingCode(
                     parentAccountVal,
-                    accountsNameVal,
+                    targetAccountName,
                     createdBy,
-                    creatorRole
+                    creatorRole,
+                    supplierDoc
                 );
 
                 if (subDoc) {
-                    const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
-                    const journalPayload = {
-                        description: finalDescription || "Bulk uploaded double entry",
-                        date: finalEntryDate,
-                        branch: resolvedBranchId || branchId,
-                        lines: [
-                            {
-                                accountingCode: accCodeId, // Bank Account
-                                type: typeVal,
-                                amount: amountVal,
-                                description: finalDescription
-                            },
-                            {
-                                accountingCode: subDoc._id, // Offset Sub-Account
-                                type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
-                                amount: amountVal,
-                                description: finalDescription
-                            }
-                        ],
-                        createdBy,
-                        creatorRole: creatorRole.toUpperCase()
-                    };
+                    const BankAccount = require("../Model/BankAccountModel");
+                    const isTargetBankAccount = Boolean(await BankAccount.exists({ accountingCode: subDoc._id, isDeleted: { $ne: true } }));
 
-                    const journalResult = await ManualJournalService.createManualJournal(journalPayload);
+                    let uploadTxType = "NON_DRIVER_CUSTOMER";
+                    if (isTargetBankAccount) {
+                        uploadTxType = "INTER_BANK";
+                    } else if (supplierDoc) {
+                        uploadTxType = "VENDOR";
+                    } else if (customerDoc) {
+                        uploadTxType = isDriver ? "DRIVER" : "NON_DRIVER_CUSTOMER";
+                    }
 
-                    // We also save a BankTransaction matching it
-                    const entry = new BankTransaction({
-                        bankAccount: id,
+                    const entry = new LedgerEntry({
                         branch: resolvedBranchId || branchId || undefined,
-                        accountingCode: subDoc._id,
+                        accountingCode: accCodeId,
                         type: typeVal,
                         amount: amountVal,
                         description: finalDescription || "Bulk uploaded double-entry transaction",
                         entryDate: finalEntryDate,
-                        transactionType: typeVal,
                         transactionId: transactionIdVal,
                         runningBalance: balanceAccum,
+                        contact: customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined),
+                        contactModel: customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined),
+                        bankTxType: uploadTxType,
                         createdBy,
                         creatorRole
                     });
                     await entry.save();
 
+                    const offsetEntry = new LedgerEntry({
+                        branch: resolvedBranchId || branchId || undefined,
+                        accountingCode: subDoc._id,
+                        type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
+                        amount: amountVal,
+                        description: finalDescription || "Bulk uploaded double-entry offset",
+                        entryDate: finalEntryDate,
+                        transactionId: transactionIdVal,
+                        contact: customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined),
+                        contactModel: customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined),
+                        bankTxType: uploadTxType,
+                        createdBy,
+                        creatorRole
+                    });
+                    await offsetEntry.save();
+
                     createdEntries.push(entry);
 
                     // Trigger balance sync for sub-account immediately
                     await syncAccountingCodeBalances(subDoc._id);
+
+                    // If it's a customer receipt and offset account is Accounts Receivable, create PaymentReceived record so it maps under /customers/:id
+                    if (customerDoc && typeVal === "DEBIT") {
+                        const isAr = (subDoc.code === "1.1.03" || subDoc.code === "1.0.03" || /Accounts Receivable|Cuenta por Cobrar/i.test(subDoc.name) || /Accounts Receivable/i.test(accountsNameVal || ''));
+                        if (isAr) {
+                            try {
+                                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                                const prData = {
+                                    paymentNumber: `PR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                                    customerId: customerDoc._id,
+                                    driverId: customerDoc.driver || undefined,
+                                    amountReceived: amountVal,
+                                    paymentDate: finalEntryDate,
+                                    paymentMethod: "Bank Transfer",
+                                    referenceNumber: transactionIdVal || undefined,
+                                    notes: finalDescription || `Customer Bank Receipt (${customerDoc.name})`,
+                                    depositedTo: accCodeId,
+                                    branch: resolvedBranchId || branchId || undefined,
+                                    invoices: [],
+                                    status: "COMPLETED",
+                                    createdBy,
+                                    creatorRole
+                                };
+                                await PaymentReceived.create(prData);
+                            } catch (prErr) {
+                                console.error("Error creating PaymentReceived for customer bank deposit:", prErr);
+                            }
+                        }
+                    }
+
                     continue;
                 }
             }
@@ -721,56 +1018,45 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 creditAccum += amountVal;
             }
 
-            const targetArCodeId = arCodeDoc ? arCodeDoc._id : accCodeId;
-            const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
-            const journalPayload = {
-                description: finalDescription || "Bulk uploaded double entry",
-                date: finalEntryDate,
-                branch: resolvedBranchId || branchId,
-                lines: [
-                    {
-                        accountingCode: accCodeId,
-                        type: typeVal,
-                        amount: amountVal,
-                        description: finalDescription || "Bulk uploaded ledger transaction",
-                        contact: customerDoc ? customerDoc._id : undefined,
-                        contactModel: customerDoc ? "Customer" : undefined
-                    },
-                    {
-                        accountingCode: targetArCodeId,
-                        type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
-                        amount: amountVal,
-                        description: finalDescription || "Bulk uploaded ledger transaction offset",
-                        contact: customerDoc ? customerDoc._id : undefined,
-                        contactModel: customerDoc ? "Customer" : undefined
-                    }
-                ],
-                createdBy,
-                creatorRole: creatorRole.toUpperCase()
-            };
+            const targetOffsetCodeId = supplierDoc
+                ? (apCodeDoc ? apCodeDoc._id : accCodeId)
+                : (arCodeDoc ? arCodeDoc._id : accCodeId);
 
-            await ManualJournalService.createManualJournal(journalPayload);
+            const contactId = customerDoc ? customerDoc._id : (supplierDoc ? supplierDoc._id : undefined);
+            const contactModel = customerDoc ? "Customer" : (supplierDoc ? "Supplier" : undefined);
 
-            const entry = new BankTransaction({
-                bankAccount: id,
+            const entry = new LedgerEntry({
                 branch: resolvedBranchId || branchId || undefined,
                 accountingCode: accCodeId,
                 type: typeVal,
                 amount: amountVal,
                 description: finalDescription || "Bulk uploaded ledger transaction",
                 entryDate: finalEntryDate,
-                transactionType: typeVal,
                 transactionId: transactionIdVal,
                 runningBalance: balanceAccum,
-                customer: customerDoc ? customerDoc._id : undefined,
-                customerName: customerDoc ? customerDoc.name : undefined,
+                contact: contactId,
+                contactModel: contactModel,
                 createdBy,
                 creatorRole
             });
-
             await entry.save();
-            createdEntries.push(entry);
 
+            const offsetEntry = new LedgerEntry({
+                branch: resolvedBranchId || branchId || undefined,
+                accountingCode: targetOffsetCodeId,
+                type: typeVal === "DEBIT" ? "CREDIT" : "DEBIT",
+                amount: amountVal,
+                description: finalDescription || "Bulk uploaded ledger transaction offset",
+                entryDate: finalEntryDate,
+                transactionId: transactionIdVal,
+                contact: contactId,
+                contactModel: contactModel,
+                createdBy,
+                creatorRole
+            });
+            await offsetEntry.save();
+
+            createdEntries.push(entry);
         }
 
         const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
@@ -784,9 +1070,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         // Fetch updated bank account to return correct balance
         const updatedAccount = await BankAccount.findById(id);
 
+        const totalSetOffCount = setOffResults.reduce((sum, r) => {
+            if (!r) return sum;
+            const invCount = Array.isArray(r.invoicesSetOff) ? r.invoicesSetOff.length : 0;
+            const billCount = Array.isArray(r.billsSetOff) ? r.billsSetOff.length : 0;
+            return sum + invCount + billCount;
+        }, 0);
+
         res.status(200).json({
             success: true,
-            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${setOffResults.reduce((sum, r) => sum + r.invoicesSetOff.length, 0)} invoice(s).` : ''}`,
+            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''}`,
             data: {
                 count: createdEntries.length,
                 newBalance: updatedAccount.currentBalance,
@@ -834,10 +1127,14 @@ exports.getBankTransactions = async (req, res, next) => {
         if (startDate || endDate) {
             query.entryDate = {};
             if (startDate) {
-                query.entryDate.$gte = new Date(startDate);
+                const startD = new Date(startDate);
+                startD.setHours(0, 0, 0, 0);
+                query.entryDate.$gte = startD;
             }
             if (endDate) {
-                query.entryDate.$lte = new Date(endDate);
+                const endD = new Date(endDate);
+                endD.setHours(23, 59, 59, 999);
+                query.entryDate.$lte = endD;
             }
         }
 
@@ -946,22 +1243,134 @@ exports.getBankTransactions = async (req, res, next) => {
             );
         };
 
+        const InvoiceSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+
+        const contactIds = transactions.map(t => t.contact).filter(Boolean);
+        const [customersList, suppliersList, setOffHistories] = await Promise.all([
+            Customer.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
+            Supplier.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
+            InvoiceSetOffHistory.find({
+                $or: [
+                    { primaryLedgerEntry: { $in: transactions.map(t => t._id) } },
+                    { bankTransaction: { $in: transactions.map(t => t._id) } },
+                    { ledgerJournal: { $in: manualJournalIds } },
+                    { transactionId: { $in: txIds } }
+                ]
+            }).populate("customer", "name companyName displayName").populate("supplier", "name companyName displayName").lean()
+        ]);
+
+        const customerMap = new Map(customersList.map(c => [String(c._id), c.name || c.companyName || c.displayName || ""]));
+        const supplierMap = new Map(suppliersList.map(s => [String(s._id), s.name || s.companyName || s.displayName || ""]));
+
         // Map transactions to mimic LedgerEntry fields for frontend compatibility
         const mappedTransactions = transactions.map(tx => {
             const obj = tx.toObject();
             obj.date = tx.entryDate;
             obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
+            obj.bankAccount = account._id;
+            obj.bankAccountName = account.accountName || account.bankName;
+            obj.bankAccountingCode = account.accountingCode;
+
+            // Enrich contact name directly from contact ID
+            if (tx.contact) {
+                const contactIdStr = String(tx.contact._id || tx.contact);
+                if (supplierMap.has(contactIdStr)) {
+                    obj.contactModel = "Supplier";
+                    obj.supplier = contactIdStr;
+                    obj.supplierName = supplierMap.get(contactIdStr);
+                    obj.contactName = supplierMap.get(contactIdStr);
+                } else if (customerMap.has(contactIdStr)) {
+                    obj.contactModel = "Customer";
+                    obj.customer = contactIdStr;
+                    obj.customerName = customerMap.get(contactIdStr);
+                    obj.contactName = customerMap.get(contactIdStr);
+                }
+            }
 
             // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists
             const bt = findBankTx(tx);
             if (bt) {
-                obj.customer = bt.customer;
-                obj.customerName = bt.customerName;
-                obj.invoice = bt.invoice;
-                obj.invoices = bt.invoices;
-                obj.setOffSummary = bt.setOffSummary;
-                if (bt.accountingCode && bt.accountingCode.toString() !== account.accountingCode.toString()) {
-                    obj.accountingCode = bt.accountingCode;
+                obj.customer = bt.customer || obj.customer;
+                obj.customerName = bt.customerName || obj.customerName;
+                obj.invoice = bt.invoice || obj.invoice;
+                obj.invoices = (bt.invoices && bt.invoices.length > 0) ? bt.invoices : obj.invoices;
+                obj.bills = (bt.bills && bt.bills.length > 0) ? bt.bills : obj.bills;
+                obj.setOffSummary = bt.setOffSummary || obj.setOffSummary;
+            }
+
+            // Enrich from InvoiceSetOffHistory
+            const history = setOffHistories.find(h =>
+                (h.primaryLedgerEntry && String(h.primaryLedgerEntry) === String(tx._id)) ||
+                (h.bankTransaction && String(h.bankTransaction) === String(tx._id)) ||
+                (h.ledgerJournal && String(h.ledgerJournal) === String(tx.manualJournal)) ||
+                (tx.transactionId && h.transactionId && String(h.transactionId) === String(tx.transactionId))
+            );
+
+            if (history) {
+                if (history.targetType === "SUPPLIER" || history.supplier) {
+                    obj.contactModel = "Supplier";
+                    obj.supplier = history.supplier?._id || history.supplier;
+                    const supName = typeof history.supplier === "object" && history.supplier
+                        ? (history.supplier.name || history.supplier.companyName || history.supplier.displayName)
+                        : "";
+                    if (supName) {
+                        obj.supplierName = supName;
+                        obj.contactName = supName;
+                    }
+                    if (!obj.bills || obj.bills.length === 0) {
+                        obj.bills = (history.billSnapshots || []).map(snap => ({
+                            billId: snap.bill,
+                            billNumber: snap.billNumber,
+                            amountApplied: snap.amountApplied,
+                            paymentId: snap.paymentId
+                        }));
+                    }
+                    if (!obj.setOffSummary) {
+                        obj.setOffSummary = {
+                            totalSetOff: (history.billSnapshots || []).reduce((acc, s) => acc + (s.amountApplied || 0), 0),
+                            billCount: (history.billSnapshots || []).length,
+                            bills: (history.billSnapshots || []).map(snap => ({
+                                billId: snap.bill,
+                                billNumber: snap.billNumber,
+                                amountApplied: snap.amountApplied,
+                                paymentId: snap.paymentId
+                            })),
+                            excessAmount: history.excessAmount || 0
+                        };
+                    }
+                } else {
+                    obj.contactModel = "Customer";
+                    obj.customer = history.customer?._id || history.customer;
+                    const custName = typeof history.customer === "object" && history.customer
+                        ? (history.customer.name || history.customer.companyName || history.customer.displayName)
+                        : "";
+                    if (custName) {
+                        obj.customerName = custName;
+                        obj.contactName = custName;
+                    }
+                    if (!obj.invoices || obj.invoices.length === 0) {
+                        obj.invoices = (history.invoiceSnapshots || []).map(snap => ({
+                            invoiceId: snap.invoice,
+                            invoiceNumber: snap.invoiceNumber,
+                            amountApplied: snap.amountApplied,
+                            paymentId: snap.paymentId
+                        }));
+                    }
+                    if (!obj.setOffSummary) {
+                        obj.setOffSummary = {
+                            totalSetOff: (history.invoiceSnapshots || []).reduce((acc, s) => acc + (s.amountApplied || 0), 0),
+                            invoiceCount: (history.invoiceSnapshots || []).length,
+                            invoices: (history.invoiceSnapshots || []).map(snap => ({
+                                invoiceId: snap.invoice,
+                                invoiceNumber: snap.invoiceNumber,
+                                amountApplied: snap.amountApplied,
+                                paymentId: snap.paymentId
+                            })),
+                            excessAmount: history.excessAmount || 0
+                        };
+                    }
                 }
             }
 
@@ -973,7 +1382,8 @@ exports.getBankTransactions = async (req, res, next) => {
                     e.accountingCode && e.accountingCode._id.toString() !== account.accountingCode.toString()
                 );
                 if (partnerEntry && partnerEntry.accountingCode) {
-                    obj.accountingCode = partnerEntry.accountingCode._id;
+                    obj.offsetAccountingCode = partnerEntry.accountingCode._id;
+                    obj.offsetAccountName = partnerEntry.accountingCode.name;
                     if (partnerEntry.accountingCode.parentAccount) {
                         obj.accountsName = partnerEntry.accountingCode.name;
                         obj.parentAccount = typeof partnerEntry.accountingCode.parentAccount === 'object'
@@ -1040,11 +1450,16 @@ exports.getBankTransactions = async (req, res, next) => {
                 const priorDebits = priorTotals[0].totalDeposits || 0;
                 const priorCredits = priorTotals[0].totalWithdrawals || 0;
                 const isCreditCard = account.accountType === "Credit Card";
-                openingBalance = isCreditCard
+                openingBalance = (account.initialBalance || 0) + (isCreditCard
                     ? (priorCredits - priorDebits)
-                    : (priorDebits - priorCredits);
+                    : (priorDebits - priorCredits));
             }
         }
+
+        const isCreditCard = account.accountType === "Credit Card";
+        const closingBalance = isCreditCard
+            ? openingBalance + totalWithdrawals - totalDeposits
+            : openingBalance + totalDeposits - totalWithdrawals;
 
         res.status(200).json({
             success: true,
@@ -1057,7 +1472,8 @@ exports.getBankTransactions = async (req, res, next) => {
             },
             totalDeposits,
             totalWithdrawals,
-            openingBalance
+            openingBalance,
+            closingBalance
         });
     } catch (error) {
         console.error("Error in getBankTransactions controller:", error);
@@ -1068,46 +1484,152 @@ exports.getBankTransactions = async (req, res, next) => {
 exports.getBankTransactionById = async (req, res, next) => {
     try {
         const { transactionId } = req.params;
-        const BankTransaction = require("../Model/BankTransactionModel");
+        const mongoose = require("mongoose");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+        const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+        const BankAccount = require("../Model/BankAccountModel");
 
-        let transaction = await BankTransaction.findById(transactionId)
-            .populate("bankAccount", "accountName bankName accountNumber currency status")
-            .populate("branch", "name code")
-            .populate("accountingCode", "code name category")
-            .populate("createdBy", "name email");
+        let ledgerEntry = null;
 
-        if (!transaction) {
-            const ledgerEntry = await LedgerEntry.findById(transactionId)
+        if (mongoose.Types.ObjectId.isValid(transactionId)) {
+            ledgerEntry = await LedgerEntry.findById(transactionId)
                 .populate("branch", "name code")
                 .populate("accountingCode", "code name category")
-                .populate("createdBy", "name email");
-
-            if (ledgerEntry) {
-                transaction = ledgerEntry.toObject();
-                transaction.entryDate = ledgerEntry.entryDate;
-                transaction.transactionId = ledgerEntry.transactionId;
-
-                const BankAccount = require("../Model/BankAccountModel");
-                const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode, isDeleted: false });
-                transaction.bankAccount = matchedAccount ? {
-                    _id: matchedAccount._id,
-                    accountName: matchedAccount.accountName || matchedAccount.bankName,
-                    bankName: matchedAccount.bankName,
-                    accountNumber: matchedAccount.accountNumber,
-                    currency: matchedAccount.currency,
-                    status: matchedAccount.status
-                } : null;
-            }
+                .populate("createdBy", "name email")
+                .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId");
         }
 
-        if (!transaction) {
+        if (!ledgerEntry) {
+            ledgerEntry = await LedgerEntry.findOne({ transactionId: String(transactionId) })
+                .populate("branch", "name code")
+                .populate("accountingCode", "code name category")
+                .populate("createdBy", "name email")
+                .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId");
+        }
+
+        if (!ledgerEntry) {
             return res.status(404).json({ success: false, message: "Bank transaction not found" });
         }
 
+        const transactionObj = ledgerEntry.toObject();
+        const searchTxId = ledgerEntry.transactionId || String(transactionId);
+
+        if (ledgerEntry.accountingCode) {
+            const matchedAccount = await BankAccount.findOne({ accountingCode: ledgerEntry.accountingCode._id || ledgerEntry.accountingCode, isDeleted: false });
+            transactionObj.bankAccount = matchedAccount ? {
+                _id: matchedAccount._id,
+                accountName: matchedAccount.accountName || matchedAccount.bankName,
+                bankName: matchedAccount.bankName,
+                accountNumber: matchedAccount.accountNumber,
+                currency: matchedAccount.currency,
+                status: matchedAccount.status
+            } : null;
+        }
+
+        // Fetch set-off history if available
+        const searchConditions = [
+            { primaryLedgerEntry: ledgerEntry._id },
+            { partnerLedgerEntries: ledgerEntry._id },
+        ];
+        if (searchTxId) {
+            searchConditions.push({ transactionId: String(searchTxId) });
+        }
+
+        const historyDoc = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions })
+            .populate("customer", "name customerId")
+            .populate("supplier", "name supplierId")
+            .populate("paymentReceived", "paymentNumber amountReceived")
+            .populate("vendorPayment", "paymentNumber amount");
+
+        transactionObj.setOffHistory = historyDoc || null;
+
+        // Collect all connected double-entry ledger entries (Both Credit & Debit legs)
+        const connectedConditions = [];
+
+        if (ledgerEntry.manualJournal) {
+            connectedConditions.push({ manualJournal: ledgerEntry.manualJournal });
+        }
+        if (searchTxId) {
+            connectedConditions.push({ transactionId: String(searchTxId) });
+        }
+        if (historyDoc && historyDoc.partnerLedgerEntries && historyDoc.partnerLedgerEntries.length > 0) {
+            connectedConditions.push({ _id: { $in: historyDoc.partnerLedgerEntries } });
+        }
+        connectedConditions.push({ _id: ledgerEntry._id });
+
+        let connectedLedgerEntries = [];
+        if (connectedConditions.length > 0) {
+            connectedLedgerEntries = await LedgerEntry.find({ $or: connectedConditions })
+                .populate("accountingCode", "code name category accountType")
+                .populate("contact", "name customerId")
+                .populate("supplier", "name supplierId")
+                .sort({ type: -1, createdAt: 1 });
+        }
+        transactionObj.connectedLedgerEntries = connectedLedgerEntries;
+
+        // Determine transaction classification
+        let detectedType = ledgerEntry.bankTxType || "NON_DRIVER_CUSTOMER";
+
+        if (!ledgerEntry.bankTxType) {
+            const hasSupplier = Boolean(
+                ledgerEntry.supplier ||
+                ledgerEntry.contactModel === "Supplier" ||
+                (historyDoc && historyDoc.targetType === "SUPPLIER") ||
+                connectedLedgerEntries.some(e => e.supplier || e.contactModel === "Supplier")
+            );
+
+        // Check if partner leg belongs to another Bank Account (Inter-Bank Transfer)
+        const allBankAccounts = await BankAccount.find({ isDeleted: { $ne: true } });
+        const bankAccountingCodeIds = new Set(allBankAccounts.map(b => String(b.accountingCode)));
+
+        const primaryCodeId = String(ledgerEntry.accountingCode?._id || ledgerEntry.accountingCode || '');
+
+        const isInterBank = connectedLedgerEntries.some(lEntry => {
+            const codeId = String(lEntry.accountingCode?._id || lEntry.accountingCode || '');
+            const accType = lEntry.accountingCode?.accountType;
+            return codeId !== primaryCodeId && (bankAccountingCodeIds.has(codeId) || accType === "Bank" || accType === "Cash");
+        }) || (ledgerEntry.description && /inter-bank|transfer.*bank|transferencia.*banco/i.test(ledgerEntry.description));
+
+        if (isInterBank) {
+            detectedType = "INTER_BANK";
+        } else if (hasSupplier) {
+            detectedType = "VENDOR";
+        } else {
+            // Check if Customer is Driver
+            const Customer = require("../../Customer/Model/CustomerModel");
+            let isDriver = false;
+
+            const contactId = ledgerEntry.contact?._id || ledgerEntry.contact;
+            if (contactId) {
+                const custDoc = await Customer.findById(contactId);
+                if (custDoc && (custDoc.driver || custDoc.driverId || custDoc.isDriver)) {
+                    isDriver = true;
+                }
+            }
+            if (historyDoc && historyDoc.targetType === "CUSTOMER") {
+                isDriver = true;
+            }
+            if (ledgerEntry.description && /driver|conductor|chofer/i.test(ledgerEntry.description)) {
+                isDriver = true;
+            }
+
+            if (isDriver) {
+                detectedType = "DRIVER";
+            } else if (contactId || ledgerEntry.contactModel === "Customer") {
+                detectedType = "NON_DRIVER_CUSTOMER";
+            } else {
+                detectedType = ledgerEntry.type === "CREDIT" ? "VENDOR" : "DRIVER";
+            }
+        }
+    }
+
+    transactionObj.detectedType = detectedType;
+
         res.status(200).json({
             success: true,
-            data: transaction
+            data: transactionObj
         });
     } catch (error) {
         console.error("Error in getBankTransactionById controller:", error);
@@ -1260,6 +1782,110 @@ exports.getBankAccountLedgerPdf = async (req, res, next) => {
         );
     } catch (error) {
         console.error("Error in getBankAccountLedgerPdf controller:", error);
+        next(error);
+    }
+};
+
+exports.changeCustomerTransactionAmount = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { amount, notes, entryDate } = req.body;
+
+        if (amount === undefined || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: "Valid positive amount is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role,
+            description: notes,
+            entryDate: entryDate ? new Date(entryDate) : undefined
+        };
+
+        const result = await BankAccountService.updateCustomerTransactionAmount(transactionId, amount, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated customer transaction amount and set-off history",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeCustomerTransactionAmount controller:", error);
+        next(error);
+    }
+};
+
+exports.changeCustomerContact = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { newCustomerId } = req.body;
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateCustomerContact(transactionId, newCustomerId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated customer contact and re-applied set-off",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeCustomerContact controller:", error);
+        next(error);
+    }
+};
+
+exports.changeVendorTransactionAmount = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { amount, notes, entryDate } = req.body;
+
+        if (amount === undefined || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: "Valid positive amount is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role,
+            description: notes,
+            entryDate: entryDate ? new Date(entryDate) : undefined
+        };
+
+        const result = await BankAccountService.updateVendorTransactionAmount(transactionId, amount, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated vendor transaction amount and bill set-off history",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeVendorTransactionAmount controller:", error);
+        next(error);
+    }
+};
+
+exports.changeVendorContact = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { newSupplierId } = req.body;
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateVendorContact(transactionId, newSupplierId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated vendor contact and re-applied bill set-off",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeVendorContact controller:", error);
         next(error);
     }
 };

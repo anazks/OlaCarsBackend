@@ -1304,6 +1304,11 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             existingInv = await Invoice.findOne({ customer: customerDoc._id, weekNumber, invoiceType: "RENTAL", isDeleted: false });
         }
 
+        // Is Inclusive Tax check (case-insensitive)
+        const isInclusiveTaxVal = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
+        const taxInclusiveParsed = isInclusiveTaxVal !== undefined ?
+            (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1') : true;
+
         // Parse line items
         const lineItems = [];
         let calculatedSubtotal = 0;
@@ -1316,8 +1321,8 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             if (!itemName) continue;
 
             const qty = Number(getRowVal(r, ["Quantity", "quantity"])) || 1;
-            const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice", "unit_price", "rate"])) || 0;
-            const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal", "bcy_total", "total"])) || (qty * unitPrice);
+            const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal", "Total", "total", "bcy_total", "amount"])) || 0;
+            const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice", "unit_price", "rate"])) || (qty > 0 ? itemTotal / qty : itemTotal);
 
             // Calculate tax for this line item
             let taxPct = defaultTaxRate;
@@ -1331,7 +1336,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             itemTaxRate = taxPct;
 
             const itemTaxAmtVal = getRowVal(r, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"]);
-            const taxAmt = Number(itemTaxAmtVal) || (itemTotal * (taxPct / 100));
+            const taxAmt = Number(itemTaxAmtVal) || (taxInclusiveParsed ? Math.round((itemTotal * (taxPct / (100 + taxPct))) * 100) / 100 : Math.round((itemTotal * (taxPct / 100)) * 100) / 100);
 
             lineItems.push({
                 name: itemName,
@@ -1443,42 +1448,60 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         const discountAmount = Number(getRowVal(headerRow, ["Entity Discount Amount", "entityDiscountAmount"])) ||
             Number(getRowVal(headerRow, ["Discount Amount", "discountAmount"])) || 0;
 
-        // Is Inclusive Tax check (case-insensitive)
-        const isInclusiveTaxVal = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
-        const taxInclusiveParsed = isInclusiveTaxVal !== undefined &&
-            (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1');
-
-        const taxAmount = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || calculatedTaxAmount;
         const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || calculatedSubtotal;
+        let taxAmount = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || 0;
 
         let baseAmount;
         let totalAmountDue;
 
         if (taxInclusiveParsed) {
-            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || (subtotal - discountAmount);
-            baseAmount = totalAmountDue - taxAmount;
+            totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || subtotal;
+            if (!taxAmount) {
+                taxAmount = calculatedTaxAmount || (itemTaxRate > 0 ? Math.round((totalAmountDue * (itemTaxRate / (100 + itemTaxRate))) * 100) / 100 : 0);
+            }
+            baseAmount = Math.max(0, totalAmountDue - taxAmount);
         } else {
             baseAmount = subtotal - discountAmount;
+            if (!taxAmount) {
+                taxAmount = calculatedTaxAmount || (itemTaxRate > 0 ? Math.round((baseAmount * (itemTaxRate / 100)) * 100) / 100 : 0);
+            }
             totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || (baseAmount + taxAmount);
         }
 
-        const balance = Number(getRowVal(headerRow, ["Balance", "balance", "bcy_balance", "balance_amount"])) || 0;
+        const balance = totalAmountDue;
 
-        // Map status: Closed/Paid -> PAID, Overdue -> OVERDUE, Draft -> DRAFT, Cancelled/Rejected -> CANCELLED, Pending -> PENDING
-        const rawStatus = (getRowVal(headerRow, ["Invoice Status", "status", "invoice_status"]) || "PENDING").toString().trim().toUpperCase();
+        // Format dates
+        const dueDate = parseFlexibleDate(getRowVal(headerRow, ["Due Date", "dueDate", "due_date"])) || new Date();
+        const generatedAt = parseFlexibleDate(getRowVal(headerRow, ["Invoice Date", "invoiceDate", "date", "txn_posting_date", "invoice_date"])) || new Date();
+
+        // Strict Status Validation: Only PENDING or OVERDUE are allowed
+        const rawStatusVal = getRowVal(headerRow, ["Invoice Status", "status", "invoice_status"]);
         let status = "PENDING";
-        if (rawStatus === "CLOSED" || rawStatus === "PAID") {
-            status = "PAID";
-        } else if (rawStatus === "OVERDUE") {
-            status = "OVERDUE";
-        } else if (rawStatus === "DRAFT") {
-            status = "DRAFT";
-        } else if (rawStatus === "CANCELLED" || rawStatus === "REJECTED") {
-            status = "CANCELLED";
+
+        if (rawStatusVal !== undefined && rawStatusVal !== null && String(rawStatusVal).trim() !== "") {
+            const cleanStatus = String(rawStatusVal).trim().toUpperCase();
+            if (cleanStatus === "PENDING" || cleanStatus === "OPEN") {
+                status = "PENDING";
+            } else if (cleanStatus === "OVERDUE") {
+                status = "OVERDUE";
+            } else {
+                errors.push(`Invoice group "${key}" (Row ${origIdx}): Invalid Invoice Status "${rawStatusVal}". Only "PENDING" or "OVERDUE" statuses are allowed for bulk invoice upload.`);
+                continue;
+            }
+        } else {
+            // Default status: check if overdue by due date
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (dueDate < today) {
+                status = "OVERDUE";
+            }
         }
 
-        const amountPaid = status === "PAID" ? totalAmountDue : Math.max(0, totalAmountDue - balance);
-        const finalBalance = status === "PAID" ? 0 : balance;
+        // Bulk uploaded invoices only have gross billed amounts (no pre-paid amount)
+        const amountPaid = 0;
+        const finalBalance = totalAmountDue;
+        const payments = [];
+        const paidAt = undefined;
 
         // Map Notes: Invoice ID and Tax ID are separately recorded in note field if they aren't already included
         const notesList = [];
@@ -1512,22 +1535,6 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         // Terms & Conditions column
         const rawTerms = getRowVal(headerRow, ["Terms & Conditions", "Terms and Conditions", "termsAndConditions", "terms"]);
         const terms = rawTerms ? String(rawTerms).trim() : undefined;
-
-        // Format dates
-        const dueDate = parseFlexibleDate(getRowVal(headerRow, ["Due Date", "dueDate", "due_date"])) || new Date();
-        const generatedAt = parseFlexibleDate(getRowVal(headerRow, ["Invoice Date", "invoiceDate", "date", "txn_posting_date", "invoice_date"])) || new Date();
-
-        const payments = [];
-        let paidAt = undefined;
-        if (status === "PAID" || amountPaid > 0) {
-            payments.push({
-                amount: amountPaid,
-                paidAt: dueDate,
-                paymentMethod: "Bank Transfer", // User requested all payment methods to be Bank Transfer on bulk upload
-                note: "Bulk upload payment"
-            });
-            paidAt = dueDate;
-        }
 
         const newInvoiceData = {
             invoiceNumber,

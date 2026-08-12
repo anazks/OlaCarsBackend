@@ -13,6 +13,16 @@ const addTask = async (woId, taskData) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
+    if (!taskData.taskTemplateId && taskData.description) {
+        const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
+        const matchedTemplate = await TaskTemplate.findOne({
+            name: { $regex: new RegExp(`^${taskData.description.trim()}$`, "i") }
+        });
+        if (matchedTemplate) {
+            taskData.taskTemplateId = matchedTemplate._id;
+        }
+    }
+
     wo.tasks.push(taskData);
     await wo.save();
     return wo;

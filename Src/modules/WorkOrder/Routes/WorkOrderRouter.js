@@ -26,6 +26,10 @@ const {
     generateBillHandler,
     releaseVehicleHandler,
     toggleTaskDoableHandler,
+    getPendingInventoryApprovalsHandler,
+    approvePartHandler,
+    rejectPartHandler,
+    approveAllPartsHandler,
 } = require("../Controller/WorkOrderController");
 const upload = require("../../../utils/multerConfig.js");
 
@@ -147,6 +151,17 @@ router.get(
     authenticate,
     hasPermission("WORK_ORDER_VIEW"),
     getWorkOrdersHandler
+);
+
+// ═══════════════════════════════════════════════════════════════════════
+//  INVENTORY APPROVAL ROUTES
+// ═══════════════════════════════════════════════════════════════════════
+
+router.get(
+    "/inventory/pending-approvals",
+    authenticate,
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF),
+    getPendingInventoryApprovalsHandler
 );
 
 /**
@@ -465,6 +480,27 @@ router.put(
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     hasPermission("WORK_ORDER_EDIT"),
     updatePartHandler
+);
+
+router.put(
+    "/:id/parts/:partId/approve",
+    authenticate,
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
+    approvePartHandler
+);
+
+router.put(
+    "/:id/parts/:partId/reject",
+    authenticate,
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
+    rejectPartHandler
+);
+
+router.put(
+    "/:id/parts/approve-all",
+    authenticate,
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
+    approveAllPartsHandler
 );
 
 /**

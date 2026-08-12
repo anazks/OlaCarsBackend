@@ -23,7 +23,7 @@ exports.createCreditNote = async (req, res) => {
         const savedDoc = await CreditNoteService.createCreditNote(creditNoteData, actor);
         res.status(201).json({ 
             success: true, 
-            message: "Credit Note issued successfully in OPEN status.",
+            message: "Credit Note issued successfully in PENDING status.",
             data: savedDoc 
         });
     } catch (error) {
@@ -56,15 +56,18 @@ exports.applyCreditNote = async (req, res) => {
  */
 exports.getAllCreditNotes = async (req, res) => {
     try {
-        const { page, limit, driverId, customerId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate } = req.query;
-        console.log('CreditNote Query Params:', { page, limit, driverId, customerId, status, invoiceId, search, sortBy, sortOrder, startDate, endDate });
+        const { page, limit, driverId, customerId, supplierId, targetType, status, invoiceId, search, sortBy, sortOrder, startDate, endDate } = req.query;
+        console.log('CreditNote Query Params:', { page, limit, driverId, customerId, supplierId, targetType, status, invoiceId, search, sortBy, sortOrder, startDate, endDate });
         const filter = {};
         if (driverId) filter.driverId = driverId;
         if (customerId) filter.customerId = customerId;
+        if (supplierId) filter.supplierId = supplierId;
+        if (targetType === 'CUSTOMER') filter.customerId = { $exists: true, $ne: null };
+        if (targetType === 'SUPPLIER') filter.supplierId = { $exists: true, $ne: null };
         if (status) filter.status = status;
         if (invoiceId) filter.invoiceId = invoiceId;
 
-        const result = await CreditNoteService.getCreditNotes(filter, { page, limit, search, sortBy, sortOrder, startDate, endDate });
+        const result = await CreditNoteService.getCreditNotes(filter, { page, limit, search, sortBy, sortOrder, startDate, endDate, supplierId });
         res.status(200).json({ 
             success: true, 
             data: result.data,

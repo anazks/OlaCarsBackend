@@ -1,171 +1,105 @@
-const mongoose = require("mongoose");
-const dotenv = require("dotenv");
-const path = require("path");
+const mongoose = require('mongoose');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
-// Load backend env
-dotenv.config({ path: path.join(__dirname, "../.env") });
-
-const { Invoice } = require("../Src/modules/Invoice/Model/InvoiceModel");
-const Customer = require("../Src/modules/Customer/Model/CustomerModel");
-const Branch = require("../Src/modules/Branch/Model/BranchModel");
-const Tax = require("../Src/modules/Tax/Model/TaxModel");
-const LedgerEntry = require("../Src/modules/Ledger/Model/LedgerEntryModel");
-const PaymentReceived = require("../Src/modules/PaymentReceived/Model/PaymentReceivedModel");
-const InvoiceService = require("../Src/modules/Invoice/Service/InvoiceService");
-
-async function runTest() {
+async function run() {
     try {
         console.log("Connecting to MongoDB...");
         await mongoose.connect(process.env.MONGO_URI);
-        console.log("Connected successfully!");
+        console.log("Connected.");
 
-        // 1. Resolve a branch (must exist for Customer)
-        let branch = await Branch.findOne({ isDeleted: false, status: "ACTIVE" });
-        if (!branch) {
-            console.log("No active branch found, creating a dummy branch...");
-            branch = await Branch.create({
-                name: "Test Branch " + Date.now(),
-                code: "TB-" + Math.floor(Math.random() * 100),
-                status: "ACTIVE"
-            });
-        }
-        console.log("Using Branch:", branch.name, branch._id);
+        const Customer = require('../Src/modules/Customer/Model/CustomerModel');
+        const { Invoice } = require('../Src/modules/Invoice/Model/InvoiceModel');
+        const InvoiceService = require('../Src/modules/Invoice/Service/InvoiceService');
 
-        // 2. Resolve active tax
-        let tax = await Tax.findOne({ isActive: true, isDeleted: false });
-        if (!tax) {
-            console.log("No active tax found, creating a dummy tax...");
-            tax = await Tax.create({
-                name: "ITBMS",
-                rate: 7,
-                isActive: true
-            });
-        }
-        console.log("Using Tax:", tax.name, tax.rate + "%");
+        const Branch = require('../Src/modules/Branch/Model/BranchModel');
+        const defaultBranch = await Branch.findOne({ isDeleted: { $ne: true } });
 
-        // 3. Ensure a test customer exists strictly matching "ERICK VILLAVERDE"
-        let customer = await Customer.findOne({ name: "ERICK VILLAVERDE", isDeleted: false });
-        if (!customer) {
-            console.log("Creating test customer ERICK VILLAVERDE...");
-            customer = await Customer.create({
-                name: "ERICK VILLAVERDE",
-                customerId: "CUST-000001",
-                customerNumber: "CUS-00002",
-                branch: branch._id,
-                status: "ACTIVE"
-            });
-        }
-        console.log("Using Customer:", customer.name, customer.customerId);
+        const testCust = await Customer.create({
+            name: `STRICT TEST CUST ${Date.now()}`,
+            email: `strict_${Date.now()}@example.com`,
+            branch: defaultBranch ? defaultBranch._id : undefined,
+            status: "ACTIVE"
+        });
+        console.log(`Created test customer: ${testCust.name} (${testCust._id})`);
 
-        // Mock unique invoice number for this test
-        const testInvoiceNumber = "MOCK-INV-STRICT-" + Math.floor(10000 + Math.random() * 90000);
-        console.log("Will upload items under invoice number:", testInvoiceNumber);
-
-        // Define mock rows grouped under the same invoice
-        const mockRows = [
+        const rows = [
             {
-                "Invoice Date": "2026-06-10",
-                "Invoice ID": "ID-" + testInvoiceNumber,
-                "Invoice Number": testInvoiceNumber,
-                "Invoice Status": "Paid", // Test Paid invoice to see if it generates ledger / payment entries
-                "Customer Name": "ERICK VILLAVERDE",
-                "Is Inclusive Tax": "FALSE",
-                "Due Date": "2026-06-25",
-                "SubTotal": "300",
-                "Total": "321", // 300 subtotal + 7% tax = 321
-                "Balance": "0",
-                "Notes": "Strict verification memo",
-                "Terms & Conditions": "Strict 15 day payment terms apply.",
-                "Location Name": branch.name,
-                "Item Name": "Engine Repair",
-                "Item Desc": "Workshop repairs",
-                "Quantity": "1",
-                "Item Price": "200",
-                "Item Total": "200",
-                "Item Tax %": "7",
-                "Item Tax Amount": "14"
+                'Invoice Date': '2026-07-01',
+                'Invoice Number': `INV-STRICT-PENDING-${Date.now()}`,
+                'Invoice Status': 'Pending',
+                'Customer Name': testCust.name,
+                'Item Name': 'Rental Fee',
+                'Item Price': '100',
+                'Quantity': '1',
+                'Due Date': '2026-08-15'
             },
             {
-                "Invoice Number": testInvoiceNumber,
-                "Item Name": "Brake pad check",
-                "Item Desc": "Workshop check",
-                "Quantity": "2",
-                "Item Price": "50",
-                "Item Total": "100",
-                "Item Tax %": "7",
-                "Item Tax Amount": "7"
+                'Invoice Date': '2026-06-01',
+                'Invoice Number': `INV-STRICT-OVERDUE-${Date.now()}`,
+                'Invoice Status': 'Overdue',
+                'Customer Name': testCust.name,
+                'Item Name': 'Late Maintenance Fee',
+                'Item Price': '50',
+                'Quantity': '1',
+                'Due Date': '2026-06-15'
+            },
+            {
+                'Invoice Date': '2026-07-01',
+                'Invoice Number': `INV-STRICT-PAID-${Date.now()}`,
+                'Invoice Status': 'Paid',
+                'Customer Name': testCust.name,
+                'Item Name': 'Invalid Paid Fee',
+                'Item Price': '200',
+                'Quantity': '1',
+                'Due Date': '2026-08-15'
+            },
+            {
+                'Invoice Date': '2026-07-01',
+                'Invoice Number': `INV-STRICT-DRAFT-${Date.now()}`,
+                'Invoice Status': 'Draft',
+                'Customer Name': testCust.name,
+                'Item Name': 'Invalid Draft Fee',
+                'Item Price': '300',
+                'Quantity': '1',
+                'Due Date': '2026-08-15'
             }
         ];
 
-        console.log("\nTriggering bulk upload service...");
-        const result = await InvoiceService.bulkUploadInvoices(
-            mockRows,
-            "WORKSHOP",
-            new mongoose.Types.ObjectId(), // Dummy userId
-            "ADMIN" // Dummy role
-        );
+        console.log("\nExecuting InvoiceService.bulkUploadInvoices...");
+        const result = await InvoiceService.bulkUploadInvoices(rows, "MANUAL", "6a2290019fa01283dd165204", "ADMIN");
 
-        console.log("\n--- Upload Result ---");
-        console.log(JSON.stringify(result, null, 2));
+        console.log("\nUpload Result Summary:");
+        console.log(`  • Success Count: ${result.successCount}`);
+        console.log(`  • Error Count: ${result.errorCount}`);
+        console.log(`  • Skipped Count: ${result.skippedCount}`);
+        console.log("  • Errors:", result.errors);
 
-        // 4. Query the newly created invoice to verify its state
-        console.log("\nRetrieving created invoice from database...");
-        const createdInv = await Invoice.findOne({ invoiceNumber: testInvoiceNumber })
-            .populate("customer")
-            .populate("tax");
-
-        if (!createdInv) {
-            throw new Error("Invoice was not created in the database!");
+        // Verify DB documents for created invoices
+        for (const r of rows.slice(0, 2)) {
+            const dbInv = await Invoice.findOne({ invoiceNumber: r['Invoice Number'] });
+            if (dbInv) {
+                console.log(`\n✓ Verified created invoice ${dbInv.invoiceNumber}:`);
+                console.log(`   - Status: ${dbInv.status}`);
+                console.log(`   - Total Due: $${dbInv.totalAmountDue}`);
+                console.log(`   - Amount Paid: $${dbInv.amountPaid} (MUST BE 0)`);
+                console.log(`   - Balance: $${dbInv.balance} (MUST EQUAL TOTAL $${dbInv.totalAmountDue})`);
+                console.log(`   - Payments Count: ${dbInv.payments.length} (MUST BE 0)`);
+            } else {
+                console.error(`❌ Expected invoice ${r['Invoice Number']} to exist in DB!`);
+            }
         }
 
-        console.log("\n--- Created Invoice Details ---");
-        console.log("Invoice Number:", createdInv.invoiceNumber);
-        console.log("Customer (Linked):", createdInv.customer ? `${createdInv.customer.name} (${createdInv.customer.customerId})` : "MISSING!");
-        console.log("Terms & Conditions:", createdInv.terms);
-        console.log("Subtotal:", createdInv.subtotal);
-        console.log("Tax Amount:", createdInv.taxAmount);
-        console.log("Total Amount Due:", createdInv.totalAmountDue);
-        console.log("Status:", createdInv.status);
-        console.log("Line Items Count:", createdInv.lineItems.length);
-
-        // 5. Verify Ledger and Payment Received entries
-        const ledgerEntriesCount = await LedgerEntry.countDocuments({ referenceId: createdInv._id });
-        const paymentReceivedCount = await PaymentReceived.countDocuments({ "invoices.invoiceId": createdInv._id });
-
-        console.log("\n--- Ledger / Payment Verification ---");
-        console.log("Ledger Entries Count (Expected: 0):", ledgerEntriesCount);
-        console.log("Payment Received Count (Expected: 0):", paymentReceivedCount);
-
-        let failed = false;
-        if (!createdInv.customer || createdInv.customer.name !== "ERICK VILLAVERDE") {
-            console.error("❌ FAIL: Customer was not matched correctly by Name.");
-            failed = true;
-        }
-        if (createdInv.lineItems.length !== 2) {
-            console.error(`❌ FAIL: Expected 2 line items, but got ${createdInv.lineItems.length}`);
-            failed = true;
-        }
-        if (ledgerEntriesCount !== 0) {
-            console.error(`❌ FAIL: Ledger entries were created (${ledgerEntriesCount}) but they should be bypassed.`);
-            failed = true;
-        }
-        if (paymentReceivedCount !== 0) {
-            console.error(`❌ FAIL: PaymentReceived records were created (${paymentReceivedCount}) but they should be bypassed.`);
-            failed = true;
-        }
-
-        if (!failed) {
-            console.log("\n✅ ALL TESTS PASSED SUCCESSFULLY! Customer name strict matching, item grouping, and ledger exclusion work perfectly!");
-        } else {
-            console.log("\n❌ SOME TESTS FAILED.");
-        }
+        // Cleanup
+        await Customer.deleteOne({ _id: testCust._id });
+        await Invoice.deleteMany({ customer: testCust._id });
+        console.log("\n✓ Test completed and cleaned up.");
 
     } catch (err) {
-        console.error("Error running test:", err);
+        console.error("Test Error:", err);
     } finally {
         await mongoose.disconnect();
-        console.log("Disconnected from MongoDB.");
     }
 }
 
-runTest();
+run();

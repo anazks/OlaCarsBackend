@@ -27,7 +27,7 @@ exports.createManualJournal = async (data) => {
     // 1. Create Journal Header
     const journal = await createManualJournalRepo({
         ...journalData,
-        totalAmount: totalDebit,
+        totalAmount: journalData.totalAmount || totalDebit,
         status: "POSTED" // Auto-post for now as requested
     });
 

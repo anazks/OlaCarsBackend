@@ -20,7 +20,9 @@ const createDebitNote = async (data, actor) => {
     }
 
     let finalCustomerId = customerId;
-    if (!finalCustomerId && driverId) {
+    let finalSupplierId = data.supplierId;
+
+    if (!finalCustomerId && !finalSupplierId && driverId) {
         const Customer = require("../../Customer/Model/CustomerModel");
         const customerDoc = await Customer.findOne({ driver: driverId });
         if (customerDoc) {
@@ -28,31 +30,56 @@ const createDebitNote = async (data, actor) => {
         }
     }
 
-    if (!finalCustomerId) {
-        throw new Error("Customer is required (directly or resolved via Driver).");
+    if (!finalCustomerId && !finalSupplierId) {
+        throw new Error("Customer or Supplier is required.");
     }
 
-    const Customer = require("../../Customer/Model/CustomerModel");
-    const customer = await Customer.findById(finalCustomerId);
-    if (!customer) {
-        throw new Error("Customer not found.");
+    if (finalCustomerId) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const customer = await Customer.findById(finalCustomerId);
+        if (!customer) {
+            throw new Error("Customer not found.");
+        }
     }
 
-    const debitNoteNumber = `DN-${Date.now()}`;
+    if (finalSupplierId) {
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+        const supplier = await Supplier.findById(finalSupplierId);
+        if (!supplier) {
+            throw new Error("Supplier not found.");
+        }
+    }
 
-    // 1. Create the Debit Note Record in OPEN status
+    const isDepositBool = data.isDeposit === true || String(data.isDeposit) === 'true';
+
+    let debitNoteNumber = data.debitNoteNumber;
+    if (!debitNoteNumber) {
+        const prefix = isDepositBool ? 'DP-' : 'DN-';
+        debitNoteNumber = `${prefix}${Date.now()}`;
+    } else if (isDepositBool && !debitNoteNumber.toUpperCase().startsWith('DP-')) {
+        debitNoteNumber = `DP-${debitNoteNumber}`;
+    }
+
+    const initialBalance = data.balance !== undefined ? Number(data.balance) : amount;
+    const initialAmountPaid = data.amountPaid !== undefined ? Number(data.amountPaid) : Math.max(0, amount - initialBalance);
+
+    // 1. Create the Debit Note Record in PENDING status
     const debitNoteDoc = await DebitNote.create({
         debitNoteNumber,
-        customerId: finalCustomerId,
+        isDeposit: isDepositBool,
+        customerId: finalCustomerId || undefined,
+        supplierId: finalSupplierId || undefined,
         driverId: driverId || undefined,
         invoiceId: invoiceId || undefined,
         invoices: invoices || (invoiceId ? [invoiceId] : []),
         taxId: taxId || undefined,
         amount,
+        amountPaid: initialAmountPaid,
+        balance: initialBalance,
         reason,
         notes,
         debitNoteDate: debitNoteDate || new Date(),
-        status: 'OPEN',
+        status: data.status || 'PENDING',
         supportingDocument,
         createdBy: actor.id || actor._id,
         creatorRole: actor.role
@@ -71,7 +98,7 @@ const createDebitNote = async (data, actor) => {
 };
 
 /**
- * Applies an existing OPEN Debit Note to a target Invoice (increases totalAmountDue & balance).
+ * Applies an existing PENDING Debit Note to a target Invoice (increases totalAmountDue & balance).
  */
 const applyDebitNoteToInvoice = async (id, invoiceId) => {
     const debitNote = await DebitNote.findById(id);
@@ -79,8 +106,8 @@ const applyDebitNoteToInvoice = async (id, invoiceId) => {
         throw new Error("Debit Note not found.");
     }
 
-    if (!['OPEN', 'DRAFT'].includes(debitNote.status)) {
-        throw new Error("Only OPEN or DRAFT debit notes can be applied to invoices.");
+    if (!['PENDING', 'OPEN', 'DRAFT'].includes(debitNote.status)) {
+        throw new Error("Only PENDING, OPEN, or DRAFT debit notes can be applied to invoices.");
     }
 
     const invoice = await Invoice.findById(invoiceId);
@@ -116,11 +143,11 @@ const applyDebitNoteToInvoice = async (id, invoiceId) => {
         { runValidators: false }
     );
 
-    // Link invoice to Debit Note and mark as CLOSED
+    // Link invoice to Debit Note and mark as PAID with zero remaining balance
     const closedNote = await DebitNote.findByIdAndUpdate(
         id,
         { 
-            $set: { invoiceId, status: 'CLOSED' },
+            $set: { invoiceId, status: 'PAID', amountPaid: debitNote.amount, balance: 0 },
             $addToSet: { invoices: invoiceId }
         },
         { new: true, runValidators: false }
@@ -153,6 +180,10 @@ const getDebitNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =>
         }
     }
 
+    if (pagination.supplierId) {
+        filter.supplierId = pagination.supplierId;
+    }
+
     if (pagination.search) {
         const searchRegex = { $regex: pagination.search, $options: 'i' };
 
@@ -174,12 +205,22 @@ const getDebitNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =>
         }).select('_id');
         const customerIds = customers.map(c => c._id);
 
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+        const suppliers = await Supplier.find({
+            $or: [
+                { "name": searchRegex },
+                { "supplierCode": searchRegex }
+            ]
+        }).select('_id');
+        const supplierIds = suppliers.map(s => s._id);
+
         filter.$or = [
             { debitNoteNumber: searchRegex },
             { reason: searchRegex },
             { notes: searchRegex },
             { driverId: { $in: driverIds } },
-            { customerId: { $in: customerIds } }
+            { customerId: { $in: customerIds } },
+            { supplierId: { $in: supplierIds } }
         ];
     }
 
@@ -197,6 +238,10 @@ const getDebitNotes = async (query = {}, pagination = { page: 1, limit: 10 }) =>
         .populate({
             path: 'customerId',
             select: 'customerId name email phone branch'
+        })
+        .populate({
+            path: 'supplierId',
+            select: 'supplierCode name email phone companyName category'
         })
         .populate({
             path: 'driverId',
@@ -230,6 +275,10 @@ const getDebitNoteById = async (id) => {
             select: 'customerId name email phone branch address city state country status'
         })
         .populate({
+            path: 'supplierId',
+            select: 'supplierCode name email phone companyName category address city state country'
+        })
+        .populate({
             path: 'driverId',
             select: 'driverId personalInfo branch currentVehicle'
         })
@@ -247,10 +296,10 @@ const getDebitNoteById = async (id) => {
 const voidDebitNote = async (id) => {
     const debitNote = await DebitNote.findById(id);
     if (!debitNote) throw new Error("Debit Note not found.");
-    if (debitNote.status === 'VOID') throw new Error("Debit Note is already voided.");
+    if (['CANCELLED', 'VOID'].includes(debitNote.status)) throw new Error("Debit Note is already cancelled/voided.");
 
     // If applied to an invoice, revert invoice totalAmountDue & balance
-    if (debitNote.invoiceId && debitNote.status === 'CLOSED') {
+    if (debitNote.invoiceId && ['PAID', 'PARTIAL', 'CLOSED', 'APPLIED'].includes(debitNote.status)) {
         const invoice = await Invoice.findById(debitNote.invoiceId);
         if (invoice) {
             const revertedTotal = Math.max(0, (invoice.totalAmountDue || 0) - debitNote.amount);
@@ -265,7 +314,7 @@ const voidDebitNote = async (id) => {
         }
     }
 
-    debitNote.status = 'VOID';
+    debitNote.status = 'CANCELLED';
     await debitNote.save();
     return debitNote;
 };
@@ -276,7 +325,7 @@ const voidDebitNote = async (id) => {
 const updateDebitNote = async (id, data) => {
     const debitNote = await DebitNote.findById(id);
     if (!debitNote) throw new Error("Debit Note not found.");
-    if (debitNote.status === 'VOID') throw new Error("Cannot update a voided Debit Note.");
+    if (['CANCELLED', 'VOID'].includes(debitNote.status)) throw new Error("Cannot update a cancelled/voided Debit Note.");
 
     if (data.reason !== undefined) debitNote.reason = data.reason;
     if (data.notes !== undefined) debitNote.notes = data.notes;

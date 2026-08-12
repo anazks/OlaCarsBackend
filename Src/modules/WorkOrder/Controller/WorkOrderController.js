@@ -500,6 +500,62 @@ const generateBillHandler = async (req, res) => {
 
 // ─── Toggle Task Doable (atomic check + part add/remove) ─────────────
 
+// Helper to filter parts by vehicle make/model with model specificity
+const filterPartsForVehicle = (parts, vehicleObj) => {
+    if (!vehicleObj || typeof vehicleObj !== 'object') return parts;
+    const rawMake = (vehicleObj.basicDetails?.make || '').toLowerCase().trim();
+    const rawModel = (vehicleObj.basicDetails?.model || '').toLowerCase().trim();
+
+    const makeClean = rawMake.replace(/[^a-z0-9]/g, '');
+    const modelClean = rawModel.replace(/[^a-z0-9]/g, '');
+
+    // Canonical map for brand makes
+    let canonicalMake = makeClean;
+    if (makeClean.includes('jetu') || makeClean.includes('jetour')) canonicalMake = 'jetour';
+    else if (makeClean.includes('gell') || makeClean.includes('geel')) canonicalMake = 'geely';
+    else if (makeClean.includes('soue')) canonicalMake = 'soueast';
+    else if (makeClean.includes('tiggo') || makeClean.includes('cher')) canonicalMake = 'chery';
+    else if (makeClean.includes('kia')) canonicalMake = 'kia';
+    else if (makeClean.includes('honda')) canonicalMake = 'honda';
+
+    // Canonical map for models
+    let canonicalModel = modelClean;
+    if (modelClean.includes('brv')) canonicalModel = 'brv';
+    else if (modelClean.includes('x70')) canonicalModel = 'x70';
+    else if (modelClean.includes('s07')) canonicalModel = 's07';
+    else if (modelClean.includes('okvango') || modelClean.includes('okavango')) canonicalModel = 'okavango';
+    else if (modelClean.includes('carens')) canonicalModel = 'carens';
+    else if (modelClean.includes('soluto')) canonicalModel = 'soluto';
+    else if (modelClean.includes('8pro') || modelClean.includes('tiggo')) canonicalModel = 'tiggo';
+
+    const ALL_KNOWN_MODELS = ['carens', 'soluto', 'brv', 'x70', 's07', 'okavango', 'tiggo'];
+
+    return parts.filter(p => {
+        const nameClean = (p.partName || p.partNumber || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const descClean = (p.description || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const text = `${nameClean} ${descClean}`;
+
+        // 1. Model Specificity Rule:
+        const mentionedModel = ALL_KNOWN_MODELS.find(m => text.includes(m));
+        if (mentionedModel) {
+            return canonicalModel ? text.includes(canonicalModel) : false;
+        }
+
+        // 2. Make Rule:
+        if (canonicalMake) {
+            if (canonicalMake === 'jetour' || canonicalMake === 'soueast') {
+                return text.includes('jetour') || text.includes('soueast') || text.includes('souest');
+            }
+            if (canonicalMake === 'chery') {
+                return text.includes('chery') || text.includes('cherry') || text.includes('tiggo');
+            }
+            return text.includes(canonicalMake);
+        }
+
+        return true;
+    });
+};
+
 const toggleTaskDoableHandler = async (req, res) => {
     try {
         const { id, taskId } = req.params;
@@ -510,6 +566,17 @@ const toggleTaskDoableHandler = async (req, res) => {
         if (!task) return res.status(404).json({ success: false, message: "Task not found." });
 
         const nextDoable = !task.isDoable;
+        const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
+
+        // If templateId is missing, attempt auto-linking by task description
+        if (!task.taskTemplateId && task.description) {
+            const matchedTemplate = await TaskTemplate.findOne({
+                name: { $regex: new RegExp(`^${task.description.trim()}$`, "i") }
+            });
+            if (matchedTemplate) {
+                task.taskTemplateId = matchedTemplate._id;
+            }
+        }
 
         if (!task.taskTemplateId) {
             // No template linked — just toggle isDoable
@@ -519,7 +586,6 @@ const toggleTaskDoableHandler = async (req, res) => {
             return res.status(200).json({ success: true, data: updated });
         }
 
-        const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
         const template = await TaskTemplate.findById(task.taskTemplateId)
             .populate("linkedParts.inventoryPartId", "partName partNumber quantityOnHand quantityReserved unitCost");
 
@@ -531,61 +597,8 @@ const toggleTaskDoableHandler = async (req, res) => {
             return res.status(200).json({ success: true, data: updated });
         }
 
-        // Filter linked parts by vehicle make/model
-        let applicableParts = template.linkedParts;
-        if (wo.vehicleId && typeof wo.vehicleId === 'object') {
-            const make = (wo.vehicleId.basicDetails?.make || '').toLowerCase().trim();
-            const model = (wo.vehicleId.basicDetails?.model || '').toLowerCase().trim();
-            if (make || model) {
-                const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
-                const dbMakes = await Vehicle.distinct("basicDetails.make").catch(() => []);
-                const dbModels = await Vehicle.distinct("basicDetails.model").catch(() => []);
-
-                const knownModels = Array.from(new Set([
-                    'carens', 'soluto', 'brv', 'x70', 's07', 'okavango', 'tiggo',
-                    ...dbModels.map(m => (m || '').toLowerCase().trim()).filter(m => m.length >= 3)
-                ]));
-                const knownMakes = Array.from(new Set([
-                    'kia', 'honda', 'jetour', 'soueast', 'souest', 'geely', 'chery', 'cherry',
-                    ...dbMakes.map(mk => (mk || '').toLowerCase().trim()).filter(mk => mk.length >= 3)
-                ]));
-                
-                applicableParts = applicableParts.filter(lp => {
-                    const name = (lp.partName || '').toLowerCase();
-                    
-                    // 1. Model specificity check:
-                    // If the part name contains any known model name, it MUST match the vehicle's model name
-                    const mentionsAnyModel = knownModels.some(m => name.includes(m));
-                    if (mentionsAnyModel) {
-                        if (!model) return false;
-                        const specificModelMatch = knownModels.find(m => name.includes(m));
-                        if (specificModelMatch && !model.includes(specificModelMatch)) {
-                            return false;
-                        }
-                    }
-
-                    // 2. Make specificity check:
-                    // If the part name contains any known brand make, it MUST match the vehicle's make
-                    const mentionsAnyMake = knownMakes.some(mk => name.includes(mk));
-                    if (mentionsAnyMake) {
-                        if (!make) return false;
-                        const specificMakeMatch = knownMakes.find(mk => name.includes(mk));
-                        
-                        let normalizedMake = make;
-                        if (make === 'soueast' || make === 'souest') normalizedMake = 'soue';
-                        
-                        let normalizedPartMake = specificMakeMatch;
-                        if (specificMakeMatch === 'soueast' || specificMakeMatch === 'souest') normalizedPartMake = 'soue';
-                        
-                        if (normalizedPartMake && !normalizedMake.includes(normalizedPartMake) && !normalizedPartMake.includes(normalizedMake)) {
-                            return false;
-                        }
-                    }
-
-                    return true;
-                });
-            }
-        }
+        // Filter linked parts by vehicle make/model using canonical matcher
+        const applicableParts = filterPartsForVehicle(template.linkedParts, wo.vehicleId);
 
         if (nextDoable) {
             // CHECKING — reserve stock & add parts
@@ -662,6 +675,155 @@ const toggleTaskDoableHandler = async (req, res) => {
     }
 };
 
+// ─── Inventory Approval Handlers ─────────────────────────────────────
+
+const getPendingInventoryApprovalsHandler = async (req, res) => {
+    try {
+        const { branchId } = req.query;
+        const { WorkOrder } = require("../Model/WorkOrderModel");
+
+        const query = { "parts.approvalStatus": "PENDING" };
+        if (branchId) query.branchId = branchId;
+
+        const pendingWorkOrders = await WorkOrder.find(query)
+            .populate({
+                path: "vehicleId",
+                select: "basicDetails legalDocs"
+            })
+            .populate("branchId", "name")
+            .populate("parts.inventoryPartId", "partName partNumber quantityOnHand quantityReserved unitCost");
+
+        const items = [];
+        pendingWorkOrders.forEach(wo => {
+            const pendingParts = wo.parts.filter(p => p.approvalStatus === "PENDING");
+            if (pendingParts.length > 0) {
+                items.push({
+                    workOrderId: wo._id,
+                    workOrderNumber: wo.workOrderNumber,
+                    workOrderType: wo.workOrderType,
+                    status: wo.status,
+                    createdAt: wo.createdAt,
+                    branch: wo.branchId,
+                    vehicle: wo.vehicleId ? {
+                        make: wo.vehicleId.basicDetails?.make,
+                        model: wo.vehicleId.basicDetails?.model,
+                        vin: wo.vehicleId.basicDetails?.vin,
+                        registrationNumber: wo.vehicleId.legalDocs?.registrationNumber,
+                    } : null,
+                    pendingParts: pendingParts.map(p => {
+                        const invPart = p.inventoryPartId;
+                        const available = invPart ? (invPart.quantityOnHand - invPart.quantityReserved) : 0;
+                        return {
+                            partId: p._id,
+                            partName: p.partName,
+                            partNumber: p.partNumber,
+                            quantity: p.quantity,
+                            unitCost: p.unitCost,
+                            totalCost: p.totalCost || (p.unitCost * p.quantity),
+                            source: p.source,
+                            status: p.status,
+                            approvalStatus: p.approvalStatus,
+                            inventoryPartId: p.inventoryPartId?._id || p.inventoryPartId,
+                            availableQuantity: available,
+                            inStock: available >= p.quantity,
+                            taskTemplateId: p.taskTemplateId,
+                        };
+                    })
+                });
+            }
+        });
+
+        return res.status(200).json({ success: true, count: items.length, data: items });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const approvePartHandler = async (req, res) => {
+    try {
+        const { id, partId } = req.params;
+        const { WorkOrder } = require("../Model/WorkOrderModel");
+        const wo = await WorkOrder.findById(id);
+        if (!wo) return res.status(404).json({ success: false, message: "Work order not found." });
+
+        const part = wo.parts.id(partId);
+        if (!part) return res.status(404).json({ success: false, message: "Part not found." });
+
+        part.approvalStatus = "APPROVED";
+        part.approvedBy = req.user?.id || req.user?._id;
+        part.approvedAt = new Date();
+
+        await wo.save();
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({ success: true, message: `Part '${part.partName}' approved successfully.`, data: updated });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const rejectPartHandler = async (req, res) => {
+    try {
+        const { id, partId } = req.params;
+        const { reason } = req.body;
+        const { WorkOrder } = require("../Model/WorkOrderModel");
+        const wo = await WorkOrder.findById(id);
+        if (!wo) return res.status(404).json({ success: false, message: "Work order not found." });
+
+        const part = wo.parts.id(partId);
+        if (!part) return res.status(404).json({ success: false, message: "Part not found." });
+
+        if (part.inventoryPartId && part.status === "RESERVED") {
+            const { releaseReservation } = require("../../Inventory/Service/InventoryService");
+            const performer = { id: req.user?.id || req.user?._id, role: req.user?.role };
+            try {
+                await releaseReservation(part.inventoryPartId, part.quantity || 1, performer, id);
+            } catch (err) {
+                console.error("Failed to release reservation on reject:", err);
+            }
+        }
+
+        part.approvalStatus = "REJECTED";
+        part.approvedBy = req.user?.id || req.user?._id;
+        part.approvedAt = new Date();
+        part.rejectionReason = reason || "Rejected by Workshop Manager";
+
+        await wo.save();
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({ success: true, message: `Part '${part.partName}' rejected.`, data: updated });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const approveAllPartsHandler = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { WorkOrder } = require("../Model/WorkOrderModel");
+        const wo = await WorkOrder.findById(id);
+        if (!wo) return res.status(404).json({ success: false, message: "Work order not found." });
+
+        let approvedCount = 0;
+        wo.parts.forEach(p => {
+            if (p.approvalStatus === "PENDING") {
+                p.approvalStatus = "APPROVED";
+                p.approvedBy = req.user?.id || req.user?._id;
+                p.approvedAt = new Date();
+                approvedCount++;
+            }
+        });
+
+        await wo.save();
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({
+            success: true,
+            message: `Successfully approved all ${approvedCount} pending part(s) for Work Order.`,
+            data: updated
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     createWorkOrderHandler,
     getWorkOrdersHandler,
@@ -682,5 +844,9 @@ module.exports = {
     generateBillHandler,
     releaseVehicleHandler,
     toggleTaskDoableHandler,
+    getPendingInventoryApprovalsHandler,
+    approvePartHandler,
+    rejectPartHandler,
+    approveAllPartsHandler,
 };
 
