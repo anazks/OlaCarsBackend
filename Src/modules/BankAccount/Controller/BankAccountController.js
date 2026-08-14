@@ -1618,25 +1618,27 @@ exports.getBankTransactionById = async (req, res, next) => {
         } else if (hasSupplier && (!detectedType || detectedType === "NON_DRIVER_CUSTOMER")) {
             detectedType = "VENDOR";
         } else if (hasCustomer) {
-            // Check if Customer is Driver
-            const Customer = require("../../Customer/Model/CustomerModel");
-            let isDriver = false;
+            if (!detectedType) {
+                // Check if Customer is Driver only if bankTxType is not explicitly set
+                const Customer = require("../../Customer/Model/CustomerModel");
+                let isDriver = false;
 
-            const contactId = ledgerEntry.contact?._id || ledgerEntry.contact || (historyDoc && historyDoc.customerId);
-            if (contactId) {
-                const custDoc = await Customer.findById(contactId);
-                if (custDoc && (custDoc.driver || custDoc.driverId || custDoc.isDriver)) {
+                const contactId = ledgerEntry.contact?._id || ledgerEntry.contact || (historyDoc && historyDoc.customerId);
+                if (contactId) {
+                    const custDoc = await Customer.findById(contactId);
+                    if (custDoc && (custDoc.driver || custDoc.driverId || custDoc.isDriver)) {
+                        isDriver = true;
+                    }
+                }
+                if (ledgerEntry.description && /driver|conductor|chofer/i.test(ledgerEntry.description)) {
                     isDriver = true;
                 }
-            }
-            if (ledgerEntry.description && /driver|conductor|chofer/i.test(ledgerEntry.description)) {
-                isDriver = true;
-            }
 
-            if (isDriver) {
-                detectedType = "DRIVER";
-            } else {
-                detectedType = "NON_DRIVER_CUSTOMER";
+                if (isDriver) {
+                    detectedType = "DRIVER";
+                } else {
+                    detectedType = "NON_DRIVER_CUSTOMER";
+                }
             }
         } else if (!hasCustomer && !hasSupplier && !isInterBank) {
             if (detectedType === "NON_DRIVER_CUSTOMER") {
@@ -1848,7 +1850,7 @@ exports.changeCustomerContact = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: "Successfully updated customer contact and re-applied set-off",
+            message: "Successfully updated customer contact",
             data: result
         });
     } catch (error) {
@@ -1905,6 +1907,62 @@ exports.changeVendorContact = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in changeVendorContact controller:", error);
+        next(error);
+    }
+};
+
+exports.changeInterBankTransactionAmount = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { amount, notes, entryDate } = req.body;
+
+        if (amount === undefined || isNaN(Number(amount)) || Number(amount) <= 0) {
+            return res.status(400).json({ success: false, message: "Valid positive amount is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role,
+            description: notes,
+            entryDate: entryDate ? new Date(entryDate) : undefined
+        };
+
+        const result = await BankAccountService.updateInterBankTransactionAmount(transactionId, amount, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated Inter-Bank transaction amount",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeInterBankTransactionAmount controller:", error);
+        next(error);
+    }
+};
+
+exports.changeLinkedAccountingCode = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { newAccountingCodeId } = req.body;
+
+        if (!newAccountingCodeId) {
+            return res.status(400).json({ success: false, message: "newAccountingCodeId is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateLinkedAccountingCode(transactionId, newAccountingCodeId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated linked accounting code",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeLinkedAccountingCode controller:", error);
         next(error);
     }
 };

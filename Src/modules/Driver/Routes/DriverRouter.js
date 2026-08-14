@@ -1,5 +1,12 @@
 const express = require("express");
 const router = express.Router();
+const { authenticate } = require("../../../shared/middlewares/authMiddleware");
+const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
+const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
+const { ROLES } = require("../../../shared/constants/roles");
+const upload = require("../../../utils/multerConfig");
+const { Driver } = require("../Model/DriverModel");
+
 const {
     addDriver,
     getDrivers,
@@ -17,13 +24,23 @@ const {
     downloadContractPdf,
     downloadStatementPdf,
     cancelContract,
+    verifyAndCorrectDriverPlans,
 } = require("../Controller/DriverController");
-const { authenticate } = require("../../../shared/middlewares/authMiddleware");
-const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
-const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
-const { ROLES } = require("../../../shared/constants/roles");
-const upload = require("../../../utils/multerConfig");
-const { Driver } = require("../Model/DriverModel");
+
+router.post(
+    "/verify-and-correct-plans",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    verifyAndCorrectDriverPlans
+);
+
+router.post(
+    "/data-migration",
+    authenticate,
+    authorize(ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.ADMIN),
+    hasPermission("DRIVER_CREATE"),
+    dataMigrateDrivers
+);
 // Helper to allow the driver to access their own record OR staff with permission
 const hasSelfOrStaffPermission = (permission) => {
     return (req, res, next) => {

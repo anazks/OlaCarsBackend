@@ -409,9 +409,6 @@ const dataMigrateDrivers = async (req, res) => {
             return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
         }
 
-        if (drivers.length > 500) {
-            return res.status(400).json({ success: false, message: "Maximum 500 records per data migration upload." });
-        }
 
         const userRole = req.user.role;
         const userId = req.user.id;
@@ -1022,6 +1019,7 @@ const cancelContract = async (req, res) => {
         const { Driver } = require("../Model/DriverModel");
         const Customer = require("../../Customer/Model/CustomerModel");
         const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
 
         // Fetch driver
         const driver = await Driver.findById(driverId).session(session);
@@ -1034,20 +1032,38 @@ const cancelContract = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // Keep past installments and only remove future pending installments
-        const keptInstallments = (driver.rentTracking || []).filter(item => {
-            // Keep if already paid or partially paid
-            if (item.status !== 'PENDING') return true;
-            // Keep if dueDate is in the past or today (elapsed week)
-            const itemDueDate = new Date(item.dueDate);
-            itemDueDate.setHours(0, 0, 0, 0);
-            if (itemDueDate <= today) return true;
-
-            // Otherwise, it is a future pending week and can be removed
-            return false;
+        // Mark future pending installments (from next week onwards) as CANCELLED with zero balance
+        const updatedRentTracking = (driver.rentTracking || []).map(item => {
+            const rawObj = typeof item.toObject === 'function' ? item.toObject() : item;
+            if (rawObj.status === 'PENDING' && rawObj.dueDate) {
+                const itemDueDate = new Date(rawObj.dueDate);
+                itemDueDate.setHours(0, 0, 0, 0);
+                if (itemDueDate > today) {
+                    return {
+                        ...rawObj,
+                        status: 'CANCELLED',
+                        balance: 0
+                    };
+                }
+            }
+            return rawObj;
         });
 
-        // Unassign vehicle from driver and change its status
+        // Cancel any pending or draft rental invoices for future weeks beyond today
+        await Invoice.updateMany(
+            {
+                driver: driverId,
+                invoiceType: 'RENTAL',
+                status: { $in: ['PENDING', 'DRAFT'] },
+                dueDate: { $gt: today }
+            },
+            {
+                $set: { status: 'CANCELLED', notes: 'Invoice cancelled due to driver contract cancellation.' }
+            },
+            { session }
+        );
+
+        // Unassign vehicle from driver and change vehicle status to AVAILABLE
         const vehicleId = driver.currentVehicle;
         if (vehicleId) {
             const vehicle = await Vehicle.findById(vehicleId).session(session);
@@ -1068,7 +1084,7 @@ const cancelContract = async (req, res) => {
         // Update driver status to INACTIVE, clear currentVehicle, update rentTracking, and add to history
         driver.status = 'INACTIVE';
         driver.currentVehicle = null;
-        driver.rentTracking = keptInstallments;
+        driver.rentTracking = updatedRentTracking;
         driver.statusHistory.push({
             status: 'INACTIVE',
             changedBy: user.id,
@@ -1099,6 +1115,199 @@ const cancelContract = async (req, res) => {
     }
 };
 
+/**
+ * Verification & Correction Tool for Driver Status & Repayment Plans.
+ * Re-evaluates driver status and rent tracking based on activationDate, deactivationDate, and current date.
+ * Strikes off future payment plans (status = 'CANCELLED', balance = 0) so no future invoices accrue.
+ */
+const verifyAndCorrectDriverPlans = async (req, res) => {
+    try {
+        const { drivers } = req.body;
+        if (!Array.isArray(drivers) || drivers.length === 0) {
+            return res.status(400).json({ success: false, message: "Request body must contain a non-empty 'drivers' array." });
+        }
+
+        const { Driver } = require("../Model/DriverModel");
+        const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        let verifiedCount = 0;
+        let statusCorrectedCount = 0;
+        let plansStruckOffCount = 0;
+        let vehiclesReleasedCount = 0;
+        const details = [];
+
+        // Helper function to process a single row
+        const processSingleRow = async (row, i) => {
+            const rowNum = row.originalRow || (i + 1);
+
+            // Match existing driver by email, phone, licenseNumber, or fullName
+            let existingDriver = null;
+            if (row.email && String(row.email).trim()) {
+                existingDriver = await Driver.findOne({ "personalInfo.email": String(row.email).trim().toLowerCase(), isDeleted: false });
+            }
+            if (!existingDriver && row.phone && String(row.phone).trim()) {
+                existingDriver = await Driver.findOne({ "personalInfo.phone": String(row.phone).trim(), isDeleted: false });
+            }
+            if (!existingDriver && row.licenseNumber && String(row.licenseNumber).trim()) {
+                existingDriver = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber).trim(), isDeleted: false });
+            }
+            if (!existingDriver && row.fullName && String(row.fullName).trim()) {
+                const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
+                existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex, isDeleted: false });
+            }
+
+            if (!existingDriver) {
+                return {
+                    row: rowNum,
+                    driverName: row.fullName || "Unknown",
+                    status: "NOT_FOUND",
+                    message: "Driver record not found in system.",
+                    isVerified: false
+                };
+            }
+
+            let statusChanged = false;
+            let struckOffInRow = 0;
+            let vehicleReleased = false;
+
+            const actDate = row.activationDate ? new Date(row.activationDate) : existingDriver.activationDate;
+            const deactDate = row.deactivationDate ? new Date(row.deactivationDate) : existingDriver.deactivationDate;
+
+            if (row.activationDate) existingDriver.activationDate = actDate;
+            if (row.deactivationDate) existingDriver.deactivationDate = deactDate;
+
+            const deactTime = deactDate ? new Date(deactDate) : null;
+            if (deactTime) deactTime.setHours(23, 59, 59, 999);
+
+            const isDeactivated = deactTime && deactTime <= new Date();
+
+            // 1. Status Correction & Safe Vehicle Unassignment
+            const originalStatus = existingDriver.status;
+            if (isDeactivated && existingDriver.status !== 'INACTIVE') {
+                existingDriver.status = 'INACTIVE';
+                statusChanged = true;
+
+                // Sync Customer status
+                await Customer.findOneAndUpdate({ driver: existingDriver._id }, { status: 'INACTIVE' });
+
+                // Safe Vehicle Unassignment
+                if (existingDriver.currentVehicle) {
+                    const vehicle = await Vehicle.findById(existingDriver.currentVehicle);
+                    if (vehicle) {
+                        if (vehicle.currentDriver && vehicle.currentDriver.toString() === existingDriver._id.toString()) {
+                            vehicle.currentDriver = null;
+                            vehicle.status = 'ACTIVE — AVAILABLE';
+                            vehicle.statusHistory.push({
+                                status: 'ACTIVE — AVAILABLE',
+                                changedBy: req.user.id,
+                                changedByRole: req.user.role,
+                                timestamp: new Date(),
+                                notes: `Vehicle unassigned during verification. Driver ${existingDriver.personalInfo?.fullName} deactivated.`
+                            });
+                            await vehicle.save();
+                            vehicleReleased = true;
+                        }
+                    }
+                    existingDriver.currentVehicle = null;
+                }
+            } else if (!isDeactivated && row.activationDate && new Date(row.activationDate) <= new Date() && existingDriver.status !== 'ACTIVE') {
+                existingDriver.status = 'ACTIVE';
+                statusChanged = true;
+                await Customer.findOneAndUpdate({ driver: existingDriver._id }, { status: 'ACTIVE' });
+            }
+
+            // 2. Repayment Plan Verification & Strike-Off Logic
+            if (Array.isArray(existingDriver.rentTracking) && existingDriver.rentTracking.length > 0) {
+                let trackingModified = false;
+                existingDriver.rentTracking.forEach(item => {
+                    const itemDueDate = item.dueDate ? new Date(item.dueDate) : null;
+                    if (itemDueDate) itemDueDate.setHours(0, 0, 0, 0);
+
+                    const isElapsedWeek = itemDueDate ? itemDueDate <= today : false;
+                    const isPastDeactivation = deactDate && itemDueDate ? itemDueDate > deactDate : false;
+
+                    if (isDeactivated || isPastDeactivation || isElapsedWeek) {
+                        if (item.status !== 'PAID' && item.status !== 'CANCELLED') {
+                            item.status = 'CANCELLED';
+                            item.balance = 0;
+                            trackingModified = true;
+                            struckOffInRow++;
+                        }
+                    } else {
+                        if (item.status === 'CANCELLED') {
+                            item.status = 'PENDING';
+                            item.balance = item.amount || 0;
+                            trackingModified = true;
+                        }
+                    }
+                });
+
+                if (trackingModified) {
+                    existingDriver.markModified('rentTracking');
+                }
+            }
+
+            // 3. Cancel any future pending invoices
+            await Invoice.updateMany(
+                {
+                    driver: existingDriver._id,
+                    invoiceType: 'RENTAL',
+                    status: { $in: ['PENDING', 'DRAFT'] },
+                    dueDate: { $gt: today }
+                },
+                { $set: { status: 'CANCELLED', notes: 'Cancelled during driver plan verification.' } }
+            );
+
+            await existingDriver.save();
+
+            return {
+                row: rowNum,
+                driverName: existingDriver.personalInfo?.fullName || row.fullName,
+                driverId: existingDriver.driverId,
+                originalStatus,
+                correctedStatus: existingDriver.status,
+                statusChanged,
+                struckOffInstallments: struckOffInRow,
+                vehicleReleased,
+                isVerified: true
+            };
+        };
+
+        // Run rows sequentially to prevent Mongoose VersionErrors on duplicate driver matches
+        for (let i = 0; i < drivers.length; i++) {
+            const resItem = await processSingleRow(drivers[i], i);
+            if (resItem.isVerified) {
+                verifiedCount++;
+                if (resItem.statusChanged) statusCorrectedCount++;
+                if (resItem.vehicleReleased) vehiclesReleasedCount++;
+                plansStruckOffCount += resItem.struckOffInstallments || 0;
+            }
+            details.push(resItem);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Verification complete. Verified ${verifiedCount} driver(s). Corrected ${statusCorrectedCount} status(es) and struck off ${plansStruckOffCount} rent installment(s).`,
+            data: {
+                verifiedCount,
+                statusCorrectedCount,
+                plansStruckOffCount,
+                vehiclesReleasedCount,
+                details
+            }
+        });
+    } catch (error) {
+        console.error("[VerifyAndCorrectDriverPlans Error]:", error);
+        return res.status(500).json({ success: false, message: error.message || "Failed to verify driver plans." });
+    }
+};
+
 module.exports = {
     addDriver,
     getDrivers,
@@ -1116,4 +1325,5 @@ module.exports = {
     downloadContractPdf,
     downloadStatementPdf,
     cancelContract,
+    verifyAndCorrectDriverPlans,
 };

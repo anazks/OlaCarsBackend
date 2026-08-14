@@ -267,7 +267,7 @@ const driverSchema = new mongoose.Schema(
             totalDue: { type: Number, default: 0 }, // amount + carryOver = total owed this week
             amountPaid: { type: Number, default: 0 }, // Sum of all partial payments
             balance: { type: Number, default: 0 }, // totalDue - amountPaid = remaining
-            status: { type: String, enum: ["PAID", "PARTIAL", "PENDING"], default: "PENDING" },
+            status: { type: String, enum: ["PAID", "PARTIAL", "PENDING", "OVERDUE", "CANCELLED"], default: "PENDING" },
             paidAt: { type: Date }, // Set when fully paid
             reminderSent: { type: Boolean, default: false },
             payments: [{ // Individual partial payments log

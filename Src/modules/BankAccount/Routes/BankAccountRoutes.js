@@ -33,6 +33,49 @@ router.get(
     BankAccountController.getBankAccount
 );
 
+// Dedicated Transaction Edit Routes (Must be before generic PUT /:id):
+// 1. Change Customer Transaction Amount
+router.put(
+    "/transactions/:transactionId/customer-amount",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeCustomerTransactionAmount
+);
+
+// 2. Change Customer Contact
+router.put(
+    "/transactions/:transactionId/customer-contact",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeCustomerContact
+);
+
+// 3. Change Vendor Transaction Amount
+router.put(
+    "/transactions/:transactionId/vendor-amount",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeVendorTransactionAmount
+);
+
+// 4. Change Vendor Contact
+router.put(
+    "/transactions/:transactionId/vendor-contact",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeVendorContact
+);
+
+// 5. Change Inter-Bank Transaction Amount
+router.put(
+    "/transactions/:transactionId/inter-bank-amt-edit",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeInterBankTransactionAmount
+);
+
+// 6. Change Linked Accounting Code (Single-Leg)
+router.put(
+    "/transactions/:transactionId/linked-account",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeLinkedAccountingCode
+);
+
 router.put(
     "/:id",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
@@ -93,35 +136,6 @@ router.post(
     "/:id/transactions/bulk-edit",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
     BankAccountController.bulkEditTransactions
-);
-
-// Dedicated Transaction Edit Routes:
-// 1. Change Customer Transaction Amount
-router.put(
-    "/transactions/:transactionId/customer-amount",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.changeCustomerTransactionAmount
-);
-
-// 2. Change Customer Contact
-router.put(
-    "/transactions/:transactionId/customer-contact",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.changeCustomerContact
-);
-
-// 3. Change Vendor Transaction Amount
-router.put(
-    "/transactions/:transactionId/vendor-amount",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.changeVendorTransactionAmount
-);
-
-// 4. Change Vendor Contact
-router.put(
-    "/transactions/:transactionId/vendor-contact",
-    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
-    BankAccountController.changeVendorContact
 );
 
 // Record manual payment

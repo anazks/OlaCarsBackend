@@ -1522,6 +1522,15 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
         const entry = await LedgerEntry.findById(txId);
         if (!entry) continue;
 
+        // Find ALL connected ledger entries matching entry._id, manualJournal, transaction, or transactionId
+        const connectedSearchConditions = [{ _id: entry._id }];
+        if (entry.manualJournal) connectedSearchConditions.push({ manualJournal: entry.manualJournal });
+        if (entry.transaction) connectedSearchConditions.push({ transaction: entry.transaction });
+        if (entry.transactionId) connectedSearchConditions.push({ transactionId: String(entry.transactionId) });
+
+        const connectedEntries = await LedgerEntry.find({ $or: connectedSearchConditions });
+        let partner = connectedEntries.find(l => l._id.toString() !== entry._id.toString()) || null;
+
         const oldEntryDate = entry.entryDate;
         const oldAmount = entry.amount;
         const oldType = entry.type;
@@ -2206,19 +2215,14 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 finalDesc = `Bank statement transaction`;
             }
 
-            // Sync contact (customer) field, description, amount and editing date/time on the LedgerEntries
-            entry.contact = newCustomerId || undefined;
-            entry.description = finalDesc;
-            if (amount !== undefined) entry.amount = finalAmount;
-            entry.entryDate = finalEntryDate;
-            await entry.save();
-
-            if (partner) {
-                partner.contact = newCustomerId || undefined;
-                partner.description = finalDesc;
-                if (amount !== undefined) partner.amount = finalAmount;
-                partner.entryDate = finalEntryDate;
-                await partner.save();
+            // Sync contact (customer) field, description, amount and editing date/time on ALL connected LedgerEntries
+            for (const connEntry of connectedEntries) {
+                connEntry.contact = newCustomerId || undefined;
+                if (newCustomerId) connEntry.contactModel = "Customer";
+                connEntry.description = finalDesc;
+                if (amount !== undefined) connEntry.amount = finalAmount;
+                connEntry.entryDate = finalEntryDate;
+                await connEntry.save();
             }
 
             // Update BankTransaction fields
@@ -3176,15 +3180,7 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
     const history = await InvoiceBillSetOffHistory.findOne({ $or: searchConditions });
 
     if (!history) {
-        console.log(`[reverseSetOffFromHistory] No InvoiceBillSetOffHistory found for ${bankTransactionId}. Cleaning orphan partner entries if any.`);
-        const orphanTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
-        const primaryId = primaryEntry ? primaryEntry._id : (bankTx ? bankTx.ledgerEntry : null);
-        if (orphanTxId && primaryId) {
-            await LedgerEntry.deleteMany({
-                transactionId: String(orphanTxId),
-                _id: { $ne: primaryId }
-            });
-        }
+        console.log(`[reverseSetOffFromHistory] No InvoiceBillSetOffHistory found for ${bankTransactionId}. No set-off to reverse.`);
         return null;
     }
 
@@ -3823,14 +3819,165 @@ const updateVendorContact = async (transactionId, newSupplierId, options = {}) =
     };
 };
 
+/**
+ * Dedicated Service 5: Update Inter-Bank Transaction Amount
+ */
+const updateInterBankTransactionAmount = async (transactionId, newAmount, options = {}) => {
+    const numAmount = Number(newAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Amount must be a positive number");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+    let bankTx = null;
+    let primaryEntry = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        } else if (!bankTx) {
+            primaryEntry = await LedgerEntry.findById(transactionId);
+        }
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!primaryEntry && !bankTx) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    let bankAccountId = (bankTx && bankTx.bankAccount) || (primaryEntry && primaryEntry.bankAccount);
+    if (!bankAccountId && primaryEntry && primaryEntry.accountingCode) {
+        const BankAccount = require("../Model/BankAccountModel");
+        const bankDoc = await BankAccount.findOne({
+            $or: [
+                { accountingCode: primaryEntry.accountingCode },
+                { _id: primaryEntry.accountingCode }
+            ]
+        });
+        if (bankDoc) {
+            bankAccountId = bankDoc._id;
+        }
+    }
+    if (!bankAccountId) {
+        bankAccountId = primaryEntry ? (primaryEntry.bankAccount || primaryEntry.accountingCode) : undefined;
+    }
+
+    const updateObj = {
+        id: primaryEntry ? primaryEntry._id : (bankTx ? bankTx._id : transactionId),
+        amount: numAmount
+    };
+    if (options.entryDate) updateObj.entryDate = options.entryDate;
+    if (options.description) updateObj.description = options.description;
+
+    return await bulkEditTransactions(bankAccountId, [updateObj]);
+};
+
+/**
+ * Dedicated Service 6: Update Linked Accounting Code (Single-Leg Swap)
+ * Swaps accountingCode ONLY for the specified transaction leg (primary or connected).
+ * Connected partner legs remain completely untouched.
+ */
+const updateLinkedAccountingCode = async (transactionId, newAccountingCodeId, options = {}) => {
+    if (!newAccountingCodeId || !mongoose.Types.ObjectId.isValid(newAccountingCodeId)) {
+        throw new Error("Valid new Accounting Code ID is required");
+    }
+
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const targetCodeDoc = await AccountingCode.findOne({ _id: newAccountingCodeId, isDeleted: { $ne: true } });
+    if (!targetCodeDoc) {
+        throw new Error("Target Accounting Code not found");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+    let targetLeg = null;
+    let bankTx = null;
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        targetLeg = await LedgerEntry.findById(transactionId);
+        bankTx = await BankTransaction.findById(transactionId);
+    }
+
+    if (!targetLeg && bankTx && bankTx.ledgerEntry) {
+        targetLeg = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!bankTx && targetLeg) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: targetLeg._id },
+                { transactionId: String(targetLeg.transactionId) }
+            ]
+        });
+    }
+
+    if (!targetLeg && !bankTx) {
+        throw new Error("Transaction leg not found");
+    }
+
+    const oldAccountingCodeId = targetLeg ? targetLeg.accountingCode : (bankTx ? bankTx.accountingCode : null);
+
+    // 1. Revert set-off history if present on this target leg
+    if (targetLeg) {
+        await reverseSetOffFromHistory(targetLeg._id);
+    } else if (bankTx) {
+        await reverseSetOffFromHistory(bankTx._id);
+    }
+
+    // 2. Update target LedgerEntry ONLY (Single-Leg Swap)
+    if (targetLeg) {
+        targetLeg.accountingCode = targetCodeDoc._id;
+        await targetLeg.save();
+    }
+
+    // 3. Update BankTransaction accounting code ONLY if this leg is directly associated with bankTx
+    if (bankTx && targetLeg && (String(bankTx.ledgerEntry || bankTx._id) === String(targetLeg._id))) {
+        bankTx.accountingCode = targetCodeDoc._id;
+        await bankTx.save();
+    } else if (bankTx && !targetLeg) {
+        bankTx.accountingCode = targetCodeDoc._id;
+        await bankTx.save();
+    }
+
+    // 4. Re-sync balances for old and new accounting codes
+    if (oldAccountingCodeId) {
+        await syncAccountingCodeBalances(oldAccountingCodeId);
+    }
+    await syncAccountingCodeBalances(targetCodeDoc._id);
+
+    // 5. Re-sync bank account running balances if applicable
+    const bankAccId = (bankTx && bankTx.bankAccount) || (targetLeg && targetLeg.bankAccount);
+    if (bankAccId) {
+        await recalculateRunningBalances(bankAccId);
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newAccountingCode: {
+            _id: targetCodeDoc._id,
+            code: targetCodeDoc.code,
+            name: targetCodeDoc.name,
+            category: targetCodeDoc.category
+        }
+    };
+};
+
 module.exports = {
     createBankAccount,
     getAllBankAccounts,
     getBankAccountById,
     updateBankAccount,
     deleteBankAccount,
-    updateBalance,
-    importStatement,
     recordManualPayment,
     deleteAllTransactions,
     recalculateRunningBalances,
@@ -3844,5 +3991,7 @@ module.exports = {
     updateCustomerTransactionAmount,
     updateCustomerContact,
     updateVendorTransactionAmount,
-    updateVendorContact
+    updateVendorContact,
+    updateInterBankTransactionAmount,
+    updateLinkedAccountingCode
 };

@@ -129,7 +129,9 @@ exports.getDriversService = async (queryParams = {}, options = {}) => {
  * @param {Object} options - { includeSensitive: false } to strip finance-only fields.
  */
 exports.getDriverByIdService = async (id, options = {}) => {
-    let q = Driver.findOne({ _id: id, isDeleted: false }).populate("branch", "name code city state country");
+    let q = Driver.findOne({ _id: id, isDeleted: false })
+        .populate("branch", "name code city state country")
+        .populate("currentVehicle");
 
     if (!options.includeSensitive) {
         q = q.select(SENSITIVE_FIELDS);
