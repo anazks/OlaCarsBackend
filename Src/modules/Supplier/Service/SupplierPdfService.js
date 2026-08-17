@@ -23,15 +23,13 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
         size: "A4", 
         margin: 40,
         info: {
-            Title: `Bank Ledger - ${supplier.name || "Supplier"}`,
+            Title: `General Ledger Statement - ${supplier.name || "Supplier"}`,
             Author: "Ola Cars Logistics"
         }
     });
 
-    // Pipe the PDF to the response
     doc.pipe(res);
 
-    // Color Palette
     const primaryColor = "#111827"; 
     const secondaryColor = "#4B5563"; 
     const borderMain = "#E5E7EB"; 
@@ -40,7 +38,6 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
     const rightMargin = 555;
     const contentWidth = rightMargin - leftMargin;
 
-    // Header Logo & Title
     try {
         const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
         doc.image(logoPath, leftMargin, 35, { height: 35 });
@@ -50,14 +47,13 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
 
     doc.fontSize(15)
        .fillColor(primaryColor)
-       .text("VENDOR BANK LEDGER STATEMENT", leftMargin + 150, 42, { align: "right", width: contentWidth - 150, bold: true });
+       .text("VENDOR GENERAL LEDGER STATEMENT", leftMargin + 150, 42, { align: "right", width: contentWidth - 150, bold: true });
 
     doc.moveTo(leftMargin, 80)
        .lineTo(rightMargin, 80)
        .strokeColor(borderMain)
        .stroke();
 
-    // Supplier Core Info Summary (NO Address, NO Contact details, NO Compliance section)
     let y = 92;
 
     doc.fontSize(9).fillColor(secondaryColor).text("SUPPLIER NAME:", leftMargin, y);
@@ -81,21 +77,20 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
 
     y += 15;
 
-    // Section Header: Bank Ledger Journal Entries (Latest at Top)
-    doc.fontSize(11).fillColor(primaryColor).text("Vendor Bank Ledger Journal Entries (Latest at Top)", leftMargin, y, { bold: true });
-    doc.fontSize(8).fillColor(secondaryColor).text("Connected Double-Entry Impact from Bank Accounts", leftMargin + 240, y + 2, { align: "right", width: 275 });
+    doc.fontSize(11).fillColor(primaryColor).text("Vendor General Ledger Statement (Latest at Top)", leftMargin, y, { bold: true });
+    doc.fontSize(8).fillColor(secondaryColor).text("Chronological History of Bills & Vendor Payments", leftMargin + 240, y + 2, { align: "right", width: 275 });
 
     y += 20;
 
     const drawTableHeader = (currentY) => {
         doc.rect(leftMargin, currentY, contentWidth, 20).fill("#F3F4F6");
         doc.fontSize(8.5).fillColor("#374151");
-        doc.text("Date", leftMargin + 5, currentY + 5, { width: 80, bold: true });
-        doc.text("Ref / Tx ID", leftMargin + 90, currentY + 5, { width: 110, bold: true });
-        doc.text("Account", leftMargin + 205, currentY + 5, { width: 170, bold: true });
-        doc.text("Type", leftMargin + 380, currentY + 5, { width: 45, bold: true });
-        doc.text("Debit ($)", leftMargin + 430, currentY + 5, { width: 40, align: "right", bold: true });
-        doc.text("Credit ($)", leftMargin + 475, currentY + 5, { width: 40, align: "right", bold: true });
+        doc.text("Date", leftMargin + 5, currentY + 5, { width: 65, bold: true });
+        doc.text("Transaction", leftMargin + 75, currentY + 5, { width: 85, bold: true });
+        doc.text("Ref / Details", leftMargin + 165, currentY + 5, { width: 165, bold: true });
+        doc.text("Billed ($)", leftMargin + 335, currentY + 5, { width: 55, align: "right", bold: true });
+        doc.text("Paid ($)", leftMargin + 395, currentY + 5, { width: 55, align: "right", bold: true });
+        doc.text("Balance ($)", leftMargin + 455, currentY + 5, { width: 55, align: "right", bold: true });
 
         return currentY + 22;
     };
@@ -103,7 +98,7 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
     y = drawTableHeader(y);
 
     if (!entries || entries.length === 0) {
-        doc.fontSize(9).fillColor(secondaryColor).text("No bank account ledger transactions recorded for this vendor.", leftMargin + 10, y + 10);
+        doc.fontSize(9).fillColor(secondaryColor).text("No ledger transactions recorded for this vendor.", leftMargin + 10, y + 10);
     } else {
         entries.forEach((ent, idx) => {
             if (y > 740) {
@@ -118,15 +113,15 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
             }
 
             doc.fontSize(8).fillColor(primaryColor);
-            doc.text(formatDate(ent.date), leftMargin + 5, y + 4, { width: 80, lineBreak: false });
-            doc.text(ent.ref || "N/A", leftMargin + 90, y + 4, { width: 110, lineBreak: false });
-            doc.text(ent.account || "N/A", leftMargin + 205, y + 4, { width: 170, lineBreak: false });
+            doc.text(formatDate(ent.date), leftMargin + 5, y + 4, { width: 65, lineBreak: false });
+            doc.text(ent.transactionLabel || ent.type || "N/A", leftMargin + 75, y + 4, { width: 85, lineBreak: false });
             
-            const typeColor = ent.type === "DEBIT" ? "#059669" : "#DC2626";
-            doc.fillColor(typeColor).text(ent.type || "N/A", leftMargin + 380, y + 4, { width: 45, lineBreak: false });
+            const detailStr = `${ent.ref || ''} ${ent.details ? `- ${ent.details}` : ''}`.trim();
+            doc.text(detailStr || "N/A", leftMargin + 165, y + 4, { width: 165, lineBreak: false });
             
-            doc.fillColor("#059669").text(ent.debit > 0 ? formatCurrency(ent.debit) : "—", leftMargin + 430, y + 4, { width: 40, align: "right", lineBreak: false });
-            doc.fillColor("#DC2626").text(ent.credit > 0 ? formatCurrency(ent.credit) : "—", leftMargin + 475, y + 4, { width: 40, align: "right", lineBreak: false });
+            doc.fillColor("#4F46E5").text(ent.billed > 0 ? formatCurrency(ent.billed) : "—", leftMargin + 335, y + 4, { width: 55, align: "right", lineBreak: false });
+            doc.fillColor("#059669").text(ent.paid > 0 ? formatCurrency(ent.paid) : "—", leftMargin + 395, y + 4, { width: 55, align: "right", lineBreak: false });
+            doc.fillColor("#D97706").text(formatCurrency(ent.balance || 0), leftMargin + 455, y + 4, { width: 55, align: "right", lineBreak: false });
 
             y += 20;
 
@@ -137,12 +132,11 @@ exports.generateSupplierPdf = (supplier, entries = [], res) => {
         });
     }
 
-    // Statement Footer
     const finalFooterY = doc.y > 700 ? 730 : Math.max(doc.y + 25, 740);
 
     doc.fontSize(8).fillColor(secondaryColor)
-       .text("Ola Cars Logistics - Vendor Bank Ledger Statement.", leftMargin, finalFooterY)
-       .text("Generated automatically from posted bank account ledger journal entries.", leftMargin, finalFooterY + 12);
+       .text("Ola Cars Logistics - Vendor General Ledger Statement.", leftMargin, finalFooterY)
+       .text("Generated automatically from posted bills, payments, and ledger entries.", leftMargin, finalFooterY + 12);
 
     doc.end();
 };
