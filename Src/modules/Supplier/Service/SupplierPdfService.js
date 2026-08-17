@@ -6,19 +6,24 @@ const formatDate = (val) => {
     if (!val) return "N/A";
     const d = new Date(val);
     if (isNaN(d.getTime())) return "N/A";
-    return d.toLocaleDateString("en-US", { dateStyle: "medium" });
+    return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "2-digit" });
 };
 
-exports.generateSupplierPdf = (supplier, res) => {
+const formatCurrency = (val) => {
+    const num = Number(val) || 0;
+    return `$${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+exports.generateSupplierPdf = (supplier, entries = [], res) => {
     if (!supplier) {
         throw new Error("No supplier data provided");
     }
 
     const doc = new PDFDocument({ 
         size: "A4", 
-        margin: 50,
+        margin: 40,
         info: {
-            Title: `Supplier Profile - ${supplier.name || "Supplier"}`,
+            Title: `Bank Ledger - ${supplier.name || "Supplier"}`,
             Author: "Ola Cars Logistics"
         }
     });
@@ -27,114 +32,117 @@ exports.generateSupplierPdf = (supplier, res) => {
     doc.pipe(res);
 
     // Color Palette
-    const primaryColor = "#111827"; // Dark slate
-    const secondaryColor = "#4B5563"; // Dim grey
-    const borderMain = "#E5E7EB"; // Separator lines
-    const accentColor = "#4F46E5"; // Accent blue
-    const activeColor = "#10B981"; // Accent green for active
+    const primaryColor = "#111827"; 
+    const secondaryColor = "#4B5563"; 
+    const borderMain = "#E5E7EB"; 
 
-    const leftMargin = 50;
-    const rightMargin = 545;
-    const rightColX = 350;
+    const leftMargin = 40;
+    const rightMargin = 555;
+    const contentWidth = rightMargin - leftMargin;
 
-    // Logo integration
+    // Header Logo & Title
     try {
         const logoPath = path.join(__dirname, "../../../assests/olaCars02.jpeg");
-        doc.image(logoPath, 50, 45, { height: 40 });
+        doc.image(logoPath, leftMargin, 35, { height: 35 });
     } catch (err) {
         console.error("Failed to load logo image in PDF generation:", err);
     }
 
-    doc.fontSize(18)
+    doc.fontSize(15)
        .fillColor(primaryColor)
-       .text("SUPPLIER CARD", rightColX - 50, 58, { align: "right", width: 245, bold: true });
+       .text("VENDOR BANK LEDGER STATEMENT", leftMargin + 150, 42, { align: "right", width: contentWidth - 150, bold: true });
 
-    doc.moveTo(leftMargin, 95)
-       .lineTo(rightMargin, 95)
+    doc.moveTo(leftMargin, 80)
+       .lineTo(rightMargin, 80)
        .strokeColor(borderMain)
        .stroke();
 
-    // Metadata
-    const metaY = 115;
+    // Supplier Core Info Summary (NO Address, NO Contact details, NO Compliance section)
+    let y = 92;
 
-    // Left Column: Supplier Core Info
-    doc.fontSize(9).fillColor(secondaryColor);
-    doc.text("SUPPLIER NAME & CATEGORY:", leftMargin, metaY);
+    doc.fontSize(9).fillColor(secondaryColor).text("SUPPLIER NAME:", leftMargin, y);
+    doc.fontSize(11).fillColor(primaryColor).text(supplier.name || "N/A", leftMargin + 95, y - 1, { bold: true });
 
-    doc.fontSize(12).fillColor(primaryColor)
-       .text(supplier.name || "N/A", leftMargin, metaY + 16, { bold: true })
-       .fontSize(9).fillColor(secondaryColor)
-       .text(`Procurement Category: ${supplier.category || "General"}`, leftMargin, metaY + 34)
-       .text(`Status: ${supplier.isActive ? "ACTIVE / COMPLIANT" : "INACTIVE"}`, leftMargin, metaY + 48, { 
-           underline: false,
-           color: supplier.isActive ? activeColor : secondaryColor 
-       });
+    doc.fontSize(9).fillColor(secondaryColor).text("CATEGORY:", leftMargin + 330, y);
+    doc.fontSize(10).fillColor(primaryColor).text(supplier.category || "General", leftMargin + 390, y - 1);
 
-    // Right Column: Registry info
-    doc.fontSize(9).fillColor(secondaryColor);
-    doc.text("REGISTRY INFORMATION:", rightColX, metaY);
+    y += 18;
+    doc.fontSize(9).fillColor(secondaryColor).text("VENDOR NO / ID:", leftMargin, y);
+    doc.fontSize(10).fillColor(primaryColor).text(supplier.vendorNumber || String(supplier._id || "N/A"), leftMargin + 95, y - 1);
 
-    doc.fontSize(10).fillColor(primaryColor)
-       .text(`Supplier ID: ${supplier._id || "N/A"}`, rightColX, metaY + 16)
-       .fontSize(9).fillColor(secondaryColor)
-       .text(`Registered Date: ${formatDate(supplier.createdAt)}`, rightColX, metaY + 32)
-       .text(`Last Profile Update: ${formatDate(supplier.updatedAt)}`, rightColX, metaY + 46);
+    doc.fontSize(9).fillColor(secondaryColor).text("STATEMENT DATE:", leftMargin + 330, y);
+    doc.fontSize(10).fillColor(primaryColor).text(formatDate(new Date()), leftMargin + 420, y - 1);
 
-    doc.moveTo(leftMargin, 195)
-       .lineTo(rightMargin, 195)
+    y += 25;
+    doc.moveTo(leftMargin, y)
+       .lineTo(rightMargin, y)
        .strokeColor(borderMain)
        .stroke();
 
-    // Profile Details
-    let contentY = 215;
-    doc.fontSize(10).fillColor(primaryColor).text("Contact Details & Physical Address", leftMargin, contentY, { bold: true });
+    y += 15;
 
-    contentY += 20;
-    doc.fontSize(9.5).fillColor(secondaryColor)
-       .text("Contact Person:", leftMargin, contentY)
-       .text("Email Address:", leftMargin, contentY + 20)
-       .text("Phone Number:", leftMargin, contentY + 40)
-       .text("Registered Office Address:", leftMargin, contentY + 60);
+    // Section Header: Bank Ledger Journal Entries (Latest at Top)
+    doc.fontSize(11).fillColor(primaryColor).text("Vendor Bank Ledger Journal Entries (Latest at Top)", leftMargin, y, { bold: true });
+    doc.fontSize(8).fillColor(secondaryColor).text("Connected Double-Entry Impact from Bank Accounts", leftMargin + 240, y + 2, { align: "right", width: 275 });
 
-    doc.fillColor(primaryColor)
-       .text(supplier.contactPerson || "N/A", leftMargin + 150, contentY)
-       .text(supplier.email || "N/A", leftMargin + 150, contentY + 20)
-       .text(supplier.phone || "N/A", leftMargin + 150, contentY + 40)
-       .text(supplier.address || "N/A", leftMargin + 150, contentY + 60, { width: 330 });
+    y += 20;
 
-    contentY += 110;
-    doc.moveTo(leftMargin, contentY)
-       .lineTo(rightMargin, contentY)
-       .strokeColor(borderMain)
-       .stroke();
+    const drawTableHeader = (currentY) => {
+        doc.rect(leftMargin, currentY, contentWidth, 20).fill("#F3F4F6");
+        doc.fontSize(8.5).fillColor("#374151");
+        doc.text("Date", leftMargin + 5, currentY + 5, { width: 80, bold: true });
+        doc.text("Ref / Tx ID", leftMargin + 90, currentY + 5, { width: 110, bold: true });
+        doc.text("Account", leftMargin + 205, currentY + 5, { width: 170, bold: true });
+        doc.text("Type", leftMargin + 380, currentY + 5, { width: 45, bold: true });
+        doc.text("Debit ($)", leftMargin + 430, currentY + 5, { width: 40, align: "right", bold: true });
+        doc.text("Credit ($)", leftMargin + 475, currentY + 5, { width: 40, align: "right", bold: true });
 
-    // Section: Procurement policy & compliance checklist
-    contentY += 20;
-    doc.fontSize(10).fillColor(primaryColor).text("Ola Cars Procurement Compliance Certification", leftMargin, contentY, { bold: true });
+        return currentY + 22;
+    };
 
-    contentY += 18;
-    doc.fontSize(8.5).fillColor(secondaryColor)
-       .text("This supplier is certified under Ola Cars Logistics standard vendor compliance policies. Any financial disbursements, invoices, bank transfers, or services rendered are monitored and posted directly under respective ledger groups.", leftMargin, contentY, { width: 495 });
+    y = drawTableHeader(y);
 
-    contentY += 40;
-    doc.fontSize(8.5).fillColor(primaryColor)
-       .text("Compliance Auditing status:", leftMargin, contentY, { bold: true });
-    
+    if (!entries || entries.length === 0) {
+        doc.fontSize(9).fillColor(secondaryColor).text("No bank account ledger transactions recorded for this vendor.", leftMargin + 10, y + 10);
+    } else {
+        entries.forEach((ent, idx) => {
+            if (y > 740) {
+                doc.addPage();
+                y = 40;
+                y = drawTableHeader(y);
+            }
+
+            const isAlt = idx % 2 === 1;
+            if (isAlt) {
+                doc.rect(leftMargin, y, contentWidth, 18).fill("#F9FAFB");
+            }
+
+            doc.fontSize(8).fillColor(primaryColor);
+            doc.text(formatDate(ent.date), leftMargin + 5, y + 4, { width: 80, lineBreak: false });
+            doc.text(ent.ref || "N/A", leftMargin + 90, y + 4, { width: 110, lineBreak: false });
+            doc.text(ent.account || "N/A", leftMargin + 205, y + 4, { width: 170, lineBreak: false });
+            
+            const typeColor = ent.type === "DEBIT" ? "#059669" : "#DC2626";
+            doc.fillColor(typeColor).text(ent.type || "N/A", leftMargin + 380, y + 4, { width: 45, lineBreak: false });
+            
+            doc.fillColor("#059669").text(ent.debit > 0 ? formatCurrency(ent.debit) : "—", leftMargin + 430, y + 4, { width: 40, align: "right", lineBreak: false });
+            doc.fillColor("#DC2626").text(ent.credit > 0 ? formatCurrency(ent.credit) : "—", leftMargin + 475, y + 4, { width: 40, align: "right", lineBreak: false });
+
+            y += 20;
+
+            doc.moveTo(leftMargin, y - 2)
+               .lineTo(rightMargin, y - 2)
+               .strokeColor("#F3F4F6")
+               .stroke();
+        });
+    }
+
+    // Statement Footer
+    const finalFooterY = doc.y > 700 ? 730 : Math.max(doc.y + 25, 740);
+
     doc.fontSize(8).fillColor(secondaryColor)
-       .text("• KYC Background Checks: Passed", leftMargin + 10, contentY + 12)
-       .text("• Bank Account Details Encryption Check: Passed", leftMargin + 10, contentY + 24)
-       .text("• Operations Billing Integration: Clear", leftMargin + 10, contentY + 36);
-
-    // Footer
-    doc.fontSize(8).fillColor(secondaryColor)
-       .text("Ola Cars Logistics Procurement Department.", leftMargin, 640)
-       .text("This registry sheet serves as proof of supplier validation and onboard compliance.", leftMargin, 654);
-
-    doc.moveTo(rightColX + 40, 680)
-       .lineTo(rightMargin, 680)
-       .strokeColor(primaryColor)
-       .stroke();
-    doc.fontSize(8.5).fillColor(primaryColor).text("Corporate Seal & Signature", rightColX + 40, 688, { align: "center", width: 155 });
+       .text("Ola Cars Logistics - Vendor Bank Ledger Statement.", leftMargin, finalFooterY)
+       .text("Generated automatically from posted bank account ledger journal entries.", leftMargin, finalFooterY + 12);
 
     doc.end();
 };

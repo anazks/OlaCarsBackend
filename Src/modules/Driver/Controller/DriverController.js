@@ -1222,7 +1222,47 @@ const verifyAndCorrectDriverPlans = async (req, res) => {
                 await Customer.findOneAndUpdate({ driver: existingDriver._id }, { status: 'ACTIVE' });
             }
 
-            // 2. Repayment Plan Verification & Strike-Off Logic
+            // 2. Repayment Plan Generation / Verification & Strike-Off Logic
+            const DriverService = require("../Service/DriverService");
+            const hasNewActivationDate = !!row.activationDate;
+            const isTrackingEmpty = !Array.isArray(existingDriver.rentTracking) || existingDriver.rentTracking.length === 0;
+
+            if (hasNewActivationDate || isTrackingEmpty) {
+                // Save existing PAID payments to preserve them
+                const paidWeeksMap = new Map();
+                if (Array.isArray(existingDriver.rentTracking)) {
+                    existingDriver.rentTracking.forEach(item => {
+                        if (item.status === 'PAID') {
+                            paidWeeksMap.set(item.weekNumber, item);
+                        }
+                    });
+                }
+
+                // Regenerate schedule starting from the new activationDate
+                await DriverService.generateMigrationRentPlan(existingDriver._id, {
+                    weeklyRent: Number(row.weeklyRent) || existingDriver.weeklyRent || 280,
+                    durationWeeks: Number(row.durationWeeks) || 60,
+                    activationDate: actDate,
+                    deactivationDate: deactDate
+                });
+
+                // Refetch updated driver document to get fresh rentTracking schedule
+                existingDriver = await Driver.findById(existingDriver._id);
+
+                // Restore any PAID payments
+                if (paidWeeksMap.size > 0 && Array.isArray(existingDriver.rentTracking)) {
+                    existingDriver.rentTracking.forEach(item => {
+                        if (paidWeeksMap.has(item.weekNumber)) {
+                            const paidObj = paidWeeksMap.get(item.weekNumber);
+                            item.status = 'PAID';
+                            item.amountPaid = paidObj.amountPaid || item.amount;
+                            item.balance = paidObj.balance || 0;
+                            item.payments = paidObj.payments || [];
+                        }
+                    });
+                }
+            }
+
             if (Array.isArray(existingDriver.rentTracking) && existingDriver.rentTracking.length > 0) {
                 let trackingModified = false;
                 existingDriver.rentTracking.forEach(item => {

@@ -150,13 +150,18 @@ exports.createPaymentMade = async (req, res) => {
 
 exports.getAllPaymentMades = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod } = req.query;
-        console.log('PaymentMade Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod });
+        const { page = 1, limit = 10, search, sortBy, sortOrder, paymentMethod, supplier, supplierId } = req.query;
+        console.log('PaymentMade Query Params:', { page, limit, search, sortBy, sortOrder, paymentMethod, supplier, supplierId });
         const skip = (parseInt(page) - 1) * parseInt(limit);
         
         const query = {};
         if (paymentMethod && paymentMethod !== 'ALL') {
             query.paymentMethod = paymentMethod;
+        }
+
+        const targetSupplier = supplier || supplierId;
+        if (targetSupplier) {
+            query.supplier = targetSupplier;
         }
 
         if (search) {
