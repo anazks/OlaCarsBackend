@@ -259,6 +259,7 @@ const driverSchema = new mongoose.Schema(
 
         // ── 15. Rent Tracking ────────────────────────────────────────
         rentTracking: [{
+            vehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
             weekNumber: { type: Number }, // 1, 2, 3...
             weekLabel: { type: String }, // e.g., "Week 1", "Week 2 - May 2026"
             dueDate: { type: Date },

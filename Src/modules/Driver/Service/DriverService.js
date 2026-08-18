@@ -415,6 +415,8 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
     // Load existing rent tracking history to preserve it during re-contracting
     const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
     const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
+    const currentVehId = driverRecord?.currentVehicle?._id || driverRecord?.currentVehicle || null;
+
     let maxWeekNum = 0;
     if (existingTracking.length > 0) {
         maxWeekNum = Math.max(...existingTracking.map(t => t.weekNumber));
@@ -457,6 +459,7 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
         
         const periodNum = maxWeekNum + i + 1;
         installments.push({
+            vehicle: currentVehId,
             weekNumber: periodNum,
             weekLabel: isWeekly 
                 ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
@@ -473,7 +476,15 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
     }
 
     // Combine existing installments (past history) and new installments
-    const combinedTracking = [...existingTracking, ...installments];
+    const sanitizedExisting = existingTracking.map(t => {
+        const itemObj = typeof t.toObject === 'function' ? t.toObject() : { ...t };
+        if (!itemObj.vehicle && currentVehId) {
+            itemObj.vehicle = currentVehId;
+        }
+        return itemObj;
+    });
+
+    const combinedTracking = [...sanitizedExisting, ...installments];
 
     const updatedDriver = await updateDriverService(driverId, {
         $set: { rentTracking: combinedTracking }

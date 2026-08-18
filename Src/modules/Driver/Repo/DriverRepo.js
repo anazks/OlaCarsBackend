@@ -131,13 +131,27 @@ exports.getDriversService = async (queryParams = {}, options = {}) => {
 exports.getDriverByIdService = async (id, options = {}) => {
     let q = Driver.findOne({ _id: id, isDeleted: false })
         .populate("branch", "name code city state country")
-        .populate("currentVehicle");
+        .populate("currentVehicle")
+        .populate({
+            path: "rentTracking.vehicle",
+            select: "basicDetails registrationNumber vin licensePlate vehicleId status"
+        });
 
     if (!options.includeSensitive) {
         q = q.select(SENSITIVE_FIELDS);
     }
 
-    return await q;
+    const driver = await q;
+    if (driver && driver.rentTracking && driver.rentTracking.length > 0) {
+        const defaultVeh = driver.currentVehicle;
+        driver.rentTracking.forEach(item => {
+            if (!item.vehicle && defaultVeh) {
+                item.vehicle = defaultVeh;
+            }
+        });
+    }
+
+    return driver;
 };
 
 /**
