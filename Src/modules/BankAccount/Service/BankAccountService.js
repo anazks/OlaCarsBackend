@@ -3350,17 +3350,25 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
 
     // Delete partner ledger entries
     try {
-        const partnerIdsToDelete = [...(history.partnerLedgerEntries || [])];
-        const resolvedTxId = history.transactionId || (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId);
         const primaryId = primaryEntry ? primaryEntry._id : history.primaryLedgerEntry;
+        const preserveIds = new Set();
+        if (bankTransactionId) preserveIds.add(String(bankTransactionId));
+        if (primaryId) preserveIds.add(String(primaryId));
+        if (primaryEntry) preserveIds.add(String(primaryEntry._id));
+
+        const partnerIdsToDelete = (history.partnerLedgerEntries || [])
+            .map(id => String(id))
+            .filter(id => !preserveIds.has(id));
+
+        const resolvedTxId = history.transactionId || (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId);
 
         if (partnerIdsToDelete.length > 0) {
             await LedgerEntry.deleteMany({ _id: { $in: partnerIdsToDelete } });
         }
-        if (resolvedTxId && primaryId) {
+        if (resolvedTxId) {
             await LedgerEntry.deleteMany({
                 transactionId: String(resolvedTxId),
-                _id: { $ne: primaryId }
+                _id: { $nin: Array.from(preserveIds) }
             });
         }
         console.log(`  ✓ Deleted partner set-off LedgerEntries for ${bankTransactionId}`);
@@ -3926,20 +3934,13 @@ const updateLinkedAccountingCode = async (transactionId, newAccountingCodeId, op
 
     const oldAccountingCodeId = targetLeg ? targetLeg.accountingCode : (bankTx ? bankTx.accountingCode : null);
 
-    // 1. Revert set-off history if present on this target leg
-    if (targetLeg) {
-        await reverseSetOffFromHistory(targetLeg._id);
-    } else if (bankTx) {
-        await reverseSetOffFromHistory(bankTx._id);
-    }
-
-    // 2. Update target LedgerEntry ONLY (Single-Leg Swap)
+    // 1. Update target LedgerEntry ONLY (Single-Leg Swap - Set-off history remains intact)
     if (targetLeg) {
         targetLeg.accountingCode = targetCodeDoc._id;
         await targetLeg.save();
     }
 
-    // 3. Update BankTransaction accounting code ONLY if this leg is directly associated with bankTx
+    // 2. Update BankTransaction accounting code ONLY if this leg is directly associated with bankTx
     if (bankTx && targetLeg && (String(bankTx.ledgerEntry || bankTx._id) === String(targetLeg._id))) {
         bankTx.accountingCode = targetCodeDoc._id;
         await bankTx.save();
@@ -3948,13 +3949,13 @@ const updateLinkedAccountingCode = async (transactionId, newAccountingCodeId, op
         await bankTx.save();
     }
 
-    // 4. Re-sync balances for old and new accounting codes
+    // 3. Re-sync balances for old and new accounting codes
     if (oldAccountingCodeId) {
         await syncAccountingCodeBalances(oldAccountingCodeId);
     }
     await syncAccountingCodeBalances(targetCodeDoc._id);
 
-    // 5. Re-sync bank account running balances if applicable
+    // 4. Re-sync bank account running balances if applicable
     const bankAccId = (bankTx && bankTx.bankAccount) || (targetLeg && targetLeg.bankAccount);
     if (bankAccId) {
         await recalculateRunningBalances(bankAccId);
