@@ -713,8 +713,55 @@ const dataMigrateDrivers = async (req, res) => {
                     driverIdString = newDriver.driverId;
                 }
 
-                // ── 3. Establish Bidirectional Link ──
+                // ── 3. Establish Bidirectional Link & Cancel Old Driver Contract if Taken Over ──
                 if (vehicleId && driverId && !isDeactivated) {
+                    const existingVehicle = await Vehicle.findById(vehicleId);
+                    const oldDriverId = existingVehicle?.currentDriver;
+
+                    // If vehicle was previously assigned to a different driver, cancel old driver's contract
+                    if (oldDriverId && String(oldDriverId) !== String(driverId)) {
+                        const oldDriver = await Driver.findById(oldDriverId);
+                        if (oldDriver) {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+
+                            // 1. Cancel future rent tracking installments for old driver
+                            if (Array.isArray(oldDriver.rentTracking)) {
+                                oldDriver.rentTracking.forEach(item => {
+                                    const isItemForVeh = item.vehicle && String(item.vehicle) === String(vehicleId);
+                                    const isFutureItem = item.dueDate && new Date(item.dueDate) > today;
+                                    if ((isItemForVeh || !item.vehicle) && (isFutureItem || item.status === 'PENDING')) {
+                                        item.status = 'CANCELLED';
+                                        item.balance = 0;
+                                    }
+                                });
+                                oldDriver.markModified('rentTracking');
+                            }
+
+                            // 2. Unassign and mark old driver inactive
+                            oldDriver.currentVehicle = null;
+                            oldDriver.status = 'INACTIVE';
+                            if (!oldDriver.statusHistory) oldDriver.statusHistory = [];
+                            oldDriver.statusHistory.push({
+                                status: 'INACTIVE',
+                                remarks: `Vehicle ${existingVehicle.basicDetails?.make || ''} ${existingVehicle.basicDetails?.model || ''} reassigned during bulk data migration`,
+                                changedAt: new Date()
+                            });
+                            await oldDriver.save();
+
+                            // 3. Cancel pending/draft invoices for old driver
+                            const Invoice = require("../../Invoice/Model/InvoiceModel");
+                            await Invoice.updateMany(
+                                { driver: oldDriverId, vehicle: vehicleId, status: { $in: ['PENDING', 'DRAFT'] } },
+                                { $set: { status: 'CANCELLED' } }
+                            );
+
+                            // 4. Update linked customer status to INACTIVE
+                            const Customer = require("../../Customer/Model/CustomerModel");
+                            await Customer.findOneAndUpdate({ driver: oldDriverId }, { status: 'INACTIVE' });
+                        }
+                    }
+
                     await Vehicle.findByIdAndUpdate(vehicleId, { currentDriver: driverId });
                 }
 
@@ -724,7 +771,8 @@ const dataMigrateDrivers = async (req, res) => {
                         weeklyRent: Number(row.weeklyRent),
                         durationWeeks: Number(row.durationWeeks),
                         activationDate: row.activationDate || undefined,
-                        deactivationDate: row.deactivationDate || undefined
+                        deactivationDate: row.deactivationDate || undefined,
+                        vehicleId: vehicleId
                     });
                 }
 

@@ -513,7 +513,16 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
  * the installments that have due dates >= today. 
  * Does NOT generate past invoices (these will be done via a separate upload).
  */
-exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate, deactivationDate }, session = null) => {
+exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate, deactivationDate, vehicleId }, session = null) => {
+    const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
+    const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
+    const targetVehicleId = vehicleId || driverRecord?.currentVehicle?._id || driverRecord?.currentVehicle || null;
+
+    let maxWeekNum = 0;
+    if (existingTracking.length > 0) {
+        maxWeekNum = Math.max(...existingTracking.map(t => t.weekNumber || 0));
+    }
+
     const installments = [];
     
     // Fallback to today if activationDate is not provided
@@ -546,9 +555,10 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
             break;
         }
 
-        const periodNum = i + 1;
+        const periodNum = maxWeekNum + i + 1;
 
         installments.push({
+            vehicle: targetVehicleId,
             weekNumber: periodNum,
             weekLabel: `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`,
             dueDate: dueDate,
@@ -562,8 +572,19 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
         });
     }
 
+    // Preserve existing tracking items and combine
+    const sanitizedExisting = existingTracking.map(t => {
+        const itemObj = typeof t.toObject === 'function' ? t.toObject() : { ...t };
+        if (!itemObj.vehicle && targetVehicleId) {
+            itemObj.vehicle = targetVehicleId;
+        }
+        return itemObj;
+    });
+
+    const combinedTracking = [...sanitizedExisting, ...installments];
+
     const updatedDriver = await updateDriverService(driverId, {
-        $set: { rentTracking: installments }
+        $set: { rentTracking: combinedTracking }
     }, session);
 
     return updatedDriver;
