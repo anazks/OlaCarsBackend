@@ -17,12 +17,18 @@ const VOUCHER_ACCESS_ROLES = [
 router.use(authenticate);
 router.use(authorize(...VOUCHER_ACCESS_ROLES));
 
+router.route("/stats")
+    .get(voucherController.getVoucherStats);
+
 router.route("/")
     .post(voucherController.createVoucher)
     .get(voucherController.getAllVouchers);
 
 router.route("/:id/pdf")
     .get(voucherController.downloadVoucherPdf);
+
+router.route("/:id/cancel")
+    .patch(voucherController.cancelVoucher);
 
 router.route("/:id")
     .get(voucherController.getVoucherById);

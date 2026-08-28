@@ -45,6 +45,25 @@ exports.getAllVouchers = async (req, res) => {
 };
 
 /**
+ * Get voucher statistics summary.
+ */
+exports.getVoucherStats = async (req, res) => {
+    try {
+        const result = await voucherService.getVoucherStats(req.query);
+        res.status(200).json({
+            status: "success",
+            message: "Voucher stats retrieved successfully",
+            data: result
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+/**
  * Get a single voucher by ID.
  */
 exports.getVoucherById = async (req, res) => {
@@ -53,6 +72,25 @@ exports.getVoucherById = async (req, res) => {
         res.status(200).json({
             status: "success",
             message: "Voucher retrieved successfully",
+            data: voucher
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+/**
+ * Cancel / Void a voucher.
+ */
+exports.cancelVoucher = async (req, res) => {
+    try {
+        const voucher = await voucherService.cancelVoucher(req.params.id, req.user);
+        res.status(200).json({
+            status: "success",
+            message: "Voucher cancelled and set-offs reversed successfully",
             data: voucher
         });
     } catch (error) {

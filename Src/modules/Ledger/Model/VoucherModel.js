@@ -72,6 +72,32 @@ const voucherSchema = new mongoose.Schema(
             enum: ["DRAFT", "POSTED", "CANCELLED"],
             default: "DRAFT",
         },
+        autoSetOff: {
+            type: Boolean,
+            default: true,
+        },
+        setOffSummary: {
+            totalSetOff: { type: Number, default: 0 },
+            excessAmount: { type: Number, default: 0 },
+            invoiceCount: { type: Number, default: 0 },
+            billCount: { type: Number, default: 0 },
+            itemsSetOff: { type: Array, default: [] }
+        },
+        paymentReceived: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "PaymentReceived"
+        },
+        paymentMade: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "PaymentMade"
+        },
+        contact: {
+            type: mongoose.Schema.Types.ObjectId
+        },
+        contactModel: {
+            type: String,
+            enum: ["Customer", "Supplier", "Driver", "Other"]
+        },
         // Audit Trail
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
