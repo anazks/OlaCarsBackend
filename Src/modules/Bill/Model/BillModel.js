@@ -91,6 +91,16 @@ const billSchema = new mongoose.Schema(
         notes: {
             type: String,
         },
+        purchaseType: {
+            type: String,
+            enum: ["CASH", "BANK", "CREDIT"],
+            default: "CREDIT",
+        },
+        creditAccountId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "AccountingCode",
+            default: null,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             required: true,
@@ -101,8 +111,15 @@ const billSchema = new mongoose.Schema(
             required: true,
         },
     },
-    { timestamps: true }
+    { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
+
+// Virtual Populate for linked Ledger Entries
+billSchema.virtual("ledgerEntries", {
+    ref: "LedgerEntry",
+    localField: "_id",
+    foreignField: "bill"
+});
 
 billSchema.index({ createdAt: -1 });
 billSchema.index({ status: 1 });

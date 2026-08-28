@@ -488,9 +488,10 @@ const dataMigrateDrivers = async (req, res) => {
                 continue;
             }
 
+            let vehicleId = null;
+            let isNewlyCreatedVehicle = false; // Track for rollback on driver failure
+
             try {
-                let vehicleId = null;
-                let isNewlyCreatedVehicle = false; // Track for rollback on driver failure
 
                 // Sanitize Excel formula errors (#REF!, #N/A, #VALUE!, etc.) from all fields
                 for (const key of Object.keys(row)) {
@@ -588,42 +589,40 @@ const dataMigrateDrivers = async (req, res) => {
                 // ── 2. Driver Logic ──
                 let existingDriver = null;
 
-                const isNameSimilar = (name1, name2) => {
+                const isExactFullNameMatch = (name1, name2) => {
                     if (!name1 || !name2) return false;
-                    const tokens1 = String(name1).toLowerCase().split(/\s+/).filter(t => t.length >= 3);
-                    const tokens2 = String(name2).toLowerCase().split(/\s+/).filter(t => t.length >= 3);
-                    return tokens1.some(t => tokens2.includes(t));
+                    const norm1 = String(name1).trim().replace(/\s+/g, ' ').toLowerCase();
+                    const norm2 = String(name2).trim().replace(/\s+/g, ' ').toLowerCase();
+                    return norm1 === norm2;
                 };
 
-                // 1. Try to match by email
-                if (row.email && String(row.email || "").trim()) {
-                    const match = await Driver.findOne({ "personalInfo.email": String(row.email || "").trim().toLowerCase() });
-                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
-                        existingDriver = match;
-                    }
-                }
-
-                // 2. Try to match by phone
-                if (!existingDriver && row.phone && String(row.phone || "").trim()) {
-                    const match = await Driver.findOne({ "personalInfo.phone": String(row.phone || "").trim() });
-                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
-                        existingDriver = match;
-                    }
-                }
-
-                // 3. Try to match by licenseNumber
-                if (!existingDriver && row.licenseNumber && String(row.licenseNumber || "").trim()) {
-                    const match = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber || "").trim() });
-                    if (match && isNameSimilar(match.personalInfo?.fullName, row.fullName)) {
-                        existingDriver = match;
-                    }
-                }
-
-                // 4. Try to match by fullName alone (flexible regex)
-                if (!existingDriver && row.fullName && String(row.fullName || "").trim()) {
+                // 1. Primary Match: Match by exact full name (including plate number suffix)
+                if (row.fullName && String(row.fullName || "").trim()) {
                     const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                     const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
-                    existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex });
+                    existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex, isDeleted: false });
+                }
+
+                // 2. Secondary Match: Email / Phone / License ONLY if exact full name matches
+                if (!existingDriver && row.email && String(row.email || "").trim()) {
+                    const match = await Driver.findOne({ "personalInfo.email": String(row.email || "").trim().toLowerCase(), isDeleted: false });
+                    if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
+                }
+
+                if (!existingDriver && row.phone && String(row.phone || "").trim()) {
+                    const match = await Driver.findOne({ "personalInfo.phone": String(row.phone || "").trim(), isDeleted: false });
+                    if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
+                }
+
+                if (!existingDriver && row.licenseNumber && String(row.licenseNumber || "").trim()) {
+                    const match = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber || "").trim(), isDeleted: false });
+                    if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                        existingDriver = match;
+                    }
                 }
 
                 let driverId;
@@ -750,7 +749,7 @@ const dataMigrateDrivers = async (req, res) => {
                             await oldDriver.save();
 
                             // 3. Cancel pending/draft invoices for old driver
-                            const Invoice = require("../../Invoice/Model/InvoiceModel");
+                            const { Invoice } = require("../../Invoice/Model/InvoiceModel");
                             await Invoice.updateMany(
                                 { driver: oldDriverId, vehicle: vehicleId, status: { $in: ['PENDING', 'DRAFT'] } },
                                 { $set: { status: 'CANCELLED' } }
@@ -1193,21 +1192,39 @@ const verifyAndCorrectDriverPlans = async (req, res) => {
         const processSingleRow = async (row, i) => {
             const rowNum = row.originalRow || (i + 1);
 
-            // Match existing driver by email, phone, licenseNumber, or fullName
+            const isExactFullNameMatch = (name1, name2) => {
+                if (!name1 || !name2) return false;
+                const norm1 = String(name1).trim().replace(/\s+/g, ' ').toLowerCase();
+                const norm2 = String(name2).trim().replace(/\s+/g, ' ').toLowerCase();
+                return norm1 === norm2;
+            };
+
+            // Match existing driver strictly by exact fullName (including plate number suffix)
             let existingDriver = null;
-            if (row.email && String(row.email).trim()) {
-                existingDriver = await Driver.findOne({ "personalInfo.email": String(row.email).trim().toLowerCase(), isDeleted: false });
-            }
-            if (!existingDriver && row.phone && String(row.phone).trim()) {
-                existingDriver = await Driver.findOne({ "personalInfo.phone": String(row.phone).trim(), isDeleted: false });
-            }
-            if (!existingDriver && row.licenseNumber && String(row.licenseNumber).trim()) {
-                existingDriver = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber).trim(), isDeleted: false });
-            }
-            if (!existingDriver && row.fullName && String(row.fullName).trim()) {
+            if (row.fullName && String(row.fullName).trim()) {
                 const escapedName = row.fullName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const nameRegex = new RegExp("^" + escapedName.replace(/\s+/g, '\\s+') + "$", "i");
                 existingDriver = await Driver.findOne({ "personalInfo.fullName": nameRegex, isDeleted: false });
+            }
+
+            // Secondary check by email, phone, or license ONLY if exact full name matches
+            if (!existingDriver && row.email && String(row.email).trim()) {
+                const match = await Driver.findOne({ "personalInfo.email": String(row.email).trim().toLowerCase(), isDeleted: false });
+                if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                    existingDriver = match;
+                }
+            }
+            if (!existingDriver && row.phone && String(row.phone).trim()) {
+                const match = await Driver.findOne({ "personalInfo.phone": String(row.phone).trim(), isDeleted: false });
+                if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                    existingDriver = match;
+                }
+            }
+            if (!existingDriver && row.licenseNumber && String(row.licenseNumber).trim()) {
+                const match = await Driver.findOne({ "drivingLicense.licenseNumber": String(row.licenseNumber).trim(), isDeleted: false });
+                if (match && isExactFullNameMatch(match.personalInfo?.fullName, row.fullName)) {
+                    existingDriver = match;
+                }
             }
 
             if (!existingDriver) {

@@ -266,6 +266,10 @@ exports.getInvoiceByIdService = async (id) => {
             populate: { path: "branch", select: "name city country" }
         })
         .populate("vehicle", "basicDetails.make basicDetails.model basicDetails.vin basicDetails.fleetNumber legalDocs.registrationNumber")
+        .populate({
+            path: "ledgerEntries",
+            populate: { path: "accountingCode", select: "code name category" }
+        })
         .lean();
     if (!invoice || invoice.isDeleted) throw new Error("Invoice not found");
     return invoice;

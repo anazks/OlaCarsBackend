@@ -13,12 +13,19 @@ const isLastDayOfMonth = (date = new Date()) => {
 const startFixedAssetCronJob = () => {
     // Run daily at 23:30 (11:30 PM) to check for month-end depreciation posting
     cron.schedule('30 23 * * *', async () => {
-        if (!isLastDayOfMonth()) {
-            return;
-        }
-
-        console.log('[FixedAssetCronService] Last day of the month detected. Running auto-depreciation posting...');
         try {
+            const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+            const suspendedSetting = await SystemSettings.findOne({ key: 'depreciation_cron_suspended' });
+            if (suspendedSetting && (suspendedSetting.value === true || suspendedSetting.value === 'true')) {
+                console.log('[FixedAssetCronService] Depreciation cron job is suspended. Skipping month-end check.');
+                return;
+            }
+
+            if (!isLastDayOfMonth()) {
+                return;
+            }
+
+            console.log('[FixedAssetCronService] Last day of the month detected. Running auto-depreciation posting...');
             await exports.autoPostMonthlyDepreciation();
         } catch (error) {
             console.error('[FixedAssetCronService] Error in monthly auto-depreciation cron routine:', error);

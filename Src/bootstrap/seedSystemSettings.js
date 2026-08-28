@@ -21,6 +21,11 @@ const seedSystemSettings = async () => {
                 value: false,
                 description: "Toggle to suspend or enable the automated weekly invoice generation cron job.",
             },
+            {
+                key: "depreciation_cron_suspended",
+                value: false,
+                description: "Toggle to suspend or enable the automated monthly asset depreciation cron job.",
+            },
         ];
 
         for (const setting of defaultSettings) {

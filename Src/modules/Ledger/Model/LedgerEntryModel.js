@@ -110,6 +110,16 @@ const ledgerEntrySchema = new mongoose.Schema(
             invoiceCount: { type: Number, default: 0 },
             excessAmount: { type: Number, default: 0 }
         },
+        invoice: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Invoice",
+            required: false,
+        },
+        bill: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Bill",
+            required: false,
+        },
     },
     { timestamps: true }
 );
@@ -123,5 +133,7 @@ ledgerEntrySchema.index({ accountingCode: 1 });
 ledgerEntrySchema.index({ type: 1 });
 ledgerEntrySchema.index({ entryDate: 1 });
 ledgerEntrySchema.index({ transactionId: 1 });
+ledgerEntrySchema.index({ invoice: 1 });
+ledgerEntrySchema.index({ bill: 1 });
 
 module.exports = mongoose.model("LedgerEntry", ledgerEntrySchema);

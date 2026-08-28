@@ -15,6 +15,7 @@ const getSystemSetting = async (req, res) => {
             if (key === "hourlyLabourRate") finalValue = 150;
             if (key === "driver_payment_emails_enabled") finalValue = true;
             if (key === "invoice_cron_suspended") finalValue = false;
+            if (key === "depreciation_cron_suspended") finalValue = false;
         }
 
         return res.status(200).json({ success: true, key, value: finalValue });

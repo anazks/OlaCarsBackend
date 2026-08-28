@@ -746,20 +746,18 @@ exports.createManualInvoice = async (data, createdBy, creatorRole) => {
 exports.applyPrepaymentsToInvoice = async (invoiceId) => {
     const { Invoice } = require("../Model/InvoiceModel");
     const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
 
     const invoice = await Invoice.findById(invoiceId);
     if (!invoice || invoice.status === 'PAID') return;
-
-    if (invoice.invoiceType === 'RENTAL') {
-        console.log(`[InvoiceService] Skipping prepayment application for RENTAL invoice ${invoice.invoiceNumber}`);
-        return;
-    }
 
     // Find all completed PaymentReceived records for this customer
     const payments = await PaymentReceived.find({ customerId: invoice.customer, status: 'COMPLETED' });
 
     let remainingToPay = invoice.balance;
     if (remainingToPay <= 0) return;
+
+    let totalAppliedFromCredit = 0;
 
     for (const payment of payments) {
         if (remainingToPay <= 0) break;
@@ -783,7 +781,7 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
                     amount: toApply,
                     paidAt: new Date(),
                     paymentMethod: payment.paymentMethod || "Cash",
-                    transactionId: payment.referenceNumber || undefined,
+                    transactionId: payment.referenceNumber || payment.paymentNumber || undefined,
                     note: `Applied prepayment from ${payment.paymentNumber}`,
                 };
 
@@ -800,13 +798,28 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
                 }
 
                 remainingToPay = newBalance;
+                totalAppliedFromCredit += toApply;
             }
         }
     }
 
-    if (remainingToPay < invoice.balance) {
+    if (totalAppliedFromCredit > 0) {
         await invoice.save();
         await exports.syncInvoiceToAdditionalPayments(invoice);
+
+        // Generate double-entry rollover ledger entry: DR Advance Received (2.1.02), CR Accounts Receivable (1.1.03)
+        try {
+            await LedgerService.generateRolloverLedgerEntry({
+                customer: invoice.customer,
+                invoice: invoice,
+                amount: totalAppliedFromCredit,
+                createdBy: invoice.createdBy,
+                creatorRole: invoice.creatorRole
+            });
+        } catch (ledgerErr) {
+            console.error("[InvoiceService] Failed to generate rollover ledger entry for prepayment application:", ledgerErr);
+        }
+
         // Also trigger rollover customer invoices to maintain carryover calculations
         await exports.rolloverCustomerInvoices(invoice.customer);
     }
@@ -1572,7 +1585,14 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             const created = await Invoice.create(newInvoiceData);
             createdInvoices.push(created);
 
-            // General Ledger entries are bypassed for bulk invoice uploads as requested.
+            if (created.status !== 'DRAFT') {
+                try {
+                    await LedgerService.generateInvoiceLedgerEntries(created);
+                } catch (ledgerErr) {
+                    console.error("[InvoiceService] Failed to generate ledger entries for bulk invoice:", ledgerErr);
+                }
+                await exports.applyPrepaymentsToInvoice(created._id);
+            }
         } catch (err) {
             errors.push(`Invoice group "${key}" (Row ${origIdx}): Failed to create invoice - ${err.message}`);
         }

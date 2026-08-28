@@ -91,40 +91,66 @@ exports.createBillFromPO = async (poId, userData, overrides = {}) => {
 
 async function postBillToLedger(bill, userData) {
     const extractId = (val) => (val && val._id ? val._id : val);
-    
-    // 1. Find the Accounts Payable account ID (assuming code 2.1.01 exists)
     const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
-    const apAccount = await AccountingCode.findOne({ code: "2.1.01", category: "LIABILITY" });
-    
-    if (!apAccount) {
-        console.error("[BillService] Accounts Payable account (2.1.01) not found. Skipping ledger entry.");
-        return;
+
+    // 1. Resolve the CREDIT account (Always Accounts Payable for Bill creation / liability booking)
+    let creditAccountId = bill.creditAccountId ? extractId(bill.creditAccountId) : null;
+
+    if (!creditAccountId) {
+        const apAccount = await AccountingCode.findOne({ code: "2.1.01" })
+            || await AccountingCode.findOne({ accountType: "Accounts Payable", isActive: true, isDeleted: false })
+            || await AccountingCode.findOne({ category: /Accounts Payable/i });
+
+        if (!apAccount) {
+            console.error(`[BillService] Accounts Payable account (2.1.01) not found. Skipping ledger entry.`);
+            return;
+        }
+        creditAccountId = apAccount._id;
     }
 
-    // 2. Create entries for each item (Debit Expense)
+    // 2. DEBIT entries — one per line item (Expense / Asset account)
+    let defaultExpenseAccount = null;
     for (const item of bill.items) {
-        await LedgerService.create({
-            branch: extractId(bill.branch),
-            accountingCode: extractId(item.accountId),
-            type: "DEBIT",
-            amount: item.quantity * item.unitPrice,
-            description: `Bill ${bill.billNumber} - Item: ${item.itemName}`,
-            entryDate: bill.billDate,
-            createdBy: userData.id || userData._id,
-            creatorRole: userData.role
-        });
+        let debitAccountId = extractId(item.accountId);
+        if (!debitAccountId) {
+            if (!defaultExpenseAccount) {
+                defaultExpenseAccount = await AccountingCode.findOne({ code: "EXP0006" })
+                    || await AccountingCode.findOne({ category: /EXPENSE/i, isActive: true, isDeleted: false })
+                    || await AccountingCode.findOne({ category: "EXPENSE" });
+            }
+            if (defaultExpenseAccount) {
+                debitAccountId = defaultExpenseAccount._id;
+            }
+        }
+
+        if (debitAccountId) {
+            await LedgerService.create({
+                branch: extractId(bill.branch),
+                accountingCode: debitAccountId,
+                type: "DEBIT",
+                amount: item.quantity * item.unitPrice,
+                description: `Bill ${bill.billNumber} - Item: ${item.itemName}`,
+                entryDate: bill.billDate,
+                createdBy: userData.id || userData._id,
+                creatorRole: userData.role,
+                bill: bill._id
+            });
+        }
     }
 
-    // 3. Create one entry for the total (Credit Accounts Payable)
+    // 3. CREDIT entry — one for total amount against Accounts Payable
+    const creditDesc = `Bill ${bill.billNumber} - Total Liability`;
+
     await LedgerService.create({
         branch: extractId(bill.branch),
-        accountingCode: apAccount._id,
+        accountingCode: creditAccountId,
         type: "CREDIT",
         amount: bill.totalAmount,
-        description: `Bill ${bill.billNumber} - Total Liability`,
+        description: creditDesc,
         entryDate: bill.billDate,
         createdBy: userData.id || userData._id,
-        creatorRole: userData.role
+        creatorRole: userData.role,
+        bill: bill._id
     });
 }
 
@@ -402,6 +428,36 @@ exports.createBill = async (billData, userData) => {
         }
     }
 
+    // Resolve and validate purchaseType + creditAccountId
+    const purchaseType = (billData.purchaseType || "CREDIT").toUpperCase();
+    if (!["CASH", "BANK", "CREDIT"].includes(purchaseType)) {
+        throw new AppError(`Invalid purchase type: "${billData.purchaseType}". Must be CASH, BANK, or CREDIT.`, 400);
+    }
+
+    let creditAccountId = billData.creditAccountId ? extractId(billData.creditAccountId) : undefined;
+    if (creditAccountId) {
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const creditAcc = await AccountingCode.findById(creditAccountId);
+        if (!creditAcc) {
+            throw new AppError("Credit account not found.", 400);
+        }
+        const creditCat = (creditAcc.category || "").toLowerCase().trim();
+        const creditType = (creditAcc.accountType || "").toLowerCase().trim();
+        const isCash = creditType === "cash" || creditCat === "cash";
+        const isBank = creditType === "bank" || creditCat === "bank";
+        const isAP = creditType === "accounts payable" || creditCat === "accounts payable" || creditAcc.code === "2.1.01";
+
+        if (purchaseType === "CASH" && !isCash) {
+            throw new AppError(`Purchase Type is CASH but credit account "${creditAcc.code}" is not a Cash account (type: "${creditAcc.accountType || creditAcc.category}").`, 400);
+        }
+        if (purchaseType === "BANK" && !isBank) {
+            throw new AppError(`Purchase Type is BANK but credit account "${creditAcc.code}" is not a Bank account (type: "${creditAcc.accountType || creditAcc.category}").`, 400);
+        }
+        if (purchaseType === "CREDIT" && !isAP) {
+            throw new AppError(`Purchase Type is CREDIT but credit account "${creditAcc.code}" is not an Accounts Payable account (type: "${creditAcc.accountType || creditAcc.category}").`, 400);
+        }
+    }
+
     const savedBillData = {
         billNumber: billData.billNumber || `BILL-${Date.now()}`,
         supplier: extractId(billData.supplier),
@@ -413,6 +469,8 @@ exports.createBill = async (billData, userData) => {
         totalAmount: totalAmount,
         balanceDue: totalAmount,
         status: "OPEN",
+        purchaseType,
+        creditAccountId: creditAccountId || undefined,
         isInclusiveTax: !!billData.isInclusiveTax,
         taxId: billData.taxId ? extractId(billData.taxId) : undefined,
         taxPercentage: taxPercentage,
@@ -622,85 +680,76 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
 
         for (const itemObj of grouped) {
             const r = itemObj.row;
-            const itemName = getRowVal(r, ["Description", "description", "Item Name", "itemName"]) || "No Item Details";
-            const qty = Number(getRowVal(r, ["Quantity", "quantity"])) || 1;
-            const unitPrice = Number(getRowVal(r, ["Rate", "rate", "Item Price", "itemPrice", "Unit Price", "unitPrice"])) || 0;
-            const itemDesc = getRowVal(r, ["Description", "description"]) || "";
+            // Prioritize Item Name over Description
+            const rawItemNameVal = getRowVal(r, ["Item Name", "itemName", "Item", "item"]) 
+                || getRowVal(r, ["Description", "description"]) 
+                || "No Item Details";
+            const rawQtyVal = getRowVal(r, ["Quantity", "quantity"]) ?? "1";
+            const rawPriceVal = getRowVal(r, ["Rate", "rate", "Item Price", "itemPrice", "Unit Price", "unitPrice"]) ?? "0";
+            const rawItemDesc = getRowVal(r, ["Description", "description"]) || "";
+            const rawAccCodeVal = getRowVal(r, ["Debit Account", "debitAccount", "Debit Account Code", "debitAccountCode", "Account Code", "accountCode"]) ?? "";
+            const rawAccNameVal = getRowVal(r, ["Debit Account Name", "debitAccountName", "Debit Account", "debitAccount", "Account", "accountName", "account"]) ?? "";
 
-            const accCodeVal = getRowVal(r, ["Account Code", "accountCode"]);
-            const accNameVal = getRowVal(r, ["Account", "accountName", "account"]);
+            const itemNameStr = rawItemNameVal.toString().trim();
+            const isCommaSeparated = itemNameStr.includes(",") || rawQtyVal.toString().includes(",") || rawPriceVal.toString().includes(",");
 
-            let accountId = null;
-            if (accCodeVal) {
-                const codeStr = accCodeVal.toString().trim().toLowerCase();
-                const accDoc = accountsByCode.get(codeStr);
-                if (accDoc) accountId = accDoc._id;
-            }
-            if (!accountId && accNameVal) {
-                const nameStr = accNameVal.toString().trim().toLowerCase().replace(/\s+/g, ' ');
-                const accDoc = accountsByName.get(nameStr);
-                if (accDoc) accountId = accDoc._id;
-            }
+            const itemNames = isCommaSeparated 
+                ? itemNameStr.split(",").map(s => s.trim()).filter(Boolean) 
+                : [itemNameStr];
+            const quantities = isCommaSeparated 
+                ? rawQtyVal.toString().split(",").map(s => s.trim()) 
+                : [rawQtyVal.toString().trim()];
+            const rates = isCommaSeparated 
+                ? rawPriceVal.toString().split(",").map(s => s.trim()) 
+                : [rawPriceVal.toString().trim()];
+            const accCodes = rawAccCodeVal.toString().includes(",") 
+                ? rawAccCodeVal.toString().split(",").map(s => s.trim()) 
+                : [rawAccCodeVal.toString().trim()];
+            const accNames = rawAccNameVal.toString().includes(",") 
+                ? rawAccNameVal.toString().split(",").map(s => s.trim()) 
+                : [rawAccNameVal.toString().trim()];
+            const itemDescs = rawItemDesc.toString().includes(",") 
+                ? rawItemDesc.toString().split(",").map(s => s.trim()) 
+                : [rawItemDesc.toString().trim()];
 
-            // Collect unmapped line-item fields
-            const usageUnit = getRowVal(r, ["Usage unit", "usageUnit"]);
-            const taxAmountItem = getRowVal(r, ["Tax Amount", "taxAmount"]);
-            const itemTotal = getRowVal(r, ["Item Total", "itemTotal"]);
-            const isBillable = getRowVal(r, ["Is Billable", "isBillable"]);
-            const itemLocName = getRowVal(r, ["Line Item Location Name", "lineItemLocationName"]);
-            const discountType = getRowVal(r, ["Discount Type", "discountType"]);
-            const isDiscountBeforeTax = getRowVal(r, ["Is Discount Before Tax", "isDiscountBeforeTax"]);
-            const discount = getRowVal(r, ["Discount", "discount"]);
-            const discountAmount = getRowVal(r, ["Discount Amount", "discountAmount"]);
-            const billReceiveStatus = getRowVal(r, ["Bill Receive Status", "billReceiveStatus"]);
-            const manuallyReceivedQty = getRowVal(r, ["Manually Received Quantity", "manuallyReceivedQuantity"]);
-            const taxIDItem = getRowVal(r, ["Tax ID", "taxId"]);
-            const taxNameItem = getRowVal(r, ["Tax Name", "taxName"]);
-            const taxPctItem = getRowVal(r, ["Tax Percentage", "taxPercentage"]);
-            const taxTypeItem = getRowVal(r, ["Tax Type", "taxType"]);
-            const entityDiscountAmt = getRowVal(r, ["Entity Discount Amount", "entityDiscountAmount"]);
-            const discountAccount = getRowVal(r, ["Discount Account", "discountAccount"]);
-            const isLandedCost = getRowVal(r, ["Is Landed Cost", "isLandedCost"]);
+            const subItemCount = Math.max(itemNames.length, quantities.length, rates.length);
 
-            let descParts = [];
-            if (itemDesc) descParts.push(itemDesc);
+            for (let i = 0; i < subItemCount; i++) {
+                const subItemName = itemNames[i] || itemNames[0] || "Item";
+                const subQty = Number(quantities[i] !== undefined ? quantities[i] : quantities[0]) || 1;
+                const subRate = Number(rates[i] !== undefined ? rates[i] : rates[0]) || 0;
+                const subAccCode = accCodes[i] !== undefined ? accCodes[i] : accCodes[0];
+                const subAccName = accNames[i] !== undefined ? accNames[i] : accNames[0];
+                const subDesc = itemDescs[i] !== undefined ? itemDescs[i] : (rawItemDesc || subItemName);
 
-            const unmappedItemFields = {
-                "Usage Unit": usageUnit,
-                "Tax Amount": taxAmountItem,
-                "Item Total": itemTotal,
-                "Is Billable": isBillable,
-                "Line Item Location": itemLocName,
-                "Discount Type": discountType,
-                "Is Discount Before Tax": isDiscountBeforeTax,
-                "Discount": discount,
-                "Discount Amount": discountAmount,
-                "Bill Receive Status": billReceiveStatus,
-                "Manually Received Quantity": manuallyReceivedQty,
-                "Tax ID": taxIDItem,
-                "Tax Name": taxNameItem,
-                "Tax Percentage": taxPctItem,
-                "Tax Type": taxTypeItem,
-                "Entity Discount Amount": entityDiscountAmt,
-                "Discount Account": discountAccount,
-                "Is Landed Cost": isLandedCost
-            };
-
-            for (const [k, v] of Object.entries(unmappedItemFields)) {
-                if (v !== undefined && v !== null && v !== "") {
-                    descParts.push(`${k}: ${v}`);
+                let accountId = null;
+                if (subAccCode) {
+                    const codeStr = subAccCode.toLowerCase();
+                    const accDoc = accountsByCode.get(codeStr);
+                    if (accDoc) accountId = accDoc._id;
                 }
+                if (!accountId && subAccName) {
+                    const nameStr = subAccName.toLowerCase().replace(/\s+/g, ' ');
+                    const accDoc = accountsByName.get(nameStr);
+                    if (accDoc) accountId = accDoc._id;
+                }
+
+                if (!accountId) {
+                    const missingAcc = subAccCode || subAccName || "Not specified";
+                    errors.push(`Bill "${key}" (Row ${origIdx}): Item "${subItemName}" Debit Account "${missingAcc}" was not found in Chart of Accounts.`);
+                    continue;
+                }
+
+                items.push({
+                    itemName: subItemName,
+                    quantity: subQty,
+                    unitPrice: subRate,
+                    description: subDesc,
+                    accountId
+                });
+
+                calculatedTotal += subQty * subRate;
             }
-
-            items.push({
-                itemName,
-                quantity: qty,
-                unitPrice,
-                description: descParts.join(" | "),
-                accountId
-            });
-
-            calculatedTotal += qty * unitPrice;
         }
 
         if (items.length === 0) {
@@ -738,11 +787,60 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
             taxPercentage = taxPctExcel;
         }
 
-        // If bill already exists, append new items
+        // --- Resolve Purchase Type & Credit Account ---
+        const rawPurchaseType = (getRowVal(headerRow, ["Purchase Type", "purchaseType", "Bill Type", "billType"]) || "CREDIT").toString().trim().toUpperCase();
+        const purchaseTypeMap = {
+            "CASH": "CASH", "CASH PURCHASE": "CASH",
+            "BANK": "BANK", "BANK PURCHASE": "BANK", "BANK TRANSFER": "BANK",
+            "CREDIT": "CREDIT", "CREDIT PURCHASE": "CREDIT", "ON CREDIT": "CREDIT", "PAYABLE": "CREDIT"
+        };
+        const purchaseType = purchaseTypeMap[rawPurchaseType] || "CREDIT";
+
+        const creditAccCodeVal = getRowVal(headerRow, ["Credit Account", "creditAccount", "Credit Account Code", "creditAccountCode", "Credit Account Name", "creditAccountName", "Accounts Payable", "accountsPayable"]);
+        let creditAccountId = null;
+        let creditAccountDoc = null;
+
+        if (creditAccCodeVal) {
+            const cleanCreditCode = creditAccCodeVal.toString().trim().toLowerCase();
+            creditAccountDoc = accountsByCode.get(cleanCreditCode) || null;
+            if (!creditAccountDoc) {
+                // Try by name
+                const cleanCreditName = creditAccCodeVal.toString().trim().toLowerCase().replace(/\s+/g, ' ');
+                creditAccountDoc = accountsByName.get(cleanCreditName) || null;
+            }
+        }
+
+        // If no Credit Account specified in Excel/CSV, default to 2.1.01 (Accounts Payable)
+        if (!creditAccountDoc) {
+            creditAccountDoc = accountsByCode.get("2.1.01") || Array.from(accountsByCode.values()).find(a => (a.accountType || a.category || '').toLowerCase().includes("payable")) || null;
+        }
+
+        if (creditAccountDoc) {
+            creditAccountId = creditAccountDoc._id;
+        }
+
+        // If bill already exists in DB, append new items and update totalAmount & balanceDue
         if (existingBill) {
             try {
                 existingBill.items.push(...items);
-                existingBill.totalAmount = (existingBill.totalAmount || 0) + calculatedTotal;
+                const newTotal = (existingBill.totalAmount || 0) + calculatedTotal;
+                const paid = existingBill.amountPaid || 0;
+                const newBalance = Math.max(0, newTotal - paid);
+
+                existingBill.totalAmount = newTotal;
+                existingBill.balanceDue = newBalance;
+                if (newBalance <= 0) {
+                    existingBill.status = "PAID";
+                } else if (paid > 0) {
+                    existingBill.status = "PARTIALLY_PAID";
+                } else {
+                    existingBill.status = "OPEN";
+                }
+
+                // Update purchaseType and creditAccountId if provided
+                if (purchaseType) existingBill.purchaseType = purchaseType;
+                if (creditAccountId) existingBill.creditAccountId = creditAccountId;
+
                 existingBill.isInclusiveTax = isInclusiveTax;
                 if (taxId) {
                     existingBill.taxId = taxId;
@@ -750,6 +848,25 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
                 }
                 await existingBill.save();
                 updatedBills.push(existingBill.billNumber);
+
+                // Post incremental GL entries for newly appended items
+                if (existingBill.status !== 'DRAFT' && calculatedTotal > 0) {
+                    try {
+                        const tempIncrementalBill = {
+                            _id: existingBill._id,
+                            billNumber: existingBill.billNumber,
+                            branch: existingBill.branch,
+                            billDate: existingBill.billDate || new Date(),
+                            totalAmount: calculatedTotal,
+                            items: items,
+                            purchaseType: existingBill.purchaseType,
+                            creditAccountId: existingBill.creditAccountId
+                        };
+                        await postBillToLedger(tempIncrementalBill, { id: actor.id, role: actor.role });
+                    } catch (glErr) {
+                        console.error(`[BillService] Failed to post incremental GL for bill ${existingBill.billNumber}:`, glErr);
+                    }
+                }
             } catch (err) {
                 errors.push(`Bill "${key}" (Row ${origIdx}): Failed to update existing bill - ${err.message}`);
             }
@@ -800,7 +917,6 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         const adjustment = getRowVal(headerRow, ["Adjustment", "adjustment"]);
         const adjustmentDesc = getRowVal(headerRow, ["Adjustment Description", "adjustmentDescription"]);
         const adjustmentAccount = getRowVal(headerRow, ["Adjustment Account", "adjustmentAccount"]);
-        const billType = getRowVal(headerRow, ["Bill Type", "billType"]);
         const createdByExcel = getRowVal(headerRow, ["Created By", "createdBy"]);
 
         let docDescParts = [];
@@ -818,7 +934,6 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
             "Adjustment": adjustment,
             "Adjustment Description": adjustmentDesc,
             "Adjustment Account": adjustmentAccount,
-            "Bill Type": billType,
             "Is Inclusive Tax": isInclusiveTax,
             "Created By (Original)": createdByExcel
         };
@@ -847,6 +962,8 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
             amountPaid,
             balanceDue: totalAmount - amountPaid,
             status,
+            purchaseType,
+            creditAccountId: creditAccountId || undefined,
             isInclusiveTax,
             taxId,
             taxPercentage,
@@ -858,6 +975,14 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         try {
             const created = await Bill.create(newBillData);
             createdBills.push(created);
+
+            if (created.status !== 'DRAFT') {
+                try {
+                    await postBillToLedger(created, { id: actor.id, role: actor.role });
+                } catch (ledgerErr) {
+                    console.error(`[BillService] Failed to post bulk bill ${created.billNumber} to ledger:`, ledgerErr);
+                }
+            }
         } catch (err) {
             errors.push(`Bill "${key}" (Row ${origIdx}): Failed to create - ${err.message}`);
         }

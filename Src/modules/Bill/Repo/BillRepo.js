@@ -5,12 +5,52 @@ exports.createBill = async (data) => {
 };
 
 exports.getBillById = async (id) => {
-    return await Bill.findById(id)
+    const bill = await Bill.findById(id)
         .populate("supplier")
         .populate("branch")
         .populate("purchaseOrder")
         .populate("taxId")
+        .populate("creditAccountId")
         .populate("items.accountId");
+
+    if (!bill) return null;
+
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    
+    // Collect transaction IDs from bill payments
+    const paymentTxIds = (bill.payments || [])
+        .map(p => p.transactionId ? String(p.transactionId).trim() : null)
+        .filter(Boolean);
+
+    const queryOr = [
+        { bill: bill._id },
+        { "bills.billId": bill._id },
+        { description: new RegExp(`\\b${bill.billNumber.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, "i") }
+    ];
+
+    if (paymentTxIds.length > 0) {
+        queryOr.push({ transactionId: { $in: paymentTxIds } });
+    }
+
+    const allEntries = await LedgerEntry.find({
+        $or: queryOr,
+        isDeleted: { $ne: true }
+    })
+    .populate("accountingCode", "code name category accountType")
+    .sort({ entryDate: 1, createdAt: 1 })
+    .lean();
+
+    // Filter out entries that explicitly belong to a different bill ID
+    const validEntries = allEntries.filter(entry => {
+        if (entry.bill && entry.bill.toString() !== bill._id.toString()) {
+            return false;
+        }
+        return true;
+    });
+
+    const billObj = bill.toObject ? bill.toObject() : bill;
+    billObj.ledgerEntries = validEntries;
+    return billObj;
 };
 
 exports.getAllBills = async (query = {}) => {

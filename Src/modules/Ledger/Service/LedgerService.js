@@ -17,7 +17,9 @@ const ALLOWED_CREATE_FIELDS = [
     'contact',
     'contactModel',
     'transactionType',
-    'transactionId'
+    'transactionId',
+    'invoice',
+    'bill'
 ];
 
 /**
@@ -93,7 +95,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         description: `Bill Payment (Debit Accounts Payable) to ${supplierName} (Bill: ${bill.billNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
-                        creatorRole: paymentTransaction.creatorRole
+                        creatorRole: paymentTransaction.creatorRole,
+                        bill: bill._id
                     });
 
                     // Leg 2: CREDIT Bank/Cash Account (Asset decreases)
@@ -106,7 +109,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         description: `Bill Payment (Credit Bank/Cash) - Taken from ${paymentTransaction.accountingCode.name || "selected account"} (Bill: ${bill.billNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
-                        creatorRole: paymentTransaction.creatorRole
+                        creatorRole: paymentTransaction.creatorRole,
+                        bill: bill._id
                     });
 
                     console.log(`[LedgerService] Standalone Bill Payment double-entry posted successfully.`);
@@ -204,6 +208,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                     const totalApplied = invoices.reduce((sum, inv) => sum + (inv.amountApplied || 0), 0);
                     const excessAmount = Math.max(0, totalAmount - totalApplied);
                     const appliedAmount = Math.min(totalAmount, totalApplied);
+                    const targetInvoiceId = (invoices.length > 0 && invoices[0].invoiceId) ? invoices[0].invoiceId : undefined;
 
                     // Leg 1: DEBIT Bank/Cash Account (Asset increases)
                     await addLedgerEntryService({
@@ -215,7 +220,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         description: `Payment Received (Debit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
                         createdBy: paymentTransaction.createdBy,
-                        creatorRole: finalCreatorRole
+                        creatorRole: finalCreatorRole,
+                        invoice: targetInvoiceId
                     });
 
                     // Leg 2: CREDIT Accounts Receivable (Asset decreases)
@@ -229,7 +235,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                             description: `Payment Received (Credit Accounts Receivable) - Customer: ${customerName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                             entryDate: paymentTransaction.paymentDate || new Date(),
                             createdBy: paymentTransaction.createdBy,
-                            creatorRole: finalCreatorRole
+                            creatorRole: finalCreatorRole,
+                            invoice: targetInvoiceId
                         });
                     }
 
@@ -244,7 +251,8 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                             description: `Payment Received (Credit Advance Received From Customer) - Customer: ${customerName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                             entryDate: paymentTransaction.paymentDate || new Date(),
                             createdBy: paymentTransaction.createdBy,
-                            creatorRole: finalCreatorRole
+                            creatorRole: finalCreatorRole,
+                            invoice: targetInvoiceId
                         });
                     }
 
@@ -387,7 +395,8 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
             description: `Invoice Created (Debit Accounts Receivable) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
             createdBy: invoice.createdBy,
-            creatorRole: invoice.creatorRole
+            creatorRole: invoice.creatorRole,
+            invoice: invoice._id
         });
 
         // Determine credited accounts for line items or general
@@ -559,7 +568,8 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
                     description: description,
                     entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
                     createdBy: invoice.createdBy,
-                    creatorRole: invoice.creatorRole
+                    creatorRole: invoice.creatorRole,
+                    invoice: invoice._id
                 });
             }
         } else {
@@ -578,7 +588,8 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
                 description: `Invoice Created (Credit ${fallbackSalesAccount.name || 'Sales'}) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
                 entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
                 createdBy: invoice.createdBy,
-                creatorRole: invoice.creatorRole
+                creatorRole: invoice.creatorRole,
+                invoice: invoice._id
             });
         }
 
@@ -592,7 +603,8 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
                 description: `Invoice Created (Credit Tax Payable 7%) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
                 entryDate: invoice.generatedAt || invoice.createdAt || new Date(),
                 createdBy: invoice.createdBy,
-                creatorRole: invoice.creatorRole
+                creatorRole: invoice.creatorRole,
+                invoice: invoice._id
             });
         }
 
@@ -640,7 +652,8 @@ exports.generateRolloverLedgerEntry = async ({ customer, invoice, amount, create
             description: `Advance Applied (Debit Advance Received From Customer) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: new Date(),
             createdBy,
-            creatorRole
+            creatorRole,
+            invoice: invoice._id
         });
 
         // Leg 2: CREDIT Accounts Receivable (reduces Accounts Receivable Asset)
@@ -652,7 +665,8 @@ exports.generateRolloverLedgerEntry = async ({ customer, invoice, amount, create
             description: `Advance Applied (Credit Accounts Receivable) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`,
             entryDate: new Date(),
             createdBy,
-            creatorRole
+            creatorRole,
+            invoice: invoice._id
         });
 
         console.log(`[LedgerService] Successfully created double-entry rollover ledger entries for invoice: ${invoice.invoiceNumber}`);

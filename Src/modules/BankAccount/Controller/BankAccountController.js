@@ -879,6 +879,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         billNumber: b.billNumber,
                         amountApplied: b.amountApplied
                     })),
+                    bill: (setOffResult.billsSetOff && setOffResult.billsSetOff.length === 1) ? setOffResult.billsSetOff[0].billId : undefined,
                     setOffSummary: {
                         totalSetOff: setOffResult.totalSetOff,
                         billCount: (setOffResult.billsSetOff || []).length,

@@ -3005,6 +3005,12 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
                 amount: totalSetOff,
                 description: `Vendor Bill set-off payment (${billNumbers})`,
                 supplier: supplierId,
+                bills: billsSetOff.map(b => ({
+                    billId: b.billId,
+                    billNumber: b.billNumber,
+                    amountApplied: b.amountApplied
+                })),
+                bill: billsSetOff.length === 1 ? billsSetOff[0].billId : undefined,
                 transactionId: transactionId,
                 entryDate: timestamp,
                 createdBy: createdBy || "6a2290019fa01283dd165204",

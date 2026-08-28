@@ -143,7 +143,14 @@ const invoiceSchema = new mongoose.Schema({
     mailSentReminder3d: { type: Boolean, default: false },
     mailSentDueToday: { type: Boolean, default: false },
     mailSentRecovery: { type: Boolean, default: false },
-}, { timestamps: true });
+}, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
+
+// Virtual Populate for linked Ledger Entries
+invoiceSchema.virtual("ledgerEntries", {
+    ref: "LedgerEntry",
+    localField: "_id",
+    foreignField: "invoice"
+});
 
 invoiceSchema.index({ customer: 1, weekNumber: 1 }, {
     unique: true,
