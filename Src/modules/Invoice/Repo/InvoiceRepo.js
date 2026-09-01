@@ -26,7 +26,7 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     let isWorkshopQuery = false;
 
     const cleanSearch = queryParams.search ? queryParams.search.trim() : '';
-    const isFullInvoice = /^INV-\d{6}$/i.test(cleanSearch) || /^WRK-\d{6,8}-\d{4}$/i.test(cleanSearch);
+    const isFullInvoice = /^(?:INV|MAN|WRK)-\d{5,10}(?:-\d{4})?$/i.test(cleanSearch) || /^WRK-\d{6,8}-\d{4}$/i.test(cleanSearch);
 
     if (queryParams.driver) query.driver = queryParams.driver;
     if (queryParams.customer) query.customer = queryParams.customer;
