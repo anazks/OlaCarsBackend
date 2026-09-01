@@ -110,6 +110,13 @@ const ledgerEntrySchema = new mongoose.Schema(
             invoiceCount: { type: Number, default: 0 },
             excessAmount: { type: Number, default: 0 }
         },
+        bills: [
+            {
+                billId: { type: mongoose.Schema.Types.ObjectId, ref: "Bill" },
+                billNumber: { type: String },
+                amountApplied: { type: Number }
+            }
+        ],
         invoice: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Invoice",

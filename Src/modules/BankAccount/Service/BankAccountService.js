@@ -2672,12 +2672,32 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                     amount: totalSetOff,
                     description: `Invoice set-off payment (${invoiceNumbers}) - Customer: ${customerName}`,
                     contact: customerId,
+                    invoices: formattedInvoicesForLedger,
+                    invoice: invoicesSetOff.length === 1 ? invoicesSetOff[0].invoiceId : undefined,
                     transactionId: transactionId,
                     entryDate: timestamp,
                     createdBy: createdBy || "6a2290019fa01283dd165204",
                     creatorRole: (creatorRole || "ADMIN").toUpperCase()
                 });
                 if (arEntry) createdPartnerEntryIds.push(arEntry._id);
+            }
+
+            // Update primary ledger entry with invoices if present
+            const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
+            if (primaryTxId && invoicesSetOff.length > 0) {
+                try {
+                    await LedgerEntry.updateOne(
+                        { _id: primaryTxId },
+                        {
+                            $set: {
+                                invoices: formattedInvoicesForLedger,
+                                ...(invoicesSetOff.length === 1 ? { invoice: invoicesSetOff[0].invoiceId } : {})
+                            }
+                        }
+                    );
+                } catch (peErr) {
+                    console.error("[autoSetOffInvoices] Failed to update primary entry with invoices:", peErr);
+                }
             }
 
             // Leg 3: CREDIT Advance Received From Customer (2.1.02) for excess amount
@@ -3043,9 +3063,29 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
         }
     }
 
+    const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
+    if (primaryTxId && billsSetOff.length > 0) {
+        try {
+            await LedgerEntry.updateOne(
+                { _id: primaryTxId },
+                {
+                    $set: {
+                        bills: billsSetOff.map(b => ({
+                            billId: b.billId,
+                            billNumber: b.billNumber,
+                            amountApplied: b.amountApplied
+                        })),
+                        ...(billsSetOff.length === 1 ? { bill: billsSetOff[0].billId } : {})
+                    }
+                }
+            );
+        } catch (peErr) {
+            console.error("[autoSetOffBills] Failed to update primary entry with bills:", peErr);
+        }
+    }
+
     // Save InvoiceBillSetOffHistory with targetType: "SUPPLIER"
     let historyDoc = null;
-    const primaryTxId = bankTransactionId || options.existingBankLedgerEntryId || options.primaryLedgerEntry;
     if (primaryTxId) {
         try {
             const billSnapshots = billsSetOff.map(b => ({

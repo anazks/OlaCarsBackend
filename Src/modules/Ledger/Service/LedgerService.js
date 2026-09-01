@@ -19,7 +19,10 @@ const ALLOWED_CREATE_FIELDS = [
     'transactionType',
     'transactionId',
     'invoice',
-    'bill'
+    'bill',
+    'bills',
+    'invoices',
+    'supplier'
 ];
 
 /**

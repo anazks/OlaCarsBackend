@@ -56,6 +56,7 @@ exports.createVoucher = async (data) => {
     // 1. Instantiate & Save Voucher Header
     const voucher = new Voucher({
         ...voucherData,
+        lines,
         autoSetOff: autoSetOff !== false,
         totalAmount: totalVoucherAmount,
         contact: (contactId && mongoose.Types.ObjectId.isValid(contactId)) ? contactId : undefined,
@@ -106,7 +107,7 @@ exports.createVoucher = async (data) => {
             creatorRole: voucher.creatorRole
         });
 
-        // 3. Link partner ledger entries created by autoSetOffInvoices to this voucher
+        // 3. Link partner ledger entries created by autoSetOffInvoices to this voucher & update bankEntry
         if (setOffResult) {
             const partnerEntries = await LedgerEntry.find({
                 contact: contactId,
@@ -120,6 +121,17 @@ exports.createVoucher = async (data) => {
                 await pe.save();
                 createdLedgerEntries.push(pe);
                 if (pe.accountingCode) affectedCodeIds.add(String(pe.accountingCode));
+            }
+
+            if (setOffResult.invoicesSetOff && setOffResult.invoicesSetOff.length > 0) {
+                bankEntry.invoices = setOffResult.invoicesSetOff.map(i => ({
+                    invoiceId: i.invoiceId,
+                    invoiceNumber: i.invoiceNumber,
+                    amountApplied: i.amountApplied
+                }));
+                if (setOffResult.invoicesSetOff.length === 1) {
+                    bankEntry.invoice = setOffResult.invoicesSetOff[0].invoiceId;
+                }
             }
 
             voucher.setOffSummary = {
@@ -170,7 +182,7 @@ exports.createVoucher = async (data) => {
             creatorRole: voucher.creatorRole
         });
 
-        // 3. Link partner ledger entries created by autoSetOffBills to this voucher
+        // 3. Link partner ledger entries created by autoSetOffBills to this voucher & update bankEntry
         if (setOffResult) {
             const partnerEntries = await LedgerEntry.find({
                 supplier: contactId,
@@ -184,6 +196,17 @@ exports.createVoucher = async (data) => {
                 await pe.save();
                 createdLedgerEntries.push(pe);
                 if (pe.accountingCode) affectedCodeIds.add(String(pe.accountingCode));
+            }
+
+            if (setOffResult.billsSetOff && setOffResult.billsSetOff.length > 0) {
+                bankEntry.bills = setOffResult.billsSetOff.map(b => ({
+                    billId: b.billId,
+                    billNumber: b.billNumber,
+                    amountApplied: b.amountApplied
+                }));
+                if (setOffResult.billsSetOff.length === 1) {
+                    bankEntry.bill = setOffResult.billsSetOff[0].billId;
+                }
             }
 
             voucher.setOffSummary = {
