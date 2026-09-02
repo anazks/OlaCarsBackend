@@ -127,7 +127,7 @@ billSchema.index({ supplier: 1 });
 billSchema.index({ branch: 1 });
 billSchema.index({ billDate: -1 });
 
-// Middleware to update balanceDue and calculate inclusive tax amount before saving
+// Middleware to update balanceDue and calculate tax amount before saving
 billSchema.pre("save", async function () {
     this.balanceDue = this.totalAmount - this.amountPaid;
     if (this.balanceDue <= 0 && this.totalAmount > 0) {
@@ -136,8 +136,17 @@ billSchema.pre("save", async function () {
         this.status = "PARTIALLY_PAID";
     }
 
-    if (this.isInclusiveTax && this.taxPercentage > 0) {
-        this.taxAmount = Number((this.totalAmount - (this.totalAmount / (1 + (this.taxPercentage / 100)))).toFixed(4));
+    if (this.taxPercentage > 0) {
+        if (this.isInclusiveTax) {
+            this.taxAmount = Number((this.totalAmount - (this.totalAmount / (1 + (this.taxPercentage / 100)))).toFixed(4));
+        } else {
+            if (!this.taxAmount) {
+                const subtotal = (this.items && this.items.length > 0)
+                    ? this.items.reduce((s, it) => s + ((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)), 0)
+                    : this.totalAmount;
+                this.taxAmount = Number((subtotal * (this.taxPercentage / 100)).toFixed(4));
+            }
+        }
     } else {
         this.taxAmount = 0;
     }

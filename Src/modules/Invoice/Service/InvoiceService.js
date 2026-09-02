@@ -1099,8 +1099,22 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
 
     const validCreatedBy = (createdBy && mongoose.Types.ObjectId.isValid(createdBy)) ? createdBy : undefined;
 
-    const activeTax = await Tax.findOne({ isActive: true, isDeleted: false }).lean();
+    const allTaxes = await Tax.find({ isDeleted: false }).lean();
+    const activeTax = allTaxes.find(t => t.isActive) || allTaxes[0] || null;
     const defaultTaxRate = activeTax ? activeTax.rate : 0;
+    const taxesByName = new Map();
+    const taxesByRate = new Map();
+    for (const t of allTaxes) {
+        if (t.name) {
+            const norm = t.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            taxesByName.set(norm, t);
+        }
+        if (t.rate !== undefined && t.rate !== null) {
+            if (!taxesByRate.has(t.rate) || t.isActive) {
+                taxesByRate.set(t.rate, t);
+            }
+        }
+    }
     const startSeq = await exports.getNextInvoiceNumberVal();
 
     // 1. Fetch all drivers, customers, and branches into memory for fast map-based lookups
@@ -1317,19 +1331,33 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             existingInv = await Invoice.findOne({ customer: customerDoc._id, weekNumber, invoiceType: "RENTAL", isDeleted: false });
         }
 
-        // Is Inclusive Tax check (case-insensitive)
-        const isInclusiveTaxVal = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
-        const taxInclusiveParsed = isInclusiveTaxVal !== undefined ?
-            (isInclusiveTaxVal === true || String(isInclusiveTaxVal).toLowerCase() === 'true' || String(isInclusiveTaxVal).toLowerCase() === 'yes' || String(isInclusiveTaxVal).toLowerCase() === '1') : true;
+        // Determine tax inclusivity: check Item Tax Type (boolean TRUE/FALSE) or Is Inclusive Tax
+        const rawTaxType = getRowVal(headerRow, ["Item Tax Type", "itemTaxType", "item_tax_type", "Is Inclusive Tax", "isInclusiveTax", "isTaxInclusive"]);
+        let taxInclusiveParsed = true;
+        if (rawTaxType !== undefined && rawTaxType !== null && String(rawTaxType).trim() !== "") {
+            const cleanTaxType = String(rawTaxType).trim().toLowerCase();
+            if (cleanTaxType === "true" || cleanTaxType === "1" || cleanTaxType === "yes" || cleanTaxType === "inclusive" || rawTaxType === true) {
+                taxInclusiveParsed = true;
+            } else if (cleanTaxType === "false" || cleanTaxType === "0" || cleanTaxType === "no" || cleanTaxType === "exclusive" || rawTaxType === false) {
+                taxInclusiveParsed = false;
+            } else {
+                errors.push(`Invoice group "${key}" (Row ${origIdx}): Invalid Item Tax Type "${rawTaxType}". Please provide TRUE or FALSE.`);
+                continue;
+            }
+        }
 
         // Parse line items
         const lineItems = [];
         let calculatedSubtotal = 0;
         let calculatedTaxAmount = 0;
+        let firstAppliedTaxDoc = null;
+        let firstAppliedTaxRate = null;
         let itemTaxRate = defaultTaxRate;
+        let hasTaxError = false;
 
         for (const itemObj of grouped) {
             const r = itemObj.row;
+            const itemOrigIdx = itemObj.originalIndex;
             const itemName = getRowVal(r, ["Item Name", "itemName", "item_name"]);
             if (!itemName) continue;
 
@@ -1337,19 +1365,64 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             const itemTotal = Number(getRowVal(r, ["Item Total", "itemTotal", "Total", "total", "bcy_total", "amount"])) || 0;
             const unitPrice = Number(getRowVal(r, ["Item Price", "itemPrice", "unit_price", "rate"])) || (qty > 0 ? itemTotal / qty : itemTotal);
 
-            // Calculate tax for this line item
-            let taxPct = defaultTaxRate;
-            const itemTaxPctVal = getRowVal(r, ["Item Tax %", "itemTaxPct", "taxRate", "tax_amount"]);
-            if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
-                taxPct = Number(itemTaxPctVal);
-                if (taxPct > 0 && taxPct < 1) {
-                    taxPct = taxPct * 100;
+            // 1. Check Item Tax %
+            let taxPct = null;
+            const itemTaxPctVal = getRowVal(r, ["Item Tax %", "itemTaxPct", "taxRate"]);
+            if (itemTaxPctVal !== undefined && itemTaxPctVal !== null && String(itemTaxPctVal).trim() !== "") {
+                let parsedPct = Number(itemTaxPctVal);
+                if (!isNaN(parsedPct)) {
+                    if (parsedPct > 0 && parsedPct < 1) parsedPct = parsedPct * 100;
+                    taxPct = parsedPct;
                 }
+            }
+
+            // 2. Check Item Tax (tax profile name)
+            const itemTaxName = getRowVal(r, ["Item Tax", "itemTax", "taxProfile", "taxName", "tax_name"]);
+            let matchedTaxDoc = null;
+
+            if (itemTaxName !== undefined && itemTaxName !== null && String(itemTaxName).trim() !== "") {
+                const rawName = String(itemTaxName).trim();
+                const normName = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                matchedTaxDoc = taxesByName.get(normName);
+                if (!matchedTaxDoc) {
+                    for (const t of allTaxes) {
+                        const tNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (tNorm === normName || tNorm.includes(normName) || normName.includes(tNorm)) {
+                            matchedTaxDoc = t;
+                            break;
+                        }
+                    }
+                }
+                if (!matchedTaxDoc) {
+                    hasTaxError = true;
+                    errors.push(`Invoice group "${key}" (Row ${itemOrigIdx}): Tax profile "${rawName}" not found in system.`);
+                    break;
+                }
+                if (taxPct === null) {
+                    taxPct = matchedTaxDoc.rate;
+                }
+            } else if (taxPct !== null) {
+                matchedTaxDoc = taxesByRate.get(taxPct);
+                if (!matchedTaxDoc) {
+                    hasTaxError = true;
+                    errors.push(`Invoice group "${key}" (Row ${itemOrigIdx}): No tax profile found with rate ${taxPct}%.`);
+                    break;
+                }
+            } else {
+                matchedTaxDoc = activeTax;
+                taxPct = defaultTaxRate;
+            }
+
+            if (!firstAppliedTaxDoc && matchedTaxDoc) {
+                firstAppliedTaxDoc = matchedTaxDoc;
+                firstAppliedTaxRate = taxPct;
             }
             itemTaxRate = taxPct;
 
-            const itemTaxAmtVal = getRowVal(r, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"]);
-            const taxAmt = Number(itemTaxAmtVal) || (taxInclusiveParsed ? Math.round((itemTotal * (taxPct / (100 + taxPct))) * 100) / 100 : Math.round((itemTotal * (taxPct / 100)) * 100) / 100);
+            // Calculate tax amount mathematically without relying on Item Tax Amount column
+            const taxAmt = taxInclusiveParsed
+                ? Math.round((itemTotal * (taxPct / (100 + taxPct))) * 100) / 100
+                : Math.round((itemTotal * (taxPct / 100)) * 100) / 100;
 
             lineItems.push({
                 name: itemName,
@@ -1357,6 +1430,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
                 qty,
                 unitPrice,
                 total: itemTotal,
+                tax: matchedTaxDoc ? matchedTaxDoc._id : undefined,
                 taxRate: taxPct,
                 taxAmount: taxAmt
             });
@@ -1365,29 +1439,80 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             calculatedTaxAmount += taxAmt;
         }
 
+        if (hasTaxError) {
+            continue;
+        }
+
         // Fallback if no item details were parsed
         if (lineItems.length === 0) {
             const totalVal = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "amount"])) || 0;
-            const taxVal = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || 0;
-            const baseAmount = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || (totalVal > taxVal ? totalVal - taxVal : totalVal);
+            const baseAmount = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || totalVal;
+
+            let taxPct = null;
+            const itemTaxPctVal = getRowVal(headerRow, ["Item Tax %", "itemTaxPct", "taxRate"]);
+            if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
+                let parsedPct = Number(itemTaxPctVal);
+                if (!isNaN(parsedPct)) {
+                    if (parsedPct > 0 && parsedPct < 1) parsedPct = parsedPct * 100;
+                    taxPct = parsedPct;
+                }
+            }
+
+            const itemTaxName = getRowVal(headerRow, ["Item Tax", "itemTax", "taxProfile", "taxName", "tax_name"]);
+            let matchedTaxDoc = null;
+
+            if (itemTaxName !== undefined && itemTaxName !== null && String(itemTaxName).trim() !== "") {
+                const rawName = String(itemTaxName).trim();
+                const normName = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                matchedTaxDoc = taxesByName.get(normName);
+                if (!matchedTaxDoc) {
+                    for (const t of allTaxes) {
+                        const tNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        if (tNorm === normName || tNorm.includes(normName) || normName.includes(tNorm)) {
+                            matchedTaxDoc = t;
+                            break;
+                        }
+                    }
+                }
+                if (!matchedTaxDoc) {
+                    errors.push(`Invoice group "${key}" (Row ${origIdx}): Tax profile "${rawName}" not found in system.`);
+                    continue;
+                }
+                if (taxPct === null) {
+                    taxPct = matchedTaxDoc.rate;
+                }
+            } else if (taxPct !== null) {
+                matchedTaxDoc = taxesByRate.get(taxPct);
+                if (!matchedTaxDoc) {
+                    errors.push(`Invoice group "${key}" (Row ${origIdx}): No tax profile found with rate ${taxPct}%.`);
+                    continue;
+                }
+            } else {
+                matchedTaxDoc = activeTax;
+                taxPct = defaultTaxRate;
+            }
+
+            if (!firstAppliedTaxDoc && matchedTaxDoc) {
+                firstAppliedTaxDoc = matchedTaxDoc;
+                firstAppliedTaxRate = taxPct;
+            }
+            itemTaxRate = taxPct;
+
+            const taxAmt = taxInclusiveParsed
+                ? Math.round((baseAmount * (taxPct / (100 + taxPct))) * 100) / 100
+                : Math.round((baseAmount * (taxPct / 100)) * 100) / 100;
 
             lineItems.push({
                 name: getRowVal(headerRow, ["Item Name", "itemName", "item_name"]) || getRowVal(headerRow, ["Invoice Number", "invoiceNumber", "invoice_number"]) || getRowVal(headerRow, ["description"]) || "Manual Billing",
                 qty: 1,
                 unitPrice: baseAmount,
-                total: baseAmount
+                total: baseAmount,
+                tax: matchedTaxDoc ? matchedTaxDoc._id : undefined,
+                taxRate: taxPct,
+                taxAmount: taxAmt
             });
             calculatedSubtotal = baseAmount;
-
-            let taxPct = defaultTaxRate;
-            const itemTaxPctVal = getRowVal(headerRow, ["Item Tax %", "itemTaxPct", "taxRate"]);
-            if (itemTaxPctVal !== undefined && itemTaxPctVal !== "") {
-                taxPct = Number(itemTaxPctVal);
-                if (taxPct > 0 && taxPct < 1) taxPct = taxPct * 100;
-            }
-            itemTaxRate = taxPct;
-
-            calculatedTaxAmount = taxVal || (baseAmount * (taxPct / 100));
+            calculatedTaxAmount = taxAmt;
         }
 
         if (existingInv) {
@@ -1462,7 +1587,7 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             Number(getRowVal(headerRow, ["Discount Amount", "discountAmount"])) || 0;
 
         const subtotal = Number(getRowVal(headerRow, ["SubTotal", "subtotal", "sub_total"])) || calculatedSubtotal;
-        let taxAmount = Number(getRowVal(headerRow, ["Item Tax Amount", "itemTaxAmount", "taxAmount", "tax_amount"])) || 0;
+        let taxAmount = calculatedTaxAmount;
 
         let baseAmount;
         let totalAmountDue;
@@ -1470,13 +1595,13 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         if (taxInclusiveParsed) {
             totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || subtotal;
             if (!taxAmount) {
-                taxAmount = calculatedTaxAmount || (itemTaxRate > 0 ? Math.round((totalAmountDue * (itemTaxRate / (100 + itemTaxRate))) * 100) / 100 : 0);
+                taxAmount = itemTaxRate > 0 ? Math.round((totalAmountDue * (itemTaxRate / (100 + itemTaxRate))) * 100) / 100 : 0;
             }
             baseAmount = Math.max(0, totalAmountDue - taxAmount);
         } else {
             baseAmount = subtotal - discountAmount;
             if (!taxAmount) {
-                taxAmount = calculatedTaxAmount || (itemTaxRate > 0 ? Math.round((baseAmount * (itemTaxRate / 100)) * 100) / 100 : 0);
+                taxAmount = itemTaxRate > 0 ? Math.round((baseAmount * (itemTaxRate / 100)) * 100) / 100 : 0;
             }
             totalAmountDue = Number(getRowVal(headerRow, ["Total", "total", "bcy_total", "total_amount"])) || (baseAmount + taxAmount);
         }
@@ -1560,8 +1685,8 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
             dueDate,
             generatedAt,
             baseAmount,
-            tax: activeTax ? activeTax._id : undefined,
-            taxRate: itemTaxRate,
+            tax: firstAppliedTaxDoc ? firstAppliedTaxDoc._id : (activeTax ? activeTax._id : undefined),
+            taxRate: firstAppliedTaxRate !== null ? firstAppliedTaxRate : itemTaxRate,
             taxAmount,
             totalAmountDue,
             amountPaid,

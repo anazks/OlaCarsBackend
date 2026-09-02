@@ -93,7 +93,7 @@ async function postBillToLedger(bill, userData) {
     const extractId = (val) => (val && val._id ? val._id : val);
     const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
-    // 1. Resolve the CREDIT account (Always Accounts Payable for Bill creation / liability booking)
+    // 1. Resolve the CREDIT account (Accounts Payable / Cash / Bank)
     let creditAccountId = bill.creditAccountId ? extractId(bill.creditAccountId) : null;
 
     if (!creditAccountId) {
@@ -108,9 +108,23 @@ async function postBillToLedger(bill, userData) {
         creditAccountId = apAccount._id;
     }
 
+    // Determine tax details
+    const taxAmount = Number(bill.taxAmount) || 0;
+    const isInclusive = !!bill.isInclusiveTax;
+    
+    // Calculate total items gross to calculate net proportion if inclusive
+    const itemsGrossTotal = (bill.items || []).reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0);
+    const expenseFactor = (isInclusive && taxAmount > 0 && itemsGrossTotal > 0)
+        ? Math.max(0, (itemsGrossTotal - taxAmount)) / itemsGrossTotal
+        : 1;
+
     // 2. DEBIT entries — one per line item (Expense / Asset account)
     let defaultExpenseAccount = null;
-    for (const item of bill.items) {
+    let accumulatedExpenseDebits = 0;
+    const itemsCount = (bill.items || []).length;
+
+    for (let idx = 0; idx < itemsCount; idx++) {
+        const item = bill.items[idx];
         let debitAccountId = extractId(item.accountId);
         if (!debitAccountId) {
             if (!defaultExpenseAccount) {
@@ -124,21 +138,64 @@ async function postBillToLedger(bill, userData) {
         }
 
         if (debitAccountId) {
+            const itemGross = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+            let itemDebitAmount = itemGross;
+            if (isInclusive && taxAmount > 0) {
+                if (idx === itemsCount - 1) {
+                    itemDebitAmount = Math.max(0, Math.round(((itemsGrossTotal - taxAmount) - accumulatedExpenseDebits) * 100) / 100);
+                } else {
+                    itemDebitAmount = Math.round(itemGross * expenseFactor * 100) / 100;
+                    accumulatedExpenseDebits += itemDebitAmount;
+                }
+            }
+
+            if (itemDebitAmount > 0) {
+                await LedgerService.create({
+                    branch: extractId(bill.branch),
+                    accountingCode: debitAccountId,
+                    type: "DEBIT",
+                    amount: itemDebitAmount,
+                    description: `Bill ${bill.billNumber} - Item: ${item.itemName}`,
+                    entryDate: bill.billDate,
+                    createdBy: userData.id || userData._id,
+                    creatorRole: userData.role,
+                    bill: bill._id
+                });
+            }
+        }
+    }
+
+    // 3. DEBIT entry — Input Tax (if taxAmount > 0)
+    if (taxAmount > 0) {
+        const inputTaxAccount = await AccountingCode.findOne({ code: "INPUT TAX", isDeleted: false })
+            || await AccountingCode.findOne({ code: "TAX0001", isDeleted: false })
+            || await AccountingCode.findOne({ accountType: "Input Tax", isDeleted: false })
+            || await AccountingCode.findOne({ name: /INPUT TAX/i, isDeleted: false })
+            || await AccountingCode.findOne({ category: /INPUT TAX/i, isDeleted: false });
+
+        if (inputTaxAccount) {
+            let taxDescription = `Bill ${bill.billNumber} - Input Tax`;
+            if (bill.taxPercentage) {
+                taxDescription += ` (${bill.taxPercentage}%${isInclusive ? ' Inclusive' : ' Exclusive'})`;
+            }
+
             await LedgerService.create({
                 branch: extractId(bill.branch),
-                accountingCode: debitAccountId,
+                accountingCode: inputTaxAccount._id,
                 type: "DEBIT",
-                amount: item.quantity * item.unitPrice,
-                description: `Bill ${bill.billNumber} - Item: ${item.itemName}`,
+                amount: taxAmount,
+                description: taxDescription,
                 entryDate: bill.billDate,
                 createdBy: userData.id || userData._id,
                 creatorRole: userData.role,
                 bill: bill._id
             });
+        } else {
+            console.warn(`[BillService] Input Tax account not found in Chart of Accounts. Tax amount $${taxAmount} not posted.`);
         }
     }
 
-    // 3. CREDIT entry — one for total amount against Accounts Payable
+    // 4. CREDIT entry — one for total amount against Accounts Payable (or Cash/Bank)
     const creditDesc = `Bill ${bill.billNumber} - Total Liability`;
 
     await LedgerService.create({
@@ -417,14 +474,31 @@ exports.createBill = async (billData, userData) => {
         };
     });
 
-    const totalAmount = billItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const itemsSubtotal = billItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
 
     let taxPercentage = 0;
+    let taxDoc = null;
     if (billData.taxId) {
         const Tax = require("../../Tax/Model/TaxModel");
-        const tax = await Tax.findById(billData.taxId);
-        if (tax) {
-            taxPercentage = tax.rate;
+        taxDoc = await Tax.findById(billData.taxId);
+        if (taxDoc) {
+            taxPercentage = taxDoc.rate;
+        }
+    } else if (billData.taxPercentage) {
+        taxPercentage = Number(billData.taxPercentage) || 0;
+    }
+
+    const isInclusiveTax = !!billData.isInclusiveTax;
+    let taxAmount = 0;
+    let totalAmount = itemsSubtotal;
+
+    if (taxPercentage > 0) {
+        if (isInclusiveTax) {
+            totalAmount = itemsSubtotal;
+            taxAmount = Math.round((totalAmount * (taxPercentage / (100 + taxPercentage))) * 100) / 100;
+        } else {
+            taxAmount = Math.round((itemsSubtotal * (taxPercentage / 100)) * 100) / 100;
+            totalAmount = Math.round((itemsSubtotal + taxAmount) * 100) / 100;
         }
     }
 
@@ -466,14 +540,15 @@ exports.createBill = async (billData, userData) => {
         billDate: billData.billDate ? new Date(billData.billDate) : new Date(),
         dueDate: billData.dueDate ? new Date(billData.dueDate) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         items: billItems,
-        totalAmount: totalAmount,
+        totalAmount,
         balanceDue: totalAmount,
         status: "OPEN",
         purchaseType,
         creditAccountId: creditAccountId || undefined,
-        isInclusiveTax: !!billData.isInclusiveTax,
-        taxId: billData.taxId ? extractId(billData.taxId) : undefined,
-        taxPercentage: taxPercentage,
+        isInclusiveTax,
+        taxId: taxDoc ? taxDoc._id : (billData.taxId ? extractId(billData.taxId) : undefined),
+        taxPercentage,
+        taxAmount,
         createdBy: userData.id || userData._id,
         creatorRole: userData.role
     };
@@ -758,34 +833,62 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         }
 
         // --- Resolve Tax Profile & Inclusive flag ---
-        const rawIsInclusiveTax = getRowVal(headerRow, ["Is Inclusive Tax", "isInclusiveTax"]);
-        const isInclusiveTax = (rawIsInclusiveTax === true || rawIsInclusiveTax === 1 || rawIsInclusiveTax?.toString().toLowerCase() === "true" || rawIsInclusiveTax?.toString().toLowerCase() === "yes" || rawIsInclusiveTax?.toString().toLowerCase() === "y");
+        const rawIsInclusiveTax = getRowVal(headerRow, ["Item Tax Type", "itemTaxType", "item_tax_type", "Is Inclusive Tax", "isInclusiveTax"]);
+        let isInclusiveTax = false;
+        if (rawIsInclusiveTax !== undefined && rawIsInclusiveTax !== null && String(rawIsInclusiveTax).trim() !== "") {
+            const cleanTaxType = String(rawIsInclusiveTax).trim().toLowerCase();
+            if (cleanTaxType === "true" || cleanTaxType === "1" || cleanTaxType === "yes" || cleanTaxType === "inclusive" || rawIsInclusiveTax === true) {
+                isInclusiveTax = true;
+            } else if (cleanTaxType === "false" || cleanTaxType === "0" || cleanTaxType === "no" || cleanTaxType === "exclusive" || rawIsInclusiveTax === false) {
+                isInclusiveTax = false;
+            } else {
+                errors.push(`Bill "${key}" (Row ${origIdx}): Invalid Item Tax Type "${rawIsInclusiveTax}". Please provide TRUE or FALSE.`);
+                continue;
+            }
+        }
 
-        const taxNameExcel = getRowVal(headerRow, ["Tax Name", "taxName"]);
-        const taxPctExcel = Number(getRowVal(headerRow, ["Tax Percentage", "taxPercentage"])) || 0;
+        const taxNameExcel = getRowVal(headerRow, ["Item Tax", "itemTax", "Tax Name", "taxName", "Tax Profile", "taxProfile"]);
+        const taxPctRaw = getRowVal(headerRow, ["Item Tax %", "itemTaxPct", "Tax Percentage", "taxPercentage", "taxRate"]);
         const taxIDExcel = getRowVal(headerRow, ["Tax ID", "taxId"]);
 
         let taxDoc = null;
-        if (taxIDExcel && require("mongoose").Types.ObjectId.isValid(taxIDExcel.toString().trim())) {
-            const cleanId = taxIDExcel.toString().trim();
-            taxDoc = taxList.find(t => t._id.toString() === cleanId);
-        }
-        if (!taxDoc && taxNameExcel) {
-            const cleanTaxName = taxNameExcel.toString().trim().toLowerCase().replace(/\s+/g, ' ');
-            taxDoc = taxList.find(t => t.name.toLowerCase().replace(/\s+/g, ' ') === cleanTaxName);
-        }
-        if (!taxDoc && taxPctExcel) {
-            taxDoc = taxList.find(t => t.rate === taxPctExcel);
+        let taxPercentage = null;
+
+        if (taxPctRaw !== undefined && taxPctRaw !== null && String(taxPctRaw).trim() !== "") {
+            let parsed = Number(taxPctRaw);
+            if (!isNaN(parsed)) {
+                if (parsed > 0 && parsed < 1) parsed = parsed * 100;
+                taxPercentage = parsed;
+            }
         }
 
-        let taxId = undefined;
-        let taxPercentage = 0;
-        if (taxDoc) {
-            taxId = taxDoc._id;
-            taxPercentage = taxDoc.rate;
-        } else if (taxPctExcel) {
-            taxPercentage = taxPctExcel;
+        if (taxNameExcel && String(taxNameExcel).trim() !== "") {
+            const cleanName = String(taxNameExcel).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            taxDoc = taxList.find(t => {
+                const norm = (t.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return norm === cleanName || norm.includes(cleanName) || cleanName.includes(norm);
+            });
+            if (!taxDoc) {
+                errors.push(`Bill "${key}" (Row ${origIdx}): Tax profile "${taxNameExcel}" not found in system.`);
+                continue;
+            }
+            if (taxPercentage === null) {
+                taxPercentage = taxDoc.rate;
+            }
+        } else if (taxPercentage !== null) {
+            taxDoc = taxList.find(t => t.rate === taxPercentage);
+            if (!taxDoc) {
+                errors.push(`Bill "${key}" (Row ${origIdx}): No tax profile found with rate ${taxPercentage}%.`);
+                continue;
+            }
+        } else if (taxIDExcel && require("mongoose").Types.ObjectId.isValid(taxIDExcel.toString().trim())) {
+            const cleanId = taxIDExcel.toString().trim();
+            taxDoc = taxList.find(t => t._id.toString() === cleanId);
+            if (taxDoc) taxPercentage = taxDoc.rate;
         }
+
+        let taxId = taxDoc ? taxDoc._id : undefined;
+        taxPercentage = taxPercentage || 0;
 
         // --- Resolve Purchase Type & Credit Account ---
         const rawPurchaseType = (getRowVal(headerRow, ["Purchase Type", "purchaseType", "Bill Type", "billType"]) || "CREDIT").toString().trim().toUpperCase();
@@ -896,9 +999,25 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
             status = statusMap[rawStatus];
         }
 
-        // Use Excel Total if available and greater than calculated
-        const excelTotal = Number(getRowVal(headerRow, ["Total", "total"])) || 0;
-        const totalAmount = calculatedTotal > 0 ? calculatedTotal : excelTotal;
+        // Calculate tax amount and total amount mathematically
+        const subtotal = calculatedTotal;
+        let taxAmount = 0;
+        let totalAmount = subtotal;
+
+        if (taxPercentage > 0) {
+            if (isInclusiveTax) {
+                const excelTotal = Number(getRowVal(headerRow, ["Total", "total"])) || 0;
+                totalAmount = excelTotal > 0 ? excelTotal : subtotal;
+                taxAmount = Math.round((totalAmount * (taxPercentage / (100 + taxPercentage))) * 100) / 100;
+            } else {
+                taxAmount = Math.round((subtotal * (taxPercentage / 100)) * 100) / 100;
+                const excelTotal = Number(getRowVal(headerRow, ["Total", "total"])) || 0;
+                totalAmount = (excelTotal > 0 && excelTotal > subtotal) ? excelTotal : Math.round((subtotal + taxAmount) * 100) / 100;
+            }
+        } else {
+            const excelTotal = Number(getRowVal(headerRow, ["Total", "total"])) || 0;
+            totalAmount = excelTotal > 0 ? excelTotal : subtotal;
+        }
 
         const excelBalance = Number(getRowVal(headerRow, ["Balance", "balance"])) || totalAmount;
         const amountPaid = Math.max(0, totalAmount - excelBalance);
@@ -967,6 +1086,7 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
             isInclusiveTax,
             taxId,
             taxPercentage,
+            taxAmount,
             notes: docDescParts.join(" | "),
             createdBy: actor.id,
             creatorRole: actor.role
