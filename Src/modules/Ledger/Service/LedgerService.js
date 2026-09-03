@@ -678,3 +678,68 @@ exports.generateRolloverLedgerEntry = async ({ customer, invoice, amount, create
     }
 };
 
+/**
+ * Generates double-entry Ledger Entries when a Vendor Advance (PaymentMade) is applied to a Bill.
+ * Debit Accounts Payable (2.1.01), Credit Advance to Suppliers (1.1.08 / 1.1.04).
+ */
+exports.generateSupplierRolloverLedgerEntry = async ({ supplier, bill, amount, createdBy, creatorRole }) => {
+    try {
+        console.log(`[LedgerService] Generating supplier rollover ledger entries for supplier ${supplier} and bill ${bill.billNumber}`);
+
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+
+        // Find Accounts Payable (AP) Account (2.1.01)
+        const apAccount = await AccountingCode.findOne({ code: "2.1.01", isDeleted: { $ne: true } })
+            || await AccountingCode.findOne({ code: "2100", isDeleted: { $ne: true } })
+            || await AccountingCode.findOne({ name: /Accounts Payable|Cuentas por Pagar/i, isDeleted: { $ne: true } });
+
+        // Find Advance to Suppliers Account (1.1.08 / 1.1.04)
+        const advanceAccount = await AccountingCode.findOne({ code: "1.1.08", isDeleted: { $ne: true } })
+            || await AccountingCode.findOne({ code: "1.1.04", isDeleted: { $ne: true } })
+            || await AccountingCode.findOne({ name: /Advance to Suppliers|Anticipos a Proveedores|Vendor Advance/i, isDeleted: { $ne: true } });
+
+        if (!apAccount || !advanceAccount) {
+            console.error(`[LedgerService] Required accounting codes for supplier rollover (AP/Advance) not found. Skipping supplier rollover ledger entry.`);
+            return;
+        }
+
+        const supplierDoc = await Supplier.findById(supplier);
+        const branchId = bill.branch || (supplierDoc ? supplierDoc.branch : undefined);
+        const supplierName = supplierDoc ? supplierDoc.name : "Unknown Supplier";
+
+        // Leg 1: DEBIT Accounts Payable (reduces AP liability)
+        await addLedgerEntryService({
+            branch: branchId,
+            accountingCode: apAccount._id,
+            type: "DEBIT",
+            amount: amount,
+            description: `Advance Applied (Debit Accounts Payable) - Supplier: ${supplierName} (Bill: ${bill.billNumber}).`,
+            entryDate: new Date(),
+            createdBy,
+            creatorRole,
+            contact: supplierDoc ? supplierDoc._id : undefined,
+            contactModel: "Supplier"
+        });
+
+        // Leg 2: CREDIT Advance to Suppliers (reduces Advance asset)
+        await addLedgerEntryService({
+            branch: branchId,
+            accountingCode: advanceAccount._id,
+            type: "CREDIT",
+            amount: amount,
+            description: `Advance Applied (Credit Advance to Suppliers) - Supplier: ${supplierName} (Bill: ${bill.billNumber}).`,
+            entryDate: new Date(),
+            createdBy,
+            creatorRole,
+            contact: supplierDoc ? supplierDoc._id : undefined,
+            contactModel: "Supplier"
+        });
+
+        console.log(`[LedgerService] Supplier rollover ledger entries successfully created for bill ${bill.billNumber}, amount: $${amount}`);
+    } catch (error) {
+        console.error("[LedgerService] Failed to generate supplier rollover ledger entries:", error);
+    }
+};
+
+

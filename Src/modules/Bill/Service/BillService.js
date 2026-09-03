@@ -85,6 +85,9 @@ exports.createBillFromPO = async (poId, userData, overrides = {}) => {
     // Post to Ledger: Debit Expenses, Credit Accounts Payable
     await postBillToLedger(bill, userData);
 
+    // Auto-apply any available vendor advance from PaymentMade
+    await exports.applySupplierAdvanceToBill(bill._id);
+
     console.log(`[BillService] Conversion completed successfully: ${bill.billNumber}`);
     return bill;
 };
@@ -296,34 +299,24 @@ exports.getAllBills = async (query = {}) => {
         };
     }
 
-    // Skip heavy aggregation since dashboard metrics calculation is bypassed for speed/optimization
-    const metrics = {
-        totalBilled: 0,
-        totalBalanceDue: 0,
-        openCount: 0,
-        partialCount: 0,
-        paidCount: 0,
-        isFilteredPeriod: hasDateFilter
-    };
-
     if (limit) {
-        const result = await BillRepo.getAllBillsPaginated(mongooseQuery, page, limit);
+        const result = await BillRepo.getAllBillsPaginated(mongooseQuery, page, limit, hasDateFilter);
         return {
             data: result.data,
             pagination: result.pagination,
-            metrics
+            metrics: result.metrics
         };
     } else {
-        const bills = await BillRepo.getAllBills(mongooseQuery);
+        const result = await BillRepo.getAllBills(mongooseQuery, hasDateFilter);
         return {
-            data: bills,
+            data: result.data,
             pagination: {
-                totalItems: bills.length,
+                totalItems: result.data.length,
                 totalPages: 1,
                 currentPage: 1,
-                limit: bills.length
+                limit: result.data.length
             },
-            metrics
+            metrics: result.metrics
         };
     }
 };
@@ -558,6 +551,9 @@ exports.createBill = async (billData, userData) => {
 
     console.log(`[BillService] Posting manual bill to ledger...`);
     await postBillToLedger(bill, userData);
+
+    // Auto-apply any available vendor advance from PaymentMade
+    await exports.applySupplierAdvanceToBill(bill._id);
 
     console.log(`[BillService] Manual bill creation completed successfully: ${bill.billNumber}`);
     return bill;
@@ -1102,6 +1098,8 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
                 } catch (ledgerErr) {
                     console.error(`[BillService] Failed to post bulk bill ${created.billNumber} to ledger:`, ledgerErr);
                 }
+                // Auto-apply any available vendor advance from PaymentMade
+                await exports.applySupplierAdvanceToBill(created._id);
             }
         } catch (err) {
             errors.push(`Bill "${key}" (Row ${origIdx}): Failed to create - ${err.message}`);
@@ -1119,3 +1117,96 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         updatedBills
     };
 };
+
+/**
+ * Automatically checks and applies unapplied vendor advance credits (PaymentMade)
+ * to an open or partially paid bill, updating bill balance/status and posting the rollover LE.
+ */
+exports.applySupplierAdvanceToBill = async (billId) => {
+    try {
+        const Bill = require("../Model/BillModel");
+        const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+        const LedgerService = require("../../Ledger/Service/LedgerService");
+
+        const bill = await Bill.findById(billId);
+        if (!bill || !bill.supplier) return;
+        if (bill.status === "PAID" || bill.status === "VOID") return;
+
+        const supplierId = typeof bill.supplier === 'object' ? bill.supplier._id : bill.supplier;
+
+        // Find all completed PaymentMade records for this supplier (oldest payments first)
+        const payments = await PaymentMade.find({ supplier: supplierId, status: 'COMPLETED' }).sort({ paymentDate: 1, createdAt: 1 });
+        if (!payments || payments.length === 0) return;
+
+        let remainingToPay = bill.balanceDue !== undefined ? bill.balanceDue : (bill.totalAmount - (bill.amountPaid || 0));
+        if (remainingToPay <= 0.009) return;
+
+        let totalAppliedFromCredit = 0;
+
+        for (const payment of payments) {
+            if (remainingToPay <= 0.009) break;
+
+            const amountAppliedTotal = payment.bills?.reduce((sum, b) => sum + (b.amountApplied || 0), 0) || 0;
+            const unappliedAmount = Math.max(0, payment.amount - amountAppliedTotal);
+
+            if (unappliedAmount > 0.009) {
+                const toApply = Math.min(remainingToPay, unappliedAmount);
+                if (toApply > 0.009) {
+                    // 1. Update PaymentMade record's bills array
+                    if (!payment.bills) payment.bills = [];
+                    payment.bills.push({
+                        billId: bill._id,
+                        billNumber: bill.billNumber,
+                        amountApplied: toApply
+                    });
+                    await payment.save();
+
+                    // 2. Add payment record to the Bill
+                    const paymentRecord = {
+                        amount: toApply,
+                        paidAt: new Date(),
+                        paymentMethod: payment.paymentMethod || "Bank Transfer",
+                        transactionId: payment.referenceNumber || payment.paymentNumber || undefined,
+                        note: `Applied vendor advance from ${payment.paymentNumber}`,
+                    };
+
+                    const newPaid = (bill.amountPaid || 0) + toApply;
+                    const newBalance = Math.max(0, bill.totalAmount - newPaid);
+                    const newStatus = newBalance <= 0.009 ? "PAID" : "PARTIALLY_PAID";
+
+                    bill.amountPaid = newPaid;
+                    bill.balanceDue = newBalance;
+                    bill.status = newStatus;
+                    if (!bill.payments) bill.payments = [];
+                    bill.payments.push(paymentRecord);
+                    if (newStatus === "PAID" && !bill.paidAt) {
+                        bill.paidAt = new Date();
+                    }
+
+                    remainingToPay = newBalance;
+                    totalAppliedFromCredit += toApply;
+                }
+            }
+        }
+
+        if (totalAppliedFromCredit > 0) {
+            await bill.save();
+            console.log(`[BillService] Auto-applied $${totalAppliedFromCredit} advance credit to bill ${bill.billNumber}. New status: ${bill.status}, Remaining Balance: $${bill.balanceDue}`);
+
+            // Generate double-entry rollover ledger entry: DR Accounts Payable (2.1.01), CR Advance to Suppliers (1.1.08)
+            try {
+                await LedgerService.generateSupplierRolloverLedgerEntry({
+                    supplier: supplierId,
+                    bill: bill,
+                    amount: totalAppliedFromCredit,
+                    createdBy: bill.createdBy,
+                    creatorRole: bill.creatorRole
+                });
+            } catch (ledgerErr) {
+                console.error("[BillService] Failed to generate rollover ledger entry for supplier advance application:", ledgerErr);
+            }
+        }
+    } catch (err) {
+        console.error("[BillService] Error in applySupplierAdvanceToBill:", err);
+    }
+};
