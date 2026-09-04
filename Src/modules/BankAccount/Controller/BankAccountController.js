@@ -759,6 +759,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
             }
 
+            if (!accountsNameVal && !parentAccountVal && !customerDoc && !supplierDoc && !driverNameVal && !supplierNameVal && !customerNameVal) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid upload: Row "${finalDescription || transactionIdVal || 'Transaction'}" is missing ACCOUNTS NAME. Please specify an account name or provide a Driver, Supplier, or Customer name.`
+                });
+            }
+
             const isCreditCard = account.accountType === "Credit Card";
 
             // If driver is resolved and it's a DEBIT (money incoming / receipt), auto set-off against unpaid invoices
