@@ -474,6 +474,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             }
         }
         const createdEntries = [];
+        const skippedTransactions = [];
+        const insertedTransactions = [];
         let setOffResults = [];
         const seenTxIdsInFile = new Set();
 
@@ -510,84 +512,10 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const remarksVal = tx.REMARKS || tx.Remarks || tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
             const branchVal = tx.BRANCH || tx.Branch || tx.branch || "";
 
-            let resolvedBranchId = null;
-            if (branchVal) {
-                const trimmedVal = String(branchVal).trim().toLowerCase();
-                // 1. Try exact name match
-                let match = allBranches.find(b => b.name.trim().toLowerCase() === trimmedVal);
-
-                // 2. Try partial name match
-                if (!match) {
-                    match = allBranches.find(b => {
-                        const dbName = b.name.trim().toLowerCase();
-                        return dbName.includes(trimmedVal) || trimmedVal.includes(dbName);
-                    });
-                }
-
-                // 3. Try matching by type if no name matches
-                if (!match) {
-                    const isWorkshopType = trimmedVal.includes("workshop") || trimmedVal.includes("taller");
-                    const targetType = isWorkshopType ? "WORKSHOP" : "BRANCH";
-                    match = allBranches.find(b => b.type === targetType);
-                }
-
-                if (match) {
-                    resolvedBranchId = match._id;
-                }
-            }
-
-            // Ultimate fallback to first branch if still not resolved
-            if (!resolvedBranchId && allBranches.length > 0) {
-                resolvedBranchId = allBranches[0]._id;
-            }
-
-            // Verify the bank name in the Excel row matches the selected bank account (case-insensitive checks)
-            if (bankNameVal) {
-                const excelBank = String(bankNameVal).trim().toLowerCase();
-                const selBank = String(account.bankName || "").trim().toLowerCase();
-                const selAccName = String(account.accountName || "").trim().toLowerCase();
-
-                const isMatch = (
-                    excelBank.includes(selBank) ||
-                    selBank.includes(excelBank) ||
-                    excelBank.includes(selAccName) ||
-                    selAccName.includes(excelBank)
-                );
-
-                if (!isMatch) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Bank name mismatch in file row: "${bankNameVal}", but target bank account is "${account.accountName || account.bankName}".`
-                    });
-                }
-            }
-
             // Combine PREFIX & NUMBER for transaction ID
             let transactionIdVal = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
             if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
                 transactionIdVal = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
-            }
-
-            // Validate Transaction ID uniqueness against DB and upload file
-            if (transactionIdVal && String(transactionIdVal).trim()) {
-                const cleanTxId = String(transactionIdVal).trim();
-
-                if (seenTxIdsInFile.has(cleanTxId)) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Invalid upload: Duplicate Transaction ID "${cleanTxId}" appears multiple times in the upload file.`
-                    });
-                }
-                seenTxIdsInFile.add(cleanTxId);
-
-                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId, isDeleted: { $ne: true } });
-                if (existingEntry) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Invalid upload: Transaction ID "${cleanTxId}" already exists in ledger entries.`
-                    });
-                }
             }
 
             // Polarity: RECEIPT = DEBIT, PAYMENT = CREDIT
@@ -597,10 +525,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             } else if (paymentVal > 0 && receiptVal === 0) {
                 typeVal = "CREDIT";
             } else if (receiptVal > 0 && paymentVal > 0) {
-                // If both are provided, default to DEBIT
                 typeVal = "DEBIT";
             } else {
-                // Check if any legacy transaction type is passed
                 const rawType = String(tx["Transaction Type"] || tx.transactionType || tx.transaction_type || "").trim().toUpperCase();
                 const creditTypes = [
                     "CREDIT",
@@ -618,10 +544,91 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
             const amountVal = receiptVal > 0 ? receiptVal : paymentVal;
 
-            // Combine Description and Remarks if both exist
             let finalDescription = descVal;
             if (remarksVal) {
                 finalDescription = descVal ? `${descVal} - ${remarksVal}` : remarksVal;
+            }
+
+            // Verify the bank name in the Excel row matches the selected bank account (case-insensitive checks)
+            if (bankNameVal) {
+                const excelBank = String(bankNameVal).trim().toLowerCase();
+                const selBank = String(account.bankName || "").trim().toLowerCase();
+                const selAccName = String(account.accountName || "").trim().toLowerCase();
+
+                const isMatch = (
+                    excelBank.includes(selBank) ||
+                    selBank.includes(excelBank) ||
+                    excelBank.includes(selAccName) ||
+                    selAccName.includes(excelBank)
+                );
+
+                if (!isMatch) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Bank name mismatch: file has "${bankNameVal}", but target account is "${account.accountName || account.bankName}"`
+                    });
+                    continue;
+                }
+            }
+
+            // Validate Transaction ID uniqueness against DB and upload batch (skip instead of aborting)
+            if (transactionIdVal && String(transactionIdVal).trim()) {
+                const cleanTxId = String(transactionIdVal).trim();
+
+                if (seenTxIdsInFile.has(cleanTxId)) {
+                    skippedTransactions.push({
+                        transactionId: cleanTxId,
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Duplicate Transaction ID "${cleanTxId}" appears multiple times in upload batch`
+                    });
+                    continue;
+                }
+                seenTxIdsInFile.add(cleanTxId);
+
+                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId, isDeleted: { $ne: true } });
+                if (existingEntry) {
+                    skippedTransactions.push({
+                        transactionId: cleanTxId,
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Transaction ID "${cleanTxId}" already exists in ledger entries (DB)`
+                    });
+                    continue;
+                }
+            }
+
+            let resolvedBranchId = null;
+            if (branchVal) {
+                const trimmedVal = String(branchVal).trim().toLowerCase();
+                let match = allBranches.find(b => b.name.trim().toLowerCase() === trimmedVal);
+                if (!match) {
+                    match = allBranches.find(b => {
+                        const dbName = b.name.trim().toLowerCase();
+                        return dbName.includes(trimmedVal) || trimmedVal.includes(dbName);
+                    });
+                }
+                if (!match) {
+                    const isWorkshopType = trimmedVal.includes("workshop") || trimmedVal.includes("taller");
+                    const targetType = isWorkshopType ? "WORKSHOP" : "BRANCH";
+                    match = allBranches.find(b => b.type === targetType);
+                }
+                if (match) {
+                    resolvedBranchId = match._id;
+                }
+            }
+
+            if (!resolvedBranchId && allBranches.length > 0) {
+                resolvedBranchId = allBranches[0]._id;
             }
 
             // Resolve entity names from transaction row
@@ -639,10 +646,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             ].filter(Boolean).length;
 
             if (filledEntityCount > 1) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Row cannot contain more than one entity (DRIVER NAME, SUPPLIER NAME, CUSTOMER NAME) simultaneously.`
+                skippedTransactions.push({
+                    transactionId: transactionIdVal || "-",
+                    date: dateVal,
+                    description: finalDescription || descVal || remarksVal || "Transaction",
+                    amount: amountVal,
+                    type: typeVal,
+                    reason: `Row contains multiple conflicting entities (Driver, Supplier, Customer)`
                 });
+                continue;
             }
 
             let customerDoc = null;
@@ -760,10 +772,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             }
 
             if (!accountsNameVal && !parentAccountVal && !customerDoc && !supplierDoc && !driverNameVal && !supplierNameVal && !customerNameVal) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Invalid upload: Row "${finalDescription || transactionIdVal || 'Transaction'}" is missing ACCOUNTS NAME. Please specify an account name or provide a Driver, Supplier, or Customer name.`
+                skippedTransactions.push({
+                    transactionId: transactionIdVal || "-",
+                    date: dateVal,
+                    description: finalDescription || descVal || remarksVal || "Transaction",
+                    amount: amountVal,
+                    type: typeVal,
+                    reason: `Missing ACCOUNTS NAME or associated entity (Driver, Supplier, or Customer)`
                 });
+                continue;
             }
 
             const isCreditCard = account.accountType === "Credit Card";
@@ -794,7 +811,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     creatorRole
                 });
 
-                // Build invoice numbers string for the description
                 const invoiceNumbers = setOffResult.invoicesSetOff.map(inv => inv.invoiceNumber).join(", ");
                 const setOffDesc = setOffResult.invoicesSetOff.length > 0
                     ? `${finalDescription || "Receipt"} - Set off: ${invoiceNumbers}`
@@ -829,7 +845,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 await entry.save();
                 createdEntries.push(entry);
 
-                // Track set-off results for the response
+                insertedTransactions.push({
+                    transactionId: transactionIdVal || "-",
+                    date: finalEntryDate,
+                    description: setOffDesc,
+                    amount: amountVal,
+                    type: typeVal,
+                    party: customerDoc.name,
+                    status: "SAVED_TO_DB"
+                });
+
                 setOffResults.push({
                     transactionId: transactionIdVal,
                     customerName: customerDoc.name,
@@ -862,7 +887,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     creatorRole
                 });
 
-                // Build bill numbers string for description
                 const billNumbers = (setOffResult.billsSetOff || []).map(b => b.billNumber).join(", ");
                 const setOffDesc = setOffResult.billsSetOff && setOffResult.billsSetOff.length > 0
                     ? `${finalDescription || "Payment"} - Set off: ${billNumbers}`
@@ -898,7 +922,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 await entry.save();
                 createdEntries.push(entry);
 
-                // Track set-off results for response
+                insertedTransactions.push({
+                    transactionId: transactionIdVal || "-",
+                    date: finalEntryDate,
+                    description: setOffDesc,
+                    amount: amountVal,
+                    type: typeVal,
+                    party: supplierDoc.name || supplierDoc.companyName,
+                    status: "SAVED_TO_DB"
+                });
+
                 setOffResults.push({
                     transactionId: transactionIdVal,
                     supplierName: supplierDoc.name || supplierDoc.companyName,
@@ -921,7 +954,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
                 const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
 
-                // Determine target account name from ACCOUNTS NAME, or fallback to Accounts Receivable for customer / Accounts Payable for supplier
                 const targetAccountName = (accountsNameVal && String(accountsNameVal).trim())
                     ? accountsNameVal
                     : (customerDoc ? "Accounts Receivable" : (supplierDoc ? "Accounts Payable" : ""));
@@ -996,10 +1028,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
                     createdEntries.push(entry);
 
-                    // Trigger balance sync for sub-account immediately
+                    insertedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: finalEntryDate,
+                        description: finalDescription || "Double-entry transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        party: targetAccountName,
+                        status: "SAVED_TO_DB"
+                    });
+
                     await syncAccountingCodeBalances(subDoc._id);
 
-                    // If it's a customer receipt and offset account is Accounts Receivable, create PaymentReceived record so it maps under /customers/:id
                     if (customerDoc && typeVal === "DEBIT") {
                         const isAr = (subDoc.code === "1.1.03" || subDoc.code === "1.0.03" || /Accounts Receivable|Cuenta por Cobrar/i.test(subDoc.name) || /Accounts Receivable/i.test(accountsNameVal || ''));
                         if (isAr) {
@@ -1079,17 +1119,26 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             await offsetEntry.save();
 
             createdEntries.push(entry);
+
+            insertedTransactions.push({
+                transactionId: transactionIdVal || "-",
+                date: finalEntryDate,
+                description: finalDescription || "Ledger transaction",
+                amount: amountVal,
+                type: typeVal,
+                party: customerDoc ? customerDoc.name : (supplierDoc ? (supplierDoc.name || supplierDoc.companyName) : "-"),
+                status: "SAVED_TO_DB"
+            });
         }
 
         const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
 
-        // Recalculate running balances for the bank account
-        await recalculateRunningBalances(id);
+        // Recalculate running balances for the bank account if entries were created
+        if (createdEntries.length > 0) {
+            await recalculateRunningBalances(id);
+            await syncAccountingCodeBalances(accCodeId);
+        }
 
-        // Sync and update the bank's accounting code totals and currentBalance
-        await syncAccountingCodeBalances(accCodeId);
-
-        // Fetch updated bank account to return correct balance
         const updatedAccount = await BankAccount.findById(id);
 
         const totalSetOffCount = setOffResults.reduce((sum, r) => {
@@ -1101,10 +1150,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
         res.status(200).json({
             success: true,
-            message: `Successfully processed ${createdEntries.length} bulk entries. New current balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''}`,
+            message: `Successfully processed ${createdEntries.length} transaction(s). ${skippedTransactions.length > 0 ? `${skippedTransactions.length} skipped. ` : ''}New balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''}`,
             data: {
                 count: createdEntries.length,
+                totalReceived: transactions.length,
+                insertedCount: createdEntries.length,
+                skippedCount: skippedTransactions.length,
                 newBalance: updatedAccount.currentBalance,
+                insertedTransactions,
+                skippedTransactions,
                 setOffResults: setOffResults.length > 0 ? setOffResults : undefined
             }
         });
