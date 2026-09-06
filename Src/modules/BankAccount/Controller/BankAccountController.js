@@ -390,6 +390,10 @@ const parseDateFlexible = (val) => {
     return date;
 };
 
+const escapeRegExp = (string) => {
+    return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 exports.bulkUploadTransactions = async (req, res, next) => {
     try {
         const { id } = req.params;
@@ -631,19 +635,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 resolvedBranchId = allBranches[0]._id;
             }
 
-            // Resolve entity names from transaction row
-            const driverNameVal = tx["DRIVER NAME"] || tx["DRIVER"] || tx.driverName || tx.driver_name;
-            const supplierNameVal = tx["SUPPLIER NAME"] || tx.supplierName || tx.supplier_name;
-            const customerNameVal = tx["CUSTOMER NAME"] || tx.customerName || tx.customer_name;
+            const driverNameVal = tx["DRIVER NAME"] || tx["DRIVER"] || tx["Driver Name"] || tx["Driver"] || tx.driverName || tx.driver_name;
+            const supplierNameVal = tx["SUPPLIER NAME"] || tx["SUPPLIER"] || tx["VENDOR NAME"] || tx["VENDOR"] || tx["Supplier Name"] || tx["Supplier"] || tx["Vendor Name"] || tx["Vendor"] || tx.supplierName || tx.supplier_name || tx.vendorName || tx.vendor_name;
+            const customerNameVal = tx["CUSTOMER NAME"] || tx["CUSTOMER"] || tx["Customer Name"] || tx["Customer"] || tx.customerName || tx.customer_name;
 
             const customerIdVal = tx.customerId || tx.customer;
             const supplierIdVal = tx.supplierId || tx.supplier;
 
-            const filledEntityCount = [
-                driverNameVal && String(driverNameVal).trim(),
-                supplierNameVal && String(supplierNameVal).trim(),
-                customerNameVal && String(customerNameVal).trim()
-            ].filter(Boolean).length;
+            const hasDriver = Boolean(driverNameVal && String(driverNameVal).trim());
+            const hasSupplier = Boolean((supplierNameVal && String(supplierNameVal).trim()) || (supplierIdVal && !hasDriver));
+            const hasCustomer = Boolean((customerNameVal && String(customerNameVal).trim()) || (customerIdVal && !hasDriver && !hasSupplier));
+
+            const filledEntityCount = [hasDriver, hasSupplier, hasCustomer].filter(Boolean).length;
 
             if (filledEntityCount > 1) {
                 skippedTransactions.push({
@@ -667,13 +670,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 const Customer = require("../../Customer/Model/CustomerModel");
                 const { Driver } = require("../../Driver/Model/DriverModel");
                 const rawName = String(driverNameVal).trim();
-                const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const esc = escapeRegExp(rawName);
+                const nameRegex = new RegExp("^" + esc + "$", "i");
 
-                const driverDoc = await Driver.findOne({
+                let driverDoc = await Driver.findOne({
                     $or: [
-                        { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                        { firstName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                        { driverId: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                        { "personalInfo.fullName": { $regex: nameRegex } },
+                        { "personalInfo.firstName": { $regex: nameRegex } },
+                        { driverId: { $regex: nameRegex } },
+                        { name: { $regex: nameRegex } }
                     ],
                     isDeleted: { $ne: true }
                 });
@@ -685,12 +690,42 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 if (!customerDoc) {
                     customerDoc = await Customer.findOne({
                         $or: [
-                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                            { name: { $regex: nameRegex } },
+                            { displayName: { $regex: nameRegex } },
+                            { companyName: { $regex: nameRegex } },
+                            { customerNumber: { $regex: nameRegex } },
+                            { customerId: { $regex: nameRegex } }
                         ],
                         isDeleted: false
+                    });
+                }
+
+                if (customerDoc && !driverDoc && customerDoc.driver) {
+                    driverDoc = await Driver.findOne({ _id: customerDoc.driver, isDeleted: { $ne: true } });
+                }
+
+                // If neither driverDoc nor customerDoc is found in DB, skip row
+                if (!driverDoc && !customerDoc) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Driver "${driverNameVal}" not found in database`
+                    });
+                    continue;
+                }
+
+                // Ensure customerDoc is linked for driver auto set-off & ledger recording
+                if (driverDoc && !customerDoc) {
+                    customerDoc = await Customer.create({
+                        name: driverDoc.personalInfo?.fullName || driverDoc.name || rawName,
+                        driver: driverDoc._id,
+                        branch: driverDoc.branch || resolvedBranchId || branchId,
+                        status: "ACTIVE",
+                        createdBy,
+                        creatorRole
                     });
                 }
             } else if (customerIdVal || (customerNameVal && String(customerNameVal).trim())) {
@@ -700,43 +735,57 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
                 } else {
                     const rawName = String(customerNameVal).trim();
-                    const escapedName = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const esc = escapeRegExp(rawName);
+                    const nameRegex = new RegExp("^" + esc + "$", "i");
 
                     customerDoc = await Customer.findOne({
                         $or: [
-                            { name: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { companyName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { displayName: { $regex: new RegExp("^" + escapedName + "$", "i") } },
-                            { customerNumber: { $regex: new RegExp("^" + escapedName + "$", "i") } }
+                            { name: { $regex: nameRegex } },
+                            { displayName: { $regex: nameRegex } },
+                            { companyName: { $regex: nameRegex } },
+                            { customerNumber: { $regex: nameRegex } },
+                            { customerId: { $regex: nameRegex } }
                         ],
                         isDeleted: false
                     });
 
                     if (!customerDoc) {
-                        customerDoc = await Customer.findOne({
+                        const { Driver } = require("../../Driver/Model/DriverModel");
+                        const matchedDriver = await Driver.findOne({
                             $or: [
-                                { name: { $regex: new RegExp(escapedName, "i") } },
-                                { companyName: { $regex: new RegExp(escapedName, "i") } },
-                                { displayName: { $regex: new RegExp(escapedName, "i") } }
+                                { "personalInfo.fullName": { $regex: nameRegex } },
+                                { "personalInfo.firstName": { $regex: nameRegex } },
+                                { driverId: { $regex: nameRegex } },
+                                { name: { $regex: nameRegex } }
                             ],
-                            isDeleted: false
+                            isDeleted: { $ne: true }
                         });
-                    }
-
-                    if (!customerDoc) {
-                        const cleanWords = rawName.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
-                        if (cleanWords) {
-                            const fuzzyPattern = cleanWords.split(' ').filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s,.-]*');
-                            customerDoc = await Customer.findOne({
-                                $or: [
-                                    { name: { $regex: new RegExp(fuzzyPattern, "i") } },
-                                    { companyName: { $regex: new RegExp(fuzzyPattern, "i") } },
-                                    { displayName: { $regex: new RegExp(fuzzyPattern, "i") } }
-                                ],
-                                isDeleted: false
-                            });
+                        if (matchedDriver) {
+                            customerDoc = await Customer.findOne({ driver: matchedDriver._id, isDeleted: false });
+                            if (!customerDoc) {
+                                customerDoc = await Customer.findOne({
+                                    name: { $regex: new RegExp("^" + escapeRegExp(matchedDriver.personalInfo?.fullName || "") + "$", "i") },
+                                    isDeleted: false
+                                });
+                            }
+                            if (customerDoc) {
+                                isDriver = true;
+                            }
                         }
                     }
+                }
+
+                // If customer is not found in DB, skip row
+                if (!customerDoc) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Customer "${customerNameVal || customerIdVal}" not found in database`
+                    });
+                    continue;
                 }
             }
 
@@ -746,28 +795,32 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
                 } else {
                     const rawSupName = String(supplierNameVal).trim();
-                    const escapedSupName = rawSupName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const esc = escapeRegExp(rawSupName);
+                    const nameRegex = new RegExp("^" + esc + "$", "i");
 
                     supplierDoc = await Supplier.findOne({
                         $or: [
-                            { name: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                            { companyName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                            { displayName: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                            { vendorNumber: { $regex: new RegExp("^" + escapedSupName + "$", "i") } },
-                            { supplierCode: { $regex: new RegExp("^" + escapedSupName + "$", "i") } }
+                            { name: { $regex: nameRegex } },
+                            { companyName: { $regex: nameRegex } },
+                            { displayName: { $regex: nameRegex } },
+                            { vendorNumber: { $regex: nameRegex } },
+                            { supplierCode: { $regex: nameRegex } }
                         ],
                         isDeleted: { $ne: true }
                     });
+                }
 
-                    if (!supplierDoc) {
-                        supplierDoc = await Supplier.findOne({
-                            $or: [
-                                { name: { $regex: new RegExp(escapedSupName, "i") } },
-                                { companyName: { $regex: new RegExp(escapedSupName, "i") } }
-                            ],
-                            isDeleted: { $ne: true }
-                        });
-                    }
+                // If vendor/supplier is not found in DB, skip row
+                if (!supplierDoc) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Vendor/Supplier "${supplierNameVal || supplierIdVal}" not found in database`
+                    });
+                    continue;
                 }
             }
 
