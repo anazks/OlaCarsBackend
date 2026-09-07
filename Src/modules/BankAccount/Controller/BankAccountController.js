@@ -396,6 +396,10 @@ const escapeRegExp = (string) => {
 
 exports.bulkUploadTransactions = async (req, res, next) => {
     try {
+        // Extend request timeout to 3 minutes for large batch processing
+        req.setTimeout(180000);
+        if (res.socket) res.socket.setTimeout(180000);
+
         const { id } = req.params;
         const { branchId, transactions, clearExisting } = req.body;
 
@@ -403,10 +407,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "Invalid or empty transactions array" });
         }
 
+        // ── All requires at top (avoid per-row require overhead) ──
         const BankAccount = require("../Model/BankAccountModel");
         const BankTransaction = require("../Model/BankTransactionModel");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
         const Branch = require("../../Branch/Model/BranchModel");
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const Supplier = require("../../Supplier/Model/SupplierModel");
+        const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+        const mongoose = require("mongoose");
+        const { autoSetOffInvoices, autoSetOffBills, ensureSubAccountingCode, syncAccountingCodeBalances, recalculateRunningBalances } = require("../Service/BankAccountService");
 
         const allBranches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
 
@@ -423,7 +435,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const createdBy = req.user?._id || req.user?.id || req.user?.userId;
         const creatorRole = req.user?.role || "ADMIN";
 
-        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
         const accountingCodeDoc = await AccountingCode.findOne({ _id: accCodeId });
         if (!accountingCodeDoc) {
             return res.status(400).json({ success: false, message: "Linked accounting code not found" });
@@ -449,6 +460,80 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             isDeleted: { $ne: true }
         });
 
+        // ── Pre-fetch entities into Maps for O(1) lookups ──
+        const [allCustomers, allDrivers, allSuppliers] = await Promise.all([
+            Customer.find({ isDeleted: false }).lean(),
+            Driver.find({ isDeleted: { $ne: true } }).lean(),
+            Supplier.find({ isDeleted: { $ne: true } }).lean()
+        ]);
+
+        // Build normalized-name -> doc Maps for fast lookups
+        const normalizeForMap = (str) => String(str || "").trim().toLowerCase();
+
+        const customerByIdMap = new Map();
+        const customerByNameMap = new Map();
+        for (const c of allCustomers) {
+            customerByIdMap.set(String(c._id), c);
+            if (c.name) customerByNameMap.set(normalizeForMap(c.name), c);
+            if (c.displayName) customerByNameMap.set(normalizeForMap(c.displayName), c);
+            if (c.companyName) customerByNameMap.set(normalizeForMap(c.companyName), c);
+            if (c.customerNumber) customerByNameMap.set(normalizeForMap(c.customerNumber), c);
+            if (c.customerId) customerByNameMap.set(normalizeForMap(c.customerId), c);
+        }
+
+        const driverByIdMap = new Map();
+        const driverByNameMap = new Map();
+        const customerByDriverIdMap = new Map();
+        for (const d of allDrivers) {
+            driverByIdMap.set(String(d._id), d);
+            const fullName = d.personalInfo?.fullName || d.name;
+            if (fullName) driverByNameMap.set(normalizeForMap(fullName), d);
+            if (d.personalInfo?.firstName) driverByNameMap.set(normalizeForMap(d.personalInfo.firstName), d);
+            if (d.driverId) driverByNameMap.set(normalizeForMap(d.driverId), d);
+            if (d.name) driverByNameMap.set(normalizeForMap(d.name), d);
+        }
+        // Map customer -> driver relationships
+        for (const c of allCustomers) {
+            if (c.driver) customerByDriverIdMap.set(String(c.driver), c);
+        }
+
+        const supplierByIdMap = new Map();
+        const supplierByNameMap = new Map();
+        for (const s of allSuppliers) {
+            supplierByIdMap.set(String(s._id), s);
+            if (s.name) supplierByNameMap.set(normalizeForMap(s.name), s);
+            if (s.companyName) supplierByNameMap.set(normalizeForMap(s.companyName), s);
+            if (s.displayName) supplierByNameMap.set(normalizeForMap(s.displayName), s);
+            if (s.vendorNumber) supplierByNameMap.set(normalizeForMap(s.vendorNumber), s);
+            if (s.supplierCode) supplierByNameMap.set(normalizeForMap(s.supplierCode), s);
+        }
+
+        // ── Batch transactionId duplicate check ──
+        const allTxIdsInBatch = transactions
+            .map(tx => {
+                const prefixVal = tx.PREFIX || tx.prefix;
+                const numberVal = tx.NUMBER || tx.number;
+                let txId = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
+                if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
+                    txId = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
+                }
+                return txId ? String(txId).trim() : null;
+            })
+            .filter(Boolean);
+
+        const existingTxIdSet = new Set();
+        if (allTxIdsInBatch.length > 0) {
+            const existingEntries = await LedgerEntry.find(
+                { transactionId: { $in: allTxIdsInBatch }, isDeleted: { $ne: true } },
+                { transactionId: 1 }
+            ).lean();
+            for (const e of existingEntries) {
+                if (e.transactionId) existingTxIdSet.add(String(e.transactionId).trim());
+            }
+        }
+
+        // Track sub-account IDs that need sync at end (instead of per-row)
+        const subAccountIdsToSync = new Set();
 
         let balanceAccum = 0;
         let debitAccum = 0;
@@ -596,9 +681,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
                 seenTxIdsInFile.add(cleanTxId);
 
-                const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
-                const existingEntry = await LedgerEntry.findOne({ transactionId: cleanTxId, isDeleted: { $ne: true } });
-                if (existingEntry) {
+                // Use pre-fetched Set instead of per-row DB query
+                if (existingTxIdSet.has(cleanTxId)) {
                     skippedTransactions.push({
                         transactionId: cleanTxId,
                         date: dateVal,
@@ -667,41 +751,22 @@ exports.bulkUploadTransactions = async (req, res, next) => {
 
             if (driverNameVal && String(driverNameVal).trim()) {
                 isDriver = true;
-                const Customer = require("../../Customer/Model/CustomerModel");
-                const { Driver } = require("../../Driver/Model/DriverModel");
                 const rawName = String(driverNameVal).trim();
-                const esc = escapeRegExp(rawName);
-                const nameRegex = new RegExp("^" + esc + "$", "i");
+                const normalizedName = normalizeForMap(rawName);
 
-                let driverDoc = await Driver.findOne({
-                    $or: [
-                        { "personalInfo.fullName": { $regex: nameRegex } },
-                        { "personalInfo.firstName": { $regex: nameRegex } },
-                        { driverId: { $regex: nameRegex } },
-                        { name: { $regex: nameRegex } }
-                    ],
-                    isDeleted: { $ne: true }
-                });
+                // O(1) Map lookup instead of DB findOne with regex
+                let driverDoc = driverByNameMap.get(normalizedName) || null;
 
                 if (driverDoc) {
-                    customerDoc = await Customer.findOne({ driver: driverDoc._id, isDeleted: false });
+                    customerDoc = customerByDriverIdMap.get(String(driverDoc._id)) || null;
                 }
 
                 if (!customerDoc) {
-                    customerDoc = await Customer.findOne({
-                        $or: [
-                            { name: { $regex: nameRegex } },
-                            { displayName: { $regex: nameRegex } },
-                            { companyName: { $regex: nameRegex } },
-                            { customerNumber: { $regex: nameRegex } },
-                            { customerId: { $regex: nameRegex } }
-                        ],
-                        isDeleted: false
-                    });
+                    customerDoc = customerByNameMap.get(normalizedName) || null;
                 }
 
                 if (customerDoc && !driverDoc && customerDoc.driver) {
-                    driverDoc = await Driver.findOne({ _id: customerDoc.driver, isDeleted: { $ne: true } });
+                    driverDoc = driverByIdMap.get(String(customerDoc.driver)) || null;
                 }
 
                 // If neither driverDoc nor customerDoc is found in DB, skip row
@@ -730,43 +795,24 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
             } else if (customerIdVal || (customerNameVal && String(customerNameVal).trim())) {
                 isCustomer = true;
-                const Customer = require("../../Customer/Model/CustomerModel");
                 if (customerIdVal) {
-                    customerDoc = await Customer.findOne({ _id: customerIdVal, isDeleted: false });
+                    // O(1) Map lookup by ID
+                    customerDoc = customerByIdMap.get(String(customerIdVal)) || null;
                 } else {
                     const rawName = String(customerNameVal).trim();
-                    const esc = escapeRegExp(rawName);
-                    const nameRegex = new RegExp("^" + esc + "$", "i");
+                    const normalizedName = normalizeForMap(rawName);
 
-                    customerDoc = await Customer.findOne({
-                        $or: [
-                            { name: { $regex: nameRegex } },
-                            { displayName: { $regex: nameRegex } },
-                            { companyName: { $regex: nameRegex } },
-                            { customerNumber: { $regex: nameRegex } },
-                            { customerId: { $regex: nameRegex } }
-                        ],
-                        isDeleted: false
-                    });
+                    // O(1) Map lookup by normalized name
+                    customerDoc = customerByNameMap.get(normalizedName) || null;
 
                     if (!customerDoc) {
-                        const { Driver } = require("../../Driver/Model/DriverModel");
-                        const matchedDriver = await Driver.findOne({
-                            $or: [
-                                { "personalInfo.fullName": { $regex: nameRegex } },
-                                { "personalInfo.firstName": { $regex: nameRegex } },
-                                { driverId: { $regex: nameRegex } },
-                                { name: { $regex: nameRegex } }
-                            ],
-                            isDeleted: { $ne: true }
-                        });
+                        // Try matching as driver name
+                        const matchedDriver = driverByNameMap.get(normalizedName) || null;
                         if (matchedDriver) {
-                            customerDoc = await Customer.findOne({ driver: matchedDriver._id, isDeleted: false });
+                            customerDoc = customerByDriverIdMap.get(String(matchedDriver._id)) || null;
                             if (!customerDoc) {
-                                customerDoc = await Customer.findOne({
-                                    name: { $regex: new RegExp("^" + escapeRegExp(matchedDriver.personalInfo?.fullName || "") + "$", "i") },
-                                    isDeleted: false
-                                });
+                                const driverFullName = normalizeForMap(matchedDriver.personalInfo?.fullName || "");
+                                customerDoc = customerByNameMap.get(driverFullName) || null;
                             }
                             if (customerDoc) {
                                 isDriver = true;
@@ -790,24 +836,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             }
 
             if (supplierIdVal || (supplierNameVal && String(supplierNameVal).trim())) {
-                const Supplier = require("../../Supplier/Model/SupplierModel");
                 if (supplierIdVal) {
-                    supplierDoc = await Supplier.findOne({ _id: supplierIdVal, isDeleted: { $ne: true } });
+                    // O(1) Map lookup by ID
+                    supplierDoc = supplierByIdMap.get(String(supplierIdVal)) || null;
                 } else {
                     const rawSupName = String(supplierNameVal).trim();
-                    const esc = escapeRegExp(rawSupName);
-                    const nameRegex = new RegExp("^" + esc + "$", "i");
+                    const normalizedName = normalizeForMap(rawSupName);
 
-                    supplierDoc = await Supplier.findOne({
-                        $or: [
-                            { name: { $regex: nameRegex } },
-                            { companyName: { $regex: nameRegex } },
-                            { displayName: { $regex: nameRegex } },
-                            { vendorNumber: { $regex: nameRegex } },
-                            { supplierCode: { $regex: nameRegex } }
-                        ],
-                        isDeleted: { $ne: true }
-                    });
+                    // O(1) Map lookup by normalized name
+                    supplierDoc = supplierByNameMap.get(normalizedName) || null;
                 }
 
                 // If vendor/supplier is not found in DB, skip row
@@ -848,8 +885,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     creditAccum += amountVal;
                 }
 
-                const { autoSetOffInvoices } = require("../Service/BankAccountService");
-                const mongoose = require("mongoose");
                 const bankTxId = new mongoose.Types.ObjectId();
 
                 const setOffResult = await autoSetOffInvoices(customerDoc._id, amountVal, {
@@ -923,8 +958,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 balanceAccum = isCreditCard ? (balanceAccum + amountVal) : (balanceAccum - amountVal);
                 creditAccum += amountVal;
 
-                const { autoSetOffBills } = require("../Service/BankAccountService");
-                const mongoose = require("mongoose");
                 const bankTxId = new mongoose.Types.ObjectId();
 
                 const setOffResult = await autoSetOffBills(supplierDoc._id, amountVal, {
@@ -1005,7 +1038,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     creditAccum += amountVal;
                 }
 
-                const { ensureSubAccountingCode, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+                // ensureSubAccountingCode & syncAccountingCodeBalances already imported at top
 
                 const targetAccountName = (accountsNameVal && String(accountsNameVal).trim())
                     ? accountsNameVal
@@ -1020,7 +1053,6 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 );
 
                 if (subDoc) {
-                    const BankAccount = require("../Model/BankAccountModel");
                     let isTargetBankAccount = Boolean(await BankAccount.exists({ accountingCode: subDoc._id, isDeleted: { $ne: true } }));
 
                     if (!isTargetBankAccount && (accountsNameVal || subDoc.name)) {
@@ -1091,13 +1123,14 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         status: "SAVED_TO_DB"
                     });
 
-                    await syncAccountingCodeBalances(subDoc._id);
+                    // Collect for batch sync at end instead of per-row
+                    subAccountIdsToSync.add(String(subDoc._id));
 
                     if (customerDoc && typeVal === "DEBIT") {
                         const isAr = (subDoc.code === "1.1.03" || subDoc.code === "1.0.03" || /Accounts Receivable|Cuenta por Cobrar/i.test(subDoc.name) || /Accounts Receivable/i.test(accountsNameVal || ''));
                         if (isAr) {
                             try {
-                                const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+                                // PaymentReceived already imported at top
                                 const prData = {
                                     paymentNumber: `PR-BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                                     customerId: customerDoc._id,
@@ -1184,12 +1217,19 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             });
         }
 
-        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
-
         // Recalculate running balances for the bank account if entries were created
         if (createdEntries.length > 0) {
             await recalculateRunningBalances(id);
             await syncAccountingCodeBalances(accCodeId);
+
+            // Sync all sub-account codes that were touched (deduplicated)
+            for (const subAccId of subAccountIdsToSync) {
+                try {
+                    await syncAccountingCodeBalances(subAccId);
+                } catch (syncErr) {
+                    console.error(`[BulkUpload] Failed to sync sub-account ${subAccId}:`, syncErr);
+                }
+            }
         }
 
         const updatedAccount = await BankAccount.findById(id);
