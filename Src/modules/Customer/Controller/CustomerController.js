@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Customer = require('../Model/CustomerModel');
 const { getNextCustomerId, getNextDriverId } = require('../../SystemSettings/Model/CounterModel');
 const { addDriverService } = require('../../Driver/Repo/DriverRepo');
+const { Driver } = require('../../Driver/Model/DriverModel');
 const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
 
 exports.createCustomer = async (req, res) => {
@@ -114,7 +115,10 @@ exports.getCustomerById = async (req, res) => {
             .populate('branch')
             .populate({
                 path: 'driver',
-                populate: { path: 'currentVehicle' }
+                populate: {
+                    path: 'currentVehicle',
+                    populate: { path: 'fleet' }
+                }
             });
             
         if (!doc) return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -144,6 +148,229 @@ exports.updateCustomer = async (req, res) => {
         res.status(200).json({ success: true, data: updatedDoc });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.updateCustomerWeeklyRent = async (req, res) => {
+    try {
+        const mongoose = require('mongoose');
+        const Driver = require('../../Driver/Model/DriverModel');
+        const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
+        const { Invoice } = require('../../Invoice/Model/InvoiceModel');
+        const Tax = require('../../Tax/Model/TaxModel');
+
+        const { weeklyRent, remark, effectiveDate } = req.body;
+        const newRate = Number(weeklyRent);
+
+        if (!newRate || isNaN(newRate) || newRate <= 0) {
+            return res.status(400).json({ success: false, message: 'Valid weekly rent amount greater than 0 is required.' });
+        }
+
+        if (!remark || !String(remark).trim()) {
+            return res.status(400).json({ success: false, message: 'Remark / reason for weekly rent change is required.' });
+        }
+
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: false });
+        if (!customer) {
+            return res.status(404).json({ success: false, message: 'Customer not found.' });
+        }
+
+        if (!customer.driver) {
+            return res.status(400).json({ success: false, message: 'Customer is not registered as a driver.' });
+        }
+
+        const DriverModel = mongoose.models.Driver || mongoose.model('Driver');
+        const VehicleModel = mongoose.models.Vehicle || mongoose.model('Vehicle');
+
+        const driver = await DriverModel.findById(customer.driver);
+        if (!driver) {
+            return res.status(404).json({ success: false, message: 'Driver record not found.' });
+        }
+
+        const vehicle = driver.currentVehicle ? await VehicleModel.findById(driver.currentVehicle) : null;
+
+        // Determine previous rent rate
+        const previousWeeklyRent = driver.weeklyRent ?? 
+            vehicle?.basicDetails?.weeklyRent ?? 
+            (driver.rentTracking && driver.rentTracking.length > 0 ? driver.rentTracking[0]?.amount : 0);
+
+        // Capture user info
+        const changedBy = req.user?._id || req.user?.id || null;
+        const changedByName = req.user?.fullName || req.user?.name || req.user?.email || 'System User';
+        const changedByRole = req.user?.role || 'Staff';
+
+        // Determine vehicle details
+        const regNo = vehicle?.legalDocs?.registrationNumber || vehicle?.basicDetails?.registrationNumber || '';
+        const vehMake = vehicle?.basicDetails?.make || '';
+        const vehModelName = vehicle?.basicDetails?.model || '';
+        const fullVehModel = [vehMake, vehModelName].filter(Boolean).join(' ');
+        const fleetNo = vehicle?.basicDetails?.fleetNumber || vehicle?.fleet?.fleetNumber || vehicle?.fleetNumber || '';
+        const vinNo = vehicle?.basicDetails?.vin || '';
+
+        // Add history entry
+        if (!driver.rentChangeHistory) {
+            driver.rentChangeHistory = [];
+        }
+        driver.rentChangeHistory.unshift({
+            previousWeeklyRent: Number(previousWeeklyRent) || 0,
+            newWeeklyRent: newRate,
+            effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
+            remark: String(remark).trim(),
+            vehicle: vehicle?._id || null,
+            vehicleRegistrationNumber: regNo,
+            vehicleModel: fullVehModel,
+            fleetNumber: fleetNo,
+            vin: vinNo,
+            changedBy,
+            changedByName,
+            changedByRole,
+            createdAt: new Date()
+        });
+
+        // Update driver master weekly rent
+        driver.weeklyRent = newRate;
+
+        // Update vehicle basicDetails.weeklyRent if vehicle is assigned
+        if (vehicle) {
+            if (!vehicle.basicDetails) vehicle.basicDetails = {};
+            vehicle.basicDetails.weeklyRent = newRate;
+            await vehicle.save();
+        }
+
+        // Update future rentTracking installments
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const effDate = effectiveDate ? new Date(effectiveDate) : today;
+        effDate.setHours(0, 0, 0, 0);
+
+        if (driver.rentTracking && driver.rentTracking.length > 0) {
+            const isWeekly = driver.rentTracking.length > 50;
+            const installmentAmount = isWeekly ? newRate : newRate * 4;
+
+            // Sort rentTracking chronologically
+            driver.rentTracking.sort((a, b) => a.weekNumber - b.weekNumber);
+
+            // Step 1: Update amounts only for future / eligible installments
+            for (let i = 0; i < driver.rentTracking.length; i++) {
+                const week = driver.rentTracking[i];
+                const dueDate = week.dueDate ? new Date(week.dueDate) : null;
+                const isFutureOrToday = dueDate ? dueDate >= effDate : false;
+
+                // Old / historical or already fully paid installments retain their original amounts
+                if (isFutureOrToday && week.status !== 'PAID') {
+                    week.amount = installmentAmount;
+                    week.totalDue = week.amount + (week.carryOver || 0);
+                    week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+                    if (week.balance === 0) {
+                        week.status = 'PAID';
+                    } else if (week.amountPaid > 0) {
+                        week.status = 'PARTIAL';
+                    } else {
+                        week.status = 'PENDING';
+                    }
+                }
+            }
+
+            // Step 2: Recompute carryover forward
+            let runningCarryOver = 0;
+            for (let i = 0; i < driver.rentTracking.length; i++) {
+                const week = driver.rentTracking[i];
+                const dueDate = week.dueDate ? new Date(week.dueDate) : null;
+                const isOverdue = dueDate && dueDate < today;
+
+                if (week.status !== 'PAID' && isOverdue) {
+                    week.totalDue = week.amount;
+                    week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+                    runningCarryOver += week.balance;
+                } else if (week.status !== 'PAID' && !isOverdue) {
+                    week.carryOver = runningCarryOver;
+                    week.totalDue = week.amount + week.carryOver;
+                    week.balance = Math.max(0, week.totalDue - (week.amountPaid || 0));
+                    if (week.balance === 0) {
+                        week.status = 'PAID';
+                    } else if (week.amountPaid > 0) {
+                        week.status = 'PARTIAL';
+                    } else {
+                        week.status = 'PENDING';
+                    }
+                    runningCarryOver = 0; // Carryover absorbed
+                }
+            }
+
+            driver.markModified('rentTracking');
+        }
+
+        driver.markModified('rentChangeHistory');
+        await driver.save();
+
+        // Update corresponding future un-paid rental Invoices if any exist
+        if (vehicle) {
+            const activeTax = await Tax.findOne({ isActive: true, isDeleted: false });
+            const defaultTaxRate = activeTax ? activeTax.rate : 0;
+
+            const futureInvoices = await Invoice.find({
+                driver: driver._id,
+                vehicle: vehicle._id,
+                invoiceType: "RENTAL",
+                status: { $ne: "PAID" },
+                dueDate: { $gte: effDate },
+                isDeleted: false
+            });
+
+            for (const inv of futureInvoices) {
+                const weekNum = Number(inv.weekNumber);
+                const installment = driver.rentTracking.find(w => w.weekNumber === weekNum);
+                if (installment) {
+                    const taxRate = inv.taxRate !== undefined ? inv.taxRate : defaultTaxRate;
+                    const baseAmount = taxRate > 0 ? Math.round((installment.amount / (1 + taxRate / 100)) * 100) / 100 : installment.amount;
+                    const taxAmount = Math.round((installment.amount - baseAmount) * 100) / 100;
+
+                    inv.baseAmount = baseAmount;
+                    inv.taxAmount = taxAmount;
+                    inv.carryOverAmount = installment.carryOver || 0;
+                    inv.totalAmountDue = installment.amount + (installment.carryOver || 0);
+                    inv.balance = Math.max(0, inv.totalAmountDue - (inv.amountPaid || 0));
+
+                    if (inv.balance === 0) {
+                        inv.status = "PAID";
+                        if (!inv.paidAt) inv.paidAt = new Date();
+                    } else if (inv.amountPaid > 0) {
+                        inv.status = "PARTIAL";
+                    } else {
+                        inv.status = "PENDING";
+                    }
+                    await inv.save();
+                }
+            }
+        }
+
+        // Return updated customer doc
+        const updatedCustomer = await Customer.findOne({ _id: customer._id })
+            .populate('branch')
+            .populate({
+                path: 'driver',
+                populate: {
+                    path: 'currentVehicle',
+                    populate: { path: 'fleet' }
+                }
+            });
+
+        return res.status(200).json({
+            success: true,
+            message: `Weekly rent successfully updated to $${newRate.toFixed(2)}. Future installments have been updated.`,
+            data: updatedCustomer
+        });
+    } catch (error) {
+        console.error('Error updating customer weekly rent:', error);
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 

@@ -16,6 +16,7 @@ router.get('/', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerC
 router.get('/:id/statement/monthly-pdf', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.downloadMonthlyStatementPdf);
 router.get('/:id/statement/pdf', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.downloadStatementPdf);
 router.get('/:id', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.getCustomerById);
+router.put('/:id/weekly-rent', authorize(...ALL_ROLES), hasPermission('DRIVER_EDIT'), CustomerController.updateCustomerWeeklyRent);
 router.put('/:id', authorize(...ALL_ROLES), hasPermission('DRIVER_EDIT'), CustomerController.updateCustomer);
 router.delete('/:id', authorize(...ALL_ROLES), hasPermission('DRIVER_DELETE'), CustomerController.deleteCustomer);
 

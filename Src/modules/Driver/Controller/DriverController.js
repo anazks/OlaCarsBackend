@@ -295,6 +295,38 @@ const updatePerformance = async (req, res) => {
  * The CSV file itself never contains a branch column.
  * @route POST /api/driver/bulk
  */
+// ─── Identity Docs Sanitizer ──────────────────────────────────────────
+// Handles cases where Excel/CSV data provides an ID number in idType column,
+// or non-standard enum variations ("cedula", "dni", "passport", etc.).
+const sanitizeIdentityDocs = (rawType, rawNumber) => {
+    let idType = rawType ? String(rawType).trim() : undefined;
+    let idNumber = rawNumber ? String(rawNumber).trim() : undefined;
+
+    const validEnums = ["National ID", "Passport"];
+
+    if (idType) {
+        const lower = idType.toLowerCase();
+        if (["national id", "national_id", "nationalid", "cedula", "cédula", "dni", "national", "id"].includes(lower)) {
+            idType = "National ID";
+        } else if (["passport", "pasaporte"].includes(lower)) {
+            idType = "Passport";
+        } else if (!validEnums.includes(idType)) {
+            // idType is not a recognized enum string (e.g., it contains an ID number like "9-741-2283")
+            if (!idNumber) {
+                idNumber = idType;
+            }
+            idType = idNumber ? "National ID" : undefined;
+        }
+    } else if (idNumber) {
+        idType = "National ID";
+    }
+
+    return {
+        idType: idType || undefined,
+        idNumber: idNumber || undefined
+    };
+};
+
 const bulkAddDrivers = async (req, res) => {
     try {
         const { drivers, branch: selectedBranch } = req.body;
@@ -343,6 +375,7 @@ const bulkAddDrivers = async (req, res) => {
             }
 
             try {
+                const { idType: cleanIdType, idNumber: cleanIdNumber } = sanitizeIdentityDocs(row.idType, row.idNumber);
                 const driverData = {
                     personalInfo: {
                         fullName: row.fullName.trim(),
@@ -353,8 +386,8 @@ const bulkAddDrivers = async (req, res) => {
                         nationality: row.nationality ? row.nationality.trim() : undefined,
                     },
                     identityDocs: {
-                        idType: row.idType || undefined,
-                        idNumber: row.idNumber ? row.idNumber.trim() : undefined,
+                        idType: cleanIdType,
+                        idNumber: cleanIdNumber,
                     },
                     drivingLicense: {
                         licenseNumber: row.licenseNumber ? row.licenseNumber.trim() : undefined,
@@ -544,6 +577,9 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.vehicleCategory) vehicleUpdateData["basicDetails.category"] = row.vehicleCategory.trim();
                     if (row.vehicleFuelType) vehicleUpdateData["basicDetails.fuelType"] = row.vehicleFuelType.trim();
                     if (row.vehicleColour) vehicleUpdateData["basicDetails.colour"] = row.vehicleColour.trim();
+                    if (row.weeklyRent && !isNaN(row.weeklyRent)) {
+                        vehicleUpdateData["basicDetails.weeklyRent"] = Number(row.weeklyRent);
+                    }
                     if (!currentFleetNumber && newFleetNumber) {
                         vehicleUpdateData["basicDetails.fleetNumber"] = newFleetNumber;
                     }
@@ -566,6 +602,7 @@ const dataMigrateDrivers = async (req, res) => {
                             fuelType: row.vehicleFuelType ? row.vehicleFuelType.trim() : undefined,
                             colour: row.vehicleColour ? row.vehicleColour.trim() : undefined,
                             vin: row.vehicleVin ? String(row.vehicleVin || "").trim().toUpperCase() : undefined,
+                            weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
                             fleetNumber: staffFleetNumber || (row.fleetNumber || row.vehicleFleetNumber || "").toString().trim() || null,
                         },
                         legalDocs: {
@@ -645,8 +682,9 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.dateOfBirth) driverUpdateData["personalInfo.dateOfBirth"] = row.dateOfBirth;
                     if (row.nationality) driverUpdateData["personalInfo.nationality"] = String(row.nationality || "").trim();
 
-                    if (row.idType) driverUpdateData["identityDocs.idType"] = row.idType;
-                    if (row.idNumber) driverUpdateData["identityDocs.idNumber"] = String(row.idNumber || "").trim();
+                    const { idType: cleanIdType, idNumber: cleanIdNumber } = sanitizeIdentityDocs(row.idType, row.idNumber);
+                    if (cleanIdType) driverUpdateData["identityDocs.idType"] = cleanIdType;
+                    if (cleanIdNumber) driverUpdateData["identityDocs.idNumber"] = cleanIdNumber;
 
                     if (row.licenseNumber) driverUpdateData["drivingLicense.licenseNumber"] = String(row.licenseNumber || "").trim();
                     if (row.licenseCountry) driverUpdateData["drivingLicense.licenseCountry"] = String(row.licenseCountry || "").trim();
@@ -660,6 +698,7 @@ const dataMigrateDrivers = async (req, res) => {
                     if (row.activationDate) driverUpdateData["activationDate"] = row.activationDate;
                     if (row.deactivationDate) driverUpdateData["deactivationDate"] = row.deactivationDate;
                     if (row.remarks) driverUpdateData["remarks"] = String(row.remarks || "").trim();
+                    if (row.weeklyRent && !isNaN(row.weeklyRent)) driverUpdateData["weeklyRent"] = Number(row.weeklyRent);
                     if (branch) driverUpdateData["branch"] = branch;
 
                     driverUpdateData["status"] = isDeactivated ? "INACTIVE" : "ACTIVE";
@@ -674,6 +713,7 @@ const dataMigrateDrivers = async (req, res) => {
                     isUpdated = true;
                 } else {
                     // Create new driver
+                    const { idType: cleanIdType, idNumber: cleanIdNumber } = sanitizeIdentityDocs(row.idType, row.idNumber);
                     const driverData = {
                         status: isDeactivated ? "INACTIVE" : "ACTIVE",
                         personalInfo: {
@@ -685,8 +725,8 @@ const dataMigrateDrivers = async (req, res) => {
                             nationality: row.nationality ? String(row.nationality || "").trim() : undefined,
                         },
                         identityDocs: {
-                            idType: row.idType || undefined,
-                            idNumber: row.idNumber ? String(row.idNumber || "").trim() : undefined,
+                            idType: cleanIdType,
+                            idNumber: cleanIdNumber,
                         },
                         drivingLicense: {
                             licenseNumber: row.licenseNumber ? String(row.licenseNumber || "").trim() : undefined,
@@ -702,6 +742,7 @@ const dataMigrateDrivers = async (req, res) => {
                         activationDate: row.activationDate || undefined,
                         deactivationDate: row.deactivationDate || undefined,
                         remarks: row.remarks ? String(row.remarks || "").trim() : undefined,
+                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
                         currentVehicle: isDeactivated ? null : vehicleId,
                         branch: branch,
                         createdBy: userId,

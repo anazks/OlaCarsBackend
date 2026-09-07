@@ -55,6 +55,22 @@ const statusHistorySchema = new mongoose.Schema({
     notes: { type: String },
 }, { _id: false });
 
+const rentChangeHistorySchema = new mongoose.Schema({
+    previousWeeklyRent: { type: Number },
+    newWeeklyRent: { type: Number, required: true },
+    effectiveDate: { type: Date, default: Date.now },
+    remark: { type: String, required: true, trim: true },
+    vehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+    vehicleRegistrationNumber: { type: String, trim: true },
+    vehicleModel: { type: String, trim: true },
+    fleetNumber: { type: String, trim: true },
+    vin: { type: String, trim: true },
+    changedBy: { type: mongoose.Schema.Types.ObjectId },
+    changedByName: { type: String, trim: true },
+    changedByRole: { type: String, trim: true },
+    createdAt: { type: Date, default: Date.now },
+}, { _id: true });
+
 // ─── Main Driver Schema ──────────────────────────────────────────────
 const driverSchema = new mongoose.Schema(
     {
@@ -304,6 +320,8 @@ const driverSchema = new mongoose.Schema(
 
         // ── Audit ────────────────────────────────────────────────────
         statusHistory: [statusHistorySchema],
+        weeklyRent: { type: Number },
+        rentChangeHistory: [rentChangeHistorySchema],
 
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

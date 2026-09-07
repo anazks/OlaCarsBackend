@@ -584,8 +584,20 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
     const combinedTracking = [...sanitizedExisting, ...installments];
 
     const updatedDriver = await updateDriverService(driverId, {
-        $set: { rentTracking: combinedTracking }
+        $set: { 
+            rentTracking: combinedTracking,
+            ...(weeklyRent !== undefined && !isNaN(weeklyRent) ? { weeklyRent: Number(weeklyRent) } : {})
+        }
     }, session);
+
+    if (targetVehicleId && weeklyRent !== undefined && !isNaN(weeklyRent)) {
+        try {
+            const { updateVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
+            await updateVehicleService(targetVehicleId, { 'basicDetails.weeklyRent': Number(weeklyRent) }, session);
+        } catch (vehErr) {
+            console.error(`[generateMigrationRentPlan] Could not sync weeklyRent to vehicle ${targetVehicleId}:`, vehErr.message);
+        }
+    }
 
     return updatedDriver;
 };

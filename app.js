@@ -17,6 +17,7 @@ const {
   seedBranchPermissions,
 } = require("./Src/bootstrap/seedBranchPermissions");
 const { seedAccountingCodes } = require("./Src/bootstrap/seedAccountingCodes");
+const { healDriverWeeklyRent } = require("./Src/bootstrap/healDriverWeeklyRent");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -428,6 +429,8 @@ const startServer = async () => {
 
     await seedAccountingCodes();
     console.log("Essential accounting codes verified/seeded");
+
+    await healDriverWeeklyRent();
 
     const FixedAssetTypeService = require("./Src/modules/FixedAsset/Service/FixedAssetTypeService");
     await FixedAssetTypeService.seedDefaultFixedAssetTypes();
