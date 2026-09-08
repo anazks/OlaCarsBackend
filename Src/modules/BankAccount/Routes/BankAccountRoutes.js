@@ -110,6 +110,13 @@ router.post(
     BankAccountController.bulkUploadTransactions
 );
 
+// Get current upload status / active batch info
+router.get(
+    "/:id/upload-status",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.getAccountUploadStatus
+);
+
 // Get transactions
 router.get(
     "/:id/transactions",

@@ -394,14 +394,50 @@ const escapeRegExp = (string) => {
     return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-exports.bulkUploadTransactions = async (req, res, next) => {
-    try {
-        // Extend request timeout to 3 minutes for large batch processing
-        req.setTimeout(180000);
-        if (res.socket) res.socket.setTimeout(180000);
+const activeAccountUploads = new Map();
+const inFlightTxIds = new Set();
 
-        const { id } = req.params;
-        const { branchId, transactions, clearExisting } = req.body;
+exports.bulkUploadTransactions = async (req, res, next) => {
+    const { id } = req.params;
+    const { branchId, transactions, clearExisting, batchIndex, totalBatches, fileName } = req.body || {};
+
+    if (activeAccountUploads.has(String(id))) {
+        const currentActive = activeAccountUploads.get(String(id));
+        return res.status(409).json({
+            success: false,
+            message: "Another upload batch is currently being processed for this bank account. Please wait a moment.",
+            activeBatch: currentActive
+        });
+    }
+
+    const formatTxId = (tx) => {
+        if (!tx) return undefined;
+        const p = tx.PREFIX || tx.prefix;
+        const n = tx.NUMBER || tx.number;
+        if (p !== undefined && n !== undefined && p !== null && n !== null) {
+            return `${String(p).trim()}${String(n).trim()}`;
+        }
+        return tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
+    };
+
+    const firstTxId = Array.isArray(transactions) && transactions.length > 0 ? formatTxId(transactions[0]) : undefined;
+    const lastTxId = Array.isArray(transactions) && transactions.length > 0 ? formatTxId(transactions[transactions.length - 1]) : undefined;
+
+    activeAccountUploads.set(String(id), {
+        startTime: new Date(),
+        batchSize: Array.isArray(transactions) ? transactions.length : 0,
+        batchIndex: batchIndex !== undefined ? Number(batchIndex) : undefined,
+        totalBatches: totalBatches !== undefined ? Number(totalBatches) : undefined,
+        fileName: fileName || undefined,
+        firstTxId,
+        lastTxId,
+        status: "PROCESSING"
+    });
+
+    try {
+        // Extend request timeout to 10 minutes for large batch processing
+        req.setTimeout(600000);
+        if (res.socket) res.socket.setTimeout(600000);
 
         if (!transactions || !Array.isArray(transactions)) {
             return res.status(400).json({ success: false, message: "Invalid or empty transactions array" });
@@ -681,7 +717,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
                 seenTxIdsInFile.add(cleanTxId);
 
-                // Use pre-fetched Set instead of per-row DB query
+                // 1. Check pre-fetched Set
                 if (existingTxIdSet.has(cleanTxId)) {
                     skippedTransactions.push({
                         transactionId: cleanTxId,
@@ -693,6 +729,39 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     });
                     continue;
                 }
+
+                // 2. Check in-flight lock (prevent concurrent workers from processing same txn)
+                if (inFlightTxIds.has(cleanTxId)) {
+                    skippedTransactions.push({
+                        transactionId: cleanTxId,
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Transaction ID "${cleanTxId}" is currently being processed by another active upload`
+                    });
+                    continue;
+                }
+
+                // 3. Just-In-Time atomic database check to catch any records written while this batch was in progress
+                const alreadyInDb = await LedgerEntry.exists({
+                    accountingCode: accCodeId,
+                    transactionId: cleanTxId
+                });
+                if (alreadyInDb) {
+                    existingTxIdSet.add(cleanTxId);
+                    skippedTransactions.push({
+                        transactionId: cleanTxId,
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        reason: `Transaction ID "${cleanTxId}" already exists in ledger entries (DB)`
+                    });
+                    continue;
+                }
+
+                inFlightTxIds.add(cleanTxId);
             }
 
             let resolvedBranchId = null;
@@ -1257,6 +1326,69 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in bulkUploadTransactions controller:", error);
+        next(error);
+    } finally {
+        activeAccountUploads.delete(String(id));
+        const txList = transactions || req.body?.transactions;
+        if (Array.isArray(txList)) {
+            for (const tx of txList) {
+                const prefixVal = tx.PREFIX || tx.prefix;
+                const numberVal = tx.NUMBER || tx.number;
+                let txId = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
+                if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
+                    txId = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
+                }
+                if (txId) inFlightTxIds.delete(String(txId).trim());
+            }
+        }
+    }
+};
+
+exports.getAccountUploadStatus = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const BankAccount = require("../Model/BankAccountModel");
+        const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+        const activeBatch = activeAccountUploads.get(String(id)) || null;
+        const account = await BankAccount.findById(id).lean();
+        if (!account) {
+            return res.status(404).json({ success: false, message: "Bank account not found" });
+        }
+
+        let latestTx = null;
+        if (account.accountingCode) {
+            latestTx = await LedgerEntry.findOne({ accountingCode: account.accountingCode, isDeleted: { $ne: true } })
+                .sort({ entryDate: -1, _id: -1 })
+                .lean();
+        }
+
+        return res.status(200).json({
+            success: true,
+            isUploading: !!activeBatch,
+            activeBatch: activeBatch ? {
+                ...activeBatch,
+                elapsedSeconds: Math.floor((Date.now() - new Date(activeBatch.startTime).getTime()) / 1000)
+            } : null,
+            account: {
+                id: account._id,
+                accountName: account.accountName,
+                accountNumber: account.accountNumber,
+                bankName: account.bankName,
+                currentBalance: account.currentBalance
+            },
+            latestTransaction: latestTx ? {
+                transactionId: latestTx.transactionId,
+                date: latestTx.entryDate,
+                amount: latestTx.amount,
+                type: latestTx.type,
+                runningBalance: latestTx.runningBalance,
+                description: latestTx.description,
+                createdAt: latestTx.createdAt
+            } : null
+        });
+    } catch (error) {
+        console.error("Error in getAccountUploadStatus:", error);
         next(error);
     }
 };

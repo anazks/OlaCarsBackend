@@ -1312,12 +1312,14 @@ const recalculateRunningBalances = async (bankAccountId) => {
             bankBalanceAccum = isCreditCard ? (bankBalanceAccum + (tx.amount || 0)) : (bankBalanceAccum - (tx.amount || 0));
         }
 
-        bankBulkOps.push({
-            updateOne: {
-                filter: { _id: tx._id },
-                update: { $set: { runningBalance: bankBalanceAccum } }
-            }
-        });
+        if (Math.abs((tx.runningBalance || 0) - bankBalanceAccum) > 0.001) {
+            bankBulkOps.push({
+                updateOne: {
+                    filter: { _id: tx._id },
+                    update: { $set: { runningBalance: bankBalanceAccum } }
+                }
+            });
+        }
     }
 
     if (bankBulkOps.length > 0) {
@@ -2601,27 +2603,34 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
     // Create PaymentReceived record (Full amount received, keeping track of set-off vs unapplied advance)
     let prDoc = null;
     try {
-        const prData = {
-            paymentNumber: `PR-${Date.now()}`,
-            customerId: customerId,
-            amountReceived: amount,
-            paymentDate: timestamp,
-            paymentMethod: "Bank Transfer",
-            referenceNumber: transactionId || undefined,
-            notes: description || (invoicesSetOff.length > 0
-                ? `Auto set-off from bank statement (${invoicesSetOff.length} invoice(s))${excessAmount > 0.01 ? ` + Advance: $${excessAmount.toFixed(2)}` : ''}`
-                : `Customer advance payment (${customerName})`),
-            depositedTo: bankAccountingCodeId || undefined,
-            branch: branchId || undefined,
-            invoices: invoicesSetOff.map(inv => ({
-                invoiceId: inv.invoiceId,
-                invoiceNumber: inv.invoiceNumber,
-                amountApplied: inv.amountApplied
-            })),
-            status: "COMPLETED"
-        };
-        prDoc = await PaymentReceived.create(prData);
-        console.log(`[AUTO SET-OFF STAGE 5] Created PaymentReceived ${prDoc.paymentNumber} for $${amount}`);
+        if (transactionId) {
+            prDoc = await PaymentReceived.findOne({ referenceNumber: transactionId, isDeleted: { $ne: true } });
+        }
+        if (!prDoc) {
+            const prData = {
+                paymentNumber: `PR-${Date.now()}`,
+                customerId: customerId,
+                amountReceived: amount,
+                paymentDate: timestamp,
+                paymentMethod: "Bank Transfer",
+                referenceNumber: transactionId || undefined,
+                notes: description || (invoicesSetOff.length > 0
+                    ? `Auto set-off from bank statement (${invoicesSetOff.length} invoice(s))${excessAmount > 0.01 ? ` + Advance: $${excessAmount.toFixed(2)}` : ''}`
+                    : `Customer advance payment (${customerName})`),
+                depositedTo: bankAccountingCodeId || undefined,
+                branch: branchId || undefined,
+                invoices: invoicesSetOff.map(inv => ({
+                    invoiceId: inv.invoiceId,
+                    invoiceNumber: inv.invoiceNumber,
+                    amountApplied: inv.amountApplied
+                })),
+                status: "COMPLETED"
+            };
+            prDoc = await PaymentReceived.create(prData);
+            console.log(`[AUTO SET-OFF STAGE 5] Created PaymentReceived ${prDoc.paymentNumber} for $${amount}`);
+        } else {
+            console.log(`[AUTO SET-OFF STAGE 5] Reusing existing PaymentReceived ${prDoc.paymentNumber} for ref ${transactionId}`);
+        }
     } catch (prErr) {
         console.error("[autoSetOffInvoices] Failed to create PaymentReceived:", prErr);
     }
@@ -2702,18 +2711,27 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
 
             // Leg 3: CREDIT Advance Received From Customer (2.1.02) for excess amount
             if (excessAmount > 0 && targetAdvCode) {
-                const advEntry = await LedgerEntry.create({
-                    branch: branchId,
-                    accountingCode: targetAdvCode._id,
-                    type: "CREDIT",
-                    amount: excessAmount,
-                    description: `Advance Received from Customer: ${customerName} | Payment Ref: ${prNumber} | Advance Amount: $${excessAmount.toFixed(2)}`,
-                    contact: customerId,
-                    transactionId: transactionId,
-                    entryDate: timestamp,
-                    createdBy: createdBy || "6a2290019fa01283dd165204",
-                    creatorRole: (creatorRole || "ADMIN").toUpperCase()
-                });
+                let advEntry = null;
+                if (transactionId) {
+                    advEntry = await LedgerEntry.findOne({
+                        accountingCode: targetAdvCode._id,
+                        transactionId: transactionId
+                    });
+                }
+                if (!advEntry) {
+                    advEntry = await LedgerEntry.create({
+                        branch: branchId,
+                        accountingCode: targetAdvCode._id,
+                        type: "CREDIT",
+                        amount: excessAmount,
+                        description: `Advance Received from Customer: ${customerName} | Payment Ref: ${prNumber} | Advance Amount: $${excessAmount.toFixed(2)}`,
+                        contact: customerId,
+                        transactionId: transactionId,
+                        entryDate: timestamp,
+                        createdBy: createdBy || "6a2290019fa01283dd165204",
+                        creatorRole: (creatorRole || "ADMIN").toUpperCase()
+                    });
+                }
                 if (advEntry) createdPartnerEntryIds.push(advEntry._id);
             }
 
