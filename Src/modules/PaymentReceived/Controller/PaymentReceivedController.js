@@ -86,6 +86,7 @@ exports.createPaymentReceived = async (req, res) => {
                         amount: inv.amountApplied,
                         paidAt: paymentDate,
                         paymentMethod: paymentMethod || "Cash",
+                        transactionId: paymentNumber || referenceNumber,
                         note: notes || `Payment received (PR: ${paymentNumber})`
                     });
                     await invoice.save();
@@ -104,6 +105,7 @@ exports.createPaymentReceived = async (req, res) => {
                 await InvoiceService.applyExcessToNextInvoice(finalCustomerId, excessAmount, {
                     paymentMethod,
                     referenceNumber,
+                    transactionId: paymentNumber || referenceNumber,
                     notes,
                     createdBy: creatorId,
                     creatorRole: creatorRole

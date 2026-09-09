@@ -189,7 +189,7 @@ exports.payInvoice = async (invoiceId, paymentData) => {
                         amount: toApply,
                         paidAt: new Date(),
                         paymentMethod: "Prepayment Credit",
-                        transactionId: payment.referenceNumber || payment.paymentNumber || undefined,
+                        transactionId: payment.paymentNumber || payment.referenceNumber || undefined,
                         note: note || `Applied prepayment credit from ${payment.paymentNumber}`,
                     };
 
@@ -781,7 +781,7 @@ exports.applyPrepaymentsToInvoice = async (invoiceId) => {
                     amount: toApply,
                     paidAt: new Date(),
                     paymentMethod: payment.paymentMethod || "Cash",
-                    transactionId: payment.referenceNumber || payment.paymentNumber || undefined,
+                    transactionId: payment.paymentNumber || payment.referenceNumber || undefined,
                     note: `Applied prepayment from ${payment.paymentNumber}`,
                 };
 

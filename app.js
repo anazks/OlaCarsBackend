@@ -248,7 +248,7 @@ app.use("/api/payment-requests", PaymentRequestRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
-app.use("/api/bank-accounts", BankAccountRouter);
+app.use("/api/bank-accounts", BankAccountRouter); // Bank Accounts API Router (Active)
 app.use("/api/voice", VoiceRoutes);
 app.use("/api/customers", CustomerRouter);
 app.use("/api/quotes", QuoteRouter);

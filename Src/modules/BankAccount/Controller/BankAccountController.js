@@ -604,27 +604,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         let setOffResults = [];
         const seenTxIdsInFile = new Set();
 
-        const getISTNow = () => {
-            const now = new Date();
-            return new Date(now.getTime() + (5.5 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60 * 1000));
-        };
-
         for (const tx of transactions) {
             // Parse custom template headings and support the new sample file headings:
             const dateVal = tx.DATE || tx.Date || tx.date;
             const baseDate = parseDateFlexible(dateVal);
-            let finalEntryDate = getISTNow();
+            let finalEntryDate = new Date();
             if (baseDate) {
-                const uploadTimeIST = getISTNow();
-                finalEntryDate = new Date(
+                finalEntryDate = new Date(Date.UTC(
                     baseDate.getUTCFullYear(),
                     baseDate.getUTCMonth(),
                     baseDate.getUTCDate(),
-                    uploadTimeIST.getHours(),
-                    uploadTimeIST.getMinutes(),
-                    uploadTimeIST.getSeconds(),
-                    uploadTimeIST.getMilliseconds()
-                );
+                    12, 0, 0, 0
+                ));
             }
             const prefixVal = tx.PREFIX || tx.prefix;
             const numberVal = tx.NUMBER || tx.number;
@@ -2253,3 +2244,60 @@ exports.changeLinkedAccountingCode = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.recalculateBankBalances = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const BankAccount = require("../Model/BankAccountModel");
+        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+
+        const account = await BankAccount.findOne({ _id: id, isDeleted: false });
+        if (!account) {
+            return res.status(404).json({ success: false, message: "Bank account not found" });
+        }
+
+        await recalculateRunningBalances(account._id);
+        if (account.accountingCode) {
+            await syncAccountingCodeBalances(account.accountingCode);
+        }
+
+        const updatedAccount = await BankAccount.findById(account._id);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully recalculated running balances for account",
+            data: {
+                accountId: updatedAccount._id,
+                accountName: updatedAccount.accountName || updatedAccount.bankName,
+                currentBalance: updatedAccount.currentBalance
+            }
+        });
+    } catch (error) {
+        console.error("Error in recalculateBankBalances controller:", error);
+        next(error);
+    }
+};
+
+exports.recalculateAllBankBalances = async (req, res, next) => {
+    try {
+        const BankAccount = require("../Model/BankAccountModel");
+        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+
+        const accounts = await BankAccount.find({ isDeleted: false });
+        for (const acc of accounts) {
+            await recalculateRunningBalances(acc._id);
+            if (acc.accountingCode) {
+                await syncAccountingCodeBalances(acc.accountingCode);
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `Successfully recalculated running balances for all ${accounts.length} bank accounts.`
+        });
+    } catch (error) {
+        console.error("Error in recalculateAllBankBalances controller:", error);
+        next(error);
+    }
+};
+

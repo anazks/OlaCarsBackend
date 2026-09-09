@@ -6,6 +6,8 @@ const invoicePaymentSchema = new mongoose.Schema({
     paidAt: { type: Date, default: Date.now },
     paymentMethod: { type: String, enum: ["Cash", "Bank Transfer", "Card", "Mobile Money", "Prepayment Credit", "Other"], default: "Cash" },
     transactionId: { type: String },
+    referenceNumber: { type: String },
+    paymentReceivedId: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentReceived" },
     note: { type: String },
 }, { _id: true });
 

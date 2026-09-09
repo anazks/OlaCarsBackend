@@ -2480,6 +2480,20 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         isDeleted: { $ne: true }
     });
 
+    // Pre-resolve or generate the PaymentReceived document / number so invoice payments are properly branded with the Payment Received ID
+    let prDoc = null;
+    let prPaymentNumber = `PR-${Date.now()}`;
+    try {
+        if (transactionId) {
+            prDoc = await PaymentReceived.findOne({ referenceNumber: transactionId, isDeleted: { $ne: true } });
+            if (prDoc && prDoc.paymentNumber) {
+                prPaymentNumber = prDoc.paymentNumber;
+            }
+        }
+    } catch (findPrErr) {
+        console.warn("[autoSetOffInvoices] Could not find existing PR:", findPrErr);
+    }
+
     for (const invoice of sortedInvoices) {
         if (remainingAmount <= 0.01) break;
 
@@ -2514,13 +2528,15 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         console.log(`  • New Remaining Balance: $${newBalance}`);
         console.log(`  • New Invoice Status: ${newStatus}`);
 
-        // Add payment record to the invoice
+        // Add payment record to the invoice with the PaymentReceived ID as primary identifier
         const paymentRecord = {
             amount: amountToApply,
             paidAt: timestamp,
             paymentMethod: "Bank Transfer",
-            transactionId: transactionId || undefined,
-            note: description || `Auto set-off from bank statement upload`,
+            transactionId: prPaymentNumber,
+            referenceNumber: transactionId || undefined,
+            paymentReceivedId: prDoc ? prDoc._id : undefined,
+            note: description ? `${description} (PR: ${prPaymentNumber})` : `Payment received via Bank Statement (PR: ${prPaymentNumber})`,
         };
 
         invoice.amountPaid = newPaid;
@@ -2559,8 +2575,8 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
                                 amount: amountToApply,
                                 paidAt: timestamp,
                                 paymentMethod: "Bank Transfer",
-                                paymentReference: transactionId,
-                                notes: `Auto set-off from bank statement for Invoice ${invoice.invoiceNumber}`,
+                                paymentReference: prPaymentNumber,
+                                notes: `Auto set-off from bank statement for Invoice ${invoice.invoiceNumber} (PR: ${prPaymentNumber})`,
                                 recordedBy: createdBy
                             }
                         },
@@ -2601,14 +2617,10 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
     }
 
     // Create PaymentReceived record (Full amount received, keeping track of set-off vs unapplied advance)
-    let prDoc = null;
     try {
-        if (transactionId) {
-            prDoc = await PaymentReceived.findOne({ referenceNumber: transactionId, isDeleted: { $ne: true } });
-        }
         if (!prDoc) {
             const prData = {
-                paymentNumber: `PR-${Date.now()}`,
+                paymentNumber: prPaymentNumber,
                 customerId: customerId,
                 amountReceived: amount,
                 paymentDate: timestamp,
@@ -2628,6 +2640,16 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
             };
             prDoc = await PaymentReceived.create(prData);
             console.log(`[AUTO SET-OFF STAGE 5] Created PaymentReceived ${prDoc.paymentNumber} for $${amount}`);
+
+            // Backfill paymentReceivedId on the modified invoices
+            for (const item of invoicesSetOff) {
+                if (item.invoiceId) {
+                    await Invoice.updateOne(
+                        { _id: item.invoiceId, "payments.transactionId": prPaymentNumber },
+                        { $set: { "payments.$.paymentReceivedId": prDoc._id } }
+                    ).catch(e => console.warn("[autoSetOffInvoices] Failed to update paymentReceivedId on invoice:", e));
+                }
+            }
         } else {
             console.log(`[AUTO SET-OFF STAGE 5] Reusing existing PaymentReceived ${prDoc.paymentNumber} for ref ${transactionId}`);
         }
@@ -3347,9 +3369,9 @@ const reverseSetOffFromHistory = async (bankTransactionId) => {
                 // Remove exact connected payment from invoice.payments
                 invoiceDoc.payments = (invoiceDoc.payments || []).filter(p => {
                     const matchSnapshotPayment = snapshot.paymentId && String(p._id) === String(snapshot.paymentId);
-                    const matchTxId = txId && String(p.transactionId) === String(txId);
-                    const matchBankTxId = String(p.transactionId) === String(bankTransactionId);
-                    const matchPRId = history.paymentReceived && String(p.paymentReceivedId || p.transactionId || '') === String(history.paymentReceived);
+                    const matchTxId = txId && (String(p.transactionId) === String(txId) || String(p.referenceNumber) === String(txId));
+                    const matchBankTxId = String(p.transactionId) === String(bankTransactionId) || String(p.referenceNumber) === String(bankTransactionId);
+                    const matchPRId = history.paymentReceived && (String(p.paymentReceivedId || '') === String(history.paymentReceived) || String(p.transactionId || '') === String(history.paymentReceived));
                     return !(matchSnapshotPayment || matchTxId || matchBankTxId || matchPRId);
                 });
 
@@ -3657,10 +3679,13 @@ const updateCustomerContact = async (transactionId, newCustomerId, options = {})
     }
 
     // Recalculate running balances
-    if (bankTx && bankTx.bankAccount) {
-        await recalculateRunningBalances(bankTx.bankAccount);
-    } else if (primaryEntry && primaryEntry.bankAccount) {
-        await recalculateRunningBalances(primaryEntry.bankAccount);
+    let accToRecalc = bankTx ? bankTx.bankAccount : null;
+    if (!accToRecalc && primaryEntry && primaryEntry.accountingCode) {
+        const accDoc = await BankAccount.findOne({ accountingCode: primaryEntry.accountingCode, isDeleted: false });
+        if (accDoc) accToRecalc = accDoc._id;
+    }
+    if (accToRecalc) {
+        await recalculateRunningBalances(accToRecalc);
     }
 
     return {
@@ -3877,10 +3902,13 @@ const updateVendorContact = async (transactionId, newSupplierId, options = {}) =
     }
 
     // Recalculate running balances
-    if (bankTx && bankTx.bankAccount) {
-        await recalculateRunningBalances(bankTx.bankAccount);
-    } else if (primaryEntry && primaryEntry.bankAccount) {
-        await recalculateRunningBalances(primaryEntry.bankAccount);
+    let accToRecalc = bankTx ? bankTx.bankAccount : null;
+    if (!accToRecalc && primaryEntry && primaryEntry.accountingCode) {
+        const accDoc = await BankAccount.findOne({ accountingCode: primaryEntry.accountingCode, isDeleted: false });
+        if (accDoc) accToRecalc = accDoc._id;
+    }
+    if (accToRecalc) {
+        await recalculateRunningBalances(accToRecalc);
     }
 
     return {
@@ -4020,7 +4048,11 @@ const updateLinkedAccountingCode = async (transactionId, newAccountingCodeId, op
     await syncAccountingCodeBalances(targetCodeDoc._id);
 
     // 4. Re-sync bank account running balances if applicable
-    const bankAccId = (bankTx && bankTx.bankAccount) || (targetLeg && targetLeg.bankAccount);
+    let bankAccId = bankTx ? bankTx.bankAccount : null;
+    if (!bankAccId && targetLeg && targetLeg.accountingCode) {
+        const accDoc = await BankAccount.findOne({ accountingCode: targetLeg.accountingCode, isDeleted: false });
+        if (accDoc) bankAccId = accDoc._id;
+    }
     if (bankAccId) {
         await recalculateRunningBalances(bankAccId);
     }

@@ -153,4 +153,11 @@ router.post(
     BankAccountController.recordManualPayment
 );
 
+// Recalculate running balances for specific account
+router.post(
+    "/:id/recalculate-balances",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.recalculateBankBalances
+);
+
 module.exports = router;
