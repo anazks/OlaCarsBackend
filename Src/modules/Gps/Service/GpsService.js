@@ -355,17 +355,17 @@ class GpsService {
         }
     }
 
-    async getTripsReport(imei, startTime, endTime, startRow = 1) {
+    async getTripsReport(imei, startTime, endTime, pageNo = 1, pageSize = 100, type = 'day') {
         try {
-            console.log(`[GPS Service] Fetching trips report for IMEI: ${imei} from ${startTime} to ${endTime}`);
+            console.log(`[GPS Service] Fetching trips report for IMEI: ${imei} from ${startTime} to ${endTime} (type: ${type}, page: ${pageNo})`);
             const result = await this.requestApi('jimi.open.platform.report.trips', {
                 account: TRACKSOLID_USER_ID,
                 imeis: imei,
-                type: 'list',
+                type: type || 'day',
                 start_time: startTime,
                 end_time: endTime,
-                start_row: String(startRow),
-                page_size: '100'
+                start_row: String(pageNo || 1),
+                page_size: String(pageSize || 100)
             });
 
             console.log("[GPS Service] Raw response from trips report:", JSON.stringify(result));
@@ -376,10 +376,73 @@ class GpsService {
             }
 
             let list = [];
-            if (actualData && actualData.dayList) {
-                // The Tracksolid Pro API for report.trips with type='list' returns a dayList array,
-                // where each element represents a day and contains a tripsData array of objects.
-                // Each tripsData object contains a dayData array of trip segments.
+            // 1. Handle summaryData (Tracksolid type='day' aggregated summary)
+            // 1. Handle datDatas daily breakdown (type='day')
+            if (actualData && Array.isArray(actualData.datDatas) && actualData.datDatas.length > 0) {
+                for (const dev of actualData.datDatas) {
+                    if (dev && Array.isArray(dev.data)) {
+                        for (const dayItem of dev.data) {
+                            const distKm = parseFloat(dayItem.totalMileage || 0);
+                            let rtSec = 0;
+                            if (typeof dayItem.travelTime === 'string' && dayItem.travelTime.includes(':')) {
+                                const parts = dayItem.travelTime.split(':').map(Number);
+                                if (parts.length === 3) rtSec = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+                                else if (parts.length === 2) rtSec = (parts[0] * 60) + parts[1];
+                            } else if (typeof dayItem.travelTime === 'number') {
+                                rtSec = dayItem.travelTime;
+                            }
+
+                            list.push({
+                                imei: dev.deviceImei || imei,
+                                deviceName: dev.deviceName,
+                                startTime: dayItem.date ? `${dayItem.date} 00:00:00` : 'N/A',
+                                endTime: dayItem.date ? `${dayItem.date} 23:59:59` : 'N/A',
+                                distance: distKm * 1000,
+                                totalMileage: distKm,
+                                maxSpeed: Number(dayItem.maxSpeed || 0),
+                                avgSpeed: Number(dayItem.averageSpeed || 0),
+                                runTimeSecond: rtSec,
+                                travelTime: dayItem.travelTime,
+                                fuel: Number(dayItem.fuel || dayItem.oilWear || 0),
+                                fuelConsumption: Number(dayItem.fuel || dayItem.oilWear || 0),
+                                totalTrips: Number(dayItem.totalTrips || 1)
+                            });
+                        }
+                    }
+                }
+            } else if (actualData && Array.isArray(actualData.summaryData) && actualData.summaryData.length > 0) {
+                // 2. Handle summaryData fallback
+                for (const s of actualData.summaryData) {
+                    if (s) {
+                        const distKm = parseFloat(s.dis || 0);
+                        let rtSec = 0;
+                        if (typeof s.runTime === 'string' && s.runTime.includes(':')) {
+                            const parts = s.runTime.split(':').map(Number);
+                            if (parts.length === 3) rtSec = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+                            else if (parts.length === 2) rtSec = (parts[0] * 60) + parts[1];
+                        } else if (typeof s.runTime === 'number') {
+                            rtSec = s.runTime;
+                        }
+
+                        list.push({
+                            imei: s.imei || imei,
+                            deviceName: s.deviceName,
+                            startTime: startTime || 'N/A',
+                            endTime: endTime || 'N/A',
+                            distance: distKm * 1000,
+                            totalMileage: distKm,
+                            maxSpeed: Number(s.maxSpeed || 0),
+                            avgSpeed: Number(s.avgSpeed || 0),
+                            runTimeSecond: rtSec,
+                            travelTime: s.runTime,
+                            fuel: Number(s.fuel || s.oilWear || 0),
+                            fuelConsumption: Number(s.fuel || s.oilWear || 0),
+                            totalTrips: 1
+                        });
+                    }
+                }
+            } else if (actualData && actualData.dayList) {
+                // 3. Handle dayList (type='list')
                 for (const day of actualData.dayList) {
                     if (day) {
                         if (Array.isArray(day.tripsData)) {
@@ -589,11 +652,13 @@ class GpsService {
 
     async getMileage(imeis, startTime, endTime) {
         try {
-            console.log(`[GPS Service] Fetching mileage data for IMEIs: ${imeis} from ${startTime} to ${endTime}`);
-            const imeiList = imeis.split(',').map(i => i.trim()).filter(Boolean);
+            console.log(`[GPS Service] Fetching mileage data (jimi.device.track.mileage) for IMEIs: ${imeis} from ${startTime} to ${endTime}`);
+            const imeiList = (typeof imeis === 'string' ? imeis.split(',') : (Array.isArray(imeis) ? imeis : []))
+                .map(i => String(i).trim())
+                .filter(Boolean);
             if (imeiList.length === 0) return [];
 
-            // Batch into chunks of 20 IMEIs per request to respect Tracksolid API & header limits
+            // Batch into chunks of 20 IMEIs per request to respect Tracksolid API limits
             const chunkSize = 20;
             const chunks = [];
             for (let i = 0; i < imeiList.length; i += chunkSize) {
@@ -606,7 +671,9 @@ class GpsService {
                     const responseBody = await this.requestApiRaw('jimi.device.track.mileage', {
                         imeis: chunkImeiStr,
                         begin_time: startTime,
-                        end_time: endTime
+                        end_time: endTime,
+                        start_row: 1,
+                        page_size: 100
                     });
 
                     const resultList = responseBody && Array.isArray(responseBody.result) ? responseBody.result :
@@ -614,47 +681,80 @@ class GpsService {
                     const dataList = responseBody && Array.isArray(responseBody.data) ? responseBody.data : [];
 
                     return chunkImeis.map(imei => {
-                        const resultItem = resultList.find(r => r.imei === imei) || {};
-                        const dataItem = dataList.find(d => d.imei === imei) || {};
+                        // Find all trip segments for this device
+                        const deviceSegments = resultList.filter(r => String(r.imei) === String(imei));
+                        const dataItem = dataList.find(d => String(d.imei) === String(imei)) || {};
+
+                        let totalDistMeters = 0;
+                        let totalRuntimeSec = 0;
+                        let maxSpeed = 0;
+
+                        deviceSegments.forEach(seg => {
+                            const segDist = Number(seg.distance || 0);
+                            totalDistMeters += segDist;
+
+                            const segRt = Number(seg.runTimeSecond || seg.durSecond || seg.elapsed || 0);
+                            totalRuntimeSec += segRt;
+
+                            const segSpd = Number(seg.avgSpeed || seg.speed || seg.maxSpeed || 0);
+                            if (segSpd > maxSpeed) maxSpeed = segSpd;
+                        });
+
+                        const officialTotalMeters = dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : totalDistMeters;
+                        const finalDistMeters = officialTotalMeters > 0 ? officialTotalMeters : totalDistMeters;
+                        const distKm = Number((finalDistMeters / 1000).toFixed(2));
+
+                        const avgSpeed = totalRuntimeSec > 0 
+                            ? Number((distKm / (totalRuntimeSec / 3600)).toFixed(2)) 
+                            : (deviceSegments.length > 0 ? Number((deviceSegments.reduce((sum, s) => sum + Number(s.avgSpeed || 0), 0) / deviceSegments.length).toFixed(2)) : 0);
 
                         return {
                             imei,
-                            startTime: resultItem.startTime || startTime,
-                            endTime: resultItem.endTime || endTime,
-                            elapsed: resultItem.elapsed !== undefined ? Number(resultItem.elapsed) : 0,
-                            distance: resultItem.distance !== undefined ? Number(resultItem.distance) : 0,
-                            avgSpeed: resultItem.avgSpeed !== undefined ? Number(resultItem.avgSpeed) : 0,
-                            totalMileage: dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : 0,
-                            mileage: dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : 0
+                            startTime,
+                            endTime,
+                            elapsed: totalRuntimeSec,
+                            distance: finalDistMeters,
+                            distanceKm: distKm,
+                            avgSpeed,
+                            maxSpeed,
+                            totalMileage: officialTotalMeters,
+                            totalMileageKm: Number((officialTotalMeters / 1000).toFixed(2)),
+                            trips: deviceSegments
                         };
                     });
                 } catch (err) {
-                    console.warn(`[GPS Service] Chunk fetch failed for IMEIs (${chunkImeiStr}):`, err.message);
+                    console.warn(`[GPS Service] jimi.device.track.mileage failed for chunk (${chunkImeiStr}):`, err.message);
                     return chunkImeis.map(imei => ({
                         imei,
                         startTime,
                         endTime,
                         elapsed: 0,
                         distance: 0,
+                        distanceKm: 0,
                         avgSpeed: 0,
+                        maxSpeed: 0,
                         totalMileage: 0,
-                        mileage: 0
+                        totalMileageKm: 0,
+                        trips: []
                     }));
                 }
             }));
 
             return results.flat();
         } catch (e) {
-            console.error("Error fetching mileage from Tracksolid API:", e.message);
-            return imeis.split(',').map(imei => imei.trim()).filter(Boolean).map(imei => ({
+            console.error("Error fetching mileage from Tracksolid API (jimi.device.track.mileage):", e.message);
+            return (typeof imeis === 'string' ? imeis.split(',') : []).map(i => i.trim()).filter(Boolean).map(imei => ({
                 imei,
                 startTime,
                 endTime,
                 elapsed: 0,
                 distance: 0,
+                distanceKm: 0,
                 avgSpeed: 0,
+                maxSpeed: 0,
                 totalMileage: 0,
-                mileage: 0
+                totalMileageKm: 0,
+                trips: []
             }));
         }
     }
@@ -702,24 +802,79 @@ class GpsService {
         }
     }
 
-    async getFleetSummaryReport({ imeis, group, startTime, endTime, reportType = 'Summary' }) {
+    async getFleetSummaryReport({ imeis, group, startTime, endTime, reportType = 'Summary', page = 1, limit = 25, search = '' }) {
         try {
-            const cacheKey = `${imeis || 'ALL'}_${group || 'ALL'}_${startTime}_${endTime}_${reportType}`;
+            const pageNum = Math.max(1, parseInt(page, 10) || 1);
+            const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+            const searchQuery = String(search || '').trim().toLowerCase();
+
+            // Default time period and date normalization
+            const nowObj = new Date();
+            const pad = (n) => String(n).padStart(2, "0");
+            const formatD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+            const normalizeDateStr = (str, isEnd = false) => {
+                if (!str) return null;
+                let s = String(str).trim().replace('T', ' ');
+                // If format is YYYY-MM-DD
+                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+                    return isEnd ? `${s} 23:59:59` : `${s} 00:00:00`;
+                }
+                // If format is YYYY-MM-DD HH:mm
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)) {
+                    return `${s}:00`;
+                }
+                // If format is YYYY-MM-DD HH:mm:ss
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+                    return s;
+                }
+                const d = new Date(str);
+                if (!isNaN(d.getTime())) return formatD(d);
+                return null;
+            };
+
+            let normStart = normalizeDateStr(startTime, false);
+            let normEnd = normalizeDateStr(endTime, true);
+
+            if (!normStart || !normEnd) {
+                const startToday = new Date(nowObj.getFullYear(), nowObj.getMonth(), nowObj.getDate(), 0, 0, 0);
+                normStart = normStart || formatD(startToday);
+                normEnd = normEnd || formatD(nowObj);
+            } else {
+                // Ensure query range does not exceed 31 days limit (Tracksolid Pro API limit)
+                const startObj = new Date(normStart.replace(' ', 'T'));
+                const endObj = new Date(normEnd.replace(' ', 'T'));
+                if (!isNaN(startObj.getTime()) && !isNaN(endObj.getTime())) {
+                    const diffDays = (endObj.getTime() - startObj.getTime()) / (1000 * 60 * 60 * 24);
+                    if (diffDays > 31) {
+                        const clampedStart = new Date(endObj.getTime() - (31 * 24 * 60 * 60 * 1000));
+                        normStart = formatD(clampedStart);
+                        console.warn(`[GPS Service] Date range exceeded 31 days limit. Clamped startTime to: ${normStart}`);
+                    }
+                }
+            }
+
+            startTime = normStart;
+            endTime = normEnd;
+
+            const cacheKey = `${imeis || 'ALL'}_${group || 'ALL'}_${startTime}_${endTime}_${reportType}_p${pageNum}_l${limitNum}_s${searchQuery}`;
             if (!this.fleetSummaryCache) {
                 this.fleetSummaryCache = new Map();
             }
             const cached = this.fleetSummaryCache.get(cacheKey);
             const now = Date.now();
-            if (cached && (now - cached.timestamp < 5 * 60 * 1000)) { // 5 mins cache TTL
+            if (cached && (now - cached.timestamp < 2 * 60 * 1000)) { // 2 mins cache TTL
                 console.log(`[GPS Service] Returning cached Fleet Summary Report for key: ${cacheKey}`);
                 return cached.data;
             }
+
+            console.log(`[GPS Service] Generating Fleet Summary Report: page=${pageNum}, limit=${limitNum}, range: ${startTime} -> ${endTime}`);
 
             let vehicles = [];
             try {
                 vehicles = await this.getVehiclesList();
             } catch (err) {
-                console.warn("[GPS Service] getVehiclesList failed, using mock fallback vehicles for report:", err.message);
+                console.warn("[GPS Service] getVehiclesList failed, using fallback vehicles for report:", err.message);
                 vehicles = [
                     { imei: "860121060691774", deviceName: "VL802-01656", vehicleName: "Toyota HiAce (VL802-01656)", vehicleNumber: "VL802-01656", customerName: "Direct Fleet / N/A", driverName: "Carlos Perez", deviceGroup: "Arrendadora Panama" },
                     { imei: "860121060690685", deviceName: "VL802-06874", vehicleName: "Nissan Frontier (VL802-06874)", vehicleNumber: "VL802-06874", customerName: "Direct Fleet / N/A", driverName: "Mateo Rodriguez", deviceGroup: "Arrendadora Panama" },
@@ -735,30 +890,10 @@ class GpsService {
                 ];
             }
 
-            // Filter by IMEIs if specified
-            if (imeis && imeis !== 'ALL') {
-                const imeiSet = new Set(imeis.split(',').map(i => i.trim()).filter(Boolean));
-                vehicles = vehicles.filter(v => imeiSet.has(v.imei));
-            }
-
-            // Filter by group if specified
-            if (group && group !== 'ALL') {
-                vehicles = vehicles.filter(v => (v.deviceGroup === group || v.deviceGroupId === group));
-            }
-
-            // Default time period if not provided
-            if (!startTime || !endTime) {
-                const nowObj = new Date();
-                const startToday = new Date(nowObj.getFullYear(), nowObj.getMonth(), nowObj.getDate());
-                const pad = (n) => String(n).padStart(2, "0");
-                const formatD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-                startTime = startTime || formatD(startToday);
-                endTime = endTime || formatD(nowObj);
-            }
-
             // Fetch local database vehicles & drivers to map vehicleNumber, driverName, and status
             let dbVehicles = [];
             try {
+                require('../../Driver/Model/DriverModel');
                 const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
                 dbVehicles = await Vehicle.find({})
                     .select('basicDetails legalDocs currentDriver status customerName renter')
@@ -768,11 +903,11 @@ class GpsService {
                 console.warn('[GPS Service] Local DB vehicle/driver lookup warning:', dbErr.message);
             }
 
-            const summaryRows = await Promise.all(vehicles.map(async (v) => {
-                const deviceName = v.deviceName || v.vehicleName || v.vehicleNumber || v.imei;
+            // Enhance all vehicles with local database details
+            const enhancedVehicles = vehicles.map(v => {
+                const deviceName = v.deviceName || v.vehicleName || v.vehicleNumber || v.imei || '';
                 const groupName = v.deviceGroup || v.deviceGroupId || 'Default Group';
 
-                // Attempt to match GPS vehicle v against our database
                 const matchedDbVeh = dbVehicles.find(dbV => {
                     const dbReg = dbV.legalDocs?.registrationNumber?.toLowerCase().trim();
                     const dbVin = dbV.basicDetails?.vin?.toLowerCase().trim();
@@ -811,6 +946,82 @@ class GpsService {
                     }
                 }
 
+                return {
+                    ...v,
+                    deviceName,
+                    groupName,
+                    vehicleNumber,
+                    driverName,
+                    driverStatus,
+                    customerName,
+                    matchedDbVeh
+                };
+            });
+
+            // Filter by IMEIs if specified
+            let filteredVehicles = enhancedVehicles;
+            if (imeis && imeis !== 'ALL') {
+                const imeiSet = new Set(imeis.split(',').map(i => i.trim()).filter(Boolean));
+                filteredVehicles = filteredVehicles.filter(v => imeiSet.has(v.imei));
+            }
+
+            // Filter by group if specified
+            if (group && group !== 'ALL') {
+                filteredVehicles = filteredVehicles.filter(v => (v.deviceGroup === group || v.deviceGroupId === group || v.groupName === group));
+            }
+
+            // Filter by search query if provided
+            if (searchQuery) {
+                filteredVehicles = filteredVehicles.filter(v =>
+                    (v.deviceName && v.deviceName.toLowerCase().includes(searchQuery)) ||
+                    (v.imei && v.imei.toLowerCase().includes(searchQuery)) ||
+                    (v.vehicleNumber && v.vehicleNumber.toLowerCase().includes(searchQuery)) ||
+                    (v.driverName && v.driverName.toLowerCase().includes(searchQuery)) ||
+                    (v.customerName && v.customerName.toLowerCase().includes(searchQuery)) ||
+                    (v.groupName && v.groupName.toLowerCase().includes(searchQuery)) ||
+                    (v.driverStatus && v.driverStatus.toLowerCase().includes(searchQuery))
+                );
+            }
+
+            // Default sort: Driver assigned on top (alphabetically)
+            filteredVehicles.sort((a, b) => {
+                const isUnassignedA = !a.driverName || a.driverName === 'Unassigned';
+                const isUnassignedB = !b.driverName || b.driverName === 'Unassigned';
+                if (isUnassignedA && !isUnassignedB) return 1;
+                if (!isUnassignedA && isUnassignedB) return -1;
+                return (a.driverName || '').localeCompare(b.driverName || '');
+            });
+
+            const totalRecords = filteredVehicles.length;
+            const totalPages = Math.ceil(totalRecords / limitNum) || 1;
+            const safePage = Math.min(Math.max(1, pageNum), totalPages);
+
+            // Slicing for pagination: query Tracksolid telemetry ONLY for the target page slice!
+            const startIndex = (safePage - 1) * limitNum;
+            const paginatedVehicles = filteredVehicles.slice(startIndex, startIndex + limitNum);
+
+            console.log(`[GPS Service] Processing telemetry for ${paginatedVehicles.length} vehicles (Page ${safePage}/${totalPages}, Total Filtered: ${totalRecords})`);
+
+            // Fetch mileage data (jimi.device.track.mileage) in batch for all vehicles on the current page
+            const paginatedImeis = paginatedVehicles.map(v => v.imei).filter(Boolean);
+            let mileageDataList = [];
+            try {
+                mileageDataList = await this.getMileage(paginatedImeis.join(','), startTime, endTime);
+            } catch (mileageErr) {
+                console.warn("[GPS Service] Batch getMileage failed, falling back to per-device trip queries:", mileageErr.message);
+            }
+
+            const summaryRows = await Promise.all(paginatedVehicles.map(async (v) => {
+                const matchedDbVeh = v.matchedDbVeh;
+                const deviceName = v.deviceName;
+                const groupName = v.groupName;
+                const vehicleNumber = v.vehicleNumber;
+                const driverName = v.driverName;
+                const driverStatus = v.driverStatus;
+                const customerName = v.customerName;
+
+                const mileageData = (mileageDataList || []).find(m => String(m.imei) === String(v.imei)) || null;
+
                 let trips = [];
                 try {
                     trips = await this.getTripsReport(v.imei, startTime, endTime);
@@ -829,7 +1040,67 @@ class GpsService {
                     ? parseFloat(detailObj.currentMileage)
                     : null;
 
-                if (!trips || trips.length === 0) {
+                // Priority: Use validated trip report data if available, otherwise fallback to track mileage data
+                let totalDistKm = 0;
+                let highestMaxSpeed = 0;
+                let totalRuntimeSec = 0;
+                let totalFuel = 0;
+
+                const hasTrips = Array.isArray(trips) && trips.length > 0;
+                const mileageSegments = (mileageData && Array.isArray(mileageData.trips)) ? mileageData.trips : [];
+                const allTrips = hasTrips ? trips : mileageSegments;
+
+                allTrips.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+                // 1. Calculate Distance
+                if (hasTrips) {
+                    const totalMeters = trips.reduce((sum, t) => sum + Number(t.distance !== undefined ? t.distance : (t.totalMileage || 0)), 0);
+                    totalDistKm = Number((totalMeters / 1000).toFixed(2));
+                } else if (mileageData && (mileageData.distanceKm > 0 || mileageData.totalMileageKm > 0)) {
+                    totalDistKm = mileageData.distanceKm > 0 ? mileageData.distanceKm : mileageData.totalMileageKm;
+                } else if (mileageSegments.length > 0) {
+                    const totalMeters = mileageSegments.reduce((sum, t) => sum + Number(t.distance !== undefined ? t.distance : 0), 0);
+                    totalDistKm = Number((totalMeters / 1000).toFixed(2));
+                }
+
+                // 2. Calculate Runtime & Fuel
+                allTrips.forEach(t => {
+                    let rt = 0;
+                    const rawRt = t.runTimeSecond !== undefined ? t.runTimeSecond : (t.durSecond !== undefined ? t.durSecond : (t.elapsed !== undefined ? t.elapsed : t.travelTime));
+                    if (typeof rawRt === 'number') {
+                        rt = isNaN(rawRt) ? 0 : rawRt;
+                    } else if (typeof rawRt === 'string') {
+                        const trimmed = rawRt.trim();
+                        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+                            rt = parseFloat(trimmed);
+                        } else if (trimmed.includes(':')) {
+                            const parts = trimmed.split(':').map(Number);
+                            if (parts.length === 3) rt = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+                            else if (parts.length === 2) rt = (parts[0] * 60) + parts[1];
+                        }
+                    }
+                    totalRuntimeSec += rt;
+
+                    const fl = Number(t.fuel || t.fuelConsumption || t.oil || t.oilWear || 0);
+                    totalFuel += fl;
+                });
+
+                if (totalRuntimeSec === 0 && mileageData && mileageData.elapsed > 0) {
+                    totalRuntimeSec = mileageData.elapsed;
+                }
+
+                // 3. Calculate Maximum Speed (across all sources)
+                const allSources = [...(trips || []), ...(mileageSegments || [])];
+                allSources.forEach(t => {
+                    const spd = Number(t.maxSpeed || t.topSpeed || t.speed || 0);
+                    if (spd > highestMaxSpeed) highestMaxSpeed = spd;
+                });
+                if (mileageData && (mileageData.maxSpeed > 0 || mileageData.topSpeed > 0)) {
+                    const spd = Number(mileageData.maxSpeed || mileageData.topSpeed || 0);
+                    if (spd > highestMaxSpeed) highestMaxSpeed = spd;
+                }
+
+                if (totalDistKm === 0 && allTrips.length === 0) {
                     const fallbackOdo = currentMileageFromApi !== null 
                         ? currentMileageFromApi 
                         : (matchedDbVeh?.basicDetails?.odometer || 0);
@@ -855,49 +1126,10 @@ class GpsService {
                     };
                 }
 
-                trips.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+                totalDistKm = Number(totalDistKm.toFixed(2));
+                const firstTrip = allTrips[0] || {};
+                const lastTrip = allTrips[allTrips.length - 1] || {};
 
-                let totalDistMetersOrKm = 0;
-                let highestMaxSpeed = 0;
-                let totalRuntimeSec = 0;
-                let totalFuel = 0;
-
-                trips.forEach(t => {
-                    const rawDist = Number(t.distance || t.totalMileage || 0);
-                    const distKm = rawDist > 500 ? rawDist / 1000 : rawDist;
-                    totalDistMetersOrKm += distKm;
-
-                    const spd = Number(t.maxSpeed || t.topSpeed || t.speed || 0);
-                    if (spd > highestMaxSpeed) highestMaxSpeed = spd;
-
-                    // Support HH:MM:SS string travelTime or integer seconds
-                    let rt = 0;
-                    const rawRt = t.runTimeSecond !== undefined ? t.runTimeSecond : t.travelTime;
-                    if (typeof rawRt === 'number') {
-                        rt = isNaN(rawRt) ? 0 : rawRt;
-                    } else if (typeof rawRt === 'string') {
-                        const trimmed = rawRt.trim();
-                        if (/^\d+(\.\d+)?$/.test(trimmed)) {
-                            rt = parseFloat(trimmed);
-                        } else if (trimmed.includes(':')) {
-                            const parts = trimmed.split(':').map(Number);
-                            if (parts.length === 3) rt = (parts[0] * 3600) + (parts[1] * 60) + parts[2];
-                            else if (parts.length === 2) rt = (parts[0] * 60) + parts[1];
-                        }
-                    }
-                    totalRuntimeSec += rt;
-
-                    const fl = Number(t.fuel || t.fuelConsumption || t.oil || 0);
-                    totalFuel += fl;
-                });
-
-                const totalDistKm = Number(totalDistMetersOrKm.toFixed(2));
-                const firstTrip = trips[0];
-                const lastTrip = trips[trips.length - 1];
-
-                // Calculate Odometer End:
-                // 1. Direct API Method (jimi.track.device.detail currentMileage)
-                // 2. Manual Formula Method: endMileage / 1000 (if reported in meters by trip segment)
                 let odometerEnd = 0;
                 let odometerStart = 0;
 
@@ -908,7 +1140,6 @@ class GpsService {
                     odometerEnd = currentMileageFromApi;
                     odometerStart = Math.max(0, odometerEnd - totalDistKm);
                 } else if (rawEndMil > 0) {
-                    // endMileage returned by API in meters or km
                     odometerEnd = rawEndMil > 50000 ? rawEndMil / 1000 : rawEndMil;
                     if (rawStartMil > 0) {
                         odometerStart = rawStartMil > 50000 ? rawStartMil / 1000 : rawStartMil;
@@ -926,14 +1157,16 @@ class GpsService {
                 odometerStart = Number(odometerStart.toFixed(2));
                 odometerEnd = Number(odometerEnd.toFixed(2));
 
-                const startDate = firstTrip.startTime ? firstTrip.startTime.split(' ')[0] : 'N/A';
+                const startDate = firstTrip.startTime ? String(firstTrip.startTime).split(' ')[0].split('T')[0] : (startTime.split(' ')[0] || 'N/A');
 
                 const totalRuntimeHours = totalRuntimeSec / 3600;
                 let averageSpeed = 0;
                 if (totalRuntimeHours > 0) {
                     averageSpeed = Number((totalDistKm / totalRuntimeHours).toFixed(2));
+                } else if (mileageData && mileageData.avgSpeed > 0) {
+                    averageSpeed = Number(mileageData.avgSpeed.toFixed(2));
                 } else {
-                    const nonZeroAvgSpeeds = trips.map(t => Number(t.avgSpeed || 0)).filter(s => s > 0);
+                    const nonZeroAvgSpeeds = allTrips.map(t => Number(t.avgSpeed || 0)).filter(s => s > 0);
                     if (nonZeroAvgSpeeds.length > 0) {
                         averageSpeed = Number((nonZeroAvgSpeeds.reduce((a, b) => a + b, 0) / nonZeroAvgSpeeds.length).toFixed(2));
                     }
@@ -969,38 +1202,28 @@ class GpsService {
                     odometerStart,
                     odometerEnd,
                     averageSpeed,
-                    tripCount: trips.length
+                    tripCount: allTrips.reduce((sum, t) => sum + (t.totalTrips || 1), 0)
                 };
             }));
 
-            // Default sort: Driver assigned on top (alphabetically)
-            summaryRows.sort((a, b) => {
-                const isUnassignedA = !a.driverName || a.driverName === 'Unassigned';
-                const isUnassignedB = !b.driverName || b.driverName === 'Unassigned';
-                if (isUnassignedA && !isUnassignedB) return 1;
-                if (!isUnassignedA && isUnassignedB) return -1;
-                return (a.driverName || '').localeCompare(b.driverName || '');
-            });
+            const pageDistance = Number(summaryRows.reduce((sum, r) => sum + r.distance, 0).toFixed(2));
+            const pageFuel = Number(summaryRows.reduce((sum, r) => sum + r.fuelConsumed, 0).toFixed(1));
+            const pageEngineHoursSeconds = summaryRows.reduce((sum, r) => sum + r.engineHoursSeconds, 0);
 
-            const totalDevices = summaryRows.length;
-            const totalDistance = Number(summaryRows.reduce((sum, r) => sum + r.distance, 0).toFixed(2));
-            const totalFuel = Number(summaryRows.reduce((sum, r) => sum + r.fuelConsumed, 0).toFixed(1));
-            const totalEngineHoursSeconds = summaryRows.reduce((sum, r) => sum + r.engineHoursSeconds, 0);
-
-            const totalFleetRuntimeHours = totalEngineHoursSeconds / 3600;
-            let fleetAverageSpeed = 0;
-            if (totalFleetRuntimeHours > 0) {
-                fleetAverageSpeed = Number((totalDistance / totalFleetRuntimeHours).toFixed(2));
+            const pageRuntimeHours = pageEngineHoursSeconds / 3600;
+            let pageAverageSpeed = 0;
+            if (pageRuntimeHours > 0) {
+                pageAverageSpeed = Number((pageDistance / pageRuntimeHours).toFixed(2));
             } else {
                 const rowAvgSpeeds = summaryRows.map(r => r.averageSpeed).filter(s => s > 0);
                 if (rowAvgSpeeds.length > 0) {
-                    fleetAverageSpeed = Number((rowAvgSpeeds.reduce((a, b) => a + b, 0) / rowAvgSpeeds.length).toFixed(2));
+                    pageAverageSpeed = Number((rowAvgSpeeds.reduce((a, b) => a + b, 0) / rowAvgSpeeds.length).toFixed(2));
                 }
             }
 
-            const totalDays = Math.floor(totalEngineHoursSeconds / 86400);
-            const totalHrs = Math.floor((totalEngineHoursSeconds % 86400) / 3600);
-            const totalMins = Math.floor((totalEngineHoursSeconds % 3600) / 60);
+            const totalDays = Math.floor(pageEngineHoursSeconds / 86400);
+            const totalHrs = Math.floor((pageEngineHoursSeconds % 86400) / 3600);
+            const totalMins = Math.floor((pageEngineHoursSeconds % 3600) / 60);
 
             let totalEngineHoursFormatted = "";
             if (totalDays > 0) {
@@ -1014,12 +1237,18 @@ class GpsService {
             const result = {
                 summaryRows,
                 totals: {
-                    totalDevices,
-                    totalDistance,
-                    totalFuel,
-                    averageSpeed: fleetAverageSpeed,
-                    totalEngineHoursSeconds,
+                    totalDevices: totalRecords,
+                    totalDistance: pageDistance,
+                    totalFuel: pageFuel,
+                    averageSpeed: pageAverageSpeed,
+                    totalEngineHoursSeconds: pageEngineHoursSeconds,
                     totalEngineHoursFormatted
+                },
+                pagination: {
+                    total: totalRecords,
+                    page: safePage,
+                    limit: limitNum,
+                    totalPages
                 }
             };
 

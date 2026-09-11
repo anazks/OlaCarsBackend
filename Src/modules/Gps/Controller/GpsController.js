@@ -48,11 +48,18 @@ const getDeviceMediaEvent = async (req, res, next) => {
 
 const getGpsTripsReport = async (req, res, next) => {
     try {
-        const { imei, startTime, endTime, startRow } = req.query;
+        const { imei, startTime, endTime, pageNo, page_no, pageSize, page_size, type } = req.query;
         if (!imei || !startTime || !endTime) {
             return res.status(400).json({ success: false, message: 'IMEI, startTime, and endTime query parameters are required' });
         }
-        const data = await GpsService.getTripsReport(imei, startTime, endTime, startRow);
+        const data = await GpsService.getTripsReport(
+            imei,
+            startTime,
+            endTime,
+            Number(page_no || pageNo || 1),
+            Number(page_size || pageSize || 100),
+            type || 'list'
+        );
         res.status(200).json({ success: true, data });
     } catch (error) {
         error.isOperational = true;
@@ -213,8 +220,8 @@ const getGpsObdData = async (req, res, next) => {
 
 const getFleetSummaryReport = async (req, res, next) => {
     try {
-        const { imeis, group, startTime, endTime, reportType } = req.query;
-        const data = await GpsService.getFleetSummaryReport({ imeis, group, startTime, endTime, reportType });
+        const { imeis, group, startTime, endTime, reportType, page, limit, search } = req.query;
+        const data = await GpsService.getFleetSummaryReport({ imeis, group, startTime, endTime, reportType, page, limit, search });
         res.status(200).json({ success: true, data });
     } catch (error) {
         next(error);
