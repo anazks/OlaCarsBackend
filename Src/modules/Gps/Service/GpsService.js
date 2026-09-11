@@ -20,6 +20,8 @@ class GpsService {
             expiresAt: 0
         };
         this.locationsCache = {};
+        this.fleetSummaryCache = new Map();
+        this.deviceFirstTripDate = new Map();
     }
 
     loadCache() {
@@ -110,7 +112,14 @@ class GpsService {
                 },
                 body: searchParams.toString()
             });
-            const data = await response.json();
+
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error(`Tracksolid API returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 100)}`);
+            }
 
             console.log(`[GPS API RESPONSE] Method: ${method} | Code: ${data.code} | Message: ${data.message || 'success'}`);
 
@@ -530,83 +539,34 @@ class GpsService {
             console.log(`[GPS Service] Parsed and mapped ${mappedList.length} trip records.`);
             return mappedList;
         } catch (e) {
-            console.error("Error fetching trips report from Tracksolid API:", e.message);
-
-            // Fallback mock trips for demo/test purposes if the API/credentials fail or are inactive
-            console.log(`[GPS Service] Using mock fallback for getTripsReport (IMEI: ${imei}) due to API error.`);
-            const baseLat = 8.5379;
-            const baseLng = -80.7821;
-            const now = new Date();
-
-            const formatDate = (d) => {
-                const pad = (n) => String(n).padStart(2, "0");
-                return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-            };
-
-            // Generate deterministic IMEI-based seed for distinct per-device trips
-            const imeiStr = String(imei || '1234567890');
-            const charSum = imeiStr.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            const numSeed = (parseInt(imeiStr.replace(/\D/g, '').slice(-4) || '1234', 10) + charSum) || 1234;
-
-            const t1Dist = 3000 + (numSeed * 137) % 85000;
-            const t2Dist = 5000 + (numSeed * 251) % 180000;
-            const t1Runtime = 1800 + (numSeed * 43) % 7200;
-            const t2Runtime = 2700 + (numSeed * 89) % 14400;
-            const t1MaxSpeed = 60 + (numSeed * 17) % 45;
-            const t2MaxSpeed = 65 + (numSeed * 29) % 40;
-            const t1AvgSpeed = Math.round(t1MaxSpeed * 0.65);
-            const t2AvgSpeed = Math.round(t2MaxSpeed * 0.62);
-            const baseOdo = 0;
-            const t1Fuel = Number(((t1Dist / 1000) * 0.08).toFixed(1));
-            const t2Fuel = Number(((t2Dist / 1000) * 0.085).toFixed(1));
-
-            const mockTrips = [
-                {
-                    imei,
-                    startTime: formatDate(new Date(now.getTime() - 8 * 3600 * 1000)),
-                    endTime: formatDate(new Date(now.getTime() - 6.5 * 3600 * 1000)),
-                    startLat: baseLat,
-                    startLng: baseLng,
-                    endLat: baseLat + 0.015,
-                    endLng: baseLng + 0.02,
-                    runTimeSecond: t1Runtime,
-                    travelTime: t1Runtime,
-                    distance: t1Dist,
-                    totalMileage: t1Dist,
-                    avgSpeed: t1AvgSpeed,
-                    averageSpeed: t1AvgSpeed,
-                    maxSpeed: t1MaxSpeed,
-                    topSpeed: t1MaxSpeed,
-                    startMileage: baseOdo,
-                    endMileage: baseOdo + (t1Dist / 1000),
-                    fuel: t1Fuel,
-                    fuelConsumption: t1Fuel
-                },
-                {
-                    imei,
-                    startTime: formatDate(new Date(now.getTime() - 4 * 3600 * 1000)),
-                    endTime: formatDate(new Date(now.getTime() - 2.5 * 3600 * 1000)),
-                    startLat: baseLat + 0.015,
-                    startLng: baseLng + 0.02,
-                    endLat: baseLat - 0.005,
-                    endLng: baseLng - 0.01,
-                    runTimeSecond: t2Runtime,
-                    travelTime: t2Runtime,
-                    distance: t2Dist,
-                    totalMileage: t2Dist,
-                    avgSpeed: t2AvgSpeed,
-                    averageSpeed: t2AvgSpeed,
-                    maxSpeed: t2MaxSpeed,
-                    topSpeed: t2MaxSpeed,
-                    startMileage: baseOdo + (t1Dist / 1000),
-                    endMileage: baseOdo + ((t1Dist + t2Dist) / 1000),
-                    fuel: t2Fuel,
-                    fuelConsumption: t2Fuel
-                }
-            ];
-
-            return mockTrips;
+            console.error(`[GPS Service] Error fetching trips report for IMEI ${imei}:`, e.message);
+            return [];
         }
+    }
+
+    async getVehicleTripStartDate(imei, fallbackDate = 'N/A') {
+        if (this.deviceFirstTripDate.has(imei)) {
+            return this.deviceFirstTripDate.get(imei);
+        }
+        try {
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, "0");
+            const formatD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            const past30 = new Date(now.getTime() - 30 * 86400000);
+
+            const historyTrips = await this.getTripsReport(imei, formatD(past30), formatD(now));
+            if (historyTrips && historyTrips.length > 0) {
+                historyTrips.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+                const earliest = historyTrips[0].startTime ? String(historyTrips[0].startTime).split(' ')[0].split('T')[0] : null;
+                if (earliest && earliest !== 'N/A') {
+                    this.deviceFirstTripDate.set(imei, earliest);
+                    return earliest;
+                }
+            }
+        } catch (e) {
+            console.warn(`[GPS Service] Could not determine trip start date for ${imei}:`, e.message);
+        }
+        return fallbackDate;
     }
 
     async getDeviceLiveStreamingUrl(imei) {
@@ -1100,10 +1060,14 @@ class GpsService {
                     if (spd > highestMaxSpeed) highestMaxSpeed = spd;
                 }
 
+                const periodStartDate = startTime ? String(startTime).split(' ')[0].split('T')[0] : 'N/A';
+
                 if (totalDistKm === 0 && allTrips.length === 0) {
                     const fallbackOdo = currentMileageFromApi !== null 
                         ? currentMileageFromApi 
                         : (matchedDbVeh?.basicDetails?.odometer || 0);
+
+                    const tripStartDate = await this.getVehicleTripStartDate(v.imei, periodStartDate);
 
                     return {
                         imei: v.imei,
@@ -1118,7 +1082,7 @@ class GpsService {
                         engineHoursSeconds: 0,
                         engineHoursFormatted: "0 h 0 m",
                         fuelConsumed: 0,
-                        startDate: "N/A",
+                        startDate: tripStartDate,
                         odometerStart: Number(fallbackOdo.toFixed(2)),
                         odometerEnd: Number(fallbackOdo.toFixed(2)),
                         averageSpeed: 0,
@@ -1157,7 +1121,15 @@ class GpsService {
                 odometerStart = Number(odometerStart.toFixed(2));
                 odometerEnd = Number(odometerEnd.toFixed(2));
 
-                const startDate = firstTrip.startTime ? String(firstTrip.startTime).split(' ')[0].split('T')[0] : (startTime.split(' ')[0] || 'N/A');
+                let startDate = (firstTrip.startTime && firstTrip.startTime !== 'N/A') 
+                    ? String(firstTrip.startTime).split(' ')[0].split('T')[0] 
+                    : null;
+
+                if (startDate && startDate !== 'N/A') {
+                    this.deviceFirstTripDate.set(v.imei, startDate);
+                } else {
+                    startDate = await this.getVehicleTripStartDate(v.imei, periodStartDate);
+                }
 
                 const totalRuntimeHours = totalRuntimeSec / 3600;
                 let averageSpeed = 0;
