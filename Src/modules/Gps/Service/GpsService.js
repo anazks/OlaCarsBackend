@@ -765,7 +765,7 @@ class GpsService {
     async getFleetSummaryReport({ imeis, group, startTime, endTime, reportType = 'Summary', page = 1, limit = 25, search = '' }) {
         try {
             const pageNum = Math.max(1, parseInt(page, 10) || 1);
-            const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 25));
+            const limitNum = Math.min(3000, Math.max(1, parseInt(limit, 10) || 25));
             const searchQuery = String(search || '').trim().toLowerCase();
 
             // Default time period and date normalization
@@ -966,12 +966,39 @@ class GpsService {
             const paginatedImeis = paginatedVehicles.map(v => v.imei).filter(Boolean);
             let mileageDataList = [];
             try {
-                mileageDataList = await this.getMileage(paginatedImeis.join(','), startTime, endTime);
+                const imeiChunks = [];
+                for (let i = 0; i < paginatedImeis.length; i += 50) {
+                    imeiChunks.push(paginatedImeis.slice(i, i + 50));
+                }
+                const chunkResults = [];
+                const CONCURRENT_CHUNKS = 4;
+                for (let i = 0; i < imeiChunks.length; i += CONCURRENT_CHUNKS) {
+                    const batch = imeiChunks.slice(i, i + CONCURRENT_CHUNKS);
+                    const res = await Promise.all(batch.map(chunk => 
+                        this.getMileage(chunk.join(','), startTime, endTime).catch(() => [])
+                    ));
+                    chunkResults.push(...res);
+                    if (i + CONCURRENT_CHUNKS < imeiChunks.length) {
+                        await new Promise(r => setTimeout(r, 60));
+                    }
+                }
+                mileageDataList = chunkResults.flat();
             } catch (mileageErr) {
                 console.warn("[GPS Service] Batch getMileage failed, falling back to per-device trip queries:", mileageErr.message);
             }
 
-            const summaryRows = await Promise.all(paginatedVehicles.map(async (v) => {
+            const isFullFleetExport = paginatedVehicles.length > 50;
+
+            // Process devices in batches (or all at once for full fleet export since no per-device network calls needed)
+            const vehicleBatches = [];
+            const BATCH_SIZE = isFullFleetExport ? paginatedVehicles.length : 15;
+            for (let i = 0; i < paginatedVehicles.length; i += BATCH_SIZE) {
+                vehicleBatches.push(paginatedVehicles.slice(i, i + BATCH_SIZE));
+            }
+
+            const summaryRows = [];
+            for (const batch of vehicleBatches) {
+                const batchRows = await Promise.all(batch.map(async (v) => {
                 const matchedDbVeh = v.matchedDbVeh;
                 const deviceName = v.deviceName;
                 const groupName = v.groupName;
@@ -983,22 +1010,26 @@ class GpsService {
                 const mileageData = (mileageDataList || []).find(m => String(m.imei) === String(v.imei)) || null;
 
                 let trips = [];
-                try {
-                    trips = await this.getTripsReport(v.imei, startTime, endTime);
-                } catch (err) {
-                    console.warn(`[GPS Service] Failed to fetch trips for IMEI ${v.imei}:`, err.message);
+                if (!isFullFleetExport) {
+                    try {
+                        trips = await this.getTripsReport(v.imei, startTime, endTime);
+                    } catch (err) {
+                        console.warn(`[GPS Service] Failed to fetch trips for IMEI ${v.imei}:`, err.message);
+                    }
                 }
 
                 let detailObj = null;
-                try {
-                    detailObj = await this.getDeviceDetail(v.imei);
-                } catch (err) {
-                    console.warn(`[GPS Service] Could not fetch detail for IMEI ${v.imei}:`, err.message);
+                if (!isFullFleetExport) {
+                    try {
+                        detailObj = await this.getDeviceDetail(v.imei);
+                    } catch (err) {
+                        console.warn(`[GPS Service] Could not fetch detail for IMEI ${v.imei}:`, err.message);
+                    }
                 }
 
                 const currentMileageFromApi = (detailObj && detailObj.currentMileage !== undefined && detailObj.currentMileage !== null)
                     ? parseFloat(detailObj.currentMileage)
-                    : null;
+                    : (v.odometer || v.basicDetails?.odometer || matchedDbVeh?.basicDetails?.odometer || null);
 
                 // Priority: Use validated trip report data if available, otherwise fallback to track mileage data
                 let totalDistKm = 0;
@@ -1067,7 +1098,9 @@ class GpsService {
                         ? currentMileageFromApi 
                         : (matchedDbVeh?.basicDetails?.odometer || 0);
 
-                    const tripStartDate = await this.getVehicleTripStartDate(v.imei, periodStartDate);
+                    const tripStartDate = isFullFleetExport 
+                        ? (this.deviceFirstTripDate.get(v.imei) || periodStartDate)
+                        : await this.getVehicleTripStartDate(v.imei, periodStartDate);
 
                     return {
                         imei: v.imei,
@@ -1128,7 +1161,9 @@ class GpsService {
                 if (startDate && startDate !== 'N/A') {
                     this.deviceFirstTripDate.set(v.imei, startDate);
                 } else {
-                    startDate = await this.getVehicleTripStartDate(v.imei, periodStartDate);
+                    startDate = isFullFleetExport 
+                        ? (this.deviceFirstTripDate.get(v.imei) || periodStartDate)
+                        : await this.getVehicleTripStartDate(v.imei, periodStartDate);
                 }
 
                 const totalRuntimeHours = totalRuntimeSec / 3600;
@@ -1177,6 +1212,8 @@ class GpsService {
                     tripCount: allTrips.reduce((sum, t) => sum + (t.totalTrips || 1), 0)
                 };
             }));
+            summaryRows.push(...batchRows);
+        }
 
             const pageDistance = Number(summaryRows.reduce((sum, r) => sum + r.distance, 0).toFixed(2));
             const pageFuel = Number(summaryRows.reduce((sum, r) => sum + r.fuelConsumed, 0).toFixed(1));
