@@ -1339,7 +1339,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         });
     } catch (error) {
         console.error("Error in bulkUploadTransactions controller:", error);
-        next(error);
+        if (!res.headersSent) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || "Failed to process bulk upload batch"
+            });
+        }
     } finally {
         activeAccountUploads.delete(String(id));
         const txList = transactions || req.body?.transactions;

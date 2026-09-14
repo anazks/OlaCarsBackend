@@ -113,8 +113,29 @@ setTimeout(() => {
   });
 }, 10000);
 
+const corsOptions = {
+  origin: true, // Allow request origin dynamically (including vercel.app and localhost)
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "Accept",
+    "Origin",
+    "Access-Control-Request-Method",
+    "Access-Control-Request-Headers",
+    "X-Skip-Toast"
+  ],
+  exposedHeaders: ["Content-Range", "X-Content-Range"]
+};
+
+app.use(cors(corsOptions));
+
 app.use(
   helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
@@ -125,12 +146,11 @@ app.use(
         ],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
         imgSrc: ["'self'", "data:", "https://cdnjs.cloudflare.com"],
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", "https:", "http:"],
       },
     },
   }),
 ); // Security headers with Swagger support
-app.use(cors({ origin: "*" })); // Adjust in production
 app.use(
   "/uploads",
   (req, res, next) => {
