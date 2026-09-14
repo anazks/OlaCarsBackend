@@ -396,7 +396,7 @@ const escapeRegExp = (string) => {
 
 const activeAccountUploads = new Map();
 const inFlightTxIds = new Set();
-const UPLOAD_LOCK_TTL_MS = 60 * 1000; // 60 seconds TTL
+const UPLOAD_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes TTL for large uploads
 
 const checkAndCleanStaleLock = (accountId) => {
     const key = String(accountId);
@@ -442,8 +442,17 @@ exports.bulkUploadTransactions = async (req, res, next) => {
     activeAccountUploads.set(String(id), {
         startTime: new Date(),
         batchSize: Array.isArray(transactions) ? transactions.length : 0,
-        batchIndex: batchIndex !== undefined ? Number(batchIndex) : undefined,
-        totalBatches: totalBatches !== undefined ? Number(totalBatches) : undefined,
+        totalCount: Array.isArray(transactions) ? transactions.length : 0,
+        processedCount: 0,
+        insertedCount: 0,
+        skippedCount: 0,
+        setOffCount: 0,
+        percentage: 0,
+        stage: "INITIALIZING",
+        estimatedSecondsRemaining: 0,
+        statusMessage: `Initializing upload for ${Array.isArray(transactions) ? transactions.length : 0} transactions...`,
+        batchIndex: batchIndex !== undefined ? Number(batchIndex) : 0,
+        totalBatches: totalBatches !== undefined ? Number(totalBatches) : 1,
         fileName: fileName || undefined,
         firstTxId,
         lastTxId,
@@ -620,7 +629,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         let setOffResults = [];
         const seenTxIdsInFile = new Set();
 
-        for (const tx of transactions) {
+        for (let txIndex = 0; txIndex < transactions.length; txIndex++) {
+            const tx = transactions[txIndex];
             // Parse custom template headings and support the new sample file headings:
             const dateVal = tx.DATE || tx.Date || tx.date;
             const baseDate = parseDateFlexible(dateVal);
@@ -1291,6 +1301,29 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 party: customerDoc ? customerDoc.name : (supplierDoc ? (supplierDoc.name || supplierDoc.companyName) : "-"),
                 status: "SAVED_TO_DB"
             });
+
+            // Update live progress in activeAccountUploads map
+            const activeUpload = activeAccountUploads.get(String(id));
+            if (activeUpload) {
+                const processed = txIndex + 1;
+                const total = transactions.length;
+                const pct = Math.min(95, Math.round((processed / (total || 1)) * 95));
+                const elapsedMs = Date.now() - new Date(activeUpload.startTime).getTime();
+                const avgMsPerRow = elapsedMs / (processed || 1);
+                const remainingRows = total - processed;
+                const estimatedSecs = Math.max(0, Math.ceil((remainingRows * avgMsPerRow) / 1000));
+                
+                activeUpload.processedCount = processed;
+                activeUpload.totalCount = total;
+                activeUpload.insertedCount = createdEntries.length;
+                activeUpload.skippedCount = skippedTransactions.length;
+                activeUpload.setOffCount = setOffResults.length;
+                activeUpload.percentage = pct;
+                activeUpload.stage = "INSERTING_TRANSACTIONS";
+                activeUpload.estimatedSecondsRemaining = estimatedSecs;
+                const timeStr = estimatedSecs >= 60 ? `${Math.ceil(estimatedSecs / 60)} min` : `${estimatedSecs}s`;
+                activeUpload.statusMessage = `Processing ${processed} of ${total} transactions (${pct}%). ~${timeStr} for completion.`;
+            }
         }
 
         // Recalculate running balances for the bank account only on the final batch or single-batch upload
@@ -1298,6 +1331,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             (skipRecalculate !== true && (batchIndex === undefined || totalBatches === undefined || batchIndex >= totalBatches - 1));
 
         if (createdEntries.length > 0 && shouldRecalculate) {
+            const activeUpload = activeAccountUploads.get(String(id));
+            if (activeUpload) {
+                activeUpload.stage = "RECALCULATING_BALANCES";
+                activeUpload.percentage = 98;
+                activeUpload.statusMessage = "Finalizing: recalculating running balances across entire ledger...";
+            }
+
             console.log(`[BulkUpload] Final batch completed (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || 1}). Recalculating bank account and ledger running balances...`);
             await recalculateRunningBalances(id);
             await syncAccountingCodeBalances(accCodeId);
