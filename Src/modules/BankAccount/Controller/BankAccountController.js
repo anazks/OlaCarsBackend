@@ -468,6 +468,15 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "Invalid or empty transactions array" });
         }
 
+        // Set up streaming response headers for live progress
+        res.status(200);
+        res.setHeader('Content-Type', 'application/x-ndjson');
+        res.setHeader('Transfer-Encoding', 'chunked');
+        res.setHeader('Cache-Control', 'no-cache, no-store');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
         // ── All requires at top (avoid per-row require overhead) ──
         const BankAccount = require("../Model/BankAccountModel");
         const BankTransaction = require("../Model/BankTransactionModel");
@@ -628,9 +637,51 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const insertedTransactions = [];
         let setOffResults = [];
         const seenTxIdsInFile = new Set();
+        const sendProgress = (processedIndex) => {
+            const processed = processedIndex + 1;
+            const total = transactions.length;
+            const pct = Math.min(95, Math.round((processed / (total || 1)) * 95));
+            const elapsedMs = Date.now() - new Date(activeAccountUploads.get(String(id))?.startTime || Date.now()).getTime();
+            const avgMsPerRow = elapsedMs / (processed || 1);
+            const remainingRows = total - processed;
+            const estimatedSecs = Math.max(0, Math.ceil((remainingRows * avgMsPerRow) / 1000));
+            const timeStr = estimatedSecs >= 60 ? `${Math.ceil(estimatedSecs / 60)} min` : `${estimatedSecs}s`;
+            const statusMessage = `Processing ${processed} of ${total} transactions (${pct}%). ~${timeStr} for completion.`;
+
+            const activeUpload = activeAccountUploads.get(String(id));
+            if (activeUpload) {
+                activeUpload.processedCount = processed;
+                activeUpload.totalCount = total;
+                activeUpload.insertedCount = createdEntries.length;
+                activeUpload.skippedCount = skippedTransactions.length;
+                activeUpload.setOffCount = setOffResults.length;
+                activeUpload.percentage = pct;
+                activeUpload.stage = "INSERTING_TRANSACTIONS";
+                activeUpload.estimatedSecondsRemaining = estimatedSecs;
+                activeUpload.statusMessage = statusMessage;
+            }
+
+            // Stream to frontend every 5 rows or on first/last row
+            if (processed === 1 || processed === total || processed % 5 === 0) {
+                try {
+                    res.write(JSON.stringify({
+                        type: 'progress',
+                        processedCount: processed,
+                        totalCount: total,
+                        percentage: pct,
+                        insertedCount: createdEntries.length,
+                        skippedCount: skippedTransactions.length,
+                        setOffCount: setOffResults.length,
+                        estimatedSecondsRemaining: estimatedSecs,
+                        statusMessage: statusMessage
+                    }) + '\n');
+                } catch (writeErr) { /* client disconnected */ }
+            }
+        };
 
         for (let txIndex = 0; txIndex < transactions.length; txIndex++) {
-            const tx = transactions[txIndex];
+            try {
+                const tx = transactions[txIndex];
             // Parse custom template headings and support the new sample file headings:
             const dateVal = tx.DATE || tx.Date || tx.date;
             const baseDate = parseDateFlexible(dateVal);
@@ -1302,27 +1353,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 status: "SAVED_TO_DB"
             });
 
-            // Update live progress in activeAccountUploads map
-            const activeUpload = activeAccountUploads.get(String(id));
-            if (activeUpload) {
-                const processed = txIndex + 1;
-                const total = transactions.length;
-                const pct = Math.min(95, Math.round((processed / (total || 1)) * 95));
-                const elapsedMs = Date.now() - new Date(activeUpload.startTime).getTime();
-                const avgMsPerRow = elapsedMs / (processed || 1);
-                const remainingRows = total - processed;
-                const estimatedSecs = Math.max(0, Math.ceil((remainingRows * avgMsPerRow) / 1000));
-                
-                activeUpload.processedCount = processed;
-                activeUpload.totalCount = total;
-                activeUpload.insertedCount = createdEntries.length;
-                activeUpload.skippedCount = skippedTransactions.length;
-                activeUpload.setOffCount = setOffResults.length;
-                activeUpload.percentage = pct;
-                activeUpload.stage = "INSERTING_TRANSACTIONS";
-                activeUpload.estimatedSecondsRemaining = estimatedSecs;
-                const timeStr = estimatedSecs >= 60 ? `${Math.ceil(estimatedSecs / 60)} min` : `${estimatedSecs}s`;
-                activeUpload.statusMessage = `Processing ${processed} of ${total} transactions (${pct}%). ~${timeStr} for completion.`;
+            } finally {
+                sendProgress(txIndex);
             }
         }
 
@@ -1337,6 +1369,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 activeUpload.percentage = 98;
                 activeUpload.statusMessage = "Finalizing: recalculating running balances across entire ledger...";
             }
+            try {
+                res.write(JSON.stringify({
+                    type: 'progress',
+                    processedCount: transactions.length,
+                    totalCount: transactions.length,
+                    percentage: 98,
+                    stage: 'RECALCULATING_BALANCES',
+                    statusMessage: 'Finalizing: recalculating running balances across entire ledger...'
+                }) + '\n');
+            } catch (writeErr) { /* client disconnected */ }
 
             console.log(`[BulkUpload] Final batch completed (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || 1}). Recalculating bank account and ledger running balances...`);
             await recalculateRunningBalances(id);
@@ -1363,20 +1405,35 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             return sum + invCount + billCount;
         }, 0);
 
-        res.status(200).json({
-            success: true,
-            message: `Successfully processed ${createdEntries.length} transaction(s). ${skippedTransactions.length > 0 ? `${skippedTransactions.length} skipped. ` : ''}New balance is ${updatedAccount.currentBalance}.${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''}`,
-            data: {
-                count: createdEntries.length,
-                totalReceived: transactions.length,
+        const formattedNewBalance = Number(updatedAccount?.currentBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+        const crispMessage = `Successfully processed ${createdEntries.length} of ${transactions.length} transactions (100%).${skippedTransactions.length > 0 ? ` ${skippedTransactions.length} skipped.` : ''}${setOffResults.length > 0 ? ` Auto set-off applied to ${totalSetOffCount} document(s).` : ''} Account balance: ₹${formattedNewBalance}`;
+
+        try {
+            res.write(JSON.stringify({
+                type: 'complete',
+                success: true,
+                message: crispMessage,
+                totalCount: transactions.length,
+                processedCount: transactions.length,
                 insertedCount: createdEntries.length,
                 skippedCount: skippedTransactions.length,
-                newBalance: updatedAccount.currentBalance,
-                insertedTransactions,
-                skippedTransactions,
-                setOffResults: setOffResults.length > 0 ? setOffResults : undefined
-            }
-        });
+                setOffCount: totalSetOffCount,
+                percentage: 100,
+                statusMessage: crispMessage,
+                newBalance: updatedAccount?.currentBalance,
+                data: {
+                    count: createdEntries.length,
+                    totalReceived: transactions.length,
+                    insertedCount: createdEntries.length,
+                    skippedCount: skippedTransactions.length,
+                    newBalance: updatedAccount?.currentBalance,
+                    insertedTransactions,
+                    skippedTransactions,
+                    setOffResults: setOffResults.length > 0 ? setOffResults : undefined
+                }
+            }) + '\n');
+        } catch (writeErr) { /* client disconnected */ }
+        res.end();
     } catch (error) {
         console.error("Error in bulkUploadTransactions controller:", error);
         if (!res.headersSent) {
@@ -1384,6 +1441,11 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 success: false,
                 message: error.message || "Failed to process bulk upload batch"
             });
+        } else {
+            try {
+                res.write(JSON.stringify({ type: 'error', message: error.message || 'Upload failed' }) + '\n');
+                res.end();
+            } catch (e) { res.end(); }
         }
     } finally {
         activeAccountUploads.delete(String(id));
