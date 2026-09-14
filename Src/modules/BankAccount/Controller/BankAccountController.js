@@ -396,12 +396,28 @@ const escapeRegExp = (string) => {
 
 const activeAccountUploads = new Map();
 const inFlightTxIds = new Set();
+const UPLOAD_LOCK_TTL_MS = 60 * 1000; // 60 seconds TTL
+
+const checkAndCleanStaleLock = (accountId) => {
+    const key = String(accountId);
+    const existing = activeAccountUploads.get(key);
+    if (existing) {
+        const elapsed = Date.now() - new Date(existing.startTime).getTime();
+        if (elapsed > UPLOAD_LOCK_TTL_MS) {
+            console.warn(`[BulkUpload] Auto-expired stale upload lock for bank account ${accountId} (held for ${Math.round(elapsed / 1000)}s)`);
+            activeAccountUploads.delete(key);
+            return false;
+        }
+        return true;
+    }
+    return false;
+};
 
 exports.bulkUploadTransactions = async (req, res, next) => {
     const { id } = req.params;
-    const { branchId, transactions, clearExisting, batchIndex, totalBatches, fileName } = req.body || {};
+    const { branchId, transactions, clearExisting, batchIndex, totalBatches, fileName, isLastBatch, skipRecalculate } = req.body || {};
 
-    if (activeAccountUploads.has(String(id))) {
+    if (checkAndCleanStaleLock(id)) {
         const currentActive = activeAccountUploads.get(String(id));
         return res.status(409).json({
             success: false,
@@ -1277,8 +1293,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             });
         }
 
-        // Recalculate running balances for the bank account if entries were created
-        if (createdEntries.length > 0) {
+        // Recalculate running balances for the bank account only on the final batch or single-batch upload
+        const shouldRecalculate = isLastBatch === true || 
+            (skipRecalculate !== true && (batchIndex === undefined || totalBatches === undefined || batchIndex >= totalBatches - 1));
+
+        if (createdEntries.length > 0 && shouldRecalculate) {
+            console.log(`[BulkUpload] Final batch completed (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || 1}). Recalculating bank account and ledger running balances...`);
             await recalculateRunningBalances(id);
             await syncAccountingCodeBalances(accCodeId);
 
@@ -1290,6 +1310,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     console.error(`[BulkUpload] Failed to sync sub-account ${subAccId}:`, syncErr);
                 }
             }
+        } else if (createdEntries.length > 0) {
+            console.log(`[BulkUpload] Intermediate batch (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || '?'}) processed ${createdEntries.length} entries. Skipping balance recalculation until final batch.`);
         }
 
         const updatedAccount = await BankAccount.findById(id);
@@ -1340,6 +1362,14 @@ exports.getAccountUploadStatus = async (req, res, next) => {
         const { id } = req.params;
         const BankAccount = require("../Model/BankAccountModel");
         const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+        // Clean any expired lock before returning status
+        checkAndCleanStaleLock(id);
+
+        // Prevent browser/proxy cache for upload status
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
 
         const activeBatch = activeAccountUploads.get(String(id)) || null;
         const account = await BankAccount.findById(id).lean();
