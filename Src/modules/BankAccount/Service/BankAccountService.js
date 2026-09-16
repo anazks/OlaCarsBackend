@@ -1732,21 +1732,34 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             }
 
             const oldInvoiceId = (typeof bankTx.invoice === 'object' && bankTx.invoice !== null) ? (bankTx.invoice._id || bankTx.invoice.id) : bankTx.invoice;
-            const newInvoiceId = (typeof invoice === 'object' && invoice !== null) ? (invoice._id || invoice.id) : invoice;
+            const hasInvoiceInPayload = update.invoice !== undefined || update.invoiceId !== undefined;
+            const newInvoiceId = hasInvoiceInPayload
+                ? ((typeof invoice === 'object' && invoice !== null) ? (invoice._id || invoice.id) : invoice)
+                : oldInvoiceId;
+
             const oldCustomerId = (typeof bankTx.customer === 'object' && bankTx.customer !== null)
                 ? (bankTx.customer._id || bankTx.customer.id)
                 : (bankTx.customer || entry.customer || entry.contact || (partner && partner.contact));
-            const newCustomerId = (typeof customer === 'object' && customer !== null) ? (customer._id || customer.id) : customer;
+            const hasCustomerInPayload = rawCustomer !== undefined || rawCustomerId !== undefined || update.customer !== undefined || update.customerId !== undefined;
+            const newCustomerId = hasCustomerInPayload
+                ? ((typeof customer === 'object' && customer !== null) ? (customer._id || customer.id) : customer)
+                : oldCustomerId;
 
             const oldSupplierId = (typeof bankTx.supplier === 'object' && bankTx.supplier !== null)
                 ? (bankTx.supplier._id || bankTx.supplier.id)
                 : (bankTx.supplier || entry.supplier);
-            const newSupplierId = update.supplierId || update.supplier || update.vendorId || (typeof supplier !== 'undefined' && typeof supplier === 'object' && supplier !== null ? (supplier._id || supplier.id) : (typeof supplier !== 'undefined' ? supplier : undefined));
+            const hasSupplierInPayload = update.supplierId !== undefined || update.supplier !== undefined || update.vendorId !== undefined || (typeof supplier !== 'undefined');
+            const newSupplierId = hasSupplierInPayload
+                ? (update.supplierId || update.supplier || update.vendorId || (typeof supplier !== 'undefined' && typeof supplier === 'object' && supplier !== null ? (supplier._id || supplier.id) : (typeof supplier !== 'undefined' ? supplier : undefined)))
+                : oldSupplierId;
 
             const oldBillId = (typeof bankTx.bill === 'object' && bankTx.bill !== null)
                 ? (bankTx.bill._id || bankTx.bill.id)
                 : (bankTx.bill || entry.bill);
-            const newBillId = update.billId || update.bill || (typeof bill !== 'undefined' && typeof bill === 'object' && bill !== null ? (bill._id || bill.id) : (typeof bill !== 'undefined' ? bill : undefined));
+            const hasBillInPayload = update.billId !== undefined || update.bill !== undefined || (typeof bill !== 'undefined');
+            const newBillId = hasBillInPayload
+                ? (update.billId || update.bill || (typeof bill !== 'undefined' && typeof bill === 'object' && bill !== null ? (bill._id || bill.id) : (typeof bill !== 'undefined' ? bill : undefined)))
+                : oldBillId;
 
             const finalAmount = amount !== undefined ? Number(amount) : oldAmount;
 
@@ -1755,9 +1768,11 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 return new Date(now.getTime() + (5.5 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60 * 1000));
             };
 
-            // Construct finalEntryDate using the edit date and Indian Standard Time (IST) edit time
-            let finalEntryDate = getISTNow();
-            if (entryDate !== undefined && entryDate) {
+            // Construct finalEntryDate: preserve existing entry date unless entryDate is explicitly provided in update
+            let finalEntryDate = oldEntryDate || (bankTx && bankTx.entryDate) || entry.entryDate;
+            let hasDateUpdate = false;
+            if (entryDate !== undefined && entryDate !== null && entryDate !== "") {
+                hasDateUpdate = true;
                 const parsedEditDate = new Date(entryDate);
                 if (!isNaN(parsedEditDate.getTime())) {
                     if (parsedEditDate.getHours() === 0 && parsedEditDate.getMinutes() === 0 && parsedEditDate.getSeconds() === 0) {
@@ -1816,16 +1831,17 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
 
             // Check if Amount, Customer, Supplier, Invoice, or Bill is changed or unlinked
             const isAmountChanged = amount !== undefined && Math.abs(Number(amount) - oldAmount) > 0.001;
-            const isCustomerChanged = String(oldCustomerId || '') !== String(newCustomerId || '');
-            const isSupplierChanged = String(oldSupplierId || '') !== String(newSupplierId || '');
-            const isInvoiceChanged = String(oldInvoiceId || '') !== String(newInvoiceId || '');
-            const isBillChanged = String(oldBillId || '') !== String(newBillId || '');
+            const isCustomerChanged = hasCustomerInPayload && String(oldCustomerId || '') !== String(newCustomerId || '');
+            const isSupplierChanged = hasSupplierInPayload && String(oldSupplierId || '') !== String(newSupplierId || '');
+            const isInvoiceChanged = hasInvoiceInPayload && String(oldInvoiceId || '') !== String(newInvoiceId || '');
+            const isBillChanged = hasBillInPayload && String(oldBillId || '') !== String(newBillId || '');
+            const isExplicitUnlink = (hasCustomerInPayload && !newCustomerId) || (hasSupplierInPayload && !newSupplierId);
 
             const hasExistingSetOff = (bankTx.invoices && bankTx.invoices.length > 0) ||
                 (bankTx.bills && bankTx.bills.length > 0) ||
                 oldInvoiceId || oldCustomerId || oldSupplierId || oldBillId;
 
-            if (hasExistingSetOff && (isAmountChanged || isCustomerChanged || isSupplierChanged || isInvoiceChanged || isBillChanged || (!newCustomerId && !newSupplierId))) {
+            if (hasExistingSetOff && (isAmountChanged || isCustomerChanged || isSupplierChanged || isInvoiceChanged || isBillChanged || isExplicitUnlink)) {
                 console.log(`[bulkEditTransactions] Reversing previous set-off / linking for transaction ${bankTx._id}, oldCustomer=${oldCustomerId}, oldSupplier=${oldSupplierId}`);
 
                 // Use history-based reversal (precise undo using before-state)
@@ -2200,8 +2216,8 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 } else {
                     finalDesc = `Vendor Payment - Vendor: ${supName} | Vendor Advance ($${billSetOffResult.excessAmount.toFixed(2)})`;
                 }
-            } else if (!newCustomerId && !newSupplierId) {
-                // Both Customer and Supplier unlinked
+            } else if (isExplicitUnlink) {
+                // Both Customer and Supplier explicitly unlinked
                 bankTx.customer = undefined;
                 bankTx.customerName = undefined;
                 bankTx.supplier = undefined;
@@ -2214,22 +2230,33 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
                 entry.invoices = [];
                 entry.bills = [];
                 entry.setOffSummary = undefined;
-                finalDesc = `Bank statement transaction`;
+                if (description !== undefined) {
+                    finalDesc = description;
+                } else if (!finalDesc) {
+                    finalDesc = `Bank statement transaction`;
+                }
             }
 
             // Sync contact (customer) field, description, amount and editing date/time on ALL connected LedgerEntries
             for (const connEntry of connectedEntries) {
-                connEntry.contact = newCustomerId || undefined;
-                if (newCustomerId) connEntry.contactModel = "Customer";
-                connEntry.description = finalDesc;
+                if (hasCustomerInPayload) {
+                    connEntry.contact = newCustomerId || undefined;
+                    if (newCustomerId) connEntry.contactModel = "Customer";
+                    else connEntry.contactModel = undefined;
+                }
+                if (description !== undefined || isCustomerChanged || isSupplierChanged || isInvoiceChanged || isBillChanged) {
+                    connEntry.description = finalDesc;
+                }
                 if (amount !== undefined) connEntry.amount = finalAmount;
-                connEntry.entryDate = finalEntryDate;
+                if (hasDateUpdate) connEntry.entryDate = finalEntryDate;
                 await connEntry.save();
             }
 
             // Update BankTransaction fields
-            bankTx.description = finalDesc;
-            bankTx.entryDate = finalEntryDate;
+            if (description !== undefined || isCustomerChanged || isSupplierChanged || isInvoiceChanged || isBillChanged) {
+                bankTx.description = finalDesc;
+            }
+            if (hasDateUpdate) bankTx.entryDate = finalEntryDate;
             if (type !== undefined) {
                 bankTx.type = type;
                 bankTx.transactionType = type;
@@ -2264,15 +2291,15 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
         if (entry.manualJournal) {
             const journal = await ManualJournal.findById(entry.manualJournal);
             if (journal) {
-                if (entryDate !== undefined) journal.date = new Date(entryDate);
-                if (description !== undefined || finalDesc) journal.description = finalDesc || description;
+                if (hasDateUpdate) journal.date = finalEntryDate;
+                if (description !== undefined || isCustomerChanged || isSupplierChanged) journal.description = finalDesc || description;
                 if (amount !== undefined) journal.totalAmount = Number(amount);
                 await journal.save();
 
                 const partnerUpdate = {};
-                if (entryDate !== undefined) partnerUpdate.entryDate = new Date(entryDate);
+                if (hasDateUpdate) partnerUpdate.entryDate = finalEntryDate;
                 if (amount !== undefined) partnerUpdate.amount = Number(amount);
-                if (description !== undefined || finalDesc) partnerUpdate.description = finalDesc || description;
+                if (description !== undefined || isCustomerChanged || isSupplierChanged) partnerUpdate.description = finalDesc || description;
 
                 if (type !== undefined) {
                     const journalLines = await LedgerEntry.find({ manualJournal: journal._id });
@@ -3546,21 +3573,28 @@ const updateCustomerTransactionAmount = async (transactionId, newAmount, options
     // 2. Update BankTransaction & LedgerEntry amounts
     if (primaryEntry) {
         primaryEntry.amount = numAmount;
+        if (options.entryDate) primaryEntry.entryDate = new Date(options.entryDate);
+        if (options.description) primaryEntry.description = options.description;
         await primaryEntry.save();
     }
     if (bankTx) {
         bankTx.amount = numAmount;
+        if (options.entryDate) bankTx.entryDate = new Date(options.entryDate);
+        if (options.description) bankTx.description = options.description;
         await bankTx.save();
     }
 
     // 3. Re-run autoSetOffInvoices for Customer with new amount
     const resolvedTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
+    const existingEntryDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate);
+    const existingDescription = (primaryEntry && primaryEntry.description) || (bankTx && bankTx.description);
     const setOffResult = await autoSetOffInvoices(targetCustomerId, numAmount, {
         ...options,
         bankTransactionId: bankTx ? bankTx._id : undefined,
         existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
         primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
-        entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : (bankTx ? bankTx.entryDate : new Date())),
+        entryDate: options.entryDate || existingEntryDate || new Date(),
+        description: options.description || existingDescription || "",
         transactionId: resolvedTxId,
         createdBy: options.createdBy,
         creatorRole: options.creatorRole
@@ -3769,21 +3803,28 @@ const updateVendorTransactionAmount = async (transactionId, newAmount, options =
     // 2. Update BankTransaction & LedgerEntry amounts
     if (primaryEntry) {
         primaryEntry.amount = numAmount;
+        if (options.entryDate) primaryEntry.entryDate = new Date(options.entryDate);
+        if (options.description) primaryEntry.description = options.description;
         await primaryEntry.save();
     }
     if (bankTx) {
         bankTx.amount = numAmount;
+        if (options.entryDate) bankTx.entryDate = new Date(options.entryDate);
+        if (options.description) bankTx.description = options.description;
         await bankTx.save();
     }
 
     // 3. Re-run autoSetOffBills for Supplier with new amount
     const resolvedTxId = (bankTx && bankTx.transactionId) || (primaryEntry && primaryEntry.transactionId) || txStringId;
+    const existingEntryDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate);
+    const existingDescription = (primaryEntry && primaryEntry.description) || (bankTx && bankTx.description);
     const setOffResult = await autoSetOffBills(targetSupplierId, numAmount, {
         ...options,
         bankTransactionId: bankTx ? bankTx._id : undefined,
         existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
         primaryLedgerEntry: primaryEntry ? primaryEntry._id : undefined,
-        entryDate: options.entryDate || (primaryEntry ? primaryEntry.entryDate : (bankTx ? bankTx.entryDate : new Date())),
+        entryDate: options.entryDate || existingEntryDate || new Date(),
+        description: options.description || existingDescription || "",
         transactionId: resolvedTxId,
         createdBy: options.createdBy,
         creatorRole: options.creatorRole
