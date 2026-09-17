@@ -4110,6 +4110,350 @@ const updateLinkedAccountingCode = async (transactionId, newAccountingCodeId, op
     };
 };
 
+/**
+ * Dedicated Service 7: Update Transaction Date
+ * Updates the calendar date for the transaction and all connected legs/set-off records
+ * while strictly preserving the original time components (hours, minutes, seconds).
+ * Automatically recalculates running balances for all affected bank accounts.
+ */
+const updateTransactionDate = async (transactionId, newDateStr, options = {}) => {
+    if (!newDateStr) {
+        throw new Error("Valid date is required");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+    const BankAccount = require("../Model/BankAccountModel");
+    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+
+    let primaryEntry = null;
+    let bankTx = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        primaryEntry = await LedgerEntry.findById(transactionId);
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry && !primaryEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        }
+    }
+
+    if (!primaryEntry) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+    if (!bankTx) {
+        bankTx = await BankTransaction.findOne({ transactionId: txStringId });
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    // Extract target year, month, day
+    let targetYear, targetMonth, targetDay;
+    if (typeof newDateStr === 'string' && newDateStr.includes('-')) {
+        const datePart = newDateStr.split('T')[0];
+        const parts = datePart.split('-').map(Number);
+        targetYear = parts[0];
+        targetMonth = parts[1];
+        targetDay = parts[2];
+    } else {
+        const d = new Date(newDateStr);
+        targetYear = d.getUTCFullYear();
+        targetMonth = d.getUTCMonth() + 1;
+        targetDay = d.getUTCDate();
+    }
+
+    if (!targetYear || !targetMonth || !targetDay || isNaN(targetYear) || isNaN(targetMonth) || isNaN(targetDay)) {
+        throw new Error("Invalid date provided");
+    }
+
+    // Existing date from which to preserve time components
+    const existingDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate) || new Date();
+    const finalDate = new Date(existingDate);
+    finalDate.setUTCFullYear(targetYear, targetMonth - 1, targetDay);
+
+    if (isNaN(finalDate.getTime())) {
+        throw new Error("Invalid date calculated");
+    }
+
+    // Collect all connected ledger conditions
+    const connectedConditions = [];
+    if (primaryEntry) {
+        connectedConditions.push({ _id: primaryEntry._id });
+        if (primaryEntry.manualJournal) connectedConditions.push({ manualJournal: primaryEntry.manualJournal });
+        if (primaryEntry.transaction) connectedConditions.push({ transaction: primaryEntry.transaction });
+        if (primaryEntry.transactionId) connectedConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    if (bankTx) {
+        if (bankTx.transactionId) connectedConditions.push({ transactionId: String(bankTx.transactionId) });
+        if (bankTx.ledgerEntry) connectedConditions.push({ _id: bankTx.ledgerEntry });
+    }
+    if (txStringId) {
+        connectedConditions.push({ transactionId: txStringId });
+    }
+
+    // Find set-off history if any
+    const historyConditions = [];
+    if (primaryEntry) {
+        historyConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        historyConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        historyConditions.push({ bankTransaction: bankTx._id });
+    }
+    if (txStringId) {
+        historyConditions.push({ transactionId: txStringId });
+    }
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: historyConditions });
+    if (history && history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
+        connectedConditions.push({ _id: { $in: history.partnerLedgerEntries } });
+    }
+
+    const connectedEntries = await LedgerEntry.find({ $or: connectedConditions });
+    const affectedBankAccounts = new Set();
+
+    // 1. Update all connected LedgerEntries
+    for (const connEntry of connectedEntries) {
+        connEntry.entryDate = finalDate;
+        await connEntry.save();
+
+        if (connEntry.bankAccount) {
+            affectedBankAccounts.add(String(connEntry.bankAccount));
+        } else if (connEntry.accountingCode) {
+            const bankDoc = await BankAccount.findOne({ accountingCode: connEntry.accountingCode, isDeleted: false });
+            if (bankDoc) affectedBankAccounts.add(String(bankDoc._id));
+        }
+    }
+
+    // 2. Update ManualJournal
+    const journalIds = connectedEntries.map(e => e.manualJournal).filter(Boolean);
+    if (journalIds.length > 0) {
+        await ManualJournal.updateMany(
+            { _id: { $in: journalIds } },
+            { $set: { date: finalDate } }
+        );
+    }
+
+    // 3. Update matching BankTransaction records
+    const btConditions = [
+        ...(primaryEntry ? [{ _id: primaryEntry._id }, { ledgerEntry: primaryEntry._id }] : []),
+        ...(bankTx ? [{ _id: bankTx._id }] : []),
+        ...(txStringId ? [{ transactionId: txStringId }] : [])
+    ];
+    if (primaryEntry && primaryEntry.transactionId) {
+        btConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    const matchedBankTxs = await BankTransaction.find({ $or: btConditions });
+    for (const bt of matchedBankTxs) {
+        bt.entryDate = finalDate;
+        await bt.save();
+        if (bt.bankAccount) {
+            affectedBankAccounts.add(String(bt.bankAccount));
+        }
+    }
+
+    // 4. Update SetOffHistory, PaymentReceived, PaymentMade
+    if (history) {
+        history.entryDate = finalDate;
+        await history.save();
+
+        if (history.bankAccount) {
+            affectedBankAccounts.add(String(history.bankAccount));
+        }
+        if (history.paymentReceived) {
+            await PaymentReceived.updateOne(
+                { _id: history.paymentReceived },
+                { $set: { paymentDate: finalDate } }
+            );
+        }
+        if (history.vendorPayment) {
+            await PaymentMade.updateOne(
+                { _id: history.vendorPayment },
+                { $set: { paymentDate: finalDate } }
+            );
+        }
+    }
+
+    // Fallback: If no bank accounts identified yet, check primaryEntry accountingCode
+    if (affectedBankAccounts.size === 0 && primaryEntry && primaryEntry.accountingCode) {
+        const bankDoc = await BankAccount.findOne({
+            $or: [
+                { accountingCode: primaryEntry.accountingCode },
+                { _id: primaryEntry.accountingCode }
+            ],
+            isDeleted: false
+        });
+        if (bankDoc) affectedBankAccounts.add(String(bankDoc._id));
+    }
+
+    // 5. Recalculate Running Balances for all affected bank accounts
+    for (const accId of affectedBankAccounts) {
+        console.log(`[updateTransactionDate] Recalculating running balances for bank account: ${accId}`);
+        await recalculateRunningBalances(accId);
+        const accDoc = await BankAccount.findById(accId);
+        if (accDoc && accDoc.accountingCode) {
+            await syncAccountingCodeBalances(accDoc.accountingCode);
+        }
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newDate: finalDate,
+        affectedBankAccounts: Array.from(affectedBankAccounts)
+    };
+};
+
+/**
+ * Dedicated Service 8: Update Transaction Description
+ * Updates the description across the transaction and all connected legs/manual journals
+ * while keeping all other values (amounts, dates, accounting codes, contacts) unchanged.
+ */
+const updateTransactionDescription = async (transactionId, newDescription, options = {}) => {
+    if (!newDescription || typeof newDescription !== 'string' || !newDescription.trim()) {
+        throw new Error("Valid description is required");
+    }
+
+    const trimmedDesc = newDescription.trim();
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+
+    let primaryEntry = null;
+    let bankTx = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        primaryEntry = await LedgerEntry.findById(transactionId);
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry && !primaryEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        }
+    }
+
+    if (!primaryEntry) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+    if (!bankTx) {
+        bankTx = await BankTransaction.findOne({ transactionId: txStringId });
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    const existingDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate);
+    if (existingDate) {
+        const dObj = new Date(existingDate);
+        const y = dObj.getUTCFullYear();
+        const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(dObj.getUTCDate()).padStart(2, '0');
+        if (`${y}-${m}-${d}` <= '2026-06-15') {
+            throw new Error("Transactions on or before 15/06/2026 cannot be modified");
+        }
+    }
+
+    // Collect all connected ledger conditions
+    const connectedConditions = [];
+    if (primaryEntry) {
+        connectedConditions.push({ _id: primaryEntry._id });
+        if (primaryEntry.manualJournal) connectedConditions.push({ manualJournal: primaryEntry.manualJournal });
+        if (primaryEntry.transaction) connectedConditions.push({ transaction: primaryEntry.transaction });
+        if (primaryEntry.transactionId) connectedConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    if (bankTx) {
+        if (bankTx.transactionId) connectedConditions.push({ transactionId: String(bankTx.transactionId) });
+        if (bankTx.ledgerEntry) connectedConditions.push({ _id: bankTx.ledgerEntry });
+    }
+    if (txStringId) {
+        connectedConditions.push({ transactionId: txStringId });
+    }
+
+    // Find set-off history if any
+    const historyConditions = [];
+    if (primaryEntry) {
+        historyConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        historyConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        historyConditions.push({ bankTransaction: bankTx._id });
+    }
+    if (txStringId) {
+        historyConditions.push({ transactionId: txStringId });
+    }
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: historyConditions });
+    if (history && history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
+        connectedConditions.push({ _id: { $in: history.partnerLedgerEntries } });
+    }
+
+    const connectedEntries = await LedgerEntry.find({ $or: connectedConditions });
+
+    // 1. Update all connected LedgerEntries
+    for (const connEntry of connectedEntries) {
+        connEntry.description = trimmedDesc;
+        await connEntry.save();
+    }
+
+    // 2. Update ManualJournal
+    const journalIds = connectedEntries.map(e => e.manualJournal).filter(Boolean);
+    if (journalIds.length > 0) {
+        await ManualJournal.updateMany(
+            { _id: { $in: journalIds } },
+            { $set: { description: trimmedDesc } }
+        );
+    }
+
+    // 3. Update matching BankTransaction records
+    const btConditions = [
+        ...(primaryEntry ? [{ _id: primaryEntry._id }, { ledgerEntry: primaryEntry._id }] : []),
+        ...(bankTx ? [{ _id: bankTx._id }] : []),
+        ...(txStringId ? [{ transactionId: txStringId }] : [])
+    ];
+    if (primaryEntry && primaryEntry.transactionId) {
+        btConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    const matchedBankTxs = await BankTransaction.find({ $or: btConditions });
+    for (const bt of matchedBankTxs) {
+        bt.description = trimmedDesc;
+        await bt.save();
+    }
+
+    return {
+        success: true,
+        transactionId,
+        newDescription: trimmedDesc
+    };
+};
+
 module.exports = {
     createBankAccount,
     getAllBankAccounts,
@@ -4131,5 +4475,7 @@ module.exports = {
     updateVendorTransactionAmount,
     updateVendorContact,
     updateInterBankTransactionAmount,
-    updateLinkedAccountingCode
+    updateLinkedAccountingCode,
+    updateTransactionDate,
+    updateTransactionDescription
 };

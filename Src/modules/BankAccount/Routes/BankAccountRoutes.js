@@ -76,6 +76,20 @@ router.put(
     BankAccountController.changeLinkedAccountingCode
 );
 
+// 7. Change Transaction Date
+router.put(
+    "/transactions/:transactionId/date",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeTransactionDate
+);
+
+// 8. Change Transaction Description
+router.put(
+    "/transactions/:transactionId/description",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeTransactionDescription
+);
+
 router.put(
     "/:id",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),

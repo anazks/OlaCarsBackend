@@ -2382,6 +2382,61 @@ exports.changeLinkedAccountingCode = async (req, res, next) => {
     }
 };
 
+exports.changeTransactionDate = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { date, entryDate } = req.body;
+        const targetDate = date || entryDate;
+
+        if (!targetDate) {
+            return res.status(400).json({ success: false, message: "Valid date is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateTransactionDate(transactionId, targetDate, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated transaction date and recalculated running balances",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeTransactionDate controller:", error);
+        next(error);
+    }
+};
+
+exports.changeTransactionDescription = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { description } = req.body;
+
+        if (!description || typeof description !== 'string' || !description.trim()) {
+            return res.status(400).json({ success: false, message: "Valid description is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateTransactionDescription(transactionId, description, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated transaction description",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeTransactionDescription controller:", error);
+        next(error);
+    }
+};
+
 exports.recalculateBankBalances = async (req, res, next) => {
     try {
         const { id } = req.params;
