@@ -169,6 +169,8 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
         processedRows: 0,
         completedRows: 0,
         failedRows: 0,
+        duplicateRows: 0,
+        duplicates: [],
         errors: []
     };
 
@@ -313,6 +315,7 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
 
             const validatedRows = [];
             const errors = [];
+            const duplicates = [];
             const localFileDuplicates = {};
 
             for (let i = 0; i < filteredRows.length; i++) {
@@ -518,7 +521,12 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
                 localFileDuplicates[dupKey] = true;
 
                 if (isDuplicate && skipDuplicates) {
-                    // Skipped
+                    duplicates.push({
+                        row: rowNum,
+                        reason: localFileDuplicates[dupKey]
+                            ? "Duplicate entry within uploaded file"
+                            : "Duplicate matching existing ledger entry in database"
+                    });
                     continue;
                 }
 
@@ -542,6 +550,8 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
             const totalValid = validatedRows.length;
             global.importProgress[importId].validRows = totalValid;
             global.importProgress[importId].invalidRows = errors.length;
+            global.importProgress[importId].duplicateRows = duplicates.length;
+            global.importProgress[importId].duplicates = duplicates;
 
             // 5. In-Memory updates of balances (calculating running balances chronological order)
             global.importProgress[importId].message = "Computing running balances...";
@@ -653,6 +663,8 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
             historyDoc.totalRows = totalRows;
             historyDoc.completedRows = global.importProgress[importId].completedRows;
             historyDoc.failedRows = errors.length;
+            historyDoc.duplicateRows = duplicates.length;
+            historyDoc.duplicates = duplicates;
             historyDoc.duration = duration;
             historyDoc.errors = errors;
             await historyDoc.save();
@@ -663,6 +675,8 @@ exports.processImport = async (fileBuffer, { createdBy, creatorRole, fileName },
             global.importProgress[importId].message = "Import Completed Successfully";
             global.importProgress[importId].duration = duration;
             global.importProgress[importId].failedRows = errors.length;
+            global.importProgress[importId].duplicateRows = duplicates.length;
+            global.importProgress[importId].duplicates = duplicates;
             global.importProgress[importId].errors = errors;
 
         } catch (err) {

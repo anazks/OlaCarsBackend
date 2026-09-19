@@ -56,8 +56,10 @@ exports.getImportProgress = async (req, res) => {
             totalRows: history.totalRows,
             completedRows: history.completedRows,
             failedRows: history.failedRows,
+            duplicateRows: history.duplicateRows || 0,
             duration: history.duration,
             errors: history.errors || [],
+            duplicates: history.duplicates || [],
         };
 
         return res.status(200).json({ success: true, data: progress });

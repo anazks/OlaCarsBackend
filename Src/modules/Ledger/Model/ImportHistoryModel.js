@@ -46,10 +46,20 @@ const importHistorySchema = new mongoose.Schema(
             type: Number, // In seconds
             default: 0,
         },
+        duplicateRows: {
+            type: Number,
+            default: 0,
+        },
         errors: [
             {
                 row: { type: Number, required: true },
                 error: { type: String, required: true },
+            },
+        ],
+        duplicates: [
+            {
+                row: { type: Number, required: true },
+                reason: { type: String, required: false },
             },
         ],
     },
