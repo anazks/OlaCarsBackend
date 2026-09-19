@@ -1088,7 +1088,7 @@ exports.createLedgerEntryForBulkUpload = async (amount, paymentMethod, invoice, 
     }
 };
 
-exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) => {
+exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole, onProgress) => {
     const mongoose = require("mongoose");
     const { Invoice } = require("../Model/InvoiceModel");
     const { Driver } = require("../../Driver/Model/DriverModel");
@@ -1223,7 +1223,8 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         'quantity', 'discount', 'discountamount', 'itemtotal', 'itemprice', 'account',
         'accountcode', 'lineitemlocationname', 'invoiceshipmentstatus', 'manuallyshippedquantity',
         'taxid', 'itemtax', 'itemtaxpct', 'itemtaxamount', 'taxamount', 'itemtaxtype',
-        'weeknumber', 'invoicestatus', 'status'
+        'weeknumber', 'invoicestatus', 'status',
+        'errorreason', 'error', 'errormsg', 'errormessage', '_rowerrors'
     ]);
 
     // 2. Group uploaded rows by "Invoice Number" (or "Invoice ID") to handle multi-line items
@@ -1240,8 +1241,52 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         invoiceGroups.get(key).push({ row, originalIndex: rowCounter });
     }
 
+    const totalInvoices = invoiceGroups.size;
+    const startTime = Date.now();
+    let lastProgressTime = 0;
+    let processedInvoices = 0;
+
+    const reportProgress = () => {
+        if (typeof onProgress === 'function') {
+            const pct = Math.min(99, Math.round((processedInvoices / (totalInvoices || 1)) * 100));
+            const elapsedMs = Date.now() - startTime;
+            const avgMsPerInv = elapsedMs / (processedInvoices || 1);
+            const remainingCount = totalInvoices - processedInvoices;
+            const estimatedSecs = Math.max(0, Math.ceil((remainingCount * avgMsPerInv) / 1000));
+            const timeStr = estimatedSecs >= 60 ? `${Math.ceil(estimatedSecs / 60)} min` : `${estimatedSecs}s`;
+            const statusMessage = `Processing ${processedInvoices} of ${totalInvoices} invoices (${pct}%). ~${timeStr} remaining.`;
+
+            onProgress({
+                type: 'progress',
+                processedCount: processedInvoices,
+                totalCount: totalInvoices,
+                percentage: pct,
+                insertedCount: createdInvoices.length,
+                skippedCount: skipped.length,
+                errorCount: errors.length,
+                estimatedSecondsRemaining: estimatedSecs,
+                statusMessage
+            });
+        }
+    };
+
+    if (typeof onProgress === 'function') {
+        onProgress({
+            type: 'progress',
+            processedCount: 0,
+            totalCount: totalInvoices,
+            percentage: 0,
+            insertedCount: 0,
+            skippedCount: 0,
+            errorCount: 0,
+            estimatedSecondsRemaining: 0,
+            statusMessage: `Starting bulk upload for ${totalInvoices} invoices...`
+        });
+    }
+
     let invoiceIndex = 0;
     for (const [key, grouped] of invoiceGroups.entries()) {
+        try {
         const headerRowObj = grouped[0];
         const headerRow = headerRowObj.row;
         const origIdx = headerRowObj.originalIndex;
@@ -1721,9 +1766,17 @@ exports.bulkUploadInvoices = async (rows, invoiceType, createdBy, creatorRole) =
         } catch (err) {
             errors.push(`Invoice group "${key}" (Row ${origIdx}): Failed to create invoice - ${err.message}`);
         }
+        } finally {
+            processedInvoices++;
+            if (processedInvoices === 1 || processedInvoices === totalInvoices || processedInvoices % 5 === 0 || Date.now() - lastProgressTime >= 1000) {
+                lastProgressTime = Date.now();
+                reportProgress();
+            }
+        }
     }
 
     return {
+        totalInvoices,
         successCount: createdInvoices.length,
         errorCount: errors.length,
         skippedCount: skipped.length,

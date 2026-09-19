@@ -119,10 +119,64 @@ exports.bulkUploadInvoices = async (req, res) => {
         }
         const createdBy = req.user.id || req.user._id;
         const creatorRole = req.user.role;
+
+        const isStreaming = req.headers.accept?.includes('application/x-ndjson') || 
+                            req.headers['x-stream'] === 'true' || 
+                            req.query.stream === 'true' || 
+                            req.body.stream === true;
+
+        if (isStreaming) {
+            req.setTimeout(900000);
+            if (res.socket) res.socket.setTimeout(900000);
+
+            res.status(200);
+            res.setHeader('Content-Type', 'application/x-ndjson');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('Cache-Control', 'no-cache, no-store');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+            const onProgress = (prog) => {
+                try {
+                    res.write(JSON.stringify(prog) + '\n');
+                } catch (writeErr) { /* client disconnected */ }
+            };
+
+            const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole, onProgress);
+
+            try {
+                res.write(JSON.stringify({
+                    type: 'complete',
+                    success: true,
+                    message: "Bulk upload completed",
+                    totalCount: result.totalInvoices || (result.successCount + result.skippedCount + result.errorCount),
+                    processedCount: result.totalInvoices || (result.successCount + result.skippedCount + result.errorCount),
+                    insertedCount: result.successCount,
+                    skippedCount: result.skippedCount,
+                    errorCount: result.errorCount,
+                    percentage: 100,
+                    statusMessage: `Upload complete: ${result.successCount} created, ${result.skippedCount} skipped, ${result.errorCount} failed.`,
+                    data: result
+                }) + '\n');
+            } catch (writeErr) {}
+            res.end();
+            return;
+        }
+
         const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole);
         return res.status(201).json({ success: true, message: "Bulk upload completed", data: result });
     } catch (error) {
-        return res.status(400).json({ success: false, message: error.message });
+        if (!res.headersSent) {
+            return res.status(400).json({ success: false, message: error.message });
+        } else {
+            try {
+                res.write(JSON.stringify({ type: 'error', message: error.message || 'Upload failed' }) + '\n');
+                res.end();
+            } catch (e) {
+                res.end();
+            }
+        }
     }
 };
 
