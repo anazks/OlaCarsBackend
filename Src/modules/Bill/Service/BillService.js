@@ -1209,4 +1209,347 @@ exports.applySupplierAdvanceToBill = async (billId) => {
     } catch (err) {
         console.error("[BillService] Error in applySupplierAdvanceToBill:", err);
     }
-};
+};
+
+exports.deleteBill = async (billId, options = {}, userData = {}) => {
+    const Bill = require("../Model/BillModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+    const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    const bill = await Bill.findById(billId);
+    if (!bill) throw new AppError("Bill not found", 404);
+
+    const amountPaid = Number(bill.amountPaid) || 0;
+    const hasPayments = (bill.payments && bill.payments.length > 0) || amountPaid > 0.009;
+
+    if (hasPayments) {
+        const supplierId = bill.supplier ? (bill.supplier._id || bill.supplier) : null;
+        let otherOpenBills = [];
+        if (supplierId) {
+            otherOpenBills = await Bill.find({
+                supplier: supplierId,
+                status: { $in: ["OPEN", "PARTIALLY_PAID"] },
+                _id: { $ne: bill._id }
+            }).select("billNumber totalAmount amountPaid balanceDue status billDate").lean();
+        }
+
+        const { paymentAction, targetBillId } = options;
+
+        if (!paymentAction) {
+            const error = new AppError(
+                "Cannot delete this bill because payments or set-offs have already been applied. Please specify a paymentAction.",
+                400
+            );
+            error.requiresPaymentAction = true;
+            error.amountPaid = amountPaid;
+            error.hasOtherOpenBills = otherOpenBills.length > 0;
+            error.otherOpenBills = otherOpenBills;
+            throw error;
+        }
+
+        if (paymentAction === "REASSIGN_TO_BILL") {
+            if (otherOpenBills.length === 0) {
+                throw new AppError(
+                    "This supplier has no other open or partially paid bills. 'Convert to Vendor Advance' is the only available option.",
+                    400
+                );
+            }
+            if (!targetBillId) {
+                throw new AppError("targetBillId is required when paymentAction is REASSIGN_TO_BILL.", 400);
+            }
+
+            const targetBill = await Bill.findOne({
+                _id: targetBillId,
+                supplier: supplierId,
+                status: { $in: ["OPEN", "PARTIALLY_PAID"] }
+            });
+            if (!targetBill) {
+                throw new AppError("Target bill not found or does not belong to the same supplier.", 400);
+            }
+
+            // Reassign payments up to targetBill.balanceDue
+            const targetBalance = Number(targetBill.balanceDue) || (targetBill.totalAmount - (targetBill.amountPaid || 0));
+            const reassignAmount = Math.min(amountPaid, targetBalance);
+            const excessAmount = Math.max(0, amountPaid - reassignAmount);
+
+            targetBill.amountPaid = (targetBill.amountPaid || 0) + reassignAmount;
+            targetBill.balanceDue = Math.max(0, targetBill.totalAmount - targetBill.amountPaid);
+            targetBill.status = targetBill.balanceDue <= 0.009 ? "PAID" : "PARTIALLY_PAID";
+            if (targetBill.status === "PAID" && !targetBill.paidAt) targetBill.paidAt = new Date();
+
+            targetBill.payments = targetBill.payments || [];
+            targetBill.payments.push({
+                amount: reassignAmount,
+                paidAt: new Date(),
+                paymentMethod: "Prepayment Credit",
+                note: `Reassigned from deleted Bill ${bill.billNumber}`
+            });
+            await targetBill.save();
+
+            // Update PaymentMade records linked to deleted bill
+            const pmRecords = await PaymentMade.find({
+                "bills.billId": bill._id,
+                status: { $ne: "VOID" }
+            });
+            for (const pm of pmRecords) {
+                pm.bills = (pm.bills || []).map(b => {
+                    if (String(b.billId) === String(bill._id)) {
+                        return {
+                            ...(b.toObject ? b.toObject() : b),
+                            billId: targetBill._id,
+                            billNumber: targetBill.billNumber,
+                            amountApplied: reassignAmount
+                        };
+                    }
+                    return b;
+                });
+                await pm.save();
+            }
+
+            console.log(`[BillService] Reassigned $${reassignAmount} from ${bill.billNumber} to ${targetBill.billNumber}. Excess $${excessAmount} kept as unapplied advance.`);
+
+        } else if (paymentAction === "CONVERT_TO_ADVANCE") {
+            // Remove bill from PaymentMade.bills so amount returns to unapplied balance
+            const pmRecords = await PaymentMade.find({
+                "bills.billId": bill._id,
+                status: { $ne: "VOID" }
+            });
+            for (const pm of pmRecords) {
+                pm.bills = (pm.bills || []).filter(b => String(b.billId) !== String(bill._id));
+                await pm.save();
+            }
+
+            // Double entry adjustment:
+            // DR Advance to Suppliers (1.1.08 / 1.1.04), CR Accounts Payable (2.1.01)
+            const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+            const apAccount = await AccountingCode.findOne({ code: "2.1.01", isDeleted: { $ne: true } })
+                || await AccountingCode.findOne({ name: /Accounts Payable/i, isDeleted: { $ne: true } });
+            const advanceAccount = await AccountingCode.findOne({ code: "1.1.08", isDeleted: { $ne: true } })
+                || await AccountingCode.findOne({ code: "1.1.04", isDeleted: { $ne: true } })
+                || await AccountingCode.findOne({ name: /Advance to Suppliers|Anticipos a Proveedores/i, isDeleted: { $ne: true } });
+
+            if (apAccount && advanceAccount && amountPaid > 0) {
+                const adjCodes = [apAccount._id.toString(), advanceAccount._id.toString()];
+                await LedgerService.create({
+                    branch: bill.branch,
+                    accountingCode: advanceAccount._id,
+                    type: "DEBIT",
+                    amount: amountPaid,
+                    description: `Reclassification to Vendor Advance on deletion of Bill ${bill.billNumber}`,
+                    entryDate: new Date(),
+                    createdBy: userData.id || userData._id,
+                    creatorRole: userData.role || "ADMIN",
+                });
+                await LedgerService.create({
+                    branch: bill.branch,
+                    accountingCode: apAccount._id,
+                    type: "CREDIT",
+                    amount: amountPaid,
+                    description: `Reclassification of AP liability on deletion of Bill ${bill.billNumber}`,
+                    entryDate: new Date(),
+                    createdBy: userData.id || userData._id,
+                    creatorRole: userData.role || "ADMIN",
+                });
+                for (const cId of adjCodes) {
+                    await syncAccountingCodeBalances(cId);
+                }
+            }
+        } else {
+            throw new AppError(`Invalid paymentAction: "${paymentAction}". Must be CONVERT_TO_ADVANCE or REASSIGN_TO_BILL.`, 400);
+        }
+    }
+
+    // Delete all initial booking ledger entries directly linked to this bill
+    const entries = await LedgerEntry.find({ bill: bill._id });
+    const affectedAccountIds = [...new Set(entries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean))];
+
+    if (entries.length > 0) {
+        await LedgerEntry.deleteMany({ bill: bill._id });
+    }
+
+    // Recalculate Chart of Accounts balances for all affected accounts
+    for (const codeId of affectedAccountIds) {
+        await syncAccountingCodeBalances(codeId);
+    }
+
+    // Revert PO if linked
+    if (bill.purchaseOrder) {
+        await PurchaseOrder.findByIdAndUpdate(bill.purchaseOrder, { isBilled: false });
+    }
+
+    // Clean up draft fixed assets if any were created from this bill
+    try {
+        const FixedAsset = require("../../FixedAsset/Model/FixedAssetModel");
+        await FixedAsset.deleteMany({ originalBill: bill._id, status: "DRAFT" });
+    } catch (faErr) {
+        console.warn("[BillService] Could not clean up draft fixed assets:", faErr.message);
+    }
+
+    // Permanently delete the bill from DB
+    await BillRepo.deleteBill(bill._id);
+
+    return {
+        success: true,
+        message: "Bill deleted permanently",
+        deletedBillNumber: bill.billNumber
+    };
+};
+
+exports.updateBill = async (billId, updateData, userData = {}) => {
+    const Bill = require("../Model/BillModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const Tax = require("../../Tax/Model/TaxModel");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    const bill = await Bill.findById(billId);
+    if (!bill) throw new AppError("Bill not found", 404);
+
+    const extractId = (val) => (val && val._id ? val._id : val);
+
+    // 1. Check Bill Number update
+    if (updateData.billNumber && updateData.billNumber.trim() !== bill.billNumber) {
+        const newBillNumber = updateData.billNumber.trim();
+        const existingWithNumber = await Bill.findOne({
+            billNumber: newBillNumber,
+            _id: { $ne: bill._id }
+        });
+        if (existingWithNumber) {
+            throw new AppError(`Bill number "${newBillNumber}" already exists.`, 400);
+        }
+        const oldBillNumber = bill.billNumber;
+        bill.billNumber = newBillNumber;
+
+        // Propagate billNumber change to linked PaymentMade
+        try {
+            const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+            await PaymentMade.updateMany(
+                { "bills.billId": bill._id },
+                { $set: { "bills.$[elem].billNumber": newBillNumber } },
+                { arrayFilters: [{ "elem.billId": bill._id }] }
+            );
+        } catch (pmErr) {
+            console.warn("[BillService] Could not sync new billNumber to PaymentMade:", pmErr.message);
+        }
+    }
+
+    // 2. Dates, Supplier, Branch, Notes, etc.
+    if (updateData.supplier) bill.supplier = extractId(updateData.supplier);
+    if (updateData.branch) bill.branch = extractId(updateData.branch);
+    if (updateData.customer !== undefined) bill.customer = (updateData.customer && updateData.customer !== "") ? extractId(updateData.customer) : null;
+    if (updateData.billDate) bill.billDate = new Date(updateData.billDate);
+    if (updateData.dueDate) bill.dueDate = new Date(updateData.dueDate);
+    if (updateData.notes !== undefined) bill.notes = updateData.notes;
+    if (updateData.purchaseType) bill.purchaseType = updateData.purchaseType.toUpperCase();
+    if (updateData.creditAccountId !== undefined) bill.creditAccountId = updateData.creditAccountId ? extractId(updateData.creditAccountId) : null;
+
+    // 3. Check if Items / Tax / Amount are being updated
+    const isUpdatingItems = Array.isArray(updateData.items) && updateData.items.length > 0;
+    const isUpdatingTax = updateData.taxId !== undefined || updateData.taxPercentage !== undefined || updateData.isInclusiveTax !== undefined;
+
+    if (isUpdatingItems || isUpdatingTax) {
+        if (isUpdatingItems) {
+            bill.items = updateData.items.map(item => {
+                if (!item.accountId) {
+                    throw new AppError(`Item "${item.itemName}" is missing a debit account code.`, 400);
+                }
+                return {
+                    itemName: item.itemName,
+                    quantity: Number(item.quantity),
+                    unitPrice: Number(item.unitPrice),
+                    accountId: extractId(item.accountId),
+                    description: item.description || ""
+                };
+            });
+        }
+
+        const itemsSubtotal = bill.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0);
+
+        let taxPercentage = 0;
+        let taxDoc = null;
+        if (updateData.taxId) {
+            taxDoc = await Tax.findById(updateData.taxId);
+            if (taxDoc) {
+                taxPercentage = taxDoc.rate;
+                bill.taxId = taxDoc._id;
+            }
+        } else if (updateData.taxPercentage !== undefined) {
+            taxPercentage = Number(updateData.taxPercentage) || 0;
+            bill.taxId = undefined;
+        } else if (bill.taxId) {
+            taxDoc = await Tax.findById(bill.taxId);
+            if (taxDoc) taxPercentage = taxDoc.rate;
+        } else {
+            taxPercentage = bill.taxPercentage || 0;
+        }
+
+        const isInclusiveTax = updateData.isInclusiveTax !== undefined ? !!updateData.isInclusiveTax : !!bill.isInclusiveTax;
+        bill.isInclusiveTax = isInclusiveTax;
+        bill.taxPercentage = taxPercentage;
+
+        let taxAmount = 0;
+        let totalAmount = itemsSubtotal;
+
+        if (taxPercentage > 0) {
+            if (isInclusiveTax) {
+                totalAmount = itemsSubtotal;
+                taxAmount = Math.round((totalAmount * (taxPercentage / (100 + taxPercentage))) * 100) / 100;
+            } else {
+                taxAmount = Math.round((itemsSubtotal * (taxPercentage / 100)) * 100) / 100;
+                totalAmount = Math.round((itemsSubtotal + taxAmount) * 100) / 100;
+            }
+        }
+
+        bill.taxAmount = taxAmount;
+        bill.totalAmount = totalAmount;
+
+        // Validation against amountPaid
+        const amountPaid = Number(bill.amountPaid) || 0;
+        if (totalAmount < amountPaid) {
+            throw new AppError(
+                `New total amount ($${totalAmount}) cannot be less than the amount already paid ($${amountPaid}).`,
+                400
+            );
+        }
+
+        bill.balanceDue = Math.max(0, totalAmount - amountPaid);
+        if (bill.balanceDue <= 0.009 && totalAmount > 0) {
+            bill.status = "PAID";
+        } else if (amountPaid > 0) {
+            bill.status = "PARTIALLY_PAID";
+        } else {
+            bill.status = "OPEN";
+        }
+
+        // Rebuild initial booking ledger entries
+        const oldEntries = await LedgerEntry.find({ bill: bill._id });
+        const oldAccountIds = oldEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
+
+        await LedgerEntry.deleteMany({ bill: bill._id });
+
+        // Post fresh ledger entries
+        await postBillToLedger(bill, userData);
+
+        const newEntries = await LedgerEntry.find({ bill: bill._id });
+        const newAccountIds = newEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
+
+        const allAffectedAccounts = [...new Set([...oldAccountIds, ...newAccountIds])];
+        for (const codeId of allAffectedAccounts) {
+            await syncAccountingCodeBalances(codeId);
+        }
+    } else {
+        // If billNumber changed without items changing, update descriptions on existing ledger entries
+        if (updateData.billNumber && updateData.billNumber.trim() !== bill.billNumber) {
+            const entries = await LedgerEntry.find({ bill: bill._id });
+            for (const entry of entries) {
+                entry.description = (entry.description || "").replace(new RegExp(bill.billNumber, "g"), updateData.billNumber.trim());
+                await entry.save();
+            }
+        }
+    }
+
+    await bill.save();
+    return await BillRepo.getBillById(bill._id);
+};

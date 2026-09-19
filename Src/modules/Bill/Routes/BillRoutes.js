@@ -48,4 +48,16 @@ router.post("/:billId/record-payment",
     BillController.recordBillPayment
 );
 
+router.put("/:id", 
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission("BILL_EDIT"),
+    BillController.updateBill
+);
+
+router.delete("/:id", 
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission(["BILL_DELETE", "BILL_EDIT"]),
+    BillController.deleteBill
+);
+
 module.exports = router;

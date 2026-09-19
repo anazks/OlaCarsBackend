@@ -718,6 +718,7 @@ exports.generateSupplierRolloverLedgerEntry = async ({ supplier, bill, amount, c
             entryDate: new Date(),
             createdBy,
             creatorRole,
+            bill: bill._id,
             contact: supplierDoc ? supplierDoc._id : undefined,
             contactModel: "Supplier"
         });
@@ -732,6 +733,7 @@ exports.generateSupplierRolloverLedgerEntry = async ({ supplier, bill, amount, c
             entryDate: new Date(),
             createdBy,
             creatorRole,
+            bill: bill._id,
             contact: supplierDoc ? supplierDoc._id : undefined,
             contactModel: "Supplier"
         });

@@ -110,6 +110,10 @@ const billSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
+        isDeleted: {
+            type: Boolean,
+            default: false,
+        },
     },
     { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
@@ -126,6 +130,7 @@ billSchema.index({ status: 1 });
 billSchema.index({ supplier: 1 });
 billSchema.index({ branch: 1 });
 billSchema.index({ billDate: -1 });
+billSchema.index({ isDeleted: 1 });
 
 // Middleware to update balanceDue and calculate tax amount before saving
 billSchema.pre("save", async function () {

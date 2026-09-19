@@ -100,3 +100,37 @@ exports.bulkUploadBills = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.updateBill = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const updatedBill = await BillService.updateBill(id, req.body, req.user);
+        res.status(200).json({
+            success: true,
+            message: "Bill updated successfully",
+            data: updatedBill
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.deleteBill = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const result = await BillService.deleteBill(id, req.body, req.user);
+        res.status(200).json(result);
+    } catch (error) {
+        if (error.requiresPaymentAction) {
+            return res.status(400).json({
+                success: false,
+                requiresPaymentAction: true,
+                amountPaid: error.amountPaid,
+                hasOtherOpenBills: error.hasOtherOpenBills,
+                otherOpenBills: error.otherOpenBills,
+                message: error.message
+            });
+        }
+        next(error);
+    }
+};

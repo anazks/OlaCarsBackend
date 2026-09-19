@@ -24,8 +24,7 @@ exports.getBillById = async (id) => {
 
     const queryOr = [
         { bill: bill._id },
-        { "bills.billId": bill._id },
-        { description: new RegExp(`\\b${bill.billNumber.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, "i") }
+        { "bills.billId": bill._id }
     ];
 
     if (paymentTxIds.length > 0) {
@@ -40,9 +39,12 @@ exports.getBillById = async (id) => {
     .sort({ entryDate: 1, createdAt: 1 })
     .lean();
 
-    // Filter out entries that explicitly belong to a different bill ID
+    // Filter out entries that explicitly belong to a different bill ID or are deletion reclassifications
     const validEntries = allEntries.filter(entry => {
         if (entry.bill && entry.bill.toString() !== bill._id.toString()) {
+            return false;
+        }
+        if (entry.description && entry.description.includes("on deletion of Bill")) {
             return false;
         }
         return true;
@@ -216,6 +218,10 @@ exports.getAllBillsPaginated = async (query = {}, page = 1, limit = 10, hasDateF
 
 exports.updateBill = async (id, data) => {
     return await Bill.findByIdAndUpdate(id, data, { new: true, runValidators: true });
+};
+
+exports.deleteBill = async (id) => {
+    return await Bill.findByIdAndDelete(id);
 };
 
 exports.getBillByPO = async (poId) => {

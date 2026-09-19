@@ -54,6 +54,12 @@ const PERMISSIONS = {
   SUPPLIER_EDIT: "SUPPLIER_EDIT",
   SUPPLIER_DELETE: "SUPPLIER_DELETE",
 
+  // ─── Bill Management ────────────────────────────────────────
+  BILL_VIEW: "BILL_VIEW",
+  BILL_CREATE: "BILL_CREATE",
+  BILL_EDIT: "BILL_EDIT",
+  BILL_DELETE: "BILL_DELETE",
+
   // ─── Payment & Finance ─────────────────────────────────────
   PAYMENT_VIEW: "PAYMENT_VIEW",
   PAYMENT_CREATE: "PAYMENT_CREATE",
