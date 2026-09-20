@@ -23,3 +23,8 @@ exports.getManualJournalByIdRepo = async (id) => {
 exports.updateManualJournalRepo = async (id, data) => {
     return await ManualJournal.findByIdAndUpdate(id, data, { new: true });
 };
+
+exports.deleteManualJournalRepo = async (id) => {
+    return await ManualJournal.findByIdAndDelete(id);
+};
+

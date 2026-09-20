@@ -364,20 +364,32 @@ const clearLedgerByCode = async (req, res) => {
 const updateLedgerEntry = async (req, res) => {
     try {
         const { id } = req.params;
-        const { description, accountingCode, existingAttachments } = req.body;
+        const { description, accountingCode, amount, type, existingAttachments } = req.body;
 
         const entry = await LedgerEntry.findById(id);
         if (!entry) {
             return res.status(404).json({ success: false, message: "Ledger entry not found" });
         }
 
+        const oldAccountingCode = entry.accountingCode;
+
         // 1. Update Description if provided
         if (description !== undefined) {
             entry.description = description;
         }
 
-        // 2. Update Accounting Code if provided
-        if (accountingCode !== undefined) {
+        // 2. Update Amount if provided
+        if (amount !== undefined && !isNaN(Number(amount))) {
+            entry.amount = Math.max(0, Number(amount));
+        }
+
+        // 3. Update Type (DEBIT/CREDIT) if provided
+        if (type !== undefined && ["DEBIT", "CREDIT"].includes(type.toUpperCase())) {
+            entry.type = type.toUpperCase();
+        }
+
+        // 4. Update Accounting Code if provided
+        if (accountingCode !== undefined && accountingCode !== String(oldAccountingCode)) {
             const AccountingCode = mongoose.model("AccountingCode");
             const codeDoc = await AccountingCode.findById(accountingCode);
             if (!codeDoc) {
@@ -386,7 +398,7 @@ const updateLedgerEntry = async (req, res) => {
             entry.accountingCode = accountingCode;
         }
 
-        // 3. Handle Attachments
+        // 5. Handle Attachments
         let attachments = [];
         
         // Parse existing attachments if provided (sent as a JSON string or array)
@@ -429,6 +441,29 @@ const updateLedgerEntry = async (req, res) => {
         // Save entry
         await entry.save();
 
+        // 6. If entry belongs to a Manual Journal, recalculate parent journal totalAmount
+        if (entry.manualJournal) {
+            const ManualJournal = require("../Model/ManualJournalModel");
+            const allJournalEntries = await LedgerEntry.find({ manualJournal: entry.manualJournal });
+            let newDebitTotal = 0;
+            allJournalEntries.forEach(e => {
+                if (e.type === "DEBIT") newDebitTotal += (Number(e.amount) || 0);
+            });
+            if (newDebitTotal === 0 && allJournalEntries.length > 0) {
+                allJournalEntries.forEach(e => { newDebitTotal += (Number(e.amount) || 0); });
+            }
+            await ManualJournal.findByIdAndUpdate(entry.manualJournal, { totalAmount: newDebitTotal });
+        }
+
+        // 7. Resync accounting code balances
+        const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+        if (oldAccountingCode) {
+            try { await syncAccountingCodeBalances(oldAccountingCode); } catch (e) {}
+        }
+        if (entry.accountingCode && String(entry.accountingCode) !== String(oldAccountingCode)) {
+            try { await syncAccountingCodeBalances(entry.accountingCode); } catch (e) {}
+        }
+
         // Populate details like front-end expects
         const updatedEntry = await LedgerEntry.findById(id)
             .populate("transaction")
@@ -445,10 +480,55 @@ const updateLedgerEntry = async (req, res) => {
     }
 };
 
+const deleteSingleLedgerEntry = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const entry = await LedgerEntry.findById(id);
+        if (!entry) {
+            return res.status(404).json({ success: false, message: "Ledger entry not found" });
+        }
+
+        const journalId = entry.manualJournal;
+        const codeId = entry.accountingCode;
+
+        await LedgerEntry.deleteOne({ _id: id });
+
+        // If part of a manual journal, recalculate journal totalAmount
+        if (journalId) {
+            const ManualJournal = require("../Model/ManualJournalModel");
+            const remaining = await LedgerEntry.find({ manualJournal: journalId });
+            let newDebitTotal = 0;
+            remaining.forEach(e => {
+                if (e.type === "DEBIT") newDebitTotal += (Number(e.amount) || 0);
+            });
+            await ManualJournal.findByIdAndUpdate(journalId, { totalAmount: newDebitTotal });
+        }
+
+        // Resync accounting code balance
+        if (codeId) {
+            const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+            try {
+                await syncAccountingCodeBalances(codeId);
+            } catch (err) {
+                console.error(`Failed to sync balance for account ${codeId}:`, err);
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Ledger entry line deleted successfully"
+        });
+    } catch (error) {
+        console.error("Failed to delete ledger entry:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getLedgerEntries,
     getLedgerEntryById,
     updateLedgerEntry,
+    deleteSingleLedgerEntry,
     importLedgerEntries,
     deleteLedgerJournal,
     clearLedgerByCode,

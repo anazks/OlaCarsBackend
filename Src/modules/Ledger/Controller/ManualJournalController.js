@@ -92,3 +92,91 @@ exports.getJournals = async (req, res) => {
         });
     }
 };
+
+exports.getJournalById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { getManualJournalByIdRepo } = require("../Repo/ManualJournalRepo");
+        const LedgerEntry = require("../Model/LedgerEntryModel");
+
+        const journal = await getManualJournalByIdRepo(id);
+        if (!journal) {
+            return res.status(404).json({
+                status: "error",
+                message: "Manual journal not found"
+            });
+        }
+
+        const lines = await LedgerEntry.find({ manualJournal: id })
+            .populate("accountingCode", "code name category description isBank")
+            .populate("contact", "name email")
+            .populate("createdBy", "name email")
+            .sort({ createdAt: 1 });
+
+        res.status(200).json({
+            status: "success",
+            data: {
+                journal,
+                lines
+            }
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
+exports.deleteJournal = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { getManualJournalByIdRepo, deleteManualJournalRepo } = require("../Repo/ManualJournalRepo");
+        const LedgerEntry = require("../Model/LedgerEntryModel");
+        const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+        const journal = await getManualJournalByIdRepo(id);
+        if (!journal) {
+            return res.status(404).json({
+                status: "error",
+                message: "Manual journal not found"
+            });
+        }
+
+        // Find all child ledger entries to collect affected accounting codes
+        const entries = await LedgerEntry.find({ manualJournal: id });
+        const affectedCodeIds = new Set();
+        entries.forEach(entry => {
+            if (entry.accountingCode) {
+                affectedCodeIds.add(String(entry.accountingCode));
+            }
+        });
+
+        // Delete all ledger entries
+        const delEntries = await LedgerEntry.deleteMany({ manualJournal: id });
+
+        // Delete the journal document
+        await deleteManualJournalRepo(id);
+
+        // Sync accounting code balances
+        for (const codeId of affectedCodeIds) {
+            try {
+                await syncAccountingCodeBalances(codeId);
+            } catch (syncErr) {
+                console.error(`[ManualJournalController] Failed to sync balance for ${codeId}:`, syncErr);
+            }
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: `Manual journal and ${delEntries.deletedCount} associated ledger entries deleted successfully`,
+            deletedEntries: delEntries.deletedCount
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+

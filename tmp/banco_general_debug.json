@@ -26,7 +26,17 @@
     "currentBalance": 450,
     "debitTotal": 450
   },
-  "balance": 0,
-  "entriesCount": 0,
-  "entries": []
+  "balance": -3000,
+  "entriesCount": 1,
+  "entries": [
+    {
+      "id": "6aaf9b4a29611a15df58496c",
+      "entryDate": "2026-09-20T00:00:00.000Z",
+      "type": "CREDIT",
+      "amount": 3000,
+      "runningBalance": -3000,
+      "description": "BFUERINVJ-XXX879899-YKE FKDN< CIDNFKU",
+      "createdAt": "2026-09-20T08:37:30.571Z"
+    }
+  ]
 }

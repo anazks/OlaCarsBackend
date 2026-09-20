@@ -1,6 +1,14 @@
 const express = require("express");
 const router = express.Router();
-const { getLedgerEntries, getLedgerEntryById, updateLedgerEntry, importLedgerEntries, deleteLedgerJournal, clearLedgerByCode } = require("../Controller/LedgerController");
+const { 
+    getLedgerEntries, 
+    getLedgerEntryById, 
+    updateLedgerEntry, 
+    deleteSingleLedgerEntry,
+    importLedgerEntries, 
+    deleteLedgerJournal, 
+    clearLedgerByCode 
+} = require("../Controller/LedgerController");
 const ManualJournalController = require("../Controller/ManualJournalController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
@@ -32,6 +40,8 @@ const MANAGE_ROLES = [
 // Manual Journals
 router.post("/journals", authenticate, authorize(...MANAGE_ROLES), hasPermission("JOURNAL_CREATE"), ManualJournalController.createJournal);
 router.get("/journals", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("JOURNAL_VIEW"), ManualJournalController.getJournals);
+router.get("/journals/:id", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("JOURNAL_VIEW"), ManualJournalController.getJournalById);
+router.delete("/journals/:id", authenticate, authorize(...MANAGE_ROLES), ManualJournalController.deleteJournal);
 
 // Bulk Import
 router.post("/import", authenticate, authorize(...MANAGE_ROLES), excelUpload.single("file"), importLedgerEntries);
@@ -39,6 +49,7 @@ router.post("/import", authenticate, authorize(...MANAGE_ROLES), excelUpload.sin
 // Ledger Entries
 router.get("/", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntries);
 router.delete("/clear/:accountingCode", authenticate, authorize(...MANAGE_ROLES), clearLedgerByCode);
+router.delete("/entries/:id", authenticate, authorize(...MANAGE_ROLES), hasPermission("LEDGER_DELETE"), deleteSingleLedgerEntry);
 router.get("/:id", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("LEDGER_VIEW"), getLedgerEntryById);
 router.put("/:id", authenticate, authorize(...MANAGE_ROLES), hasPermission("LEDGER_EDIT"), upload.array("files", 5), updateLedgerEntry);
 router.delete("/:id", authenticate, authorize(ROLES.ADMIN), deleteLedgerJournal);
