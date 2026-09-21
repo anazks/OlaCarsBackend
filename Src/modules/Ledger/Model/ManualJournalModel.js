@@ -49,6 +49,47 @@ const manualJournalSchema = new mongoose.Schema(
             url: { type: String },
             uploadedAt: { type: Date },
         },
+        // Entity / Contact Information for Auto Set-off
+        contact: {
+            type: mongoose.Schema.Types.ObjectId,
+            refPath: "contactModel",
+            required: false,
+        },
+        contactModel: {
+            type: String,
+            enum: ["Customer", "Supplier"],
+            required: false,
+        },
+        supplier: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Supplier",
+            required: false,
+        },
+        autoSetOff: {
+            type: Boolean,
+            default: false,
+        },
+        invoices: [
+            {
+                invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
+                invoiceNumber: { type: String },
+                amountApplied: { type: Number },
+            }
+        ],
+        bills: [
+            {
+                billId: { type: mongoose.Schema.Types.ObjectId, ref: "Bill" },
+                billNumber: { type: String },
+                amountApplied: { type: Number },
+            }
+        ],
+        setOffSummary: {
+            totalSetOff: { type: Number, default: 0 },
+            excessAmount: { type: Number, default: 0 },
+            invoiceCount: { type: Number, default: 0 },
+            billCount: { type: Number, default: 0 },
+            itemsSetOff: { type: Array, default: [] },
+        },
         // Audit Trail
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

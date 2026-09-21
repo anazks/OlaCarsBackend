@@ -1,4 +1,5 @@
 const ManualJournalService = require("../Service/ManualJournalService");
+const LedgerEntry = require("../Model/LedgerEntryModel");
 
 exports.createJournal = async (req, res) => {
     try {
@@ -132,8 +133,7 @@ exports.deleteJournal = async (req, res) => {
     try {
         const { id } = req.params;
         const { getManualJournalByIdRepo, deleteManualJournalRepo } = require("../Repo/ManualJournalRepo");
-        const LedgerEntry = require("../Model/LedgerEntryModel");
-        const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+        const { reverseSetOffFromHistory, syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
 
         const journal = await getManualJournalByIdRepo(id);
         if (!journal) {
@@ -143,14 +143,19 @@ exports.deleteJournal = async (req, res) => {
             });
         }
 
-        // Find all child ledger entries to collect affected accounting codes
+        // Find all child ledger entries to collect affected accounting codes & reverse set-offs
         const entries = await LedgerEntry.find({ manualJournal: id });
         const affectedCodeIds = new Set();
-        entries.forEach(entry => {
+        for (const entry of entries) {
             if (entry.accountingCode) {
                 affectedCodeIds.add(String(entry.accountingCode));
             }
-        });
+            try {
+                await reverseSetOffFromHistory(entry._id);
+            } catch (revErr) {
+                // Not all entries have set-off history
+            }
+        }
 
         // Delete all ledger entries
         const delEntries = await LedgerEntry.deleteMany({ manualJournal: id });
@@ -179,4 +184,29 @@ exports.deleteJournal = async (req, res) => {
         });
     }
 };
+
+exports.bulkUploadJournals = async (req, res) => {
+    try {
+        const actor = {
+            id: req.user.id,
+            role: req.user.role,
+            branchId: req.user.branchId
+        };
+
+        const result = await ManualJournalService.bulkUploadManualJournals(req.body, actor);
+
+        const statusCode = result.createdCount > 0 ? 201 : 400;
+        res.status(statusCode).json({
+            status: result.success ? "success" : (result.createdCount > 0 ? "partial_success" : "error"),
+            message: `Processed ${result.totalCount} journal entries: ${result.createdCount} created, ${result.failedCount} failed.`,
+            data: result
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            message: error.message
+        });
+    }
+};
+
 

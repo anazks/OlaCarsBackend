@@ -17,7 +17,11 @@ exports.getManualJournalsRepo = async (query = {}, options = {}) => {
 };
 
 exports.getManualJournalByIdRepo = async (id) => {
-    return await ManualJournal.findById(id).populate("branch createdBy");
+    return await ManualJournal.findById(id)
+        .populate("branch createdBy")
+        .populate("contact")
+        .populate({ path: "invoices.invoiceId", select: "invoiceNumber totalAmount balance status invoiceDate dueDate" })
+        .populate({ path: "bills.billId", select: "billNumber totalAmount balanceDue status billDate dueDate" });
 };
 
 exports.updateManualJournalRepo = async (id, data) => {

@@ -2699,7 +2699,7 @@ const autoSetOffInvoices = async (rawCustomerId, amount, options = {}) => {
         || targetArCode;
 
     let createdJournalId = null;
-    if (targetArCode || targetAdvCode) {
+    if ((targetArCode || targetAdvCode) && !options.skipLedgerEntries) {
         try {
             const invoiceNumbers = invoicesSetOff.length > 0
                 ? invoicesSetOff.map(inv => inv.invoiceNumber).join(", ")
@@ -3082,7 +3082,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
     });
 
     const createdPartnerEntryIds = [];
-    if (totalSetOff > 0 && apCodeDoc) {
+    if (totalSetOff > 0 && apCodeDoc && !options.skipLedgerEntries) {
         try {
             const billNumbers = billsSetOff.map(b => b.billNumber).join(", ");
             const apEntry = await LedgerEntry.create({
@@ -3109,7 +3109,7 @@ const autoSetOffBills = async (supplierId, amount, options = {}) => {
         }
     }
 
-    if (excessAmount > 0 && vendorAdvCodeDoc) {
+    if (excessAmount > 0 && vendorAdvCodeDoc && !options.skipLedgerEntries) {
         try {
             const pmNum = paymentMadeDoc ? paymentMadeDoc.paymentNumber : "PM-Pending";
             const advEntry = await LedgerEntry.create({
