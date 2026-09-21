@@ -199,7 +199,7 @@ exports.payInvoice = async (req, res) => {
 
 exports.updateInvoice = async (req, res) => {
     try {
-        const result = await InvoiceService.updateInvoice(req.params.id, req.body);
+        const result = await InvoiceService.updateInvoice(req.params.id, req.body, req.user);
         return res.status(200).json({ success: true, message: "Invoice updated successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -208,10 +208,20 @@ exports.updateInvoice = async (req, res) => {
 
 exports.deleteInvoice = async (req, res) => {
     try {
-        await InvoiceService.deleteInvoice(req.params.id);
-        return res.status(200).json({ success: true, message: "Invoice deleted successfully" });
+        const result = await InvoiceService.deleteInvoice(req.params.id, req.body, req.user);
+        return res.status(200).json(result);
     } catch (error) {
-        return res.status(400).json({ success: false, message: error.message });
+        if (error.requiresPaymentAction) {
+            return res.status(400).json({
+                success: false,
+                requiresPaymentAction: true,
+                amountPaid: error.amountPaid,
+                hasOtherOpenInvoices: error.hasOtherOpenInvoices,
+                otherOpenInvoices: error.otherOpenInvoices,
+                message: error.message
+            });
+        }
+        return res.status(error.statusCode || 400).json({ success: false, message: error.message });
     }
 };
 

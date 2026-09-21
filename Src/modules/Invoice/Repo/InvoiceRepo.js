@@ -276,14 +276,14 @@ exports.getInvoiceByIdService = async (id) => {
 };
 
 exports.updateInvoiceService = async (id, updateData, session = null) => {
-    const options = session ? { new: true, session } : { new: true };
+    const options = session ? { new: true, session, runValidators: true } : { new: true, runValidators: true };
     const updated = await Invoice.findByIdAndUpdate(id, updateData, options);
-    if (!updated || updated.isDeleted) throw new Error("Invoice not found");
+    if (!updated) throw new Error("Invoice not found");
     return updated;
 };
 
 exports.deleteInvoiceService = async (id) => {
-    const deleted = await Invoice.findByIdAndUpdate(id, { isDeleted: true }, { new: true });
+    const deleted = await Invoice.findByIdAndDelete(id);
     if (!deleted) throw new Error("Invoice not found");
     return deleted;
 };

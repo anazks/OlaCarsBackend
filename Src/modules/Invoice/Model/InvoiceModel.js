@@ -12,7 +12,14 @@ const invoicePaymentSchema = new mongoose.Schema({
 }, { _id: true });
 
 const lineItemSchema = new mongoose.Schema({
-    name: { type: String, required: true },
+    name: { 
+        type: String, 
+        required: true,
+        default: function () {
+            return this.itemName || this.description || "Item";
+        }
+    },
+    itemName: { type: String },
     description: { type: String },
     qty: { type: Number, required: true, default: 1 },
     unitPrice: { type: Number, required: true, default: 0 },

@@ -20,23 +20,13 @@
     "creatorRole": "ADMIN",
     "isDeleted": false,
     "createdAt": "2026-06-09T12:57:20.278Z",
-    "updatedAt": "2026-08-03T04:44:06.862Z",
+    "updatedAt": "2026-09-20T09:07:36.310Z",
     "__v": 0,
     "creditTotal": 0,
-    "currentBalance": 450,
-    "debitTotal": 450
+    "currentBalance": 0,
+    "debitTotal": 0
   },
-  "balance": -3000,
-  "entriesCount": 1,
-  "entries": [
-    {
-      "id": "6aaf9b4a29611a15df58496c",
-      "entryDate": "2026-09-20T00:00:00.000Z",
-      "type": "CREDIT",
-      "amount": 3000,
-      "runningBalance": -3000,
-      "description": "BFUERINVJ-XXX879899-YKE FKDN< CIDNFKU",
-      "createdAt": "2026-09-20T08:37:30.571Z"
-    }
-  ]
+  "balance": 0,
+  "entriesCount": 0,
+  "entries": []
 }

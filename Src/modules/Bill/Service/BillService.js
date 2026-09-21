@@ -1232,8 +1232,15 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
             otherOpenBills = await Bill.find({
                 supplier: supplierId,
                 status: { $in: ["OPEN", "PARTIALLY_PAID"] },
-                _id: { $ne: bill._id }
+                _id: { $nin: [bill._id, billId, String(bill._id)] }
             }).select("billNumber totalAmount amountPaid balanceDue status billDate").lean();
+
+            // Explicit in-memory safeguard to ensure the bill being deleted is NEVER included
+            otherOpenBills = otherOpenBills.filter(b =>
+                b._id.toString() !== bill._id.toString() &&
+                b._id.toString() !== billId.toString() &&
+                b.billNumber !== bill.billNumber
+            );
         }
 
         const { paymentAction, targetBillId } = options;
@@ -1260,6 +1267,9 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
             if (!targetBillId) {
                 throw new AppError("targetBillId is required when paymentAction is REASSIGN_TO_BILL.", 400);
             }
+            if (targetBillId.toString() === bill._id.toString() || targetBillId.toString() === billId.toString()) {
+                throw new AppError("Target bill cannot be the same bill that is being deleted.", 400);
+            }
 
             const targetBill = await Bill.findOne({
                 _id: targetBillId,
@@ -1280,12 +1290,21 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
             targetBill.status = targetBill.balanceDue <= 0.009 ? "PAID" : "PARTIALLY_PAID";
             if (targetBill.status === "PAID" && !targetBill.paidAt) targetBill.paidAt = new Date();
 
+            // Find linked PaymentMade or payment details from the deleted bill
+            const linkedPM = await PaymentMade.findOne({
+                "bills.billId": bill._id
+            }).lean();
+            const origBillPayment = (bill.payments && bill.payments.length > 0) ? bill.payments[0] : null;
+            const actualPMNumber = linkedPM ? linkedPM.paymentNumber : (origBillPayment?.transactionId || origBillPayment?.referenceNumber || null);
+
             targetBill.payments = targetBill.payments || [];
             targetBill.payments.push({
                 amount: reassignAmount,
                 paidAt: new Date(),
                 paymentMethod: "Prepayment Credit",
-                note: `Reassigned from deleted Bill ${bill.billNumber}`
+                transactionId: actualPMNumber || undefined,
+                referenceNumber: origBillPayment?.referenceNumber || undefined,
+                note: `Reassigned from deleted Bill ${bill.billNumber}${actualPMNumber ? ` (PM: ${actualPMNumber})` : ''}`
             });
             await targetBill.save();
 
@@ -1307,6 +1326,44 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
                     return b;
                 });
                 await pm.save();
+            }
+
+            // Propagate in LedgerEntry records: update bill links on payment transactions
+            try {
+                await LedgerEntry.updateMany(
+                    { "bills.billId": bill._id },
+                    { 
+                        $set: { 
+                            "bills.$[elem].billId": targetBill._id,
+                            "bills.$[elem].billNumber": targetBill.billNumber
+                        } 
+                    },
+                    { arrayFilters: [{ "elem.billId": bill._id }] }
+                );
+            } catch (leErr) {
+                console.warn("[BillService] Could not update LedgerEntry bill links:", leErr.message);
+            }
+
+            // Debit Accounts Payable on targetBill
+            const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+            const apAccount = await AccountingCode.findOne({ code: "2.1.01", isDeleted: { $ne: true } })
+                || await AccountingCode.findOne({ name: /Accounts Payable/i, isDeleted: { $ne: true } });
+
+            if (apAccount && reassignAmount > 0) {
+                await LedgerService.create({
+                    branch: targetBill.branch || bill.branch,
+                    accountingCode: apAccount._id,
+                    type: "DEBIT",
+                    amount: reassignAmount,
+                    description: `Bill Payment Applied (Debit Accounts Payable) - Reassigned from deleted Bill ${bill.billNumber} (Bill: ${targetBill.billNumber})`,
+                    entryDate: new Date(),
+                    bill: targetBill._id,
+                    supplier: targetBill.supplier || bill.supplier,
+                    createdBy: userData.id || userData._id || "6a2290019fa01283dd165204",
+                    creatorRole: (userData.role || "ADMIN").toUpperCase()
+                });
+                await syncAccountingCodeBalances(apAccount._id);
+                console.log(`[BillService] Created DEBIT Accounts Payable ledger entry of $${reassignAmount} on target bill ${targetBill.billNumber}`);
             }
 
             console.log(`[BillService] Reassigned $${reassignAmount} from ${bill.billNumber} to ${targetBill.billNumber}. Excess $${excessAmount} kept as unapplied advance.`);
@@ -1363,11 +1420,19 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
     }
 
     // Delete all initial booking ledger entries directly linked to this bill
-    const entries = await LedgerEntry.find({ bill: bill._id });
+    const entries = await LedgerEntry.find({
+        bill: bill._id,
+        $or: [
+            { description: new RegExp(`^Bill ${bill.billNumber} - `) },
+            { description: new RegExp(`\\(Bill:\\s*${bill.billNumber}\\)`) }
+        ]
+    });
     const affectedAccountIds = [...new Set(entries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean))];
 
     if (entries.length > 0) {
-        await LedgerEntry.deleteMany({ bill: bill._id });
+        await LedgerEntry.deleteMany({
+            _id: { $in: entries.map(e => e._id) }
+        });
     }
 
     // Recalculate Chart of Accounts balances for all affected accounts
@@ -1523,19 +1588,66 @@ exports.updateBill = async (billId, updateData, userData = {}) => {
             bill.status = "OPEN";
         }
 
-        // Rebuild initial booking ledger entries
-        const oldEntries = await LedgerEntry.find({ bill: bill._id });
+        // Rebuild initial booking ledger entries (only Item, Input Tax, and Total Liability)
+        const initialBillRegex = new RegExp(`^Bill ${bill.billNumber} - `);
+        const oldEntries = await LedgerEntry.find({
+            bill: bill._id,
+            description: initialBillRegex
+        });
         const oldAccountIds = oldEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
 
-        await LedgerEntry.deleteMany({ bill: bill._id });
+        // Delete ONLY initial booking ledger entries (never delete payment entries or advance set-offs)
+        await LedgerEntry.deleteMany({
+            bill: bill._id,
+            description: initialBillRegex
+        });
 
         // Post fresh ledger entries
         await postBillToLedger(bill, userData);
 
-        const newEntries = await LedgerEntry.find({ bill: bill._id });
+        // Ensure any payments on this bill have their settlement DEBIT entry to Accounts Payable intact
+        const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+        const apAccount = await AccountingCode.findOne({ code: "2.1.01", isDeleted: { $ne: true } })
+            || await AccountingCode.findOne({ name: /Accounts Payable/i, isDeleted: { $ne: true } });
+
+        if (apAccount && bill.payments && bill.payments.length > 0) {
+            for (const pay of bill.payments) {
+                const existingPayEntry = await LedgerEntry.findOne({
+                    bill: bill._id,
+                    type: "DEBIT",
+                    amount: pay.amount,
+                    accountingCode: apAccount._id
+                });
+
+                if (!existingPayEntry) {
+                    const desc = (pay.note && pay.note.includes('Reassigned'))
+                        ? `Bill Payment Applied (Debit Accounts Payable) - ${pay.note} (Bill: ${bill.billNumber})`
+                        : `Bill Payment Applied (Debit Accounts Payable) - (Bill: ${bill.billNumber})`;
+
+                    await LedgerService.create({
+                        branch: bill.branch,
+                        accountingCode: apAccount._id,
+                        type: "DEBIT",
+                        amount: pay.amount,
+                        description: desc,
+                        entryDate: pay.paidAt || new Date(),
+                        bill: bill._id,
+                        supplier: bill.supplier,
+                        createdBy: userData.id || userData._id || "6a2290019fa01283dd165204",
+                        creatorRole: (userData.role || "ADMIN").toUpperCase()
+                    });
+                    console.log(`[BillService] Verified/restored DEBIT Accounts Payable entry of $${pay.amount} for bill ${bill.billNumber}`);
+                }
+            }
+        }
+
+        const newEntries = await LedgerEntry.find({
+            bill: bill._id,
+            description: initialBillRegex
+        });
         const newAccountIds = newEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
 
-        const allAffectedAccounts = [...new Set([...oldAccountIds, ...newAccountIds])];
+        const allAffectedAccounts = [...new Set([...oldAccountIds, ...newAccountIds, apAccount ? apAccount._id.toString() : null].filter(Boolean))];
         for (const codeId of allAffectedAccounts) {
             await syncAccountingCodeBalances(codeId);
         }

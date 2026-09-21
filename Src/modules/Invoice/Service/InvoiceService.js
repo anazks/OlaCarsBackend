@@ -12,6 +12,7 @@ const LedgerService = require("../../Ledger/Service/LedgerService");
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 const { Driver } = require("../../Driver/Model/DriverModel");
 const Tax = require("../../Tax/Model/TaxModel");
+const AppError = require("../../../shared/utils/AppError");
 
 const getNextInvoiceNumberVal = async () => {
     const lastInvoice = await Invoice.findOne({
@@ -1895,5 +1896,487 @@ exports.recalculateInvoicesForTax = async (taxId, newRate) => {
             }
         }
     }
+};
+
+exports.deleteInvoice = async (invoiceId, options = {}, userData = {}) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice) throw new AppError("Invoice not found", 404);
+
+    const amountPaid = Number(invoice.amountPaid) || 0;
+    const hasPayments = (invoice.payments && invoice.payments.length > 0) || amountPaid > 0.009;
+
+    if (hasPayments) {
+        const customerId = invoice.customer ? (invoice.customer._id || invoice.customer) : null;
+        let otherOpenInvoices = [];
+        if (customerId) {
+            otherOpenInvoices = await Invoice.find({
+                customer: customerId,
+                status: { $in: ["PENDING", "PARTIAL", "OVERDUE"] },
+                _id: { $nin: [invoice._id, invoiceId, String(invoice._id)] },
+                isDeleted: { $ne: true }
+            }).select("invoiceNumber totalAmountDue amountPaid balance status invoiceDate weekLabel").lean();
+
+            // Explicit in-memory safeguard to ensure the invoice being deleted is NEVER included
+            otherOpenInvoices = otherOpenInvoices.filter(inv =>
+                inv._id.toString() !== invoice._id.toString() &&
+                inv._id.toString() !== invoiceId.toString() &&
+                inv.invoiceNumber !== invoice.invoiceNumber
+            );
+        }
+
+        const { paymentAction, targetInvoiceId } = options;
+
+        if (!paymentAction) {
+            const error = new AppError(
+                "Cannot delete this invoice because payments or set-offs have already been applied. Please specify a paymentAction.",
+                400
+            );
+            error.requiresPaymentAction = true;
+            error.amountPaid = amountPaid;
+            error.hasOtherOpenInvoices = otherOpenInvoices.length > 0;
+            error.otherOpenInvoices = otherOpenInvoices;
+            throw error;
+        }
+
+        if (paymentAction === "REASSIGN_TO_INVOICE") {
+            if (otherOpenInvoices.length === 0) {
+                throw new AppError(
+                    "This customer has no other open or partial invoices. 'Convert to Customer Advance' is the only available option.",
+                    400
+                );
+            }
+            if (!targetInvoiceId) {
+                throw new AppError("A targetInvoiceId must be selected when reassigning payment.", 400);
+            }
+            if (targetInvoiceId.toString() === invoice._id.toString() || targetInvoiceId.toString() === invoiceId.toString()) {
+                throw new AppError("Target invoice cannot be the same invoice that is being deleted.", 400);
+            }
+
+            const targetInvoice = await Invoice.findById(targetInvoiceId);
+            if (!targetInvoice) throw new AppError("Selected target invoice not found.", 404);
+            if (targetInvoice.customer?.toString() !== customerId?.toString()) {
+                throw new AppError("Target invoice must belong to the same customer.", 400);
+            }
+
+            // Transfer amountPaid from deleted invoice to targetInvoice
+            const transferable = amountPaid;
+            const newTargetPaid = Math.round(((targetInvoice.amountPaid || 0) + transferable) * 100) / 100;
+            const newTargetBal = Math.max(0, Math.round((targetInvoice.totalAmountDue - newTargetPaid) * 100) / 100);
+            const newTargetStatus = newTargetBal <= 0.009 ? "PAID" : "PARTIAL";
+
+            targetInvoice.amountPaid = newTargetPaid;
+            targetInvoice.balance = newTargetBal;
+            targetInvoice.status = newTargetStatus;
+            if (newTargetStatus === "PAID" && !targetInvoice.paidAt) {
+                targetInvoice.paidAt = new Date();
+            }
+
+            // Find linked PaymentReceived or payment details from the deleted invoice
+            const linkedPR = await PaymentReceived.findOne({
+                "invoices.invoiceId": invoice._id
+            }).lean();
+            const origPayment = (invoice.payments && invoice.payments.length > 0) ? invoice.payments[0] : null;
+            const actualPRNumber = linkedPR ? linkedPR.paymentNumber : (origPayment?.transactionId || origPayment?.referenceNumber || null);
+
+            // Add payment record into targetInvoice payments array
+            const reassignPaymentRecord = {
+                amount: transferable,
+                paidAt: new Date(),
+                paymentMethod: "Prepayment Credit",
+                transactionId: actualPRNumber || undefined,
+                referenceNumber: origPayment?.referenceNumber || undefined,
+                paymentReceivedId: linkedPR ? linkedPR._id : (origPayment?.paymentReceivedId || undefined),
+                note: `Reallocated upon deletion of invoice ${invoice.invoiceNumber}${actualPRNumber ? ` (PR: ${actualPRNumber})` : ''}`
+            };
+            if (!targetInvoice.payments) targetInvoice.payments = [];
+            targetInvoice.payments.push(reassignPaymentRecord);
+            await targetInvoice.save();
+
+            // Propagate in PaymentReceived records: update invoice links
+            try {
+                await PaymentReceived.updateMany(
+                    { "invoices.invoiceId": invoice._id },
+                    { 
+                        $set: { 
+                            "invoices.$[elem].invoiceId": targetInvoice._id,
+                            "invoices.$[elem].invoiceNumber": targetInvoice.invoiceNumber
+                        } 
+                    },
+                    { arrayFilters: [{ "elem.invoiceId": invoice._id }] }
+                );
+            } catch (prErr) {
+                console.warn("[InvoiceService] Could not update PaymentReceived invoice links:", prErr.message);
+            }
+
+            // Propagate in LedgerEntry records: update invoice links on payment transactions
+            try {
+                await LedgerEntry.updateMany(
+                    { "invoices.invoiceId": invoice._id },
+                    { 
+                        $set: { 
+                            "invoices.$[elem].invoiceId": targetInvoice._id,
+                            "invoices.$[elem].invoiceNumber": targetInvoice.invoiceNumber
+                        } 
+                    },
+                    { arrayFilters: [{ "elem.invoiceId": invoice._id }] }
+                );
+            } catch (leErr) {
+                console.warn("[InvoiceService] Could not update LedgerEntry invoice links:", leErr.message);
+            }
+
+            // Create CREDIT Accounts Receivable (1.1.03) ledger entry for targetInvoice
+            const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
+                || await AccountingCode.findOne({ code: "1100" })
+                || await AccountingCode.findOne({ code: "1200" });
+
+            if (arAccount) {
+                const branchId = targetInvoice.branch || (targetInvoice.customer ? targetInvoice.customer.branch : undefined) || invoice.branch;
+                const customerName = (targetInvoice.customer && targetInvoice.customer.name) ? targetInvoice.customer.name : "Customer";
+
+                await LedgerService.create({
+                    branch: branchId,
+                    accountingCode: arAccount._id,
+                    type: "CREDIT",
+                    amount: transferable,
+                    description: `Payment Applied (Credit Accounts Receivable) - Reallocated from deleted Invoice ${invoice.invoiceNumber} - Customer: ${customerName} (INV: ${targetInvoice.invoiceNumber}).`,
+                    entryDate: new Date(),
+                    contact: targetInvoice.customer ? (targetInvoice.customer._id || targetInvoice.customer) : undefined,
+                    invoice: targetInvoice._id,
+                    createdBy: userData.id || userData._id || "6a2290019fa01283dd165204",
+                    creatorRole: (userData.role || "ADMIN").toUpperCase()
+                });
+
+                await syncAccountingCodeBalances(arAccount._id);
+                console.log(`[InvoiceService] Created CREDIT Accounts Receivable ledger entry of $${transferable} on target invoice ${targetInvoice.invoiceNumber}`);
+            }
+
+            console.log(`[InvoiceService] Successfully reassigned $${transferable} from invoice ${invoice.invoiceNumber} to ${targetInvoice.invoiceNumber}`);
+
+        } else if (paymentAction === "CONVERT_TO_CUSTOMER_ADVANCE") {
+            // Find Accounts Receivable (1.1.03) and Customer Advance (2.1.02)
+            const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
+                || await AccountingCode.findOne({ code: "1100" })
+                || await AccountingCode.findOne({ code: "1200" });
+            const advanceAccount = await AccountingCode.findOne({ code: "2.1.02" })
+                || await AccountingCode.findOne({ name: /Advance Received/i })
+                || await AccountingCode.findOne({ name: /Customer Advance/i });
+
+            if (!arAccount || !advanceAccount) {
+                console.warn("[InvoiceService] Could not find AR (1.1.03) or Customer Advance (2.1.02) account for reclassification.");
+            } else {
+                const branchId = invoice.branch || (invoice.customer ? invoice.customer.branch : undefined);
+                const customerName = (invoice.customer && invoice.customer.name) ? invoice.customer.name : "Customer";
+
+                // Leg 1: DEBIT Accounts Receivable (reversing the credit that was applied when this invoice was paid)
+                await LedgerService.create({
+                    branch: branchId,
+                    accountingCode: arAccount._id,
+                    type: "DEBIT",
+                    amount: amountPaid,
+                    description: `Reclassification on deletion of ${invoice.invoiceNumber}: Debit Accounts Receivable (cancel invoice settlement) for ${customerName}.`,
+                    entryDate: new Date(),
+                    createdBy: userData.id || userData._id,
+                    creatorRole: userData.role
+                });
+
+                // Leg 2: CREDIT Advance Received From Customer (2.1.02) (Liability increases)
+                await LedgerService.create({
+                    branch: branchId,
+                    accountingCode: advanceAccount._id,
+                    type: "CREDIT",
+                    amount: amountPaid,
+                    description: `Reclassification on deletion of ${invoice.invoiceNumber}: Credit Customer Advance for ${customerName} (Payment converted to Advance).`,
+                    entryDate: new Date(),
+                    createdBy: userData.id || userData._id,
+                    creatorRole: userData.role
+                });
+
+                await syncAccountingCodeBalances(arAccount._id);
+                await syncAccountingCodeBalances(advanceAccount._id);
+            }
+
+            // Remove this invoice from PaymentReceived invoices array so the payment becomes unapplied advance
+            try {
+                await PaymentReceived.updateMany(
+                    { "invoices.invoiceId": invoice._id },
+                    { $pull: { invoices: { invoiceId: invoice._id } } }
+                );
+            } catch (prErr) {
+                console.warn("[InvoiceService] Could not unlink invoice from PaymentReceived:", prErr.message);
+            }
+
+            console.log(`[InvoiceService] Converted $${amountPaid} from deleted invoice ${invoice.invoiceNumber} to Customer Advance.`);
+        } else {
+            throw new AppError(`Invalid paymentAction "${paymentAction}". Must be 'CONVERT_TO_CUSTOMER_ADVANCE' or 'REASSIGN_TO_INVOICE'.`, 400);
+        }
+    }
+
+    // Capture accounting codes of existing initial booking ledger entries to resync them
+    const oldEntries = await LedgerEntry.find({
+        $or: [
+            { invoice: invoice._id, description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`) },
+            { description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`) }
+        ]
+    });
+    const affectedAccountIds = oldEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
+
+    // Delete ONLY direct initial booking ledger entries for this invoice
+    await LedgerEntry.deleteMany({
+        $or: [
+            { invoice: invoice._id, description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`) },
+            { description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`) }
+        ]
+    });
+
+    // Hard-delete the invoice document permanently
+    await deleteInvoiceService(invoice._id);
+
+    // Resync COA balances
+    const uniqueAccounts = [...new Set(affectedAccountIds)];
+    for (const accId of uniqueAccounts) {
+        await syncAccountingCodeBalances(accId);
+    }
+
+    console.log(`[InvoiceService] Permanently deleted invoice ${invoice.invoiceNumber} and resynced accounting codes.`);
+    return { success: true, message: `Invoice ${invoice.invoiceNumber} deleted permanently.` };
+};
+
+exports.updateInvoice = async (invoiceId, updateData = {}, userData = {}) => {
+    const { Invoice } = require("../Model/InvoiceModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    const invoice = await Invoice.findById(invoiceId);
+    if (!invoice) throw new AppError("Invoice not found", 404);
+
+    const extractId = (val) => (val && val._id ? val._id : val);
+
+    // 1. Check Invoice Number update
+    if (updateData.invoiceNumber && updateData.invoiceNumber.trim() !== invoice.invoiceNumber) {
+        const newInvoiceNumber = updateData.invoiceNumber.trim();
+        const existing = await Invoice.findOne({
+            invoiceNumber: newInvoiceNumber,
+            _id: { $ne: invoice._id }
+        });
+        if (existing) {
+            throw new AppError(`Invoice number "${newInvoiceNumber}" already exists.`, 400);
+        }
+        invoice.invoiceNumber = newInvoiceNumber;
+
+        // Propagate to linked PaymentReceived
+        try {
+            await PaymentReceived.updateMany(
+                { "invoices.invoiceId": invoice._id },
+                { $set: { "invoices.$[elem].invoiceNumber": newInvoiceNumber } },
+                { arrayFilters: [{ "elem.invoiceId": invoice._id }] }
+            );
+        } catch (prErr) {
+            console.warn("[InvoiceService] Could not sync new invoiceNumber to PaymentReceived:", prErr.message);
+        }
+    }
+
+    // 2. Dates, WeekLabel, Customer, Branch, Notes
+    if (updateData.customer) invoice.customer = extractId(updateData.customer);
+    if (updateData.branch) invoice.branch = extractId(updateData.branch);
+    if (updateData.invoiceDate) invoice.invoiceDate = new Date(updateData.invoiceDate);
+    if (updateData.dueDate) invoice.dueDate = new Date(updateData.dueDate);
+    if (updateData.notes !== undefined) invoice.notes = updateData.notes;
+    if (updateData.weekLabel !== undefined) invoice.weekLabel = updateData.weekLabel;
+    if (updateData.weekNumber !== undefined) invoice.weekNumber = Number(updateData.weekNumber);
+    if (updateData.startDate) {
+        if (!invoice.dateRange) invoice.dateRange = {};
+        invoice.dateRange.startDate = new Date(updateData.startDate);
+    }
+    if (updateData.endDate) {
+        if (!invoice.dateRange) invoice.dateRange = {};
+        invoice.dateRange.endDate = new Date(updateData.endDate);
+    }
+
+    // 3. Line Items / Base Amount / Taxes
+    const isManual = invoice.invoiceType === 'MANUAL' || Array.isArray(updateData.lineItems);
+    
+    if (isManual && Array.isArray(updateData.lineItems) && updateData.lineItems.length > 0) {
+        invoice.lineItems = updateData.lineItems.map(item => {
+            const resolvedName = (item.name || item.itemName || item.description || 'Item').trim() || 'Item';
+            return {
+                name: resolvedName,
+                itemName: resolvedName,
+                description: item.description || '',
+                qty: Number(item.qty || item.quantity || 1),
+                unitPrice: Number(item.unitPrice || 0),
+                total: Math.round(((Number(item.qty || item.quantity || 1)) * (Number(item.unitPrice || 0))) * 100) / 100,
+                taxRate: Number(item.taxRate || 0),
+                taxAmount: Number(item.taxAmount || 0)
+            };
+        });
+
+        const subtotal = invoice.lineItems.reduce((sum, it) => sum + (it.total || 0), 0);
+        invoice.subtotal = subtotal;
+
+        let taxAmount = 0;
+        let taxRate = Number(updateData.taxRate || invoice.taxRate || 0);
+        if (updateData.tax) invoice.tax = extractId(updateData.tax);
+
+        const isTaxInclusive = updateData.isTaxInclusive !== undefined ? !!updateData.isTaxInclusive : !!invoice.isTaxInclusive;
+        invoice.isTaxInclusive = isTaxInclusive;
+
+        let totalAmountDue = subtotal;
+        if (taxRate > 0) {
+            if (isTaxInclusive) {
+                taxAmount = Math.round((subtotal * (taxRate / (100 + taxRate))) * 100) / 100;
+                totalAmountDue = subtotal;
+                invoice.baseAmount = Math.round((subtotal - taxAmount) * 100) / 100;
+            } else {
+                taxAmount = Math.round((subtotal * (taxRate / 100)) * 100) / 100;
+                invoice.baseAmount = subtotal;
+                totalAmountDue = Math.round((subtotal + taxAmount) * 100) / 100;
+            }
+        } else {
+            invoice.baseAmount = subtotal;
+        }
+
+        invoice.taxRate = taxRate;
+        invoice.taxAmount = taxAmount;
+        invoice.totalAmountDue = totalAmountDue;
+
+    } else if (updateData.baseAmount !== undefined || updateData.taxRate !== undefined || updateData.taxAmount !== undefined || updateData.totalAmountDue !== undefined) {
+        // Rental / Standard Invoice amounts update
+        let baseAmount = updateData.baseAmount !== undefined ? Number(updateData.baseAmount) : (invoice.baseAmount || 0);
+        let taxRate = updateData.taxRate !== undefined ? Number(updateData.taxRate) : (invoice.taxRate || 0);
+        let isTaxInclusive = updateData.isTaxInclusive !== undefined ? !!updateData.isTaxInclusive : !!invoice.isTaxInclusive;
+        invoice.isTaxInclusive = isTaxInclusive;
+
+        let taxAmount = 0;
+        let totalAmountDue = baseAmount;
+
+        if (updateData.taxAmount !== undefined) {
+            taxAmount = Number(updateData.taxAmount);
+            totalAmountDue = updateData.totalAmountDue !== undefined ? Number(updateData.totalAmountDue) : (baseAmount + taxAmount);
+        } else if (taxRate > 0) {
+            if (isTaxInclusive) {
+                totalAmountDue = baseAmount;
+                taxAmount = Math.round((baseAmount * (taxRate / (100 + taxRate))) * 100) / 100;
+                baseAmount = Math.round((baseAmount - taxAmount) * 100) / 100;
+            } else {
+                taxAmount = Math.round((baseAmount * (taxRate / 100)) * 100) / 100;
+                totalAmountDue = Math.round((baseAmount + taxAmount) * 100) / 100;
+            }
+        }
+
+        const carryOver = Number(invoice.carryOverAmount) || 0;
+        totalAmountDue = Math.round((totalAmountDue + carryOver) * 100) / 100;
+
+        invoice.baseAmount = baseAmount;
+        invoice.taxRate = taxRate;
+        invoice.taxAmount = taxAmount;
+        invoice.totalAmountDue = totalAmountDue;
+    }
+
+    // 4. Boundary check: totalAmountDue vs amountPaid
+    const amountPaid = Number(invoice.amountPaid) || 0;
+    if (invoice.totalAmountDue < amountPaid) {
+        throw new AppError(
+            `New total amount due ($${invoice.totalAmountDue}) cannot be less than already paid amount ($${amountPaid}).`,
+            400
+        );
+    }
+
+    // 5. Recalculate balance and status
+    const newBalance = Math.max(0, Math.round((invoice.totalAmountDue - amountPaid) * 100) / 100);
+    invoice.balance = newBalance;
+
+    if (newBalance <= 0.009 && invoice.totalAmountDue > 0) {
+        invoice.status = "PAID";
+        if (!invoice.paidAt) invoice.paidAt = new Date();
+    } else if (amountPaid > 0) {
+        invoice.status = "PARTIAL";
+    } else {
+        if (invoice.status === "PAID" || invoice.status === "PARTIAL") {
+            invoice.status = "PENDING";
+        }
+    }
+
+    await invoice.save();
+
+    // 6. Rebuild initial booking ledger entries & sync COA
+    try {
+        const oldEntries = await LedgerEntry.find({
+            invoice: invoice._id,
+            description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+        });
+        const oldAccountIds = oldEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
+
+        // Delete ONLY previous initial invoice creation booking entries (never delete payment entries)
+        await LedgerEntry.deleteMany({
+            invoice: invoice._id,
+            description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+        });
+
+        // Re-post initial booking ledger entries
+        await LedgerService.generateInvoiceLedgerEntries(invoice);
+
+        // Ensure any payments on this invoice have their settlement CREDIT entry to Accounts Receivable intact
+        const arAccount = await AccountingCode.findOne({ code: "1.1.03" })
+            || await AccountingCode.findOne({ code: "1100" })
+            || await AccountingCode.findOne({ code: "1200" });
+
+        if (arAccount && invoice.payments && invoice.payments.length > 0) {
+            for (const pay of invoice.payments) {
+                const existingPayEntry = await LedgerEntry.findOne({
+                    invoice: invoice._id,
+                    type: "CREDIT",
+                    amount: pay.amount,
+                    accountingCode: arAccount._id
+                });
+
+                if (!existingPayEntry) {
+                    const branchId = invoice.branch || (invoice.customer ? invoice.customer.branch : undefined);
+                    const customerName = (invoice.customer && invoice.customer.name) ? invoice.customer.name : "Customer";
+                    const desc = (pay.note && pay.note.includes('Reallocated'))
+                        ? `Payment Applied (Credit Accounts Receivable) - ${pay.note} - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`
+                        : `Payment Applied (Credit Accounts Receivable) - Customer: ${customerName} (INV: ${invoice.invoiceNumber}).`;
+
+                    await LedgerService.create({
+                        branch: branchId,
+                        accountingCode: arAccount._id,
+                        type: "CREDIT",
+                        amount: pay.amount,
+                        description: desc,
+                        entryDate: pay.paidAt || new Date(),
+                        contact: invoice.customer ? (invoice.customer._id || invoice.customer) : undefined,
+                        invoice: invoice._id,
+                        createdBy: userData.id || userData._id || "6a2290019fa01283dd165204",
+                        creatorRole: (userData.role || "ADMIN").toUpperCase()
+                    });
+                    console.log(`[InvoiceService] Verified/restored CREDIT Accounts Receivable entry of $${pay.amount} for invoice ${invoice.invoiceNumber}`);
+                }
+            }
+        }
+
+        const newEntries = await LedgerEntry.find({
+            invoice: invoice._id,
+            description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+        });
+        const newAccountIds = newEntries.map(e => e.accountingCode ? e.accountingCode.toString() : null).filter(Boolean);
+
+        const allAffected = [...new Set([...oldAccountIds, ...newAccountIds, arAccount ? arAccount._id.toString() : null].filter(Boolean))];
+        for (const accId of allAffected) {
+            await syncAccountingCodeBalances(accId);
+        }
+    } catch (ledgerErr) {
+        console.error("[InvoiceService] Error regenerating ledger entries on invoice update:", ledgerErr);
+    }
+
+    return invoice;
 };
 

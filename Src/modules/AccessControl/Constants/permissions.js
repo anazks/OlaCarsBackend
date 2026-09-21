@@ -60,6 +60,12 @@ const PERMISSIONS = {
   BILL_EDIT: "BILL_EDIT",
   BILL_DELETE: "BILL_DELETE",
 
+  // ─── Invoice Management ─────────────────────────────────────
+  INVOICE_VIEW: "INVOICE_VIEW",
+  INVOICE_CREATE: "INVOICE_CREATE",
+  INVOICE_EDIT: "INVOICE_EDIT",
+  INVOICE_DELETE: "INVOICE_DELETE",
+
   // ─── Payment & Finance ─────────────────────────────────────
   PAYMENT_VIEW: "PAYMENT_VIEW",
   PAYMENT_CREATE: "PAYMENT_CREATE",

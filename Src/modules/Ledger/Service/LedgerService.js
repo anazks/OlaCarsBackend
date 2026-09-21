@@ -309,12 +309,13 @@ exports.generateInvoiceLedgerEntries = async (invoice) => {
         const { Driver } = require("../../Driver/Model/DriverModel");
         const mongoose = require("mongoose");
 
-        // Prevent double booking/duplicate ledger entries for the same invoice
+        // Prevent double booking/duplicate initial creation ledger entries for the same invoice
         const existingEntries = await LedgerEntry.find({
-            description: new RegExp(`\\(INV:\\s*${invoice.invoiceNumber}\\)`)
+            invoice: invoice._id,
+            description: new RegExp(`Invoice Created.*\\(INV:\\s*${invoice.invoiceNumber}\\)`)
         });
         if (existingEntries.length > 0) {
-            console.log(`[LedgerService] Ledger entries for invoice ${invoice.invoiceNumber} already exist (${existingEntries.length} found). Skipping duplication.`);
+            console.log(`[LedgerService] Initial creation ledger entries for invoice ${invoice.invoiceNumber} already exist (${existingEntries.length} found). Skipping duplication.`);
             return;
         }
 
