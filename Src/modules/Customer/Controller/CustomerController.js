@@ -71,7 +71,14 @@ exports.getAllCustomers = async (req, res) => {
 
         let docsQuery = Customer.find(query)
             .populate('branch')
-            .populate('driver', 'driverId status')
+            .populate({
+                path: 'driver',
+                select: 'driverId status currentVehicle',
+                populate: {
+                    path: 'currentVehicle',
+                    select: 'legalDocs basicDetails plateNumber'
+                }
+            })
             .sort(sort);
 
         let pageInt = 1;
