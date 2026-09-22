@@ -426,7 +426,8 @@ const assignCarToDriver = async (req, res, next) => {
             notes,
             agreementVersion,
             generatedS3Key,
-            signedS3Key
+            signedS3Key,
+            activationDate
         } = req.body;
 
         if (durationMonths === undefined || monthlyRent === undefined) {
@@ -479,25 +480,37 @@ const assignCarToDriver = async (req, res, next) => {
                     status: "ACTIVE — RENTED",
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned to driver ${driver.personalInfo.fullName} (${driverId}). Lease: ${durationMonths} months @ $${monthlyRent}/mo. Deposit: $${depositAmount}.`
+                    notes: `Assigned to driver ${driver.personalInfo?.fullName || driverId} (${driverId}). Lease: ${durationMonths} months @ $${monthlyRent}/mo. Deposit: $${depositAmount}.`
                 }
             }
         }, session);
 
-        // 6. Update Driver — link vehicle + add deposit if applicable
+        // 6. Update Driver — link vehicle + set ACTIVE status and activationDate
+        const actDate = activationDate ? new Date(activationDate) : new Date();
         const driverUpdate = {
             currentVehicle: vehicleId,
+            status: "ACTIVE",
+            activationDate: actDate,
             $push: {
                 statusHistory: {
-                    status: driver.status,
+                    status: "ACTIVE",
                     changedBy: req.user.id,
                     changedByRole: req.user.role,
-                    notes: `Assigned vehicle ${vehicle.basicDetails.make} ${vehicle.basicDetails.model} (${vehicle.basicDetails.vin}). Lease: ${durationMonths} months.`
+                    timestamp: actDate,
+                    notes: `Activated and assigned vehicle ${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''} (${vehicle.basicDetails?.vin || ''}). Lease: ${durationMonths} months.`
                 }
             }
         };
 
         await updateDriverService(driverId, driverUpdate, session);
+
+        // Sync linked Customer status to ACTIVE
+        const Customer = require("../../Customer/Model/CustomerModel");
+        await Customer.findOneAndUpdate(
+            { driver: driverId },
+            { status: "ACTIVE" },
+            { session }
+        );
 
         // 7. If deposit exists, add it as an additional payment and create a separate invoice for it
         if (depositAmount > 0) {
@@ -563,7 +576,8 @@ const assignCarToDriver = async (req, res, next) => {
             weeklyRent: req.body.weeklyRent,
             durationMonths: durationMonths,
             durationWeeks: req.body.durationWeeks,
-            frequency: req.body.frequency || 'MONTHLY'
+            frequency: req.body.frequency || 'MONTHLY',
+            activationDate: activationDate
         }, session);
 
         await session.commitTransaction();

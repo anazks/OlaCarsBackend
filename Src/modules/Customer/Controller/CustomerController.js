@@ -142,10 +142,45 @@ exports.updateCustomer = async (req, res) => {
             { $or: queryOr, isDeleted: false },
             req.body,
             { new: true }
-        ).populate('branch');
+        );
 
         if (!updatedDoc) return res.status(404).json({ success: false, message: 'Customer not found' });
-        res.status(200).json({ success: true, data: updatedDoc });
+
+        // If name was updated, sync to the connected driver document
+        if (req.body.name) {
+            try {
+                const { Driver } = require('../../Driver/Model/DriverModel');
+                const trimmedName = String(req.body.name).trim();
+                if (updatedDoc.driver) {
+                    const driverId = updatedDoc.driver._id || updatedDoc.driver;
+                    await Driver.findByIdAndUpdate(driverId, {
+                        $set: { "personalInfo.fullName": trimmedName }
+                    });
+                } else if (updatedDoc.email) {
+                    const matchedDriver = await Driver.findOne({ "personalInfo.email": updatedDoc.email.toLowerCase(), isDeleted: false });
+                    if (matchedDriver) {
+                        await Driver.findByIdAndUpdate(matchedDriver._id, {
+                            $set: { "personalInfo.fullName": trimmedName }
+                        });
+                        await Customer.findByIdAndUpdate(updatedDoc._id, { $set: { driver: matchedDriver._id } });
+                    }
+                }
+            } catch (driverSyncErr) {
+                console.error(`[updateCustomer] Failed to sync name to Driver:`, driverSyncErr);
+            }
+        }
+
+        const populatedDoc = await Customer.findById(updatedDoc._id)
+            .populate('branch')
+            .populate({
+                path: 'driver',
+                populate: {
+                    path: 'currentVehicle',
+                    populate: { path: 'fleet' }
+                }
+            });
+
+        res.status(200).json({ success: true, data: populatedDoc });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

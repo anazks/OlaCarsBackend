@@ -74,7 +74,32 @@ exports.updateDriverService = async (id, updateData, session = null) => {
     const options = { returnDocument: "after", runValidators: true };
     if (session) options.session = session;
 
-    return await Driver.findByIdAndUpdate(id, updateOps, options);
+    const result = await Driver.findByIdAndUpdate(id, updateOps, options);
+
+    // If personalInfo.fullName was updated, sync with the connected Customer document
+    const newFullName = flatFields["personalInfo.fullName"] || (updateOps.$set && updateOps.$set["personalInfo.fullName"]);
+    if (newFullName && result) {
+        try {
+            const Customer = require("../../Customer/Model/CustomerModel");
+            const trimmedName = String(newFullName).trim();
+            const syncResult = await Customer.updateMany(
+                { driver: result._id, isDeleted: false },
+                { $set: { name: trimmedName } },
+                session ? { session } : {}
+            );
+            if (syncResult.matchedCount === 0 && result.personalInfo?.email) {
+                await Customer.updateMany(
+                    { email: result.personalInfo.email.toLowerCase(), isDeleted: false },
+                    { $set: { name: trimmedName, driver: result._id } },
+                    session ? { session } : {}
+                );
+            }
+        } catch (syncErr) {
+            console.error(`[updateDriverService] Failed to sync name to Customer for Driver ${id}:`, syncErr);
+        }
+    }
+
+    return result;
 };
 
 /**

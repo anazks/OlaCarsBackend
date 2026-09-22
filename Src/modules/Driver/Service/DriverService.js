@@ -411,7 +411,7 @@ exports.rolloverOverdueRent = async (driverId) => {
  * - Monthly: Due on the 1st of every month, starting the month after assignment.
  * - Weekly: Due on every Wednesday.
  */
-exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY' }, session = null) => {
+exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY', activationDate }, session = null) => {
     // Load existing rent tracking history to preserve it during re-contracting
     const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
     const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
@@ -423,7 +423,7 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
     }
 
     const installments = [];
-    const assignmentDate = new Date();
+    const assignmentDate = activationDate ? new Date(activationDate) : new Date();
     assignmentDate.setHours(0, 0, 0, 0);
 
     const isWeekly = frequency.toUpperCase() === 'WEEKLY';
