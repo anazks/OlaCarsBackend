@@ -559,7 +559,7 @@ exports.createBill = async (billData, userData) => {
     return bill;
 };
 
-exports.bulkUploadBills = async (rows, actor, userBranchId) => {
+exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
         throw new AppError("No data rows provided.", 400);
     }
@@ -670,11 +670,42 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         billGroups.get(key).push({ row, originalIndex: rowCounter });
     }
 
+    const totalBills = billGroups.size;
+    const startTime = Date.now();
+    let lastProgressTime = 0;
+    let processedBills = 0;
+
+    const reportProgress = () => {
+        if (typeof onProgress === 'function') {
+            const pct = Math.min(99, Math.round((processedBills / (totalBills || 1)) * 100));
+            const elapsedMs = Date.now() - startTime;
+            const avgMsPerBill = elapsedMs / (processedBills || 1);
+            const remainingCount = totalBills - processedBills;
+            const estimatedSecs = Math.max(0, Math.ceil((remainingCount * avgMsPerBill) / 1000));
+            const timeStr = estimatedSecs >= 60 ? `${Math.ceil(estimatedSecs / 60)} min` : `${estimatedSecs}s`;
+            const statusMessage = `Processing ${processedBills} of ${totalBills} bills (${pct}%). ~${timeStr} remaining.`;
+
+            onProgress({
+                type: 'progress',
+                processedCount: processedBills,
+                totalCount: totalBills,
+                percentage: pct,
+                insertedCount: createdBills.length,
+                updatedCount: updatedBills.length,
+                skippedCount: skipped.length,
+                errorCount: errors.length,
+                estimatedSecondsRemaining: estimatedSecs,
+                statusMessage
+            });
+        }
+    };
+
     // 4. Process each bill group
     for (const [key, grouped] of billGroups.entries()) {
-        const headerRowObj = grouped[0];
-        const headerRow = headerRowObj.row;
-        const origIdx = headerRowObj.originalIndex;
+        try {
+            const headerRowObj = grouped[0];
+            const headerRow = headerRowObj.row;
+            const origIdx = headerRowObj.originalIndex;
 
         // --- Resolve Supplier ---
         const vendorName = getRowVal(headerRow, ["Vendor Name", "vendorName", "supplierName", "supplier"]);
@@ -1104,9 +1135,17 @@ exports.bulkUploadBills = async (rows, actor, userBranchId) => {
         } catch (err) {
             errors.push(`Bill "${key}" (Row ${origIdx}): Failed to create - ${err.message}`);
         }
+        } finally {
+            processedBills++;
+            if (processedBills === 1 || processedBills === totalBills || processedBills % 5 === 0 || Date.now() - lastProgressTime >= 1000) {
+                lastProgressTime = Date.now();
+                reportProgress();
+            }
+        }
     }
 
     return {
+        totalBills,
         successCount: createdBills.length,
         updatedCount: updatedBills.length,
         errorCount: errors.length,
