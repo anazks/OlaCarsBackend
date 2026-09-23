@@ -100,6 +100,10 @@ exports.bulkUploadBills = async (req, res, next) => {
                             req.query.stream === 'true' || 
                             req.body.stream === true;
 
+        const skipDuplicates = req.body.skipDuplicates !== undefined 
+            ? (req.body.skipDuplicates === true || req.body.skipDuplicates === 'true') 
+            : (req.query.skipDuplicates !== undefined ? (req.query.skipDuplicates === true || req.query.skipDuplicates === 'true') : true);
+
         if (isStreaming) {
             req.setTimeout(900000);
             if (res.socket) res.socket.setTimeout(900000);
@@ -118,7 +122,7 @@ exports.bulkUploadBills = async (req, res, next) => {
                 } catch (writeErr) { /* client disconnected */ }
             };
 
-            const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId, onProgress);
+            const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId, onProgress, { skipDuplicates });
 
             try {
                 res.write(JSON.stringify({
@@ -140,7 +144,7 @@ exports.bulkUploadBills = async (req, res, next) => {
             return;
         }
 
-        const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId);
+        const result = await BillService.bulkUploadBills(rows, actor, req.user.branchId, null, { skipDuplicates });
         res.status(200).json({
             success: true,
             data: result

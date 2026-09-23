@@ -559,10 +559,19 @@ exports.createBill = async (billData, userData) => {
     return bill;
 };
 
-exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
+exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress, options = {}) => {
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
         throw new AppError("No data rows provided.", 400);
     }
+
+    const skipDuplicates = options?.skipDuplicates !== false;
+
+    const getItemKey = (name, accId, price) => {
+        const cleanName = (name || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+        const cleanAcc = (accId?._id || accId || '').toString().trim();
+        const cleanPrice = Number(price || 0).toFixed(4);
+        return `${cleanName}|${cleanAcc}|${cleanPrice}`;
+    };
 
     // 1. Pre-load reference collections for fast lookups
     const branchesList = await Branch.find({ isDeleted: false });
@@ -779,6 +788,8 @@ exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
         // --- Build items array ---
         const items = [];
         let calculatedTotal = 0;
+        const seenItemKeys = new Set();
+        let duplicateInFileCount = 0;
 
         for (const itemObj of grouped) {
             const r = itemObj.row;
@@ -842,6 +853,14 @@ exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
                     continue;
                 }
 
+                // Check for duplicate line item within this file/batch for this bill
+                const itemKey = getItemKey(subItemName, accountId, subRate);
+                if (skipDuplicates && seenItemKeys.has(itemKey)) {
+                    duplicateInFileCount++;
+                    continue;
+                }
+                seenItemKeys.add(itemKey);
+
                 items.push({
                     itemName: subItemName,
                     quantity: subQty,
@@ -852,6 +871,10 @@ exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
 
                 calculatedTotal += subQty * subRate;
             }
+        }
+
+        if (duplicateInFileCount > 0) {
+            skipped.push(`Bill "${key}": Skipped ${duplicateInFileCount} duplicate item(s) within upload file.`);
         }
 
         if (items.length === 0) {
@@ -952,8 +975,40 @@ exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
         // If bill already exists in DB, append new items and update totalAmount & balanceDue
         if (existingBill) {
             try {
-                existingBill.items.push(...items);
-                const newTotal = (existingBill.totalAmount || 0) + calculatedTotal;
+                let itemsToAppend = items;
+                let incrementalTotal = calculatedTotal;
+                let existingDuplicatesCount = 0;
+
+                if (skipDuplicates && existingBill.items && existingBill.items.length > 0) {
+                    const existingKeys = new Set(
+                        existingBill.items.map(it => getItemKey(it.itemName, it.accountId, it.unitPrice))
+                    );
+
+                    itemsToAppend = [];
+                    incrementalTotal = 0;
+
+                    for (const it of items) {
+                        const k = getItemKey(it.itemName, it.accountId, it.unitPrice);
+                        if (existingKeys.has(k)) {
+                            existingDuplicatesCount++;
+                        } else {
+                            itemsToAppend.push(it);
+                            incrementalTotal += (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0);
+                        }
+                    }
+
+                    if (itemsToAppend.length === 0) {
+                        skipped.push(`Bill "${key}": All ${items.length} item(s) already exist on this bill in the database. Skipped.`);
+                        continue;
+                    }
+
+                    if (existingDuplicatesCount > 0) {
+                        skipped.push(`Bill "${key}": Skipped ${existingDuplicatesCount} duplicate item(s) already on bill; added ${itemsToAppend.length} new item(s).`);
+                    }
+                }
+
+                existingBill.items.push(...itemsToAppend);
+                const newTotal = (existingBill.totalAmount || 0) + incrementalTotal;
                 const paid = existingBill.amountPaid || 0;
                 const newBalance = Math.max(0, newTotal - paid);
 
@@ -980,15 +1035,15 @@ exports.bulkUploadBills = async (rows, actor, userBranchId, onProgress) => {
                 updatedBills.push(existingBill.billNumber);
 
                 // Post incremental GL entries for newly appended items
-                if (existingBill.status !== 'DRAFT' && calculatedTotal > 0) {
+                if (existingBill.status !== 'DRAFT' && incrementalTotal > 0 && itemsToAppend.length > 0) {
                     try {
                         const tempIncrementalBill = {
                             _id: existingBill._id,
                             billNumber: existingBill.billNumber,
                             branch: existingBill.branch,
                             billDate: existingBill.billDate || new Date(),
-                            totalAmount: calculatedTotal,
-                            items: items,
+                            totalAmount: incrementalTotal,
+                            items: itemsToAppend,
                             purchaseType: existingBill.purchaseType,
                             creditAccountId: existingBill.creditAccountId
                         };
@@ -1704,3 +1759,5 @@ exports.updateBill = async (billId, updateData, userData = {}) => {
     await bill.save();
     return await BillRepo.getBillById(bill._id);
 };
+
+exports.postBillToLedger = postBillToLedger;
