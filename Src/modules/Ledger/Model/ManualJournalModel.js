@@ -9,6 +9,11 @@ const manualJournalSchema = new mongoose.Schema(
             unique: true,
             uppercase: true,
         },
+        referenceNumber: {
+            type: String,
+            trim: true,
+            index: true,
+        },
         description: {
             type: String,
             required: true,

@@ -11,10 +11,52 @@ const {
 const AppError = require("../../../shared/utils/AppError");
 
 /**
+ * Safely parses any date string, Date object, or Excel serial number into a valid JS Date.
+ */
+function normalizeDate(val) {
+    if (!val) return new Date();
+    if (val instanceof Date && !isNaN(val.getTime())) {
+        const adjusted = new Date(val.getTime() + (val.getUTCHours() >= 12 ? 12 * 3600 * 1000 : 0));
+        return new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate(), 0, 0, 0));
+    }
+    const num = Number(val);
+    if (!isNaN(num) && num > 20000 && num < 100000) {
+        const totalDays = Math.floor(num);
+        const jsDate = new Date(Math.round((totalDays - 25569) * 86400 * 1000));
+        if (!isNaN(jsDate.getTime())) {
+            return new Date(Date.UTC(jsDate.getUTCFullYear(), jsDate.getUTCMonth(), jsDate.getUTCDate(), 0, 0, 0));
+        }
+    }
+    const str = String(val).trim();
+    // Check DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+    const dmyMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+    if (dmyMatch) {
+        const d = parseInt(dmyMatch[1], 10);
+        const m = parseInt(dmyMatch[2], 10);
+        const y = parseInt(dmyMatch[3], 10);
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    }
+    // Check YYYY-MM-DD or YYYY/MM/DD
+    const ymdMatch = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+    if (ymdMatch) {
+        const y = parseInt(ymdMatch[1], 10);
+        const m = parseInt(ymdMatch[2], 10);
+        const d = parseInt(ymdMatch[3], 10);
+        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    }
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+        const adjusted = new Date(d.getTime() + (d.getUTCHours() >= 12 ? 12 * 3600 * 1000 : 0));
+        return new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate(), 0, 0, 0));
+    }
+    return new Date();
+}
+
+/**
  * Creates a Manual Journal and its associated Ledger Entries with Auto Set-off & Category Validations.
  */
 exports.createManualJournal = async (data) => {
-    const { lines, autoSetOff = false, contact, contactModel, ...journalData } = data;
+    const { lines, autoSetOff = false, contact, contactModel, skipBalanceSync = false, ...journalData } = data;
 
     if (!lines || !Array.isArray(lines) || lines.length < 2) {
         throw new AppError("A manual journal must contain at least two transaction lines.", 400);
@@ -82,9 +124,13 @@ exports.createManualJournal = async (data) => {
     // 3. Create Journal Header
     const isCustomer = contactModel === "Customer" && contact;
     const isSupplier = contactModel === "Supplier" && contact;
+    const refNum = (data.referenceNumber || data.reference || journalData.referenceNumber || journalData.reference || "").trim();
+    const effectiveDate = normalizeDate(journalData.date);
 
     const journal = await createManualJournalRepo({
         ...journalData,
+        date: effectiveDate,
+        referenceNumber: refNum || undefined,
         totalAmount: journalTotal,
         contact: isCustomer ? contact : (isSupplier ? contact : undefined),
         contactModel: contactModel || undefined,
@@ -118,7 +164,7 @@ exports.createManualJournal = async (data) => {
             description: sanitizedLine.description || journalData.description || "Manual Journal Entry",
             manualJournal: journal._id,
             branch: journalData.branch,
-            entryDate: journalData.date || new Date(),
+            entryDate: effectiveDate,
             createdBy: journalData.createdBy,
             creatorRole: journalData.creatorRole
         });
@@ -246,22 +292,24 @@ exports.createManualJournal = async (data) => {
     }
 
     // 6. Recalculate & Synchronize Accounting Code Balances
-    for (const codeId of affectedCodeIds) {
-        try {
-            await syncAccountingCodeBalances(codeId);
-        } catch (syncErr) {
-            console.error(`[ManualJournalService] Failed to sync balance for account ${codeId}:`, syncErr);
+    if (skipBalanceSync !== true) {
+        for (const codeId of affectedCodeIds) {
+            try {
+                await syncAccountingCodeBalances(codeId);
+            } catch (syncErr) {
+                console.error(`[ManualJournalService] Failed to sync balance for account ${codeId}:`, syncErr);
+            }
         }
     }
 
-    return { journal, ledgerEntries };
+    return { journal, ledgerEntries, affectedCodeIds: Array.from(affectedCodeIds) };
 };
 
 /**
  * Bulk creates manual journals from parsed objects or rows with party resolution,
  * double-entry verification, cross-category validation, and auto set-off.
  */
-exports.bulkUploadManualJournals = async (payload, actor = {}) => {
+exports.bulkUploadManualJournals = async (payload, actor = {}, onProgress = null) => {
     const Branch = require("../../Branch/Model/BranchModel");
     const Customer = require("../../Customer/Model/CustomerModel");
     const Supplier = require("../../Supplier/Model/SupplierModel");
@@ -315,12 +363,25 @@ exports.bulkUploadManualJournals = async (payload, actor = {}) => {
         throw new AppError("No manual journal entries found to process.", 400);
     }
 
-    // Pre-load reference maps for fast O(1) resolution
+    // Send immediate initial progress event so frontend gets real-time feedback right away
+    if (typeof onProgress === "function") {
+        try {
+            onProgress({
+                type: 'progress',
+                current: 0,
+                total: journalsToProcess.length,
+                percentage: 0,
+                statusMessage: `Preparing reference data for ${journalsToProcess.length} journal entries...`
+            });
+        } catch (pErr) {}
+    }
+
+    // Pre-load reference maps with lightweight projection for high performance
     const [allBranches, allCodes, allCustomers, allSuppliers] = await Promise.all([
-        Branch.find({ isDeleted: false }).lean(),
-        AccountingCode.find({ isDeleted: false }).lean(),
-        Customer.find({ isDeleted: false }).populate("driver").lean(),
-        Supplier.find({ isDeleted: false }).lean()
+        Branch.find({ isDeleted: false }, "_id name code").lean(),
+        AccountingCode.find({ isDeleted: false }, "_id code name category").lean(),
+        Customer.find({ isDeleted: false }, "_id name customerNumber phone email driver").populate("driver", "_id name driverId").lean(),
+        Supplier.find({ isDeleted: false }, "_id name companyName vendorNumber supplierNumber phone email").lean()
     ]);
 
     // Branch Maps
@@ -367,12 +428,104 @@ exports.bulkUploadManualJournals = async (payload, actor = {}) => {
 
     const defaultBranchId = actor.branchId || (allBranches.length > 0 ? allBranches[0]._id : null);
 
+    // Extract unique references to pre-query existing manual journals in database
+    const uploadRefs = new Set();
+    journalsToProcess.forEach((j) => {
+        const r = String(j.reference || j.referenceNumber || j.journalNumber || "").trim();
+        if (r && !r.startsWith("Journal #")) {
+            uploadRefs.add(r);
+        }
+    });
+
+    const existingRefSet = new Set();
+    if (uploadRefs.size > 0) {
+        const refList = Array.from(uploadRefs);
+        const existingDocs = await ManualJournal.find({
+            $or: [
+                { referenceNumber: { $in: refList } },
+                { journalNumber: { $in: refList } }
+            ]
+        }, "referenceNumber journalNumber").lean();
+
+        existingDocs.forEach((doc) => {
+            if (doc.referenceNumber) existingRefSet.add(doc.referenceNumber.trim().toLowerCase());
+            if (doc.journalNumber) existingRefSet.add(doc.journalNumber.trim().toLowerCase());
+        });
+    }
+
+    const seenInBatchSet = new Set();
+    const batchAffectedCodes = new Set();
     const createdJournals = [];
+    const skippedJournals = [];
     const failedJournals = [];
 
     for (let i = 0; i < journalsToProcess.length; i++) {
         const j = journalsToProcess[i];
-        const jRef = j.reference || j.journalNumber || j.description || `Journal #${i + 1}`;
+        const rawRef = String(j.reference || j.referenceNumber || j.journalNumber || "").trim();
+        const jRef = rawRef || (j.description || `Journal #${i + 1}`);
+        const refLower = rawRef ? rawRef.toLowerCase() : "";
+
+        // Notify starting of current journal
+        if (typeof onProgress === "function") {
+            try {
+                onProgress({
+                    type: 'progress',
+                    current: i,
+                    total: journalsToProcess.length,
+                    percentage: Math.round((i / journalsToProcess.length) * 100),
+                    reference: jRef,
+                    statusMessage: `Processing journal ${i + 1} of ${journalsToProcess.length} (${jRef})...`
+                });
+            } catch (pErr) {}
+        }
+
+        // 1. Validation Rule: Same reference number already exists in DB -> SKIP
+        if (refLower && existingRefSet.has(refLower)) {
+            skippedJournals.push({
+                reference: jRef,
+                reason: `Journal with reference "${jRef}" already exists in the system. Skipped.`
+            });
+
+            if (typeof onProgress === "function") {
+                try {
+                    onProgress({
+                        type: 'progress',
+                        current: i + 1,
+                        total: journalsToProcess.length,
+                        percentage: Math.round(((i + 1) / journalsToProcess.length) * 100),
+                        reference: jRef,
+                        statusMessage: `Skipped ${jRef}: Reference number already exists in system.`
+                    });
+                } catch (pErr) {}
+            }
+            continue;
+        }
+
+        // 2. Validation Rule: Same reference number appears multiple times in upload batch -> SKIP DUPLICATES
+        if (refLower && seenInBatchSet.has(refLower)) {
+            skippedJournals.push({
+                reference: jRef,
+                reason: `Duplicate reference "${jRef}" within the upload batch. Skipped.`
+            });
+
+            if (typeof onProgress === "function") {
+                try {
+                    onProgress({
+                        type: 'progress',
+                        current: i + 1,
+                        total: journalsToProcess.length,
+                        percentage: Math.round(((i + 1) / journalsToProcess.length) * 100),
+                        reference: jRef,
+                        statusMessage: `Skipped ${jRef}: Duplicate reference in upload file.`
+                    });
+                } catch (pErr) {}
+            }
+            continue;
+        }
+
+        if (refLower) {
+            seenInBatchSet.add(refLower);
+        }
 
         try {
             // Resolve Branch
@@ -461,8 +614,9 @@ exports.bulkUploadManualJournals = async (payload, actor = {}) => {
                 });
             }
 
-            // Execute creation
+            // Execute creation (skip synchronous balance sync per journal for high-throughput batching)
             const createPayload = {
+                referenceNumber: rawRef || undefined,
                 description: j.description || jRef,
                 date: j.date || new Date().toISOString().split("T")[0],
                 branch: resolvedBranchId,
@@ -470,13 +624,25 @@ exports.bulkUploadManualJournals = async (payload, actor = {}) => {
                 contact: resolvedContact,
                 contactModel: resolvedContactModel,
                 autoSetOff: resolvedAutoSetOff,
+                skipBalanceSync: true,
                 createdBy: actor.id,
                 creatorRole: actor.role
             };
 
             const result = await exports.createManualJournal(createPayload);
+
+            if (result.affectedCodeIds && Array.isArray(result.affectedCodeIds)) {
+                result.affectedCodeIds.forEach(id => batchAffectedCodes.add(String(id)));
+            }
+
+            // Record to prevention set
+            if (refLower) existingRefSet.add(refLower);
+            if (result.journal?.journalNumber) existingRefSet.add(result.journal.journalNumber.trim().toLowerCase());
+            if (result.journal?.referenceNumber) existingRefSet.add(result.journal.referenceNumber.trim().toLowerCase());
+
             createdJournals.push({
                 reference: jRef,
+                referenceNumber: result.journal.referenceNumber || rawRef || null,
                 journalId: result.journal._id,
                 journalNumber: result.journal.journalNumber,
                 amount: result.journal.totalAmount,
@@ -491,14 +657,53 @@ exports.bulkUploadManualJournals = async (payload, actor = {}) => {
                 error: err.message || "Failed to create journal"
             });
         }
+
+        if (typeof onProgress === "function") {
+            try {
+                onProgress({
+                    type: 'progress',
+                    current: i + 1,
+                    total: journalsToProcess.length,
+                    percentage: Math.round(((i + 1) / journalsToProcess.length) * 100),
+                    reference: jRef,
+                    statusMessage: `Completed journal ${i + 1} of ${journalsToProcess.length} (${jRef}).`
+                });
+            } catch (pErr) {
+                // Client may have disconnected
+            }
+        }
+    }
+
+    // Batch synchronize accounting code balances once across all touched accounts in parallel
+    if (batchAffectedCodes.size > 0) {
+        if (typeof onProgress === "function") {
+            try {
+                onProgress({
+                    type: 'progress',
+                    current: journalsToProcess.length,
+                    total: journalsToProcess.length,
+                    percentage: 95,
+                    statusMessage: `Synchronizing general ledger balances for ${batchAffectedCodes.size} account(s)...`
+                });
+            } catch (pErr) {}
+        }
+
+        const syncPromises = Array.from(batchAffectedCodes).map(codeId => 
+            syncAccountingCodeBalances(codeId).catch(err => {
+                console.error(`[ManualJournalService] Batch balance sync failed for account ${codeId}:`, err);
+            })
+        );
+        await Promise.allSettled(syncPromises);
     }
 
     return {
         success: failedJournals.length === 0,
         totalCount: journalsToProcess.length,
         createdCount: createdJournals.length,
+        skippedCount: skippedJournals.length,
         failedCount: failedJournals.length,
         createdJournals,
+        skippedJournals,
         errors: failedJournals
     };
 };

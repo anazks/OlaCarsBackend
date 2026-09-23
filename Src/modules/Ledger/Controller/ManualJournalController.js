@@ -37,8 +37,8 @@ exports.getJournals = async (req, res) => {
             query.status = req.query.status;
         }
 
-        // Date range filter
-        if (req.query.startDate || req.query.endDate) {
+        // Date range filter (applied when search is not active, allowing explicit search to find records across all dates)
+        if (!req.query.search && (req.query.startDate || req.query.endDate)) {
             query.date = {};
             if (req.query.startDate) {
                 const startStr = req.query.startDate.includes("T") ? req.query.startDate : `${req.query.startDate}T00:00:00.000Z`;
@@ -50,12 +50,13 @@ exports.getJournals = async (req, res) => {
             }
         }
 
-        // Search filter (matches description or journalNumber)
+        // Search filter (matches description, journalNumber, or referenceNumber)
         if (req.query.search) {
-            const searchRegex = new RegExp(req.query.search, "i");
+            const searchRegex = new RegExp(req.query.search.trim(), "i");
             query.$or = [
                 { description: searchRegex },
-                { journalNumber: searchRegex }
+                { journalNumber: searchRegex },
+                { referenceNumber: searchRegex }
             ];
         }
 
@@ -193,19 +194,81 @@ exports.bulkUploadJournals = async (req, res) => {
             branchId: req.user.branchId
         };
 
-        const result = await ManualJournalService.bulkUploadManualJournals(req.body, actor);
+        const isStreaming = req.headers.accept === 'application/x-ndjson' || 
+                            req.query.stream === 'true' || 
+                            req.body.stream === true;
 
-        const statusCode = result.createdCount > 0 ? 201 : 400;
+        if (isStreaming) {
+            req.setTimeout(900000);
+            if (res.socket) res.socket.setTimeout(900000);
+
+            res.status(200);
+            res.setHeader('Content-Type', 'application/x-ndjson');
+            res.setHeader('Transfer-Encoding', 'chunked');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            if (typeof res.flushHeaders === 'function') res.flushHeaders();
+
+            // Send initial 2KB comment padding to bypass proxy and browser response buffering immediately
+            try {
+                res.write(': ' + ' '.repeat(2048) + '\n');
+                if (typeof res.flush === 'function') res.flush();
+            } catch (e) {}
+
+            const onProgress = (prog) => {
+                try {
+                    res.write(JSON.stringify(prog) + '\n');
+                    if (typeof res.flush === 'function') res.flush();
+                } catch (writeErr) { /* client disconnected */ }
+            };
+
+            const result = await ManualJournalService.bulkUploadManualJournals(req.body, actor, onProgress);
+
+            const skippedCount = result.skippedCount || 0;
+            try {
+                res.write(JSON.stringify({
+                    type: 'complete',
+                    success: result.success,
+                    message: `Processed ${result.totalCount} journal entries: ${result.createdCount} created, ${skippedCount} skipped (already exists), ${result.failedCount} failed.`,
+                    totalCount: result.totalCount,
+                    processedCount: result.totalCount,
+                    insertedCount: result.createdCount,
+                    skippedCount: skippedCount,
+                    errorCount: result.failedCount,
+                    percentage: 100,
+                    statusMessage: `Upload complete: ${result.createdCount} created, ${skippedCount} skipped, ${result.failedCount} failed.`,
+                    data: result
+                }) + '\n');
+                if (typeof res.flush === 'function') res.flush();
+            } catch (writeErr) {}
+            res.end();
+            return;
+        }
+
+        const result = await ManualJournalService.bulkUploadManualJournals(req.body, actor);
+        const skippedCount = result.skippedCount || 0;
+        const statusCode = (result.createdCount > 0 || skippedCount > 0) ? 200 : 400;
+
         res.status(statusCode).json({
-            status: result.success ? "success" : (result.createdCount > 0 ? "partial_success" : "error"),
-            message: `Processed ${result.totalCount} journal entries: ${result.createdCount} created, ${result.failedCount} failed.`,
+            status: result.success ? "success" : (result.createdCount > 0 || skippedCount > 0 ? "partial_success" : "error"),
+            message: `Processed ${result.totalCount} journal entries: ${result.createdCount} created, ${skippedCount} skipped (already exists), ${result.failedCount} failed.`,
             data: result
         });
     } catch (error) {
-        res.status(error.statusCode || 500).json({
-            status: "error",
-            message: error.message
-        });
+        if (!res.headersSent) {
+            res.status(error.statusCode || 500).json({
+                status: "error",
+                message: error.message
+            });
+        } else {
+            try {
+                res.write(JSON.stringify({ type: 'error', message: error.message || 'Upload failed' }) + '\n');
+                res.end();
+            } catch (e) {
+                res.end();
+            }
+        }
     }
 };
 
