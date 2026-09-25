@@ -1557,6 +1557,328 @@ exports.deleteBill = async (billId, options = {}, userData = {}) => {
     };
 };
 
+exports.previewBulkDelete = async (billIds = []) => {
+    const Bill = require("../Model/BillModel");
+    if (!Array.isArray(billIds) || billIds.length === 0) {
+        throw new AppError("No bill IDs provided", 400);
+    }
+
+    const bills = await Bill.find({ _id: { $in: billIds } })
+        .populate("supplier", "name supplierCode email phone")
+        .lean();
+
+    const unpaidBills = [];
+    const paidBills = [];
+    const billIdStrings = bills.map(b => b._id.toString());
+
+    for (const bill of bills) {
+        const amountPaid = Number(bill.amountPaid) || 0;
+        const hasPayments = (bill.payments && bill.payments.length > 0) || amountPaid > 0.009;
+
+        if (!hasPayments) {
+            unpaidBills.push({
+                _id: bill._id,
+                billNumber: bill.billNumber,
+                supplier: bill.supplier,
+                totalAmount: bill.totalAmount || 0,
+                amountPaid: 0,
+                balanceDue: bill.balanceDue || bill.totalAmount || 0,
+                billDate: bill.billDate,
+                dueDate: bill.dueDate,
+                status: bill.status
+            });
+        } else {
+            const supplierId = bill.supplier ? (bill.supplier._id || bill.supplier) : null;
+            let otherOpenBills = [];
+            if (supplierId) {
+                const candidates = await Bill.find({
+                    supplier: supplierId,
+                    status: { $in: ["OPEN", "PARTIALLY_PAID"] },
+                    _id: { $nin: billIds }
+                }).select("billNumber totalAmount amountPaid balanceDue status billDate dueDate").sort({ billDate: 1 }).lean();
+
+                otherOpenBills = candidates.filter(b => !billIdStrings.includes(b._id.toString()));
+            }
+
+            paidBills.push({
+                _id: bill._id,
+                billNumber: bill.billNumber,
+                supplier: bill.supplier,
+                totalAmount: bill.totalAmount || 0,
+                amountPaid: amountPaid,
+                balanceDue: bill.balanceDue || 0,
+                billDate: bill.billDate,
+                dueDate: bill.dueDate,
+                status: bill.status,
+                hasOtherOpenBills: otherOpenBills.length > 0,
+                otherOpenBills: otherOpenBills
+            });
+        }
+    }
+
+    return {
+        totalSelected: bills.length,
+        unpaidBills,
+        paidBills
+    };
+};
+
+exports.bulkDeleteBills = async (payload = {}, userData = {}) => {
+    const { billIds = [], resolutions = [] } = payload;
+    const Bill = require("../Model/BillModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
+    const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel");
+    const FixedAsset = require("../../FixedAsset/Model/FixedAssetModel");
+    const LedgerService = require("../../Ledger/Service/LedgerService");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    if (!Array.isArray(billIds) || billIds.length === 0) {
+        throw new AppError("No bill IDs provided for bulk deletion", 400);
+    }
+
+    const bills = await Bill.find({ _id: { $in: billIds } }).populate("supplier");
+    if (bills.length === 0) {
+        throw new AppError("None of the specified bills were found", 404);
+    }
+
+    const resolutionMap = new Map();
+    resolutions.forEach(r => {
+        if (r && r.billId) {
+            resolutionMap.set(String(r.billId), r);
+        }
+    });
+
+    const deletedBillNumbers = [];
+    const allAffectedAccountIds = new Set();
+    const advancesCreated = [];
+    const reassignmentsDone = [];
+
+    // Pre-fetch AP and Advance accounts
+    const apAccount = await AccountingCode.findOne({ code: "2.1.01", isDeleted: { $ne: true } })
+        || await AccountingCode.findOne({ name: /Accounts Payable/i, isDeleted: { $ne: true } });
+    const advanceAccount = await AccountingCode.findOne({ code: "1.1.08", isDeleted: { $ne: true } })
+        || await AccountingCode.findOne({ code: "1.1.04", isDeleted: { $ne: true } })
+        || await AccountingCode.findOne({ name: /Advance to Suppliers|Anticipos a Proveedores/i, isDeleted: { $ne: true } });
+
+    for (const bill of bills) {
+        const amountPaid = Number(bill.amountPaid) || 0;
+        const hasPayments = (bill.payments && bill.payments.length > 0) || amountPaid > 0.009;
+
+        if (hasPayments) {
+            const res = resolutionMap.get(String(bill._id)) || {};
+            const action = res.action || "CONVERT_TO_ADVANCE";
+
+            if (action === "REASSIGN_TO_BILL" && res.targetBillId) {
+                if (billIds.map(String).includes(String(res.targetBillId))) {
+                    throw new AppError(`Cannot reassign to Bill ${res.targetBillId} because it is also selected for deletion.`, 400);
+                }
+
+                const supplierId = bill.supplier ? (bill.supplier._id || bill.supplier) : null;
+                const targetBill = await Bill.findOne({
+                    _id: res.targetBillId,
+                    supplier: supplierId,
+                    status: { $in: ["OPEN", "PARTIALLY_PAID"] }
+                });
+
+                if (!targetBill) {
+                    throw new AppError(`Target bill not found or does not belong to the same supplier for Bill ${bill.billNumber}.`, 400);
+                }
+
+                const targetBalance = Number(targetBill.balanceDue) || (targetBill.totalAmount - (targetBill.amountPaid || 0));
+                const reassignAmount = Math.min(amountPaid, targetBalance);
+                const excessAmount = Math.max(0, amountPaid - reassignAmount);
+
+                targetBill.amountPaid = (targetBill.amountPaid || 0) + reassignAmount;
+                targetBill.balanceDue = Math.max(0, targetBill.totalAmount - targetBill.amountPaid);
+                targetBill.status = targetBill.balanceDue <= 0.009 ? "PAID" : "PARTIALLY_PAID";
+                if (targetBill.status === "PAID" && !targetBill.paidAt) targetBill.paidAt = new Date();
+
+                const linkedPM = await PaymentMade.findOne({ "bills.billId": bill._id }).lean();
+                const origBillPayment = (bill.payments && bill.payments.length > 0) ? bill.payments[0] : null;
+                const actualPMNumber = linkedPM ? linkedPM.paymentNumber : (origBillPayment?.transactionId || origBillPayment?.referenceNumber || null);
+
+                targetBill.payments = targetBill.payments || [];
+                targetBill.payments.push({
+                    amount: reassignAmount,
+                    paidAt: new Date(),
+                    paymentMethod: "Prepayment Credit",
+                    transactionId: actualPMNumber || undefined,
+                    referenceNumber: origBillPayment?.referenceNumber || undefined,
+                    note: `Reassigned from bulk deleted Bill ${bill.billNumber}${actualPMNumber ? ` (PM: ${actualPMNumber})` : ''}`
+                });
+                await targetBill.save();
+
+                // Update PaymentMade records
+                const pmRecords = await PaymentMade.find({ "bills.billId": bill._id, status: { $ne: "VOID" } });
+                for (const pm of pmRecords) {
+                    pm.bills = (pm.bills || []).map(b => {
+                        if (String(b.billId) === String(bill._id)) {
+                            return {
+                                ...(b.toObject ? b.toObject() : b),
+                                billId: targetBill._id,
+                                billNumber: targetBill.billNumber,
+                                amountApplied: reassignAmount
+                            };
+                        }
+                        return b;
+                    });
+                    await pm.save();
+                }
+
+                // Propagate in LedgerEntry records
+                try {
+                    await LedgerEntry.updateMany(
+                        { "bills.billId": bill._id },
+                        { 
+                            $set: { 
+                                "bills.$[elem].billId": targetBill._id,
+                                "bills.$[elem].billNumber": targetBill.billNumber
+                            } 
+                        },
+                        { arrayFilters: [{ "elem.billId": bill._id }] }
+                    );
+                } catch (leErr) {
+                    console.warn("[BillService] Could not update LedgerEntry bill links:", leErr.message);
+                }
+
+                // Debit Accounts Payable on targetBill
+                if (apAccount && reassignAmount > 0) {
+                    await LedgerService.create({
+                        branch: targetBill.branch || bill.branch,
+                        accountingCode: apAccount._id,
+                        type: "DEBIT",
+                        amount: reassignAmount,
+                        description: `Bill Payment Applied (Debit Accounts Payable) - Reassigned from deleted Bill ${bill.billNumber} (Bill: ${targetBill.billNumber})`,
+                        entryDate: new Date(),
+                        bill: targetBill._id,
+                        supplier: targetBill.supplier || bill.supplier,
+                        createdBy: userData.id || userData._id || "6a2290019fa01283dd165204",
+                        creatorRole: (userData.role || "ADMIN").toUpperCase()
+                    });
+                    allAffectedAccountIds.add(apAccount._id.toString());
+                }
+
+                reassignmentsDone.push({
+                    fromBill: bill.billNumber,
+                    toBill: targetBill.billNumber,
+                    amount: reassignAmount
+                });
+
+                // If excess exists, convert excess to advance
+                if (excessAmount > 0 && apAccount && advanceAccount) {
+                    await LedgerService.create({
+                        branch: bill.branch,
+                        accountingCode: advanceAccount._id,
+                        type: "DEBIT",
+                        amount: excessAmount,
+                        description: `Reclassification to Vendor Advance on deletion of Bill ${bill.billNumber}`,
+                        entryDate: new Date(),
+                        createdBy: userData.id || userData._id,
+                        creatorRole: userData.role || "ADMIN",
+                    });
+                    await LedgerService.create({
+                        branch: bill.branch,
+                        accountingCode: apAccount._id,
+                        type: "CREDIT",
+                        amount: excessAmount,
+                        description: `Reclassification of AP liability on deletion of Bill ${bill.billNumber}`,
+                        entryDate: new Date(),
+                        createdBy: userData.id || userData._id,
+                        creatorRole: userData.role || "ADMIN",
+                    });
+                    allAffectedAccountIds.add(apAccount._id.toString());
+                    allAffectedAccountIds.add(advanceAccount._id.toString());
+                    advancesCreated.push({
+                        billNumber: bill.billNumber,
+                        amount: excessAmount
+                    });
+                }
+            } else {
+                // CONVERT_TO_ADVANCE
+                const pmRecords = await PaymentMade.find({ "bills.billId": bill._id, status: { $ne: "VOID" } });
+                for (const pm of pmRecords) {
+                    pm.bills = (pm.bills || []).filter(b => String(b.billId) !== String(bill._id));
+                    await pm.save();
+                }
+
+                if (apAccount && advanceAccount && amountPaid > 0) {
+                    await LedgerService.create({
+                        branch: bill.branch,
+                        accountingCode: advanceAccount._id,
+                        type: "DEBIT",
+                        amount: amountPaid,
+                        description: `Reclassification to Vendor Advance on deletion of Bill ${bill.billNumber}`,
+                        entryDate: new Date(),
+                        createdBy: userData.id || userData._id,
+                        creatorRole: userData.role || "ADMIN",
+                    });
+                    await LedgerService.create({
+                        branch: bill.branch,
+                        accountingCode: apAccount._id,
+                        type: "CREDIT",
+                        amount: amountPaid,
+                        description: `Reclassification of AP liability on deletion of Bill ${bill.billNumber}`,
+                        entryDate: new Date(),
+                        createdBy: userData.id || userData._id,
+                        creatorRole: userData.role || "ADMIN",
+                    });
+                    allAffectedAccountIds.add(apAccount._id.toString());
+                    allAffectedAccountIds.add(advanceAccount._id.toString());
+                    advancesCreated.push({
+                        billNumber: bill.billNumber,
+                        amount: amountPaid
+                    });
+                }
+            }
+        }
+
+        // Delete initial creation booking ledger entries for this bill
+        const entries = await LedgerEntry.find({
+            bill: bill._id,
+            description: new RegExp(`^Bill ${bill.billNumber} - `)
+        });
+        entries.forEach(e => {
+            if (e.accountingCode) allAffectedAccountIds.add(e.accountingCode.toString());
+        });
+
+        if (entries.length > 0) {
+            await LedgerEntry.deleteMany({ _id: { $in: entries.map(e => e._id) } });
+        }
+
+        // Revert PO if linked
+        if (bill.purchaseOrder) {
+            await PurchaseOrder.findByIdAndUpdate(bill.purchaseOrder, { isBilled: false });
+        }
+
+        // Clean up draft fixed assets
+        try {
+            await FixedAsset.deleteMany({ originalBill: bill._id, status: "DRAFT" });
+        } catch (faErr) {
+            console.warn("[BillService] Could not clean up draft fixed assets:", faErr.message);
+        }
+
+        // Delete Bill document
+        await BillRepo.deleteBill(bill._id);
+        deletedBillNumbers.push(bill.billNumber);
+    }
+
+    // Sync all affected COA accounts
+    for (const codeId of allAffectedAccountIds) {
+        await syncAccountingCodeBalances(codeId);
+    }
+
+    return {
+        success: true,
+        message: `Successfully deleted ${deletedBillNumbers.length} bill(s).`,
+        deletedCount: deletedBillNumbers.length,
+        deletedBillNumbers,
+        reassignmentsDone,
+        advancesCreated
+    };
+};
+
 exports.updateBill = async (billId, updateData, userData = {}) => {
     const Bill = require("../Model/BillModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");

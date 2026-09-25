@@ -54,6 +54,18 @@ router.put("/:id",
     BillController.updateBill
 );
 
+router.post("/bulk-delete/preview",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission(["BILL_DELETE", "BILL_EDIT"]),
+    BillController.previewBulkDelete
+);
+
+router.post("/bulk-delete",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission(["BILL_DELETE", "BILL_EDIT"]),
+    BillController.bulkDeleteBills
+);
+
 router.delete("/:id", 
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
     hasPermission(["BILL_DELETE", "BILL_EDIT"]),

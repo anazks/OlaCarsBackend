@@ -196,3 +196,22 @@ exports.deleteBill = async (req, res, next) => {
         next(error);
     }
 };
+
+exports.previewBulkDelete = async (req, res, next) => {
+    try {
+        const { billIds } = req.body;
+        const result = await BillService.previewBulkDelete(billIds);
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.bulkDeleteBills = async (req, res, next) => {
+    try {
+        const result = await BillService.bulkDeleteBills(req.body, req.user);
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};

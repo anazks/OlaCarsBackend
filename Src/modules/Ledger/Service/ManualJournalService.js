@@ -708,3 +708,190 @@ exports.bulkUploadManualJournals = async (payload, actor = {}, onProgress = null
     };
 };
 
+/**
+ * Updates a Manual Journal's header details (Date, Branch, Ref Number, Description)
+ * and synchronizes relevant fields (entryDate, branch) to its associated Ledger Entries.
+ */
+exports.updateManualJournal = async (journalId, updateData) => {
+    const mongoose = require("mongoose");
+    const AppError = require("../../../shared/utils/AppError");
+    const ManualJournal = require("../Model/ManualJournalModel");
+    const LedgerEntry = require("../Model/LedgerEntryModel");
+    const Branch = require("../../Branch/Model/BranchModel");
+    const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
+    const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
+
+    if (!journalId || !mongoose.Types.ObjectId.isValid(journalId)) {
+        throw new AppError("Invalid journal ID", 400);
+    }
+
+    const journal = await ManualJournal.findById(journalId);
+    if (!journal) {
+        throw new AppError("Manual journal not found", 404);
+    }
+
+    const ledgerUpdateFields = {};
+    const affectedCodeIds = new Set();
+
+    // 1. Handle Journal Date
+    const rawDate = updateData.date !== undefined 
+        ? updateData.date 
+        : (updateData.journalDate !== undefined 
+            ? updateData.journalDate 
+            : updateData.entryDate);
+
+    if (rawDate !== undefined && rawDate !== null && rawDate !== "") {
+        const effectiveDate = normalizeDate(rawDate);
+        journal.date = effectiveDate;
+        ledgerUpdateFields.entryDate = effectiveDate;
+    }
+
+    // 2. Handle Branch
+    const branchVal = updateData.branch?._id || updateData.branch || updateData.branchId;
+    if (branchVal !== undefined && branchVal !== null && branchVal !== "") {
+        if (!mongoose.Types.ObjectId.isValid(branchVal)) {
+            throw new AppError("Invalid branch ID", 400);
+        }
+        const branchDoc = await Branch.findById(branchVal);
+        if (!branchDoc) {
+            throw new AppError("Branch not found", 404);
+        }
+        journal.branch = branchVal;
+        ledgerUpdateFields.branch = branchVal;
+    }
+
+    // 3. Handle Reference Number
+    const refVal = updateData.referenceNumber !== undefined 
+        ? updateData.referenceNumber 
+        : (updateData.refNumber !== undefined 
+            ? updateData.refNumber 
+            : (updateData.reference !== undefined 
+                ? updateData.reference 
+                : updateData.refNum));
+
+    if (refVal !== undefined) {
+        journal.referenceNumber = refVal !== null ? String(refVal).trim() : "";
+    }
+
+    // 4. Handle Description if provided
+    if (updateData.description !== undefined) {
+        journal.description = String(updateData.description).trim();
+    }
+
+    // 5. Handle Lines if provided
+    if (updateData.lines && Array.isArray(updateData.lines) && updateData.lines.length > 0) {
+        if (updateData.lines.length < 2) {
+            throw new AppError("A manual journal must contain at least two transaction lines.", 400);
+        }
+
+        // Validate debits and credits
+        let totalDebit = 0;
+        let totalCredit = 0;
+        for (const line of updateData.lines) {
+            const amt = Number(line.amount || 0);
+            if (isNaN(amt) || amt <= 0) {
+                throw new AppError("Each transaction line must have a valid positive amount.", 400);
+            }
+            if (line.type === "DEBIT") totalDebit += amt;
+            else if (line.type === "CREDIT") totalCredit += amt;
+            else throw new AppError("Each transaction line must specify type DEBIT or CREDIT.", 400);
+        }
+
+        if (Math.abs(totalDebit - totalCredit) > 0.01) {
+            throw new AppError(
+                `Total Debits must equal Total Credits. Current Debits: $${totalDebit.toFixed(2)}, Credits: $${totalCredit.toFixed(2)}. Difference: $${Math.abs(totalDebit - totalCredit).toFixed(2)}.`,
+                400
+            );
+        }
+
+        // Validate accounting codes
+        const codeIds = updateData.lines.map(l => l.accountingCode?._id || l.accountingCode);
+        const codeDocs = await AccountingCode.find({ _id: { $in: codeIds }, isDeleted: { $ne: true } });
+        const codeMap = new Map(codeDocs.map(c => [String(c._id), c]));
+
+        for (const codeId of codeIds) {
+            if (!codeMap.has(String(codeId))) {
+                throw new AppError(`Invalid or deleted accounting code specified: ${codeId}`, 400);
+            }
+        }
+
+        // Update existing lines or replace
+        const existingEntries = await LedgerEntry.find({ manualJournal: journalId }).sort({ createdAt: 1 });
+        
+        // Collect old accounting codes for balance sync
+        existingEntries.forEach(e => {
+            if (e.accountingCode) affectedCodeIds.add(String(e.accountingCode));
+        });
+
+        // If lines match existing entries by _id
+        const hasExistingIds = updateData.lines.some(l => l._id && existingEntries.some(e => String(e._id) === String(l._id)));
+
+        if (hasExistingIds) {
+            for (const line of updateData.lines) {
+                if (line._id) {
+                    const entryToUpdate = existingEntries.find(e => String(e._id) === String(line._id));
+                    if (entryToUpdate) {
+                        const targetCodeId = line.accountingCode?._id || line.accountingCode;
+                        entryToUpdate.accountingCode = targetCodeId;
+                        entryToUpdate.type = line.type;
+                        entryToUpdate.amount = Number(line.amount);
+                        if (line.description !== undefined) entryToUpdate.description = line.description;
+                        if (ledgerUpdateFields.entryDate) entryToUpdate.entryDate = ledgerUpdateFields.entryDate;
+                        if (ledgerUpdateFields.branch) entryToUpdate.branch = ledgerUpdateFields.branch;
+                        await entryToUpdate.save();
+                        affectedCodeIds.add(String(targetCodeId));
+                    }
+                }
+            }
+        }
+
+        journal.totalAmount = totalDebit;
+    }
+
+    // 6. Synchronize journal header updates (entryDate, branch) to all child Ledger Entries
+    if (Object.keys(ledgerUpdateFields).length > 0) {
+        await LedgerEntry.updateMany(
+            { manualJournal: journalId },
+            { $set: ledgerUpdateFields }
+        );
+    }
+
+    // 7. Save updated journal
+    await journal.save();
+
+    // 8. Resync accounting code balances if any lines changed
+    for (const codeId of affectedCodeIds) {
+        try {
+            await syncAccountingCodeBalances(codeId);
+        } catch (syncErr) {
+            console.error(`[ManualJournalService] Failed to sync balance for ${codeId}:`, syncErr);
+        }
+    }
+
+    // 9. Fetch populated updated journal and lines
+    let updatedJournal;
+    try {
+        const { getManualJournalByIdRepo } = require("../Repo/ManualJournalRepo");
+        updatedJournal = await getManualJournalByIdRepo(journalId);
+    } catch (popErr) {
+        updatedJournal = await ManualJournal.findById(journalId);
+    }
+
+    let lines = [];
+    try {
+        lines = await LedgerEntry.find({ manualJournal: journalId })
+            .populate("accountingCode", "code name category description isBank")
+            .populate("contact", "name email")
+            .populate("createdBy", "name email")
+            .sort({ createdAt: 1 });
+    } catch (linesPopErr) {
+        lines = await LedgerEntry.find({ manualJournal: journalId }).sort({ createdAt: 1 });
+    }
+
+    return {
+        journal: updatedJournal,
+        lines
+    };
+};
+
+

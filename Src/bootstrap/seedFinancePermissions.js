@@ -10,6 +10,7 @@ const seedFinancePermissions = async () => {
         const staffPermissions = [
             "JOURNAL_CREATE",
             "JOURNAL_VIEW",
+            "JOURNAL_EDIT",
             "FINANCIAL_REPORT_VIEW",
             "LEDGER_VIEW",
             "LEDGER_CREATE",
@@ -29,6 +30,7 @@ const seedFinancePermissions = async () => {
 
         const adminPermissions = [
             ...staffPermissions,
+            "JOURNAL_DELETE",
             "LEDGER_EDIT",
             "LEDGER_DELETE",
             "ACCOUNTING_CODE_CREATE",

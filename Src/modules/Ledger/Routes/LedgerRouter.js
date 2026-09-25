@@ -42,6 +42,8 @@ router.post("/journals/bulk-upload", authenticate, authorize(...MANAGE_ROLES), h
 router.post("/journals", authenticate, authorize(...MANAGE_ROLES), hasPermission("JOURNAL_CREATE"), ManualJournalController.createJournal);
 router.get("/journals", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("JOURNAL_VIEW"), ManualJournalController.getJournals);
 router.get("/journals/:id", authenticate, authorize(...VIEW_ACCESS_ROLES), hasPermission("JOURNAL_VIEW"), ManualJournalController.getJournalById);
+router.put("/journals/:id", authenticate, authorize(...MANAGE_ROLES), ManualJournalController.updateJournal);
+router.patch("/journals/:id", authenticate, authorize(...MANAGE_ROLES), ManualJournalController.updateJournal);
 router.delete("/journals/:id", authenticate, authorize(...MANAGE_ROLES), ManualJournalController.deleteJournal);
 
 // Bulk Import

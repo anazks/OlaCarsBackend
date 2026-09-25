@@ -272,4 +272,25 @@ exports.bulkUploadJournals = async (req, res) => {
     }
 };
 
+exports.updateJournal = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await ManualJournalService.updateManualJournal(id, req.body);
+
+        res.status(200).json({
+            status: "success",
+            success: true,
+            message: "Manual journal updated successfully",
+            data: result
+        });
+    } catch (error) {
+        res.status(error.statusCode || 500).json({
+            status: "error",
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+
 
