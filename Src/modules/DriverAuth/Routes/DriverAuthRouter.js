@@ -4,6 +4,8 @@ const {
     register,
     login,
     requestOTP,
+    getCustomerStatement,
+    getVehicleDetails,
 } = require("../Controller/DriverAuthController");
 
 /**
@@ -103,4 +105,71 @@ router.post("/request-otp", requestOTP);
  */
 router.post("/login", login);
 
+/**
+ * @swagger
+ * /api/driver-auth/verify-otp:
+ *   post:
+ *     summary: Verify OTP and log in driver
+ *     tags: [DriverAuth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: "driver@olacars.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Login successful, returns tokens and driver profile
+ *       401:
+ *         description: Invalid or expired OTP
+ */
+router.post("/verify-otp", login);
+
+/**
+ * @swagger
+ * /api/driver-auth/statement/{customerId}:
+ *   get:
+ *     summary: Get customer financial statement and pending dues
+ *     tags: [DriverAuth]
+ *     parameters:
+ *       - in: path
+ *         name: customerId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Statement and pending amount data
+ */
+router.get("/statement/:customerId", getCustomerStatement);
+
+/**
+ * @swagger
+ * /api/driver-auth/vehicle/{vehicleId}:
+ *   get:
+ *     summary: Get comprehensive vehicle info, documents, and specifications
+ *     tags: [DriverAuth]
+ *     parameters:
+ *       - in: path
+ *         name: vehicleId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Vehicle details with documents and specs
+ */
+router.get("/vehicle/:vehicleId", getVehicleDetails);
+
 module.exports = router;
+

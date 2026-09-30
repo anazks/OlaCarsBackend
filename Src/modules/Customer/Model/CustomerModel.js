@@ -12,6 +12,10 @@ const customerSchema = new mongoose.Schema({
         ref: 'Driver',
         required: false
     },
+    isDriver: {
+        type: Boolean,
+        default: false
+    },
     name: {
         type: String,
         required: true,
@@ -138,5 +142,7 @@ const customerSchema = new mongoose.Schema({
 customerSchema.index({ status: 1 });
 customerSchema.index({ branch: 1 });
 customerSchema.index({ driver: 1 });
+customerSchema.index({ email: 1 });
 
 module.exports = mongoose.model('Customer', customerSchema);
+

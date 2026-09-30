@@ -243,7 +243,11 @@ exports.getAllBills = async (query = {}) => {
     // 4. Date Range Filters (billDate)
     const fromDateVal = query.fromDate || query.startDate;
     const toDateVal = query.toDate || query.endDate;
-    if (fromDateVal || toDateVal) {
+    const hasSearch = !!(query.search && query.search.trim());
+
+    // When searching, do not restrict by date range unless strictDateSearch is explicitly requested
+    const shouldApplyDateRange = (fromDateVal || toDateVal) && (!hasSearch || query.strictDateSearch === 'true' || query.strictDateSearch === true);
+    if (shouldApplyDateRange) {
         mongooseQuery.billDate = {};
         if (fromDateVal) {
             mongooseQuery.billDate.$gte = new Date(fromDateVal + 'T00:00:00.000Z');
@@ -254,7 +258,7 @@ exports.getAllBills = async (query = {}) => {
     }
 
     // 5. Month & Year Filters
-    if (query.month || query.year) {
+    if ((query.month || query.year) && (!hasSearch || query.strictDateSearch === 'true' || query.strictDateSearch === true)) {
         const now = new Date();
         const y = query.year ? parseInt(query.year, 10) : now.getFullYear();
         if (query.month) {
@@ -271,9 +275,10 @@ exports.getAllBills = async (query = {}) => {
         }
     }
 
-    // 6. Search Filter (by Bill Number, Supplier Name, or Notes)
-    if (query.search) {
-        const searchRegex = new RegExp(query.search, 'i');
+    // 6. Search Filter (by Bill Number, Supplier Name, Notes, Item Name, or Description)
+    if (hasSearch) {
+        const trimmedSearch = query.search.trim();
+        const searchRegex = new RegExp(trimmedSearch, 'i');
         
         // Find matching supplier IDs
         const matchingSuppliers = await Supplier.find({ name: searchRegex }).select('_id').lean();
@@ -282,14 +287,16 @@ exports.getAllBills = async (query = {}) => {
         mongooseQuery.$or = [
             { billNumber: searchRegex },
             { notes: searchRegex },
-            { supplier: { $in: supplierIds } }
+            { supplier: { $in: supplierIds } },
+            { 'items.itemName': searchRegex },
+            { 'items.description': searchRegex }
         ];
     }
 
-    const hasDateFilter = !!(query.fromDate || query.toDate || query.startDate || query.endDate || query.month || query.year);
+    const hasDateFilter = !hasSearch && !!(query.fromDate || query.toDate || query.startDate || query.endDate || query.month || query.year);
 
     // Default to start of current month to today's date if no date filters are supplied and no supplier is targeted, and not explicitly ignored
-    if (!hasDateFilter && !targetSupplierId && !query.search && query.ignoreDefaultDates !== 'true' && query.ignoreDefaultDates !== true) {
+    if (!hasDateFilter && !targetSupplierId && !hasSearch && query.ignoreDefaultDates !== 'true' && query.ignoreDefaultDates !== true) {
         const now = new Date();
         const startOfMonth = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0));
         const endOfToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));

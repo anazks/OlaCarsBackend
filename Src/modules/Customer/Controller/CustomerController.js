@@ -16,9 +16,178 @@ exports.createCustomer = async (req, res) => {
             customerData.creatorRole = req.user.role;
         }
 
+        const isDriver = customerData.isDriver === true || customerData.isDriver === 'true';
+        const { vehicleId, startDate, weeklyRent } = customerData;
+
+        let vehicle = null;
+        let parsedStartDate = null;
+
+        // If vehicle is specified, validate start date and vehicle availability
+        if (vehicleId) {
+            if (!isDriver) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'A vehicle can only be assigned if the customer is registered as a driver.'
+                });
+            }
+            if (!startDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Start date is required when assigning a vehicle.'
+                });
+            }
+            parsedStartDate = new Date(startDate);
+            if (isNaN(parsedStartDate.getTime())) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid start date format.'
+                });
+            }
+
+            vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: false });
+            if (!vehicle) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Selected vehicle not found.'
+                });
+            }
+            if (vehicle.status !== 'ACTIVE — AVAILABLE' && vehicle.status !== 'ACTIVE - AVAILABLE') {
+                return res.status(400).json({
+                    success: false,
+                    message: `Vehicle is not available for assignment. Current status: ${vehicle.status}`
+                });
+            }
+        } else if (startDate) {
+            parsedStartDate = new Date(startDate);
+            if (isNaN(parsedStartDate.getTime())) {
+                parsedStartDate = null;
+            }
+        }
+
+        let savedDriver = null;
+        if (isDriver) {
+            customerData.isDriver = true;
+            const driverStatus = customerData.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+            const effectiveWeeklyRent = weeklyRent !== undefined && weeklyRent !== '' && !isNaN(Number(weeklyRent))
+                ? Number(weeklyRent)
+                : (vehicle?.basicDetails?.weeklyRent || undefined);
+
+            const effectiveStartDate = parsedStartDate || (driverStatus === 'ACTIVE' ? new Date() : undefined);
+
+            // Check if driver with same email already exists
+            let existingDriver = null;
+            if (customerData.email && customerData.email.trim()) {
+                existingDriver = await Driver.findOne({
+                    "personalInfo.email": customerData.email.trim().toLowerCase(),
+                    isDeleted: false
+                });
+            }
+
+            if (existingDriver) {
+                savedDriver = existingDriver;
+                if (vehicle) {
+                    savedDriver.currentVehicle = vehicle._id;
+                }
+                if (effectiveWeeklyRent && !savedDriver.weeklyRent) {
+                    savedDriver.weeklyRent = effectiveWeeklyRent;
+                }
+                if (effectiveStartDate && !savedDriver.activationDate) {
+                    savedDriver.activationDate = effectiveStartDate;
+                }
+                await savedDriver.save();
+            } else {
+                const driverId = await getNextDriverId();
+                const driverData = {
+                    driverId,
+                    status: driverStatus,
+                    personalInfo: {
+                        fullName: customerData.name ? customerData.name.trim() : undefined,
+                        email: customerData.email ? customerData.email.trim().toLowerCase() : undefined,
+                        phone: customerData.phone ? customerData.phone.trim() : (customerData.mobilePhone ? customerData.mobilePhone.trim() : undefined),
+                        whatsappNumber: customerData.whatsappNumber ? customerData.whatsappNumber.trim() : undefined,
+                    },
+                    branch: customerData.branch,
+                    currentVehicle: vehicle ? vehicle._id : undefined,
+                    activationDate: effectiveStartDate,
+                    weeklyRent: effectiveWeeklyRent,
+                    createdBy: req.user ? (req.user.id || req.user._id) : undefined,
+                    creatorRole: req.user?.role || 'SYSTEM',
+                    statusHistory: [{
+                        status: driverStatus,
+                        changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+                        changedByRole: req.user?.role || 'SYSTEM',
+                        timestamp: new Date(),
+                        notes: vehicle
+                            ? `Driver profile auto-created from customer registration with assigned vehicle (${vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle._id}).`
+                            : `Driver profile auto-created from customer registration.`,
+                    }],
+                };
+
+                savedDriver = await addDriverService(driverData);
+            }
+
+            customerData.driver = savedDriver._id;
+
+            // Link Vehicle <-> Driver if vehicle selected
+            if (vehicle) {
+                const regNo = vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle.basicDetails?.plateNumber;
+                customerData.cfVehicleNo = regNo;
+                customerData.cfActiveDate = effectiveStartDate;
+                customerData.cfFleetNo = vehicle.basicDetails?.fleetNumber;
+                customerData.cfVehicleModel = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
+                customerData.cfVinNumber = vehicle.basicDetails?.vin;
+                if (effectiveWeeklyRent) {
+                    customerData.cfWeeklyRent = effectiveWeeklyRent;
+                }
+
+                vehicle.currentDriver = savedDriver._id;
+                vehicle.status = 'ACTIVE — RENTED';
+                if (!vehicle.statusHistory) vehicle.statusHistory = [];
+                vehicle.statusHistory.push({
+                    status: 'ACTIVE — RENTED',
+                    changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+                    changedByRole: req.user?.role || 'SYSTEM',
+                    timestamp: effectiveStartDate || new Date(),
+                    notes: `Assigned to customer/driver ${customerData.name} (${savedDriver.driverId}) starting ${customerData.startDate}`
+                });
+                await vehicle.save();
+
+                // Generate rent tracking schedule if weekly rent exists
+                if (effectiveWeeklyRent && effectiveStartDate) {
+                    try {
+                        const DriverService = require('../../Driver/Service/DriverService');
+                        const durationWeeks = customerData.durationWeeks && !isNaN(Number(customerData.durationWeeks))
+                            ? Number(customerData.durationWeeks)
+                            : 60;
+
+                        await DriverService.generateMigrationRentPlan(savedDriver._id, {
+                            weeklyRent: Number(effectiveWeeklyRent),
+                            durationWeeks: durationWeeks,
+                            activationDate: effectiveStartDate,
+                            vehicleId: vehicle._id
+                        });
+                    } catch (rentPlanErr) {
+                        console.error('[createCustomer] Failed to generate rent plan for new driver:', rentPlanErr);
+                    }
+                }
+            }
+        }
+
         const newDoc = new Customer(customerData);
         const savedDoc = await newDoc.save();
-        res.status(201).json({ success: true, data: savedDoc });
+
+        const populatedDoc = await Customer.findById(savedDoc._id)
+            .populate('branch')
+            .populate({
+                path: 'driver',
+                select: 'driverId status currentVehicle personalInfo activationDate weeklyRent',
+                populate: {
+                    path: 'currentVehicle',
+                    select: 'legalDocs basicDetails plateNumber status'
+                }
+            });
+
+        res.status(201).json({ success: true, data: populatedDoc });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

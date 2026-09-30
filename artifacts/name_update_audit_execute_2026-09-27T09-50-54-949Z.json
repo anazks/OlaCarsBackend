@@ -1,0 +1,870 @@
+{
+  "executedAt": "2026-09-27T09:50:06.592Z",
+  "mode": "EXECUTE",
+  "excelFile": "C:\\Users\\anton\\OneDrive\\Documents\\vs coding\\OlaCarsBackend\\To change in Software.xlsx",
+  "sheetName": "Sheet1",
+  "totalRows": 41,
+  "records": [
+    {
+      "row": 2,
+      "customerId": "CUST-002591",
+      "namesInSoftware": "ANA LORENA NATION MARTINEZ",
+      "nameInZoho": "ANA LORENA NATION MARTINEZ ES6472",
+      "customer": {
+        "found": true,
+        "id": "6a9dad61267e79db577d87b5",
+        "oldName": "ANA LORENA NATION MARTINEZ",
+        "newName": "ANA LORENA NATION MARTINEZ ES6472",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dad60267e79db577d87af",
+        "driverId": "OLA-002850",
+        "oldName": "ANA LORENA NATION MARTINEZ",
+        "newName": "ANA LORENA NATION MARTINEZ ES6472",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 3,
+      "customerId": "CUST-002557",
+      "namesInSoftware": "RICARDO PALACIO PITA",
+      "nameInZoho": "RICARDO PALACIO PITA EM4330",
+      "customer": {
+        "found": true,
+        "id": "6a9dacb3267e79db577d485e",
+        "oldName": "RICARDO PALACIO PITA",
+        "newName": "RICARDO PALACIO PITA EM4330",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dacb2267e79db577d485a",
+        "driverId": "OLA-002816",
+        "oldName": "RICARDO PALACIO PITA",
+        "newName": "RICARDO PALACIO PITA EM4330",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 4,
+      "customerId": "CUST-002554",
+      "namesInSoftware": "MARCOS JESUS LAVERGNEAU LOPEZ",
+      "nameInZoho": "MARCOS JESUS LAVERGNEAU LOPEZ EW2917",
+      "customer": {
+        "found": true,
+        "id": "6a9daca2267e79db577d3f48",
+        "oldName": "MARCOS JESUS LAVERGNEAU LOPEZ",
+        "newName": "MARCOS JESUS LAVERGNEAU LOPEZ EW2917",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9daca1267e79db577d3f45",
+        "driverId": "OLA-002813",
+        "oldName": "MARCOS JESUS LAVERGNEAU LOPEZ",
+        "newName": "MARCOS JESUS LAVERGNEAU LOPEZ EW2917",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 5,
+      "customerId": "CUST-002553",
+      "namesInSoftware": "JOSEPH ARAI FERNANDEZ MIRANDA",
+      "nameInZoho": "JOSEPH ARAI FERNANDEZ MIRANDA EV6679",
+      "customer": {
+        "found": true,
+        "id": "6a9dac98267e79db577d3ca8",
+        "oldName": "JOSEPH ARAI FERNANDEZ MIRANDA",
+        "newName": "JOSEPH ARAI FERNANDEZ MIRANDA EV6679",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac98267e79db577d3c9a",
+        "driverId": "OLA-002812",
+        "oldName": "JOSEPH ARAI FERNANDEZ MIRANDA",
+        "newName": "JOSEPH ARAI FERNANDEZ MIRANDA EV6679",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 6,
+      "customerId": "CUST-002552",
+      "namesInSoftware": "JULIAN PIMENTEL",
+      "nameInZoho": "JULIAN ALBERTO PIMENTEL GONZALEZ EW2921",
+      "customer": {
+        "found": true,
+        "id": "6a9dac92267e79db577d3a13",
+        "oldName": "JULIAN PIMENTEL",
+        "newName": "JULIAN ALBERTO PIMENTEL GONZALEZ EW2921",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac91267e79db577d3a04",
+        "driverId": "OLA-002811",
+        "oldName": "JULIAN PIMENTEL",
+        "newName": "JULIAN ALBERTO PIMENTEL GONZALEZ EW2921",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 7,
+      "customerId": "CUST-002551",
+      "namesInSoftware": "PEDRO ENRIQUE MUÑOZ SOLANO",
+      "nameInZoho": "PEDRO ENRIQUE MUNOZ SOLANO EP6789",
+      "customer": {
+        "found": true,
+        "id": "6a9dac8b267e79db577d378c",
+        "oldName": "PEDRO ENRIQUE MUÑOZ SOLANO",
+        "newName": "PEDRO ENRIQUE MUNOZ SOLANO EP6789",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac8b267e79db577d3789",
+        "driverId": "OLA-002810",
+        "oldName": "PEDRO ENRIQUE MUÑOZ SOLANO",
+        "newName": "PEDRO ENRIQUE MUNOZ SOLANO EP6789",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 8,
+      "customerId": "CUST-002550",
+      "namesInSoftware": "MIGUEL ANGEL SANCHEZ BERNAL",
+      "nameInZoho": "MIGUEL ANGEL SANCHEZ BERNAL EQ6852",
+      "customer": {
+        "found": true,
+        "id": "6a9dac85267e79db577d34f7",
+        "oldName": "MIGUEL ANGEL SANCHEZ BERNAL",
+        "newName": "MIGUEL ANGEL SANCHEZ BERNAL EQ6852",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac84267e79db577d34f3",
+        "driverId": "OLA-002809",
+        "oldName": "MIGUEL ANGEL SANCHEZ BERNAL",
+        "newName": "MIGUEL ANGEL SANCHEZ BERNAL EQ6852",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 9,
+      "customerId": "CUST-002549",
+      "namesInSoftware": "JAVIER GARCIA",
+      "nameInZoho": "JAVIER ALBERTO GARCIA OBANDO ES8799",
+      "customer": {
+        "found": true,
+        "id": "6a9dac7f267e79db577d3295",
+        "oldName": "JAVIER GARCIA",
+        "newName": "JAVIER ALBERTO GARCIA OBANDO ES8799",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac7e267e79db577d3292",
+        "driverId": "OLA-002808",
+        "oldName": "JAVIER GARCIA",
+        "newName": "JAVIER ALBERTO GARCIA OBANDO ES8799",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 10,
+      "customerId": "CUST-002547",
+      "namesInSoftware": "ADALBERTO ADOLFO APARICIO GONGORA",
+      "nameInZoho": "ADALBERTO ADOLFO APARICIO GONGORA EV8570",
+      "customer": {
+        "found": true,
+        "id": "6a9dac71267e79db577d2c9c",
+        "oldName": "ADALBERTO ADOLFO APARICIO GONGORA",
+        "newName": "ADALBERTO ADOLFO APARICIO GONGORA EV8570",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac70267e79db577d2c99",
+        "driverId": "OLA-002806",
+        "oldName": "ADALBERTO ADOLFO APARICIO GONGORA",
+        "newName": "ADALBERTO ADOLFO APARICIO GONGORA EV8570",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 11,
+      "customerId": "CUST-002546",
+      "namesInSoftware": "PASTOR ALBEO",
+      "nameInZoho": "PASTOR ALBEO EW2915",
+      "customer": {
+        "found": true,
+        "id": "6a9dac6c267e79db577d2a52",
+        "oldName": "PASTOR ALBEO",
+        "newName": "PASTOR ALBEO EW2915",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac6b267e79db577d2a4f",
+        "driverId": "OLA-002805",
+        "oldName": "PASTOR ALBEO",
+        "newName": "PASTOR ALBEO EW2915",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 12,
+      "customerId": "CUST-002545",
+      "namesInSoftware": "HEYDI DAYAHADARA PHILLIPS LOPEZ",
+      "nameInZoho": "HEYDI DAYAHADARA PHILLIPS LOPEZ EW2930",
+      "customer": {
+        "found": true,
+        "id": "6a9dac66267e79db577d27ff",
+        "oldName": "HEYDI DAYAHADARA PHILLIPS LOPEZ",
+        "newName": "HEYDI DAYAHADARA PHILLIPS LOPEZ EW2930",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dac66267e79db577d27fb",
+        "driverId": "OLA-002804",
+        "oldName": "HEYDI DAYAHADARA PHILLIPS LOPEZ",
+        "newName": "HEYDI DAYAHADARA PHILLIPS LOPEZ EW2930",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 13,
+      "customerId": "CUST-002527",
+      "namesInSoftware": "CARLOS A PEREZ LEREN EV0430",
+      "nameInZoho": "CARLOS A PEREZ LEREN EP6807",
+      "customer": {
+        "found": true,
+        "id": "6a9dabf2267e79db577cf6d0",
+        "oldName": "CARLOS A PEREZ LEREN EV0430",
+        "newName": "CARLOS A PEREZ LEREN EP6807",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dabf1267e79db577cf6c0",
+        "driverId": "OLA-002786",
+        "oldName": "CARLOS A PEREZ LEREN EV0430",
+        "newName": "CARLOS A PEREZ LEREN EP6807",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 14,
+      "customerId": "CUST-002519",
+      "namesInSoftware": "ELOISA  ESTHER QUIEL FERNANDEZ EJ6899",
+      "nameInZoho": "ELOISA ESTHER QUIEL FERNANDEZ EJ6899",
+      "customer": {
+        "found": true,
+        "id": "6a9dabc2267e79db577ce281",
+        "oldName": "ELOISA  ESTHER QUIEL FERNANDEZ EJ6899",
+        "newName": "ELOISA ESTHER QUIEL FERNANDEZ EJ6899",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9dabc2267e79db577ce274",
+        "driverId": "OLA-002778",
+        "oldName": "ELOISA  ESTHER QUIEL FERNANDEZ EJ6899",
+        "newName": "ELOISA ESTHER QUIEL FERNANDEZ EJ6899",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 15,
+      "customerId": "CUST-002455",
+      "namesInSoftware": "HONYE Z LEDGISTER A",
+      "nameInZoho": "HONYE Z LEDGISTER A ET1779",
+      "customer": {
+        "found": true,
+        "id": "6a9daa2d267e79db577c34ce",
+        "oldName": "HONYE Z LEDGISTER A",
+        "newName": "HONYE Z LEDGISTER A ET1779",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9daa2c267e79db577c34c0",
+        "driverId": "OLA-002714",
+        "oldName": "HONYE Z LEDGISTER A",
+        "newName": "HONYE Z LEDGISTER A ET1779",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 16,
+      "customerId": "CUST-002451",
+      "namesInSoftware": "MELVIN MARTINEZ",
+      "nameInZoho": "MELVIN MARTINEZ EV8617",
+      "customer": {
+        "found": true,
+        "id": "6a9daa11267e79db577c2a5f",
+        "oldName": "MELVIN MARTINEZ",
+        "newName": "MELVIN MARTINEZ EV8617",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9daa10267e79db577c2a5c",
+        "driverId": "OLA-002710",
+        "oldName": "MELVIN MARTINEZ",
+        "newName": "MELVIN MARTINEZ EV8617",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 17,
+      "customerId": "CUST-002435",
+      "namesInSoftware": "FRANKLIN CLEMENTE ROUSE FONTALVO",
+      "nameInZoho": "FRANKLIN CLEMENTE ROUSE FONTALVO EV6608",
+      "customer": {
+        "found": true,
+        "id": "6a9da9a9267e79db577c01b1",
+        "oldName": "FRANKLIN CLEMENTE ROUSE FONTALVO",
+        "newName": "FRANKLIN CLEMENTE ROUSE FONTALVO EV6608",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a9da9a9267e79db577c01ae",
+        "driverId": "OLA-002694",
+        "oldName": "FRANKLIN CLEMENTE ROUSE FONTALVO",
+        "newName": "FRANKLIN CLEMENTE ROUSE FONTALVO EV6608",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 18,
+      "customerId": "CUST-001442",
+      "namesInSoftware": "FRANCISCO MOSLEY ES6473",
+      "nameInZoho": "FRANCISCO MOSLEY ER9370",
+      "customer": {
+        "found": true,
+        "id": "6a2835ea4c85b0bddca66c17",
+        "oldName": "FRANCISCO MOSLEY ES6473",
+        "newName": "FRANCISCO MOSLEY ER9370",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a2835ea4c85b0bddca66c1c",
+        "driverId": "OLA-001403",
+        "oldName": "FRANCISCO MOSLEY ES6473",
+        "newName": "FRANCISCO MOSLEY ER9370",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 19,
+      "customerId": "CUST-001431",
+      "namesInSoftware": "OMAR  BARBET EU8537",
+      "nameInZoho": "OMAR BARBET EU8537",
+      "customer": {
+        "found": true,
+        "id": "6a2835e74c85b0bddca66b9e",
+        "oldName": "OMAR  BARBET EU8537",
+        "newName": "OMAR BARBET EU8537",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a2835e74c85b0bddca66ba3",
+        "driverId": "OLA-001392",
+        "oldName": "OMAR  BARBET EU8537",
+        "newName": "OMAR BARBET EU8537",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 20,
+      "customerId": "CUST-001393",
+      "namesInSoftware": "ARIEL CARRION EV0421",
+      "nameInZoho": "ARIEL CARRION ER9369",
+      "customer": {
+        "found": true,
+        "id": "6a2835db4c85b0bddca66a04",
+        "oldName": "ARIEL CARRION EV0421",
+        "newName": "ARIEL CARRION ER9369",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a2835db4c85b0bddca66a09",
+        "driverId": "OLA-001355",
+        "oldName": "ARIEL CARRION EV0421",
+        "newName": "ARIEL CARRION ER9369",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 21,
+      "customerId": "CUST-001261",
+      "namesInSoftware": "EDUARDO SERRACIN EV0058",
+      "nameInZoho": "EDUARDO SERRACIN EP8542",
+      "customer": {
+        "found": true,
+        "id": "6a28358d4c85b0bddca66460",
+        "oldName": "EDUARDO SERRACIN EV0058",
+        "newName": "EDUARDO SERRACIN EP8542",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a28358d4c85b0bddca66465",
+        "driverId": "OLA-001224",
+        "oldName": "EDUARDO SERRACIN EV0058",
+        "newName": "EDUARDO SERRACIN EP8542",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 22,
+      "customerId": "CUST-001201",
+      "namesInSoftware": "ALEXIS VILLARREAL EP5511",
+      "nameInZoho": "ALEXIS VILLARREAL EP5508",
+      "customer": {
+        "found": true,
+        "id": "6a2835784c85b0bddca661cc",
+        "oldName": "ALEXIS VILLARREAL EP5511",
+        "newName": "ALEXIS VILLARREAL EP5508",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a2835784c85b0bddca661d1",
+        "driverId": "OLA-001164",
+        "oldName": "ALEXIS VILLARREAL EP5511",
+        "newName": "ALEXIS VILLARREAL EP5508",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 23,
+      "customerId": "CUST-001158",
+      "namesInSoftware": "DUAMETH DE LOS RIOS  EP4199",
+      "nameInZoho": "DUAMETH DE LOS RIOS",
+      "customer": {
+        "found": true,
+        "id": "6a28356b4c85b0bddca65ff3",
+        "oldName": "DUAMETH DE LOS RIOS  EP4199",
+        "newName": "DUAMETH DE LOS RIOS",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a28356b4c85b0bddca65ff8",
+        "driverId": "OLA-001121",
+        "oldName": "DUAMETH DE LOS RIOS  EP4199",
+        "newName": "DUAMETH DE LOS RIOS",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 24,
+      "customerId": "CUST-000049",
+      "namesInSoftware": "JOSE HERNANDEZ",
+      "nameInZoho": "JOSE HERNANDEZ EM3078",
+      "customer": {
+        "found": true,
+        "id": "6a2834074c85b0bddca6317b",
+        "oldName": "JOSE HERNANDEZ",
+        "newName": "JOSE HERNANDEZ EM3078",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a2834074c85b0bddca63180",
+        "driverId": "OLA-000049",
+        "oldName": "JOSE HERNANDEZ",
+        "newName": "JOSE HERNANDEZ EM3078",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 25,
+      "customerId": "CUST-001560",
+      "namesInSoftware": "ALBDERTO BOZO EW1762",
+      "nameInZoho": "ALBERTO BOZO EW1762",
+      "customer": {
+        "found": true,
+        "id": "6a3fb011423b378596c0052b",
+        "oldName": "ALBDERTO BOZO EW1762",
+        "newName": "ALBERTO BOZO EW1762",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a3fb011423b378596c00534",
+        "driverId": "OLA-001519",
+        "oldName": "ALBDERTO BOZO EW1762",
+        "newName": "ALBERTO BOZO EW1762",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 26,
+      "customerId": "CUST-002226",
+      "namesInSoftware": "JOEL ABDIEL SCARPETTA MORALES",
+      "nameInZoho": "JOEL ABDIEL SCARPETTA MORALES EU8545",
+      "customer": {
+        "found": true,
+        "id": "6a82c9173f7babe484dca2e2",
+        "oldName": "JOEL ABDIEL SCARPETTA MORALES",
+        "newName": "JOEL ABDIEL SCARPETTA MORALES EU8545",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c9163f7babe484dca2df",
+        "driverId": "OLA-002185",
+        "oldName": "JOEL ABDIEL SCARPETTA MORALES",
+        "newName": "JOEL ABDIEL SCARPETTA MORALES EU8545",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 27,
+      "customerId": "CUST-002212",
+      "namesInSoftware": "LUIS GUTIERREZ",
+      "nameInZoho": "LUIS GUTIERREZ EW1750",
+      "customer": {
+        "found": true,
+        "id": "6a82c8e03f7babe484dc9ab9",
+        "oldName": "LUIS GUTIERREZ",
+        "newName": "LUIS GUTIERREZ EW1750",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c8e03f7babe484dc9ab6",
+        "driverId": "OLA-002171",
+        "oldName": "LUIS GUTIERREZ",
+        "newName": "LUIS GUTIERREZ EW1750",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 28,
+      "customerId": "CUST-002178",
+      "namesInSoftware": "ADRAN ARAUZ",
+      "nameInZoho": "ADRIAN ARAUZ EV6829",
+      "customer": {
+        "found": true,
+        "id": "6a82c8643f7babe484dc854c",
+        "oldName": "ADRAN ARAUZ",
+        "newName": "ADRIAN ARAUZ EV6829",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c8633f7babe484dc8547",
+        "driverId": "OLA-002137",
+        "oldName": "ADRAN ARAUZ",
+        "newName": "ADRIAN ARAUZ EV6829",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 29,
+      "customerId": "CUST-002164",
+      "namesInSoftware": "RONALD TEJADA EM4326",
+      "nameInZoho": "RONALD TEJADA EQ9030",
+      "customer": {
+        "found": true,
+        "id": "6a82c8333f7babe484dc7cd2",
+        "oldName": "RONALD TEJADA EM4326",
+        "newName": "RONALD TEJADA EQ9030",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c8333f7babe484dc7ccd",
+        "driverId": "OLA-002123",
+        "oldName": "RONALD TEJADA EM4326",
+        "newName": "RONALD TEJADA EQ9030",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 30,
+      "customerId": "CUST-002107",
+      "namesInSoftware": "JOSE GUERRA NUÑEZ",
+      "nameInZoho": "JOSE GUERRA NUNEZ EW2616",
+      "customer": {
+        "found": true,
+        "id": "6a82c7603f7babe484dc5878",
+        "oldName": "JOSE GUERRA NUÑEZ",
+        "newName": "JOSE GUERRA NUNEZ EW2616",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c7603f7babe484dc5873",
+        "driverId": "OLA-002066",
+        "oldName": "JOSE GUERRA NUÑEZ",
+        "newName": "JOSE GUERRA NUNEZ EW2616",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 31,
+      "customerId": "CUST-002064",
+      "namesInSoftware": "CARLOS JAVIER YANGUEZ MUNOZ ES6950",
+      "nameInZoho": "CARLOS JAVIER YANGUEZ MUNOZ EW1729",
+      "customer": {
+        "found": true,
+        "id": "6a82c6c93f7babe484dc3def",
+        "oldName": "CARLOS JAVIER YANGUEZ MUNOZ ES6950",
+        "newName": "CARLOS JAVIER YANGUEZ MUNOZ EW1729",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c6c83f7babe484dc3dea",
+        "driverId": "OLA-002023",
+        "oldName": "CARLOS JAVIER YANGUEZ MUNOZ ES6950",
+        "newName": "CARLOS JAVIER YANGUEZ MUNOZ EW1729",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 32,
+      "customerId": "CUST-001988",
+      "namesInSoftware": "KENNETH ACOSTA",
+      "nameInZoho": "KENNETH ACOSTA EV6606",
+      "customer": {
+        "found": true,
+        "id": "6a82c5cf3f7babe484db19a9",
+        "oldName": "KENNETH ACOSTA",
+        "newName": "KENNETH ACOSTA EV6606",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c5ce3f7babe484db19a6",
+        "driverId": "OLA-001947",
+        "oldName": "KENNETH ACOSTA",
+        "newName": "KENNETH ACOSTA EV6606",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 33,
+      "customerId": "CUST-001975",
+      "namesInSoftware": "DEXMARIE DARIAN  DELGADO PIEDRA EV8660",
+      "nameInZoho": "DEXMARIE DARIAN DELGADO PIEDRA EV8660",
+      "customer": {
+        "found": true,
+        "id": "6a82c5a43f7babe484db121b",
+        "oldName": "DEXMARIE DARIAN  DELGADO PIEDRA EV8660",
+        "newName": "DEXMARIE DARIAN DELGADO PIEDRA EV8660",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c5a43f7babe484db1218",
+        "driverId": "OLA-001934",
+        "oldName": "DEXMARIE DARIAN  DELGADO PIEDRA EV8660",
+        "newName": "DEXMARIE DARIAN DELGADO PIEDRA EV8660",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 34,
+      "customerId": "CUST-001852",
+      "namesInSoftware": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ",
+      "nameInZoho": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ EV8597",
+      "customer": {
+        "found": true,
+        "id": "6a82c4273f7babe484dad770",
+        "oldName": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ",
+        "newName": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ EV8597",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c4273f7babe484dad76d",
+        "driverId": "OLA-001811",
+        "oldName": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ",
+        "newName": "ALBERTO ENRIQUE MONTENEGRO RAMIREZ EV8597",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 35,
+      "customerId": "CUST-001815",
+      "namesInSoftware": "MOISES TADEO MELHADO",
+      "nameInZoho": "MOISES TADEO MELHADO EQ9610",
+      "customer": {
+        "found": true,
+        "id": "6a82c3b33f7babe484dac64b",
+        "oldName": "MOISES TADEO MELHADO",
+        "newName": "MOISES TADEO MELHADO EQ9610",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a82c3b23f7babe484dac648",
+        "driverId": "OLA-001774",
+        "oldName": "MOISES TADEO MELHADO",
+        "newName": "MOISES TADEO MELHADO EQ9610",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 36,
+      "customerId": "CUST-002249",
+      "namesInSoftware": "CANDIDO ANDRADE MENDEZ",
+      "nameInZoho": "CANDIDO ANDRADE MENDEZ EU8651",
+      "customer": {
+        "found": true,
+        "id": "6a859dfceeaf8d56083350a4",
+        "oldName": "CANDIDO ANDRADE MENDEZ",
+        "newName": "CANDIDO ANDRADE MENDEZ EU8651",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a859dfbeeaf8d56083350a0",
+        "driverId": "OLA-002209",
+        "oldName": "CANDIDO ANDRADE MENDEZ",
+        "newName": "CANDIDO ANDRADE MENDEZ EU8651",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 37,
+      "customerId": "CUST-002248",
+      "namesInSoftware": "YONIELA RASHIRA FRIAS SINISTERRA ES9514",
+      "nameInZoho": "YONIELA RASHIRA FRIAS SINISTERRA ES7401",
+      "customer": {
+        "found": true,
+        "id": "6a859dfaeeaf8d560833509b",
+        "oldName": "YONIELA RASHIRA FRIAS SINISTERRA ES9514",
+        "newName": "YONIELA RASHIRA FRIAS SINISTERRA ES7401",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a859df9eeaf8d5608335097",
+        "driverId": "OLA-002208",
+        "oldName": "YONIELA RASHIRA FRIAS SINISTERRA ES9514",
+        "newName": "YONIELA RASHIRA FRIAS SINISTERRA ES7401",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 38,
+      "customerId": "CUST-002245",
+      "namesInSoftware": "ESTEBAN JEANNETE ES6528",
+      "nameInZoho": "ESTEBAN JEANNETE ER9385",
+      "customer": {
+        "found": true,
+        "id": "6a859df4eeaf8d5608335080",
+        "oldName": "ESTEBAN JEANNETE ES6528",
+        "newName": "ESTEBAN JEANNETE ER9385",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a859df3eeaf8d560833507c",
+        "driverId": "OLA-002205",
+        "oldName": "ESTEBAN JEANNETE ES6528",
+        "newName": "ESTEBAN JEANNETE ER9385",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 39,
+      "customerId": "CUST-002244",
+      "namesInSoftware": "KENNETH KABIR ANDRADES GOUGH EW1760",
+      "nameInZoho": "KENNETH KABIR ANDRADES GOUGH EW1802",
+      "customer": {
+        "found": true,
+        "id": "6a859df2eeaf8d5608335077",
+        "oldName": "KENNETH KABIR ANDRADES GOUGH EW1760",
+        "newName": "KENNETH KABIR ANDRADES GOUGH EW1802",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a859df1eeaf8d5608335073",
+        "driverId": "OLA-002204",
+        "oldName": "KENNETH KABIR ANDRADES GOUGH EW1760",
+        "newName": "KENNETH KABIR ANDRADES GOUGH EW1802",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 40,
+      "customerId": "CUST-002236",
+      "namesInSoftware": "DAVIS MARTINEZ",
+      "nameInZoho": "DAVIS MARTINEZ EP5898",
+      "customer": {
+        "found": true,
+        "id": "6a859de1eeaf8d560833502f",
+        "oldName": "DAVIS MARTINEZ",
+        "newName": "DAVIS MARTINEZ EP5898",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a859de0eeaf8d560833502b",
+        "driverId": "OLA-002196",
+        "oldName": "DAVIS MARTINEZ",
+        "newName": "DAVIS MARTINEZ EP5898",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 41,
+      "customerId": "CUST-002296",
+      "namesInSoftware": "FERNANDO ALMANZA EM3712",
+      "nameInZoho": "FERNANDO ALMANZA EQ7315",
+      "customer": {
+        "found": true,
+        "id": "6a86d318a35b5e0261d7dcf7",
+        "oldName": "FERNANDO ALMANZA EM3712",
+        "newName": "FERNANDO ALMANZA EQ7315",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a86d317a35b5e0261d7dcea",
+        "driverId": "OLA-002256",
+        "oldName": "FERNANDO ALMANZA EM3712",
+        "newName": "FERNANDO ALMANZA EQ7315",
+        "action": "UPDATED"
+      }
+    },
+    {
+      "row": 42,
+      "customerId": "CUST-002279",
+      "namesInSoftware": "ANTHONY ESTEBAN EP5371",
+      "nameInZoho": "ANTHONY ESTEBAN EP5360",
+      "customer": {
+        "found": true,
+        "id": "6a86d2d7a35b5e0261d7c79f",
+        "oldName": "ANTHONY ESTEBAN EP5371",
+        "newName": "ANTHONY ESTEBAN EP5360",
+        "action": "UPDATED"
+      },
+      "driver": {
+        "found": true,
+        "id": "6a86d2d7a35b5e0261d7c799",
+        "driverId": "OLA-002239",
+        "oldName": "ANTHONY ESTEBAN EP5371",
+        "newName": "ANTHONY ESTEBAN EP5360",
+        "action": "UPDATED"
+      }
+    }
+  ]
+}

@@ -373,6 +373,9 @@ const getAvailableCars = async (req, res, next) => {
 
         if (branchRoles.includes(req.user.role) && req.user.branchId) {
             baseQuery["purchaseDetails.branch"] = req.user.branchId;
+        } else if (req.query.branch && req.query.branch !== 'ALL' && req.query.branch !== '') {
+            baseQuery["purchaseDetails.branch"] = req.query.branch;
+            delete queryParams.branch;
         }
 
         console.log('[DEBUG] getAvailableCars - baseQuery:', JSON.stringify(baseQuery, null, 2));
