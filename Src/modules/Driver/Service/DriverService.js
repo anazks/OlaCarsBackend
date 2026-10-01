@@ -105,11 +105,17 @@ exports.getByEmail = async (email, options = {}) => {
  * Blocks sensitive/workflow fields from being injected.
  */
 exports.update = async (id, data) => {
+    const allowStatusActivation = data.status === "ACTIVE" && data.currentVehicle;
     // Strip all workflow-controlled and sensitive fields
     for (const field of BLOCKED_FIELDS) {
+        if (field === "status" && allowStatusActivation) continue;
         delete data[field];
     }
-    return await updateDriverService(id, data);
+    const updated = await updateDriverService(id, data);
+    if (allowStatusActivation) {
+        await Customer.findOneAndUpdate({ driver: id }, { status: "ACTIVE" });
+    }
+    return updated;
 };
 
 /**

@@ -213,6 +213,7 @@ const driverSchema = new mongoose.Schema(
             signedS3Key: { type: String },   // signed copy uploaded
             issuedDate: { type: Date },
             signedDate: { type: Date },
+            endDate: { type: Date },
         },
 
         // ── 11. Activation ───────────────────────────────────────────

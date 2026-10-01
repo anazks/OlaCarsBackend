@@ -762,38 +762,45 @@ const dataMigrateDrivers = async (req, res) => {
                     if (oldDriverId && String(oldDriverId) !== String(driverId)) {
                         const oldDriver = await Driver.findById(oldDriverId);
                         if (oldDriver) {
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
+                            const rawOldEndDate = row.activationDate || row.deactivationDate;
+                            const oldDriverEndDate = rawOldEndDate ? new Date(rawOldEndDate) : new Date();
+                            const oldDriverCutoff = new Date(oldDriverEndDate);
+                            oldDriverCutoff.setHours(23, 59, 59, 999);
 
-                            // 1. Cancel future rent tracking installments for old driver
+                            // 1. Cancel future rent tracking installments for old driver beyond end date
                             if (Array.isArray(oldDriver.rentTracking)) {
                                 oldDriver.rentTracking.forEach(item => {
                                     const isItemForVeh = item.vehicle && String(item.vehicle) === String(vehicleId);
-                                    const isFutureItem = item.dueDate && new Date(item.dueDate) > today;
-                                    if ((isItemForVeh || !item.vehicle) && (isFutureItem || item.status === 'PENDING')) {
-                                        item.status = 'CANCELLED';
-                                        item.balance = 0;
+                                    const isFutureItem = item.dueDate && new Date(item.dueDate) > oldDriverCutoff;
+                                    if ((isItemForVeh || !item.vehicle) && (isFutureItem || item.status === 'PENDING') && item.status !== 'PAID') {
+                                        if (isFutureItem) {
+                                            item.status = 'CANCELLED';
+                                            item.balance = 0;
+                                        }
                                     }
                                 });
                                 oldDriver.markModified('rentTracking');
                             }
 
-                            // 2. Unassign and mark old driver inactive
+                            // 2. Unassign and mark old driver inactive with deactivationDate
                             oldDriver.currentVehicle = null;
                             oldDriver.status = 'INACTIVE';
+                            oldDriver.deactivationDate = oldDriverEndDate;
+                            if (!oldDriver.contract) oldDriver.contract = {};
+                            oldDriver.contract.endDate = oldDriverEndDate;
                             if (!oldDriver.statusHistory) oldDriver.statusHistory = [];
                             oldDriver.statusHistory.push({
                                 status: 'INACTIVE',
-                                remarks: `Vehicle ${existingVehicle.basicDetails?.make || ''} ${existingVehicle.basicDetails?.model || ''} reassigned during bulk data migration`,
+                                remarks: `Vehicle ${existingVehicle.basicDetails?.make || ''} ${existingVehicle.basicDetails?.model || ''} reassigned during bulk data migration (End Date: ${oldDriverEndDate.toISOString().split('T')[0]})`,
                                 changedAt: new Date()
                             });
                             await oldDriver.save();
 
-                            // 3. Cancel pending/draft invoices for old driver
+                            // 3. Cancel pending/draft/overdue invoices for old driver beyond end date
                             const { Invoice } = require("../../Invoice/Model/InvoiceModel");
                             await Invoice.updateMany(
-                                { driver: oldDriverId, vehicle: vehicleId, status: { $in: ['PENDING', 'DRAFT'] } },
-                                { $set: { status: 'CANCELLED' } }
+                                { driver: oldDriverId, vehicle: vehicleId, status: { $in: ['PENDING', 'DRAFT', 'OVERDUE'] }, dueDate: { $gt: oldDriverCutoff } },
+                                { $set: { status: 'CANCELLED', notes: 'Invoice cancelled due to vehicle reassignment to new driver.' } }
                             );
 
                             // 4. Update linked customer status to INACTIVE
@@ -1102,12 +1109,13 @@ const cancelContract = async (req, res) => {
         session.startTransaction();
         const driverId = req.params.id;
         const user = req.user;
-        const { notes } = req.body;
+        const { notes, endDate, contractEndDate, cancellationDate, deactivationDate } = req.body;
 
         const { Driver } = require("../Model/DriverModel");
         const Customer = require("../../Customer/Model/CustomerModel");
         const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
         const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+        const Lease = require("../../Lease/Model/LeaseModel");
 
         // Fetch driver
         const driver = await Driver.findById(driverId).session(session);
@@ -1117,16 +1125,43 @@ const cancelContract = async (req, res) => {
             return res.status(404).json({ success: false, message: "Driver not found" });
         }
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Determine effective contract end date
+        const rawEndDate = endDate || contractEndDate || cancellationDate || deactivationDate;
+        let effectiveEndDate;
+        if (rawEndDate) {
+            effectiveEndDate = new Date(rawEndDate);
+            if (isNaN(effectiveEndDate.getTime())) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ success: false, message: "Invalid endDate provided" });
+            }
+        } else {
+            effectiveEndDate = new Date();
+        }
 
-        // Mark future pending installments (from next week onwards) as CANCELLED with zero balance
+        // Validate that contract end date cannot be in the future (today or past dates only)
+        const todayEnd = new Date();
+        todayEnd.setHours(23, 59, 59, 999);
+        if (effectiveEndDate > todayEnd) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ 
+                success: false, 
+                message: "Contract end date cannot be in the future. Please select today or a past date." 
+            });
+        }
+
+        // Normalise cutoff to end of the day so any installment due after this date is cancelled
+        const cutoffDate = new Date(effectiveEndDate);
+        cutoffDate.setHours(23, 59, 59, 999);
+
+        // Mark future pending/unpaid installments beyond the end date as CANCELLED with zero balance
         const updatedRentTracking = (driver.rentTracking || []).map(item => {
             const rawObj = typeof item.toObject === 'function' ? item.toObject() : item;
-            if (rawObj.status === 'PENDING' && rawObj.dueDate) {
+            if (rawObj.dueDate && rawObj.status !== 'PAID') {
                 const itemDueDate = new Date(rawObj.dueDate);
                 itemDueDate.setHours(0, 0, 0, 0);
-                if (itemDueDate > today) {
+                if (itemDueDate > cutoffDate) {
                     return {
                         ...rawObj,
                         status: 'CANCELLED',
@@ -1137,16 +1172,19 @@ const cancelContract = async (req, res) => {
             return rawObj;
         });
 
-        // Cancel any pending or draft rental invoices for future weeks beyond today
+        // Cancel any pending, draft, or overdue rental invoices for weeks beyond the end date
         await Invoice.updateMany(
             {
                 driver: driverId,
                 invoiceType: 'RENTAL',
-                status: { $in: ['PENDING', 'DRAFT'] },
-                dueDate: { $gt: today }
+                status: { $in: ['PENDING', 'DRAFT', 'OVERDUE'] },
+                dueDate: { $gt: cutoffDate }
             },
             {
-                $set: { status: 'CANCELLED', notes: 'Invoice cancelled due to driver contract cancellation.' }
+                $set: { 
+                    status: 'CANCELLED', 
+                    notes: `Invoice cancelled due to driver contract cancellation (End Date: ${effectiveEndDate.toISOString().split('T')[0]}).` 
+                }
             },
             { session }
         );
@@ -1163,22 +1201,42 @@ const cancelContract = async (req, res) => {
                     changedBy: user.id,
                     changedByRole: user.role,
                     timestamp: new Date(),
-                    notes: `Contract cancelled for driver ${driver.personalInfo?.fullName || driverId}. Vehicle released.`,
+                    notes: notes 
+                        ? `Contract cancelled for driver ${driver.personalInfo?.fullName || driverId} (End Date: ${effectiveEndDate.toISOString().split('T')[0]}). Notes: ${notes}`
+                        : `Contract cancelled for driver ${driver.personalInfo?.fullName || driverId} (End Date: ${effectiveEndDate.toISOString().split('T')[0]}). Vehicle released.`,
                 });
                 await vehicle.save({ session });
             }
         }
 
-        // Update driver status to INACTIVE, clear currentVehicle, update rentTracking, and add to history
+        // Terminate any active leases for this driver
+        await Lease.updateMany(
+            { driver: driverId, status: 'ACTIVE' },
+            { 
+                $set: { 
+                    status: 'TERMINATED', 
+                    endDate: effectiveEndDate,
+                    notes: notes || `Lease terminated on contract cancellation (End Date: ${effectiveEndDate.toISOString().split('T')[0]}).`
+                } 
+            },
+            { session }
+        );
+
+        // Update driver status to INACTIVE, clear currentVehicle, update rentTracking, set deactivationDate and contract.endDate, and add to history
         driver.status = 'INACTIVE';
         driver.currentVehicle = null;
+        driver.deactivationDate = effectiveEndDate;
+        if (!driver.contract) driver.contract = {};
+        driver.contract.endDate = effectiveEndDate;
         driver.rentTracking = updatedRentTracking;
         driver.statusHistory.push({
             status: 'INACTIVE',
             changedBy: user.id,
             changedByRole: user.role,
             timestamp: new Date(),
-            notes: notes || 'Contract cancelled. Rent repayment plan stopped, future pending installments cleared.',
+            notes: notes 
+                ? `Contract cancelled (End Date: ${effectiveEndDate.toISOString().split('T')[0]}). Notes: ${notes}`
+                : `Contract cancelled with end date ${effectiveEndDate.toISOString().split('T')[0]}. Rent repayment plan stopped, future installments beyond end date cleared.`,
         });
         await driver.save({ session });
 
@@ -1400,12 +1458,13 @@ const verifyAndCorrectDriverPlans = async (req, res) => {
             }
 
             // 3. Cancel any future pending invoices
+            const invoiceCutoff = isDeactivated && deactTime ? deactTime : today;
             await Invoice.updateMany(
                 {
                     driver: existingDriver._id,
                     invoiceType: 'RENTAL',
-                    status: { $in: ['PENDING', 'DRAFT'] },
-                    dueDate: { $gt: today }
+                    status: { $in: ['PENDING', 'DRAFT', 'OVERDUE'] },
+                    dueDate: { $gt: invoiceCutoff }
                 },
                 { $set: { status: 'CANCELLED', notes: 'Cancelled during driver plan verification.' } }
             );

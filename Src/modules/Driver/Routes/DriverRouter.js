@@ -446,6 +446,44 @@ router.put(
     progressDriverStatus
 );
 // ─── PUT /api/driver/:id/cancel-contract — Cancel Contract ────────────
+/**
+ * @swagger
+ * /api/driver/{id}/cancel-contract:
+ *   put:
+ *     summary: Cancel driver contract, unassign vehicle, and cancel future repayment plan weeks
+ *     description: Cancels the driver contract, sets driver status to INACTIVE, unassigns the vehicle, and cancels rent tracking installments and rental invoices due after the specified endDate.
+ *     tags: [Driver]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Driver MongoDB ID
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               endDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Effective end date from which future repayment plan installments and invoices are cancelled (defaults to today if omitted)
+ *               notes:
+ *                 type: string
+ *                 description: Optional notes/reason for cancellation
+ *     responses:
+ *       200:
+ *         description: Contract cancelled successfully
+ *       400:
+ *         description: Invalid input or endDate
+ *       404:
+ *         description: Driver not found
+ */
 router.put(
     "/:id/cancel-contract",
     authenticate,
