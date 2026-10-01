@@ -365,9 +365,9 @@ const getAvailableCars = async (req, res, next) => {
             "WORKSHOPSTAFF"
         ];
 
-        // Filter by status and branch
+        // Filter by status and branch: include both available and rented vehicles so assignment dropdowns can display assigned status
         const baseQuery = {
-            status: "ACTIVE — AVAILABLE",
+            status: { $in: ["ACTIVE — AVAILABLE", "ACTIVE - AVAILABLE", "ACTIVE — RENTED", "ACTIVE - RENTED"] },
             isDeleted: false
         };
 
@@ -385,15 +385,29 @@ const getAvailableCars = async (req, res, next) => {
             defaultSort: { createdAt: -1 }
         });
 
-        console.log('[DEBUG] getAvailableCars - Found vehicles:', result.data?.length || 0);
-        if (result.data && result.data.length > 0) {
-            console.log('[DEBUG] getAvailableCars - First Vehicle Status:', result.data[0].status);
-            console.log('[DEBUG] getAvailableCars - First Vehicle Branch:', result.data[0].purchaseDetails?.branch?._id || result.data[0].purchaseDetails?.branch);
-        }
+        // Query for drivers assigned to these vehicles
+        const vehicleIds = result.data.map(v => v._id);
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const drivers = await Driver.find({ currentVehicle: { $in: vehicleIds }, isDeleted: false })
+            .select("personalInfo.fullName personalInfo.phone personalInfo.email driverId currentVehicle");
+
+        // Convert Mongoose documents to plain JS objects and ensure currentDriver is attached
+        const vehiclesWithDrivers = result.data.map(v => {
+            const vObj = v.toObject ? v.toObject() : v;
+            if (!vObj.currentDriver) {
+                const assignedDriver = drivers.find(d => String(d.currentVehicle) === String(vObj._id));
+                if (assignedDriver) {
+                    vObj.currentDriver = assignedDriver.toObject ? assignedDriver.toObject() : assignedDriver;
+                }
+            }
+            return vObj;
+        });
+
+        console.log('[DEBUG] getAvailableCars - Found vehicles:', vehiclesWithDrivers.length);
 
         return res.status(200).json({
             success: true,
-            data: result.data,
+            data: vehiclesWithDrivers,
             pagination: {
                 total: result.total,
                 page: result.page,

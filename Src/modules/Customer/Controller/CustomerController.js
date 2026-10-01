@@ -44,13 +44,36 @@ exports.createCustomer = async (req, res) => {
                 });
             }
 
-            vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: false });
+            vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: false })
+                .populate('currentDriver', 'personalInfo driverId name');
             if (!vehicle) {
                 return res.status(404).json({
                     success: false,
                     message: 'Selected vehicle not found.'
                 });
             }
+
+            // Check if vehicle is already assigned with another driver
+            let assignedDriverName = null;
+            if (vehicle.currentDriver) {
+                assignedDriverName = vehicle.currentDriver.personalInfo?.fullName || vehicle.currentDriver.name || vehicle.currentDriver.driverId;
+            } else {
+                const assignedDriverDoc = await Driver.findOne({
+                    currentVehicle: vehicle._id,
+                    isDeleted: false
+                }).select('personalInfo driverId name');
+                if (assignedDriverDoc) {
+                    assignedDriverName = assignedDriverDoc.personalInfo?.fullName || assignedDriverDoc.name || assignedDriverDoc.driverId;
+                }
+            }
+
+            if (assignedDriverName) {
+                return res.status(400).json({
+                    success: false,
+                    message: `This vehicle is already assigned with the driver (${assignedDriverName}), please cancel it to assign it to a new driver.`
+                });
+            }
+
             if (vehicle.status !== 'ACTIVE — AVAILABLE' && vehicle.status !== 'ACTIVE - AVAILABLE') {
                 return res.status(400).json({
                     success: false,
@@ -84,6 +107,18 @@ exports.createCustomer = async (req, res) => {
             }
 
             if (existingDriver) {
+                // Safeguard: Check if this driver is already linked to another customer
+                const existingCustomerWithDriver = await Customer.findOne({
+                    driver: existingDriver._id,
+                    isDeleted: false
+                });
+                if (existingCustomerWithDriver && existingCustomerWithDriver.name.toLowerCase().trim() !== customerData.name.toLowerCase().trim()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `A customer driver profile (${existingCustomerWithDriver.name} - ${existingDriver.driverId}) already exists with email ${customerData.email}. Please use a distinct email address.`
+                    });
+                }
+
                 savedDriver = existingDriver;
                 if (vehicle) {
                     savedDriver.currentVehicle = vehicle._id;
