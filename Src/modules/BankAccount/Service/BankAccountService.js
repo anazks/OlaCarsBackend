@@ -633,54 +633,51 @@ const recordManualPayment = async (targetId, data) => {
 
     const parsedDate = (() => {
         if (!depositDate) return new Date();
-        const dateParts = String(depositDate).split("-");
-        if (dateParts.length === 3) {
-            const year = parseInt(dateParts[0], 10);
-            const month = parseInt(dateParts[1], 10) - 1;
-            const day = parseInt(dateParts[2], 10);
-            const d = new Date();
-            d.setFullYear(year, month, day);
-            return d;
+        if (depositDate instanceof Date) {
+            return isNaN(depositDate.getTime()) ? new Date() : new Date(Date.UTC(depositDate.getUTCFullYear(), depositDate.getUTCMonth(), depositDate.getUTCDate(), 12, 0, 0, 0));
         }
-        return new Date(depositDate);
+        const str = String(depositDate).trim();
+        const parts = str.split(/[\/\-\.]/);
+        if (parts.length === 3) {
+            let year, month, day;
+            if (parts[0].length === 4) {
+                // YYYY-MM-DD
+                year = parseInt(parts[0], 10);
+                month = parseInt(parts[1], 10) - 1;
+                day = parseInt(parts[2], 10);
+            } else if (parts[2].length === 4 || parts[2].length === 2) {
+                // DD-MM-YYYY
+                const p1 = parseInt(parts[0], 10);
+                const p2 = parseInt(parts[1], 10);
+                const p3 = parseInt(parts[2], 10);
+                year = p3 < 100 ? 2000 + p3 : p3;
+                if (p1 > 12 && p2 <= 12) {
+                    day = p1;
+                    month = p2 - 1;
+                } else if (p1 <= 12 && p2 > 12) {
+                    month = p1 - 1;
+                    day = p2;
+                } else {
+                    day = p1;
+                    month = p2 - 1;
+                }
+            }
+            if (year && !isNaN(month) && day) {
+                return new Date(Date.UTC(year, month, day, 12, 0, 0, 0));
+            }
+        }
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+            return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0, 0));
+        }
+        return new Date();
     })();
 
     const cleanCustomerId = (customerId && customerId !== "undefined" && customerId !== "null" && String(customerId).trim() !== "") ? String(customerId).trim() : null;
     const cleanInvoiceId = (invoiceId && invoiceId !== "undefined" && invoiceId !== "null" && String(invoiceId).trim() !== "") ? String(invoiceId).trim() : null;
 
     // -------------------------------------------------------------
-    // CASE A: RECEIPT WITH CUSTOMER & NO SPECIFIC INVOICE (Auto Set-off)
-    // -------------------------------------------------------------
-    if (normalizedEntryType === "RECEIPT" && cleanCustomerId && !cleanInvoiceId) {
-        const setOffResult = await autoSetOffInvoices(cleanCustomerId, numericAmount, {
-            bankAccountingCodeId: targetAccount.accountingCode,
-            branchId: finalBranchId,
-            entryDate: parsedDate,
-            description: description || `Manual Payment Received from Customer`,
-            createdBy: userId,
-            creatorRole: finalRole
-        });
-
-        // Update target bank account balance (DEBIT: Money In)
-        let targetBalanceChange = targetAccount.accountType === "Credit Card" ? -numericAmount : numericAmount;
-        targetAccount.currentBalance = Number(targetAccount.currentBalance || 0) + targetBalanceChange;
-        await targetAccount.save();
-
-        try {
-            await recalculateRunningBalances(targetAccount._id);
-        } catch (recalcErr) {
-            console.error("Failed to recalculate running balances after customer receipt auto set-off:", recalcErr);
-        }
-
-        return {
-            success: true,
-            setOffResult,
-            targetNewBalance: targetAccount.currentBalance
-        };
-    }
-
-    // -------------------------------------------------------------
-    // CASE B: OTHER RECEIPTS OR PAYMENTS (requires offset Account or Specific Invoice)
+    // RECEIPTS OR PAYMENTS (Double-entry recording with optional auto set-off)
     // -------------------------------------------------------------
     const cleanOffsetAccountId = (toAccountId && toAccountId !== "undefined" && toAccountId !== "null" && String(toAccountId).trim() !== "") ? String(toAccountId).trim() : ((fromAccountId && fromAccountId !== "undefined" && fromAccountId !== "null" && String(fromAccountId).trim() !== "") ? String(fromAccountId).trim() : null);
     let offsetAccount = null;
@@ -776,6 +773,8 @@ const recordManualPayment = async (targetId, data) => {
                     bankTxType: manualTxType
                 }
             ],
+            contact: cleanCustomerId || undefined,
+            contactModel: cleanCustomerId ? "Customer" : undefined,
             createdBy: userId,
             creatorRole: finalRole
         };
@@ -808,6 +807,9 @@ const recordManualPayment = async (targetId, data) => {
                     bankTxType: manualTxType
                 }
             ],
+            contact: cleanCustomerId || undefined,
+            contactModel: cleanCustomerId ? "Customer" : undefined,
+            autoSetOff: Boolean(cleanCustomerId && !cleanInvoiceId),
             createdBy: userId,
             creatorRole: finalRole
         };
@@ -4163,15 +4165,26 @@ const updateTransactionDate = async (transactionId, newDateStr, options = {}) =>
         throw new Error("Transaction not found");
     }
 
-    // Extract target year, month, day
+    // Extract target year, month, day supporting both YYYY-MM-DD and DD-MM-YYYY
     let targetYear, targetMonth, targetDay;
-    if (typeof newDateStr === 'string' && newDateStr.includes('-')) {
-        const datePart = newDateStr.split('T')[0];
-        const parts = datePart.split('-').map(Number);
-        targetYear = parts[0];
-        targetMonth = parts[1];
-        targetDay = parts[2];
-    } else {
+    if (typeof newDateStr === 'string') {
+        const datePart = newDateStr.split('T')[0].trim();
+        const parts = datePart.split(/[\/\-\.]/).map(Number);
+        if (parts.length === 3) {
+            if (String(parts[0]).length === 4) {
+                // YYYY-MM-DD
+                targetYear = parts[0];
+                targetMonth = parts[1];
+                targetDay = parts[2];
+            } else if (String(parts[2]).length === 4 || String(parts[2]).length === 2) {
+                // DD-MM-YYYY
+                targetDay = parts[0];
+                targetMonth = parts[1];
+                targetYear = parts[2] < 100 ? 2000 + parts[2] : parts[2];
+            }
+        }
+    }
+    if (!targetYear) {
         const d = new Date(newDateStr);
         targetYear = d.getUTCFullYear();
         targetMonth = d.getUTCMonth() + 1;
@@ -4182,10 +4195,7 @@ const updateTransactionDate = async (transactionId, newDateStr, options = {}) =>
         throw new Error("Invalid date provided");
     }
 
-    // Existing date from which to preserve time components
-    const existingDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate) || new Date();
-    const finalDate = new Date(existingDate);
-    finalDate.setUTCFullYear(targetYear, targetMonth - 1, targetDay);
+    const finalDate = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 12, 0, 0, 0));
 
     if (isNaN(finalDate.getTime())) {
         throw new Error("Invalid date calculated");

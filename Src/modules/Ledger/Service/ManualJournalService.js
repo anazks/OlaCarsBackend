@@ -16,38 +16,49 @@ const AppError = require("../../../shared/utils/AppError");
 function normalizeDate(val) {
     if (!val) return new Date();
     if (val instanceof Date && !isNaN(val.getTime())) {
-        const adjusted = new Date(val.getTime() + (val.getUTCHours() >= 12 ? 12 * 3600 * 1000 : 0));
-        return new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate(), 0, 0, 0));
+        return new Date(Date.UTC(val.getUTCFullYear(), val.getUTCMonth(), val.getUTCDate(), 12, 0, 0, 0));
     }
     const num = Number(val);
     if (!isNaN(num) && num > 20000 && num < 100000) {
         const totalDays = Math.floor(num);
         const jsDate = new Date(Math.round((totalDays - 25569) * 86400 * 1000));
         if (!isNaN(jsDate.getTime())) {
-            return new Date(Date.UTC(jsDate.getUTCFullYear(), jsDate.getUTCMonth(), jsDate.getUTCDate(), 0, 0, 0));
+            return new Date(Date.UTC(jsDate.getUTCFullYear(), jsDate.getUTCMonth(), jsDate.getUTCDate(), 12, 0, 0, 0));
         }
     }
     const str = String(val).trim();
-    // Check DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-    const dmyMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
-    if (dmyMatch) {
-        const d = parseInt(dmyMatch[1], 10);
-        const m = parseInt(dmyMatch[2], 10);
-        const y = parseInt(dmyMatch[3], 10);
-        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
-    }
-    // Check YYYY-MM-DD or YYYY/MM/DD
-    const ymdMatch = str.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
-    if (ymdMatch) {
-        const y = parseInt(ymdMatch[1], 10);
-        const m = parseInt(ymdMatch[2], 10);
-        const d = parseInt(ymdMatch[3], 10);
-        return new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+    const parts = str.split(/[\/\-\.]/);
+    if (parts.length === 3) {
+        let year, month, day;
+        if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            year = parseInt(parts[0], 10);
+            month = parseInt(parts[1], 10) - 1;
+            day = parseInt(parts[2], 10);
+        } else if (parts[2].length === 4 || parts[2].length === 2) {
+            // DD-MM-YYYY
+            const p1 = parseInt(parts[0], 10);
+            const p2 = parseInt(parts[1], 10);
+            const p3 = parseInt(parts[2], 10);
+            year = p3 < 100 ? 2000 + p3 : p3;
+            if (p1 > 12 && p2 <= 12) {
+                day = p1;
+                month = p2 - 1;
+            } else if (p1 <= 12 && p2 > 12) {
+                month = p1 - 1;
+                day = p2;
+            } else {
+                day = p1;
+                month = p2 - 1;
+            }
+        }
+        if (year && !isNaN(month) && day) {
+            return new Date(Date.UTC(year, month, day, 12, 0, 0, 0));
+        }
     }
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
-        const adjusted = new Date(d.getTime() + (d.getUTCHours() >= 12 ? 12 * 3600 * 1000 : 0));
-        return new Date(Date.UTC(adjusted.getUTCFullYear(), adjusted.getUTCMonth(), adjusted.getUTCDate(), 0, 0, 0));
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0, 0));
     }
     return new Date();
 }
@@ -163,6 +174,7 @@ exports.createManualJournal = async (data) => {
             contactModel: contactModel || undefined,
             description: sanitizedLine.description || journalData.description || "Manual Journal Entry",
             manualJournal: journal._id,
+            transactionId: sanitizedLine.transactionId || journal.journalNumber,
             branch: journalData.branch,
             entryDate: effectiveDate,
             createdBy: journalData.createdBy,

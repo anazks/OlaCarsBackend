@@ -1556,14 +1556,12 @@ exports.getBankTransactions = async (req, res, next) => {
         if (startDate || endDate) {
             query.entryDate = {};
             if (startDate) {
-                const startD = new Date(startDate);
-                startD.setHours(0, 0, 0, 0);
-                query.entryDate.$gte = startD;
+                const startStr = startDate.includes("T") ? startDate : `${startDate}T00:00:00.000Z`;
+                query.entryDate.$gte = new Date(startStr);
             }
             if (endDate) {
-                const endD = new Date(endDate);
-                endD.setHours(23, 59, 59, 999);
-                query.entryDate.$lte = endD;
+                const endStr = endDate.includes("T") ? endDate : `${endDate}T23:59:59.999Z`;
+                query.entryDate.$lte = new Date(endStr);
             }
         }
 
@@ -1852,9 +1850,10 @@ exports.getBankTransactions = async (req, res, next) => {
         // Calculate dynamic opening balance for the filtered period
         let openingBalance = account.initialBalance || 0;
         if (startDate) {
+            const startStr = startDate.includes("T") ? startDate : `${startDate}T00:00:00.000Z`;
             const priorQuery = {
                 accountingCode: account.accountingCode,
-                entryDate: { $lt: new Date(startDate) }
+                entryDate: { $lt: new Date(startStr) }
             };
             const priorTotals = await LedgerEntry.aggregate([
                 { $match: priorQuery },
@@ -2138,10 +2137,12 @@ exports.getBankAccountLedgerPdf = async (req, res, next) => {
         if (startDate || endDate) {
             query.entryDate = {};
             if (startDate) {
-                query.entryDate.$gte = new Date(startDate);
+                const startStr = startDate.includes("T") ? startDate : `${startDate}T00:00:00.000Z`;
+                query.entryDate.$gte = new Date(startStr);
             }
             if (endDate) {
-                query.entryDate.$lte = new Date(endDate);
+                const endStr = endDate.includes("T") ? endDate : `${endDate}T23:59:59.999Z`;
+                query.entryDate.$lte = new Date(endStr);
             }
         }
 
