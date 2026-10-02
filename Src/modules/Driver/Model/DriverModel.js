@@ -71,6 +71,20 @@ const rentChangeHistorySchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now },
 }, { _id: true });
 
+// ─── Vehicle Assignment History (tracks every assign → deactivate cycle) ──
+const vehicleAssignmentSchema = new mongoose.Schema({
+    vehicle:      { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+    plateNumber:  { type: String, trim: true },       // snapshot at assignment time
+    fleetNumber:  { type: String, trim: true },       // snapshot
+    vehicleModel: { type: String, trim: true },       // snapshot ("Make Model")
+    weeklyRent:   { type: Number },
+    startDate:    { type: Date, required: true },
+    endDate:      { type: Date },                     // null = ongoing/active
+    status:       { type: String, enum: ["ACTIVE", "CANCELLED", "COMPLETED"], default: "ACTIVE" },
+    cancelledBy:  { type: mongoose.Schema.Types.ObjectId },
+    cancelNotes:  { type: String, trim: true },
+}, { _id: true, timestamps: true });
+
 // ─── Main Driver Schema ──────────────────────────────────────────────
 const driverSchema = new mongoose.Schema(
     {
@@ -260,6 +274,9 @@ const driverSchema = new mongoose.Schema(
             ref: "Vehicle",
         },
 
+        // ── Vehicle Assignment History ───────────────────────────────
+        assignmentHistory: [vehicleAssignmentSchema],
+
         // ── 14. Performance Metrics ──────────────────────────────────
         performance: {
             avgSpeed: { type: Number, default: 0 },
@@ -326,12 +343,12 @@ const driverSchema = new mongoose.Schema(
 
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
-            required: true,
+            required: false,
             refPath: "creatorRole",
         },
         creatorRole: {
             type: String,
-            required: true,
+            required: false,
             enum: Object.values(ROLES),
         },
 
@@ -373,6 +390,7 @@ driverSchema.index({ "personalInfo.email": 1 }, { sparse: true });
 driverSchema.index({ "drivingLicense.expiryDate": 1 });
 driverSchema.index({ "medicalFitness.expiryDate": 1 });
 driverSchema.index({ createdAt: -1 });
+driverSchema.index({ "assignmentHistory.status": 1 });
 
 const Driver = mongoose.model("Driver", driverSchema);
 mongoose.model("DRIVER", driverSchema, "drivers");

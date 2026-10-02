@@ -502,30 +502,63 @@ const assignCarToDriver = async (req, res, next) => {
             }
         }, session);
 
-        // 6. Update Driver — link vehicle + set ACTIVE status and activationDate
+        // 6. Update Driver — link vehicle, update assignmentHistory, and set ACTIVE status
         const actDate = activationDate ? new Date(activationDate) : new Date();
-        const driverUpdate = {
-            currentVehicle: vehicleId,
-            status: "ACTIVE",
-            activationDate: actDate,
-            $push: {
-                statusHistory: {
-                    status: "ACTIVE",
-                    changedBy: req.user.id,
-                    changedByRole: req.user.role,
-                    timestamp: actDate,
-                    notes: `Activated and assigned vehicle ${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''} (${vehicle.basicDetails?.vin || ''}). Lease: ${durationMonths} months.`
-                }
+        const weeklyRentVal = Math.ceil(monthlyRent / 4);
+        const vehicleModelStr = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
+        const regNo = vehicle.legalDocs?.registrationNumber || vehicle.basicDetails?.plateNumber || vehicle.plateNumber || '';
+        const fleetNo = vehicle.basicDetails?.fleetNumber || '';
+
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const driverDoc = await Driver.findById(driverId).session(session);
+        if (driverDoc) {
+            if (!driverDoc.assignmentHistory) driverDoc.assignmentHistory = [];
+            // Close any existing active assignment
+            const activeIdx = driverDoc.assignmentHistory.findIndex(a => a.status === 'ACTIVE' || !a.endDate);
+            if (activeIdx !== -1) {
+                driverDoc.assignmentHistory[activeIdx].endDate = actDate;
+                driverDoc.assignmentHistory[activeIdx].status = 'COMPLETED';
             }
-        };
+            driverDoc.assignmentHistory.push({
+                vehicle: vehicleId,
+                plateNumber: regNo,
+                fleetNumber: fleetNo,
+                vehicleModel: vehicleModelStr,
+                weeklyRent: weeklyRentVal,
+                startDate: actDate,
+                endDate: null,
+                status: 'ACTIVE',
+            });
+            driverDoc.currentVehicle = vehicleId;
+            driverDoc.status = "ACTIVE";
+            driverDoc.activationDate = actDate;
+            driverDoc.deactivationDate = null;
+            driverDoc.weeklyRent = weeklyRentVal;
+            if (!driverDoc.statusHistory) driverDoc.statusHistory = [];
+            driverDoc.statusHistory.push({
+                status: "ACTIVE",
+                changedBy: req.user?.id,
+                changedByRole: req.user?.role,
+                timestamp: actDate,
+                notes: `Activated and assigned vehicle ${vehicleModelStr} (${regNo || vehicle.basicDetails?.vin || ''}). Lease: ${durationMonths} months.`
+            });
+            await driverDoc.save({ session });
+        }
 
-        await updateDriverService(driverId, driverUpdate, session);
-
-        // Sync linked Customer status to ACTIVE
+        // Sync linked Customer status and vehicle fields
         const Customer = require("../../Customer/Model/CustomerModel");
         await Customer.findOneAndUpdate(
             { driver: driverId },
-            { status: "ACTIVE" },
+            { 
+                status: "ACTIVE",
+                cfVehicleNo: regNo,
+                cfFleetNo: fleetNo,
+                cfVehicleModel: vehicleModelStr,
+                cfVinNumber: vehicle.basicDetails?.vin || '',
+                cfWeeklyRent: weeklyRentVal,
+                cfActiveDate: actDate,
+                cfEndDate: null
+            },
             { session }
         );
 

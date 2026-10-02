@@ -215,11 +215,17 @@ exports.createCustomer = async (req, res) => {
             .populate('branch')
             .populate({
                 path: 'driver',
-                select: 'driverId status currentVehicle personalInfo activationDate weeklyRent',
-                populate: {
-                    path: 'currentVehicle',
-                    select: 'legalDocs basicDetails plateNumber status'
-                }
+                select: 'driverId status currentVehicle personalInfo activationDate weeklyRent assignmentHistory',
+                populate: [
+                    {
+                        path: 'currentVehicle',
+                        select: 'legalDocs basicDetails plateNumber status'
+                    },
+                    {
+                        path: 'assignmentHistory.vehicle',
+                        select: 'basicDetails legalDocs status'
+                    }
+                ]
             });
 
         res.status(201).json({ success: true, data: populatedDoc });
@@ -326,13 +332,82 @@ exports.getCustomerById = async (req, res) => {
             .populate('branch')
             .populate({
                 path: 'driver',
-                populate: {
-                    path: 'currentVehicle',
-                    populate: { path: 'fleet' }
-                }
+                populate: [
+                    {
+                        path: 'currentVehicle',
+                        populate: { path: 'fleet' }
+                    },
+                    {
+                        path: 'assignmentHistory.vehicle',
+                        select: 'basicDetails legalDocs status'
+                    }
+                ]
             });
             
         if (!doc) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+        // Ensure active vehicle assignment is present in driver.assignmentHistory if driver has an active vehicle
+        if (doc.driver) {
+            const driverObj = doc.driver;
+            const currentVeh = driverObj.currentVehicle;
+            const hasAssignedVehicle = Boolean(
+                (currentVeh && (currentVeh.legalDocs?.registrationNumber || currentVeh.basicDetails?.plateNumber) && currentVeh.status !== 'INACTIVE') ||
+                (doc.cfVehicleNo && !['nill', 'nil', 'na', 'n/a', 'none', '-', '—', ''].includes(String(doc.cfVehicleNo).trim().toLowerCase()) && driverObj.status === 'ACTIVE')
+            );
+
+            if (!driverObj.assignmentHistory) {
+                driverObj.assignmentHistory = [];
+            }
+
+            const hasActiveInHistory = driverObj.assignmentHistory.some(
+                a => a.status === 'ACTIVE' && (!a.endDate || new Date(a.endDate) > new Date())
+            );
+
+            if (!hasActiveInHistory && hasAssignedVehicle) {
+                const plateNumber = currentVeh?.legalDocs?.registrationNumber || currentVeh?.basicDetails?.plateNumber || doc.cfVehicleNo || '';
+                const fleetNumber = currentVeh?.basicDetails?.fleetNumber || doc.cfFleetNo || '';
+                const vehicleModel = currentVeh?.basicDetails
+                    ? `${currentVeh.basicDetails.make || ''} ${currentVeh.basicDetails.model || ''}`.trim()
+                    : (doc.cfVehicleModel || 'Assigned Vehicle');
+                const weeklyRent = doc.cfWeeklyRent !== undefined && doc.cfWeeklyRent !== null && doc.cfWeeklyRent !== ''
+                    ? Number(doc.cfWeeklyRent)
+                    : (driverObj.weeklyRent || currentVeh?.basicDetails?.weeklyRent || undefined);
+                const startDate = doc.cfActiveDate || driverObj.activationDate || driverObj.createdAt || doc.createdAt || new Date();
+
+                const activeEntry = {
+                    vehicle: currentVeh?._id || currentVeh || undefined,
+                    plateNumber,
+                    fleetNumber,
+                    vehicleModel,
+                    weeklyRent: weeklyRent ? Number(weeklyRent) : undefined,
+                    startDate,
+                    endDate: null,
+                    status: 'ACTIVE',
+                    cancelNotes: 'Current Active Assignment'
+                };
+
+                // Add to response
+                driverObj.assignmentHistory.unshift(activeEntry);
+
+                // Persist to Driver document if it has currentVehicle
+                if (driverObj._id && (currentVeh?._id || currentVeh)) {
+                    try {
+                        const { Driver } = require('../../Driver/Model/DriverModel');
+                        await Driver.findByIdAndUpdate(driverObj._id, {
+                            $push: {
+                                assignmentHistory: {
+                                    $each: [activeEntry],
+                                    $position: 0
+                                }
+                            }
+                        });
+                    } catch (persistErr) {
+                        console.error('[getCustomerById] Error persisting active assignment to Driver:', persistErr.message);
+                    }
+                }
+            }
+        }
+
         res.status(200).json({ success: true, data: doc });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -385,10 +460,16 @@ exports.updateCustomer = async (req, res) => {
             .populate('branch')
             .populate({
                 path: 'driver',
-                populate: {
-                    path: 'currentVehicle',
-                    populate: { path: 'fleet' }
-                }
+                populate: [
+                    {
+                        path: 'currentVehicle',
+                        populate: { path: 'fleet' }
+                    },
+                    {
+                        path: 'assignmentHistory.vehicle',
+                        select: 'basicDetails legalDocs status'
+                    }
+                ]
             });
 
         res.status(200).json({ success: true, data: populatedDoc });
@@ -1086,3 +1167,205 @@ exports.bulkCreateCustomers = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.assignVehicleToCustomer = async (req, res) => {
+    try {
+        const mongoose = require('mongoose');
+        const Customer = require('../Model/CustomerModel');
+        const { Driver } = require('../../Driver/Model/DriverModel');
+        const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
+        const { getNextDriverId, addDriverService } = require('../../Driver/Repo/DriverRepo');
+        const DriverService = require('../../Driver/Service/DriverService');
+
+        const { vehicleId, startDate, durationWeeks, weeklyRent } = req.body;
+
+        if (!vehicleId || !mongoose.Types.ObjectId.isValid(vehicleId)) {
+            return res.status(400).json({ success: false, message: 'Please select a valid vehicle to assign.' });
+        }
+
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: { $ne: true } });
+        if (!customer) {
+            return res.status(404).json({ success: false, message: 'Customer not found.' });
+        }
+
+        const vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: { $ne: true } });
+        if (!vehicle) {
+            return res.status(404).json({ success: false, message: 'Vehicle not found.' });
+        }
+
+        // Check if vehicle is already assigned to someone else
+        if (vehicle.currentDriver && (!customer.driver || String(vehicle.currentDriver) !== String(customer.driver))) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'This vehicle is already assigned with another driver. Please cancel the existing contract first.' 
+            });
+        }
+
+        const effectiveStartDate = startDate ? new Date(startDate) : new Date();
+        const effectiveDurationWeeks = durationWeeks && !isNaN(Number(durationWeeks)) ? Number(durationWeeks) : 60;
+        const effectiveWeeklyRent = weeklyRent !== undefined && weeklyRent !== '' && !isNaN(Number(weeklyRent))
+            ? Number(weeklyRent)
+            : (vehicle.basicDetails?.weeklyRent || 150);
+
+        let driver = null;
+        if (customer.driver) {
+            driver = await Driver.findById(customer.driver);
+        }
+
+        if (!driver && customer.email) {
+            driver = await Driver.findOne({ 'personalInfo.email': customer.email.toLowerCase().trim(), isDeleted: false });
+        }
+
+        const regNo = vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle.basicDetails?.plateNumber || '';
+        const vehicleModelStr = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
+        const fleetNo = vehicle.basicDetails?.fleetNumber || '';
+
+        if (!driver) {
+            const driverId = await getNextDriverId();
+            const driverData = {
+                driverId,
+                status: 'ACTIVE',
+                personalInfo: {
+                    fullName: customer.name ? customer.name.trim() : undefined,
+                    email: customer.email ? customer.email.trim().toLowerCase() : undefined,
+                    phone: customer.phone ? customer.phone.trim() : (customer.mobilePhone ? customer.mobilePhone.trim() : undefined),
+                    whatsappNumber: customer.whatsappNumber ? customer.whatsappNumber.trim() : undefined,
+                },
+                branch: customer.branch,
+                currentVehicle: vehicle._id,
+                activationDate: effectiveStartDate,
+                weeklyRent: effectiveWeeklyRent,
+                createdBy: req.user ? (req.user.id || req.user._id) : undefined,
+                creatorRole: req.user?.role || 'SYSTEM',
+                assignmentHistory: [{
+                    vehicle: vehicle._id,
+                    plateNumber: regNo,
+                    fleetNumber: fleetNo,
+                    vehicleModel: vehicleModelStr,
+                    weeklyRent: effectiveWeeklyRent,
+                    startDate: effectiveStartDate,
+                    endDate: null,
+                    status: 'ACTIVE',
+                }],
+                statusHistory: [{
+                    status: 'ACTIVE',
+                    changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+                    changedByRole: req.user?.role || 'SYSTEM',
+                    timestamp: new Date(),
+                    notes: `Driver profile auto-created and assigned vehicle ${regNo}.`
+                }]
+            };
+            driver = await addDriverService(driverData);
+            customer.driver = driver._id;
+        } else {
+            // Close any existing ACTIVE assignment in history
+            if (!driver.assignmentHistory) driver.assignmentHistory = [];
+            const activeIdx = driver.assignmentHistory.findIndex(a => a.status === 'ACTIVE');
+            if (activeIdx !== -1) {
+                driver.assignmentHistory[activeIdx].endDate = effectiveStartDate;
+                driver.assignmentHistory[activeIdx].status = 'COMPLETED';
+            }
+
+            // Push new assignment entry
+            driver.assignmentHistory.push({
+                vehicle: vehicle._id,
+                plateNumber: regNo,
+                fleetNumber: fleetNo,
+                vehicleModel: vehicleModelStr,
+                weeklyRent: effectiveWeeklyRent,
+                startDate: effectiveStartDate,
+                endDate: null,
+                status: 'ACTIVE',
+            });
+
+            driver.status = 'ACTIVE';
+            driver.currentVehicle = vehicle._id;
+            driver.activationDate = effectiveStartDate;
+            driver.deactivationDate = null;
+            driver.weeklyRent = effectiveWeeklyRent;
+            if (!driver.statusHistory) driver.statusHistory = [];
+            driver.statusHistory.push({
+                status: 'ACTIVE',
+                changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+                changedByRole: req.user?.role || 'SYSTEM',
+                timestamp: new Date(),
+                notes: `Assigned vehicle ${regNo} starting ${effectiveStartDate.toISOString().split('T')[0]}. Weekly Rent: $${effectiveWeeklyRent}/wk.`
+            });
+            if (!driver.createdBy && req.user) {
+                driver.createdBy = req.user.id || req.user._id;
+                driver.creatorRole = req.user.role || 'ADMIN';
+            }
+            await driver.save({ validateModifiedOnly: true });
+        }
+
+        // Update Vehicle
+        vehicle.currentDriver = driver._id;
+        vehicle.status = 'ACTIVE — RENTED';
+        if (!vehicle.statusHistory) vehicle.statusHistory = [];
+        vehicle.statusHistory.push({
+            status: 'ACTIVE — RENTED',
+            changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+            changedByRole: req.user?.role || 'SYSTEM',
+            timestamp: effectiveStartDate,
+            notes: `Assigned to customer ${customer.name} (${driver.driverId}) starting ${effectiveStartDate.toISOString().split('T')[0]}`
+        });
+        await vehicle.save();
+
+        // Update Customer
+        customer.cfVehicleNo = regNo;
+        customer.cfActiveDate = effectiveStartDate;
+        customer.cfEndDate = null;
+        customer.cfFleetNo = vehicle.basicDetails?.fleetNumber || '';
+        customer.cfVehicleModel = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
+        customer.cfVinNumber = vehicle.basicDetails?.vin || '';
+        customer.cfWeeklyRent = effectiveWeeklyRent;
+        customer.isDriver = true;
+        customer.status = 'ACTIVE';
+        await customer.save();
+
+        // Generate rent repayment plan
+        try {
+            await DriverService.generateMigrationRentPlan(driver._id, {
+                weeklyRent: Number(effectiveWeeklyRent),
+                durationWeeks: effectiveDurationWeeks,
+                activationDate: effectiveStartDate,
+                vehicleId: vehicle._id
+            });
+        } catch (planErr) {
+            console.error('[assignVehicleToCustomer] Error generating rent plan:', planErr);
+        }
+
+        const populatedDoc = await Customer.findById(customer._id)
+            .populate('branch')
+            .populate({
+                path: 'driver',
+                populate: [
+                    {
+                        path: 'currentVehicle',
+                        populate: { path: 'fleet' }
+                    },
+                    {
+                        path: 'assignmentHistory.vehicle',
+                        select: 'basicDetails legalDocs status'
+                    }
+                ]
+            });
+
+        return res.status(200).json({
+            success: true,
+            message: `Vehicle ${regNo} assigned successfully!`,
+            data: populatedDoc
+        });
+    } catch (error) {
+        console.error('[assignVehicleToCustomer] Error:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+

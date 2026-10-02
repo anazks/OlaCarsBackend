@@ -668,6 +668,14 @@ const dataMigrateDrivers = async (req, res) => {
 
                 const isDeactivated = row.deactivationDate && new Date(row.deactivationDate) <= new Date();
 
+                // Resolve vehicle snapshot for assignment history
+                const resolvedVehicle = existingVehicle || await Vehicle.findById(vehicleId);
+                const importRegNo = resolvedVehicle?.legalDocs?.registrationNumber || row.vehicleNumber || '';
+                const importFleetNo = resolvedVehicle?.basicDetails?.fleetNumber || row.fleetNumber || '';
+                const importVehicleModel = `${resolvedVehicle?.basicDetails?.make || row.vehicleMake || ''} ${resolvedVehicle?.basicDetails?.model || row.vehicleModel || ''}`.trim();
+                const importWeeklyRent = (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined;
+                const importStartDate = row.activationDate ? new Date(row.activationDate) : new Date();
+
                 if (existingDriver) {
                     if (!updateExisting) {
                         throw new Error(`Driver '${row.fullName}' already exists in the database. Enable 'Update existing records' to modify.`);
@@ -708,6 +716,46 @@ const dataMigrateDrivers = async (req, res) => {
                         await updateDriverService(existingDriver._id, driverUpdateData);
                     }
 
+                    // Update assignmentHistory for existing driver
+                    if (vehicleId) {
+                        const driverDoc = await Driver.findById(existingDriver._id);
+                        if (driverDoc) {
+                            if (!driverDoc.assignmentHistory) driverDoc.assignmentHistory = [];
+                            // Close any existing ACTIVE assignment
+                            const activeIdx = driverDoc.assignmentHistory.findIndex(a => a.status === 'ACTIVE');
+                            if (activeIdx !== -1) {
+                                driverDoc.assignmentHistory[activeIdx].endDate = isDeactivated ? new Date(row.deactivationDate) : importStartDate;
+                                driverDoc.assignmentHistory[activeIdx].status = isDeactivated ? 'CANCELLED' : 'COMPLETED';
+                            }
+                            // Push new assignment if not deactivated
+                            if (!isDeactivated) {
+                                driverDoc.assignmentHistory.push({
+                                    vehicle: vehicleId,
+                                    plateNumber: importRegNo,
+                                    fleetNumber: importFleetNo,
+                                    vehicleModel: importVehicleModel,
+                                    weeklyRent: importWeeklyRent,
+                                    startDate: importStartDate,
+                                    endDate: null,
+                                    status: 'ACTIVE',
+                                });
+                            } else if (activeIdx === -1) {
+                                // Deactivated import with no active assignment — record closed assignment
+                                driverDoc.assignmentHistory.push({
+                                    vehicle: vehicleId,
+                                    plateNumber: importRegNo,
+                                    fleetNumber: importFleetNo,
+                                    vehicleModel: importVehicleModel,
+                                    weeklyRent: importWeeklyRent,
+                                    startDate: importStartDate,
+                                    endDate: new Date(row.deactivationDate),
+                                    status: 'CANCELLED',
+                                });
+                            }
+                            await driverDoc.save();
+                        }
+                    }
+
                     driverId = existingDriver._id;
                     driverIdString = existingDriver.driverId;
                     isUpdated = true;
@@ -742,11 +790,21 @@ const dataMigrateDrivers = async (req, res) => {
                         activationDate: row.activationDate || undefined,
                         deactivationDate: row.deactivationDate || undefined,
                         remarks: row.remarks ? String(row.remarks || "").trim() : undefined,
-                        weeklyRent: (row.weeklyRent && !isNaN(row.weeklyRent)) ? Number(row.weeklyRent) : undefined,
+                        weeklyRent: importWeeklyRent,
                         currentVehicle: isDeactivated ? null : vehicleId,
                         branch: branch,
                         createdBy: userId,
                         creatorRole: userRole,
+                        assignmentHistory: vehicleId ? [{
+                            vehicle: vehicleId,
+                            plateNumber: importRegNo,
+                            fleetNumber: importFleetNo,
+                            vehicleModel: importVehicleModel,
+                            weeklyRent: importWeeklyRent,
+                            startDate: importStartDate,
+                            endDate: isDeactivated ? new Date(row.deactivationDate) : null,
+                            status: isDeactivated ? 'CANCELLED' : 'ACTIVE',
+                        }] : [],
                     };
                     const newDriver = await DriverService.create(driverData);
                     driverId = newDriver._id;
@@ -788,6 +846,17 @@ const dataMigrateDrivers = async (req, res) => {
                             oldDriver.deactivationDate = oldDriverEndDate;
                             if (!oldDriver.contract) oldDriver.contract = {};
                             oldDriver.contract.endDate = oldDriverEndDate;
+
+                            // Close active assignment in history for old driver
+                            if (oldDriver.assignmentHistory && oldDriver.assignmentHistory.length > 0) {
+                                const oldActiveAssignment = oldDriver.assignmentHistory.find(a => a.status === 'ACTIVE');
+                                if (oldActiveAssignment) {
+                                    oldActiveAssignment.endDate = oldDriverEndDate;
+                                    oldActiveAssignment.status = 'CANCELLED';
+                                    oldActiveAssignment.cancelNotes = 'Vehicle reassigned during bulk data migration';
+                                }
+                            }
+
                             if (!oldDriver.statusHistory) oldDriver.statusHistory = [];
                             oldDriver.statusHistory.push({
                                 status: 'INACTIVE',
@@ -1189,6 +1258,8 @@ const cancelContract = async (req, res) => {
             { session }
         );
 
+        const effectiveUserId = user?.id || user?._id;
+
         // Unassign vehicle from driver and change vehicle status to AVAILABLE
         const vehicleId = driver.currentVehicle;
         if (vehicleId) {
@@ -1198,8 +1269,8 @@ const cancelContract = async (req, res) => {
                 vehicle.status = 'ACTIVE — AVAILABLE';
                 vehicle.statusHistory.push({
                     status: 'ACTIVE — AVAILABLE',
-                    changedBy: user.id,
-                    changedByRole: user.role,
+                    changedBy: effectiveUserId,
+                    changedByRole: user?.role || 'ADMIN',
                     timestamp: new Date(),
                     notes: notes 
                         ? `Contract cancelled for driver ${driver.personalInfo?.fullName || driverId} (End Date: ${effectiveEndDate.toISOString().split('T')[0]}). Notes: ${notes}`
@@ -1229,21 +1300,60 @@ const cancelContract = async (req, res) => {
         if (!driver.contract) driver.contract = {};
         driver.contract.endDate = effectiveEndDate;
         driver.rentTracking = updatedRentTracking;
+
+        // Close active assignment in history
+        if (!driver.assignmentHistory) driver.assignmentHistory = [];
+        const activeAssignment = driver.assignmentHistory.find(a => a.status === 'ACTIVE' || (!a.endDate && String(a.vehicle) === String(vehicleId)));
+        if (activeAssignment) {
+            activeAssignment.endDate = effectiveEndDate;
+            activeAssignment.status = 'CANCELLED';
+            activeAssignment.cancelledBy = effectiveUserId;
+            activeAssignment.cancelNotes = notes || 'Contract cancelled';
+        } else if (vehicleId) {
+            const vDoc = await Vehicle.findById(vehicleId).session(session);
+            driver.assignmentHistory.push({
+                vehicle: vehicleId,
+                plateNumber: vDoc?.legalDocs?.registrationNumber || vDoc?.basicDetails?.plateNumber || '',
+                fleetNumber: vDoc?.basicDetails?.fleetNumber || '',
+                vehicleModel: `${vDoc?.basicDetails?.make || ''} ${vDoc?.basicDetails?.model || ''}`.trim(),
+                weeklyRent: driver.weeklyRent,
+                startDate: driver.activationDate || new Date(),
+                endDate: effectiveEndDate,
+                status: 'CANCELLED',
+                cancelledBy: effectiveUserId,
+                cancelNotes: notes || 'Contract cancelled',
+            });
+        }
+
+        // Ensure createdBy/creatorRole are present if missing so validation never blocks cancellation
+        if (!driver.createdBy && effectiveUserId) {
+            driver.createdBy = effectiveUserId;
+            driver.creatorRole = user?.role || 'ADMIN';
+        }
+
         driver.statusHistory.push({
             status: 'INACTIVE',
-            changedBy: user.id,
-            changedByRole: user.role,
+            changedBy: effectiveUserId,
+            changedByRole: user?.role || 'ADMIN',
             timestamp: new Date(),
             notes: notes 
                 ? `Contract cancelled (End Date: ${effectiveEndDate.toISOString().split('T')[0]}). Notes: ${notes}`
                 : `Contract cancelled with end date ${effectiveEndDate.toISOString().split('T')[0]}. Rent repayment plan stopped, future installments beyond end date cleared.`,
         });
-        await driver.save({ session });
+        await driver.save({ session, validateModifiedOnly: true });
 
-        // Sync Customer status to INACTIVE
+        // Sync Customer status to INACTIVE and clear assigned vehicle fields
         await Customer.findOneAndUpdate(
             { driver: driverId },
-            { status: 'INACTIVE' },
+            { 
+                status: 'INACTIVE',
+                cfVehicleNo: '',
+                cfFleetNo: '',
+                cfVehicleModel: '',
+                cfVinNumber: '',
+                cfWeeklyRent: null,
+                cfActiveDate: null
+            },
             { session }
         );
 
