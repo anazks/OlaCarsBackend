@@ -1,4 +1,5 @@
 const Bill = require("../Model/BillModel");
+require("../../AccountingCode/Model/AccountingCodeModel");
 
 exports.createBill = async (data) => {
     return await Bill.create(data);
@@ -97,6 +98,7 @@ exports.getAllBills = async (query = {}, hasDateFilter = false) => {
             .populate("supplier", "name")
             .populate("branch", "name")
             .populate("taxId")
+            .populate("items.accountId", "code name category")
             .sort({ billDate: -1, createdAt: -1 })
             .lean()
     ]);

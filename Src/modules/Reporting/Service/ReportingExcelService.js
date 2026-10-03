@@ -4,6 +4,7 @@ const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel");
 const Bill = require("../../Bill/Model/BillModel");
 const PaymentMade = require("../../PaymentMade/Model/PaymentMadeModel");
 const Branch = require("../../Branch/Model/BranchModel");
+const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
 
 exports.generateExcelReport = async (reportType, filters) => {
     const { startDate, endDate, branch, country } = filters;
@@ -102,25 +103,95 @@ exports.generateExcelReport = async (reportType, filters) => {
             .populate("customer", "name")
             .populate("branch", "name")
             .populate("purchaseOrder", "purchaseOrderNumber")
+            .populate("items.accountId", "code name category")
             .sort({ billDate: -1 });
 
-        data = bills.map(bill => ({
-            "Bill Number": bill.billNumber || "",
-            "Date": bill.billDate ? bill.billDate.toISOString().split('T')[0] : "",
-            "Due Date": bill.dueDate ? bill.dueDate.toISOString().split('T')[0] : "",
-            "PO Number": bill.purchaseOrder?.purchaseOrderNumber || "",
-            "Supplier": bill.supplier?.name || "",
-            "Customer": bill.customer?.name || "",
-            "Branch": bill.branch?.name || "",
-            "Total Amount": bill.totalAmount || 0,
-            "Amount Paid": bill.amountPaid || 0,
-            "Balance Due": bill.balanceDue || 0,
-            "Status": bill.status || "",
-            "Inclusive Tax": bill.isInclusiveTax ? "Yes" : "No",
-            "Tax Percentage": bill.taxPercentage || 0,
-            "Tax Amount": bill.taxAmount || 0,
-            "Notes": bill.notes || ""
-        }));
+        data = [];
+        for (const bill of bills) {
+            const billBase = {
+                "Bill Number": bill.billNumber || "",
+                "Date": bill.billDate ? bill.billDate.toISOString().split('T')[0] : "",
+                "Due Date": bill.dueDate ? bill.dueDate.toISOString().split('T')[0] : "",
+                "PO Number": bill.purchaseOrder?.purchaseOrderNumber || "",
+                "Supplier": bill.supplier?.name || "",
+                "Customer": bill.customer?.name || "",
+                "Branch": bill.branch?.name || "",
+                "Status": bill.status || "",
+                "Total Amount": bill.totalAmount || 0,
+                "Amount Paid": bill.amountPaid || 0,
+                "Balance Due": bill.balanceDue || 0,
+                "Inclusive Tax": bill.isInclusiveTax ? "Yes" : "No",
+                "Tax Percentage": bill.taxPercentage || 0,
+                "Tax Amount": bill.taxAmount || 0,
+                "Notes": bill.notes || ""
+            };
+
+            if (bill.items && bill.items.length > 0) {
+                bill.items.forEach((item, itemIdx) => {
+                    const lineTotal = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+                    let accountStr = "";
+                    if (item.accountId) {
+                        if (typeof item.accountId === "object") {
+                            accountStr = item.accountId.code
+                                ? `${item.accountId.code} - ${item.accountId.name || ""}`.trim()
+                                : (item.accountId.name || "");
+                        } else {
+                            accountStr = String(item.accountId);
+                        }
+                    }
+
+                    data.push({
+                        "Bill Number": billBase["Bill Number"],
+                        "Date": billBase["Date"],
+                        "Due Date": billBase["Due Date"],
+                        "PO Number": billBase["PO Number"],
+                        "Supplier": billBase["Supplier"],
+                        "Customer": billBase["Customer"],
+                        "Branch": billBase["Branch"],
+                        "Status": billBase["Status"],
+                        "Item #": itemIdx + 1,
+                        "Item Name": item.itemName || "",
+                        "Item Description": item.description || "",
+                        "Item Account": accountStr,
+                        "Item Quantity": item.quantity != null ? item.quantity : 0,
+                        "Item Unit Price": item.unitPrice != null ? item.unitPrice : 0,
+                        "Item Line Total": lineTotal,
+                        "Total Amount": billBase["Total Amount"],
+                        "Amount Paid": billBase["Amount Paid"],
+                        "Balance Due": billBase["Balance Due"],
+                        "Inclusive Tax": billBase["Inclusive Tax"],
+                        "Tax Percentage": billBase["Tax Percentage"],
+                        "Tax Amount": billBase["Tax Amount"],
+                        "Notes": billBase["Notes"]
+                    });
+                });
+            } else {
+                data.push({
+                    "Bill Number": billBase["Bill Number"],
+                    "Date": billBase["Date"],
+                    "Due Date": billBase["Due Date"],
+                    "PO Number": billBase["PO Number"],
+                    "Supplier": billBase["Supplier"],
+                    "Customer": billBase["Customer"],
+                    "Branch": billBase["Branch"],
+                    "Status": billBase["Status"],
+                    "Item #": "",
+                    "Item Name": "",
+                    "Item Description": "",
+                    "Item Account": "",
+                    "Item Quantity": 0,
+                    "Item Unit Price": 0,
+                    "Item Line Total": 0,
+                    "Total Amount": billBase["Total Amount"],
+                    "Amount Paid": billBase["Amount Paid"],
+                    "Balance Due": billBase["Balance Due"],
+                    "Inclusive Tax": billBase["Inclusive Tax"],
+                    "Tax Percentage": billBase["Tax Percentage"],
+                    "Tax Amount": billBase["Tax Amount"],
+                    "Notes": billBase["Notes"]
+                });
+            }
+        }
 
     } else if (reportType === "vendor-payments") {
         sheetName = "Vendor Payments";
