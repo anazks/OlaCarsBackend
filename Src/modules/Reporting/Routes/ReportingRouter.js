@@ -29,5 +29,6 @@ router.get("/bank-balance-sheet", hasPermission("FINANCIAL_REPORT_VIEW"), Report
 router.get("/daily-finance", hasPermission("FINANCIAL_REPORT_VIEW"), ReportingController.getDailyFinance);
 router.get("/driver-performance", hasPermission("DRIVER_VIEW"), ReportingController.getDriverPerformance);
 router.get("/staff-performance", hasPermission("STAFF_PERFORMANCE_VIEW"), ReportingController.getStaffPerformance);
+router.post("/clear-cache", ReportingController.clearReportingCache);
 
 module.exports = router;

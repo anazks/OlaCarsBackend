@@ -1,4 +1,5 @@
 const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+const Customer = require("../../Customer/Model/CustomerModel");
 const { Driver } = require("../../Driver/Model/DriverModel");
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 const Branch = require("../../Branch/Model/BranchModel");
@@ -10,15 +11,61 @@ const { ROLES } = require("../../../shared/constants/roles");
 const AppError = require("../../../shared/utils/AppError");
 const moment = require("moment");
 
+// In-Memory Cache configuration for Collections (TTL: 2 minutes)
+const CACHE_TTL_MS = 120 * 1000;
+const collectionCache = new Map();
+const rawInvoicesCache = new Map();
+
+const getCacheKey = (prefix, user, filters = {}) => {
+    const userId = user?.id || user?._id || "anon";
+    const userRole = (user?.role || "unknown").toUpperCase();
+    const sortedFilterKeys = Object.keys(filters).sort();
+    const normalizedFilters = {};
+    for (const key of sortedFilterKeys) {
+        if (key !== 'refresh' && key !== 'bypassCache' && filters[key] !== undefined && filters[key] !== null && filters[key] !== "") {
+            normalizedFilters[key] = String(filters[key]).trim();
+        }
+    }
+    return `${prefix}:${userRole}:${userId}:${JSON.stringify(normalizedFilters)}`;
+};
+
+const getFromCache = (cacheMap, key) => {
+    const entry = cacheMap.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+        cacheMap.delete(key);
+        return null;
+    }
+    return entry.data;
+};
+
+const setInCache = (cacheMap, key, data, maxEntries = 200) => {
+    if (cacheMap.size >= maxEntries) {
+        const firstKey = cacheMap.keys().next().value;
+        if (firstKey) cacheMap.delete(firstKey);
+    }
+    cacheMap.set(key, {
+        timestamp: Date.now(),
+        data
+    });
+};
+
+const clearCollectionCache = () => {
+    collectionCache.clear();
+    rawInvoicesCache.clear();
+    console.log("[CollectionService] In-memory cache cleared.");
+};
+
 /**
  * Computes implicit data access bounds based on executing User's role.
  */
 const resolveImplicitFilters = async (user) => {
     const { id, role } = user;
+    const normalizedRole = (role || "").toUpperCase();
     let branchIds = null;
     let fleetNumbers = null;
 
-    switch (role) {
+    switch (normalizedRole) {
         case ROLES.ADMIN:
         case ROLES.FINANCEADMIN:
         case ROLES.OPERATIONADMIN:
@@ -133,6 +180,18 @@ const computeEffectiveQueryOptions = async (user, queryFilters) => {
  * Fetches all matching Invoices using constraints & populating needed relationships.
  */
 const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false } = {}) => {
+    const rawKey = JSON.stringify({
+        branchIds: effectiveOptions.branchIds ? effectiveOptions.branchIds.map(String).sort() : null,
+        fleetNumbers: effectiveOptions.fleetNumbers ? effectiveOptions.fleetNumbers.slice().sort() : null,
+        dateFilter: effectiveOptions.dateFilter,
+        includePastDateRange
+    });
+
+    const cachedRaw = getFromCache(rawInvoicesCache, rawKey);
+    if (cachedRaw) {
+        return cachedRaw;
+    }
+
     const { branchIds, fleetNumbers, dateFilter } = effectiveOptions;
 
     const invoiceMatch = { isDeleted: false };
@@ -150,8 +209,9 @@ const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false
         vehicleSearchCondition["basicDetails.fleetNumber"] = { $in: fleetNumbers };
     }
 
-    // Fetch invoices with match criteria
+    // Fetch invoices with match criteria (selecting only relevant financial/relational fields)
     const invoices = await Invoice.find(invoiceMatch)
+        .select("_id invoiceNumber invoiceType customer driver vehicle weekNumber dueDate totalAmountDue amountPaid balance status generatedAt payments")
         .populate({
             path: "customer",
             select: "name branch customerId",
@@ -173,14 +233,27 @@ const fetchRawInvoices = async (effectiveOptions, { includePastDateRange = false
         .lean();
 
     // Post-filter based on populated results to secure constraints
-    return invoices.filter(inv => {
+    const filteredInvoices = invoices.filter(inv => {
         if (!inv.customer) return false; // Removed if doesn't match branch bounds
         if (fleetNumbers && (!inv.vehicle || !inv.vehicle.basicDetails?.fleetNumber)) return false; // Enforce fleet limit if staff restricted
         return true;
     });
+
+    setInCache(rawInvoicesCache, rawKey, filteredInvoices, 30);
+    return filteredInvoices;
 };
 
 exports.getOverview = async (user, queryFilters) => {
+    const isBypass = queryFilters.refresh === 'true' || queryFilters.bypassCache === 'true';
+    const cacheKey = getCacheKey("overview", user, queryFilters);
+
+    if (!isBypass) {
+        const cached = getFromCache(collectionCache, cacheKey);
+        if (cached) {
+            return cached;
+        }
+    }
+
     const effectiveOptions = await computeEffectiveQueryOptions(user, queryFilters);
     
     // Retrieve the core dataset
@@ -291,7 +364,7 @@ exports.getOverview = async (user, queryFilters) => {
             balance: inv.balance
         }));
 
-    return {
+    const overviewResult = {
         metrics: {
             totalInvoiced,
             totalCollected,
@@ -304,9 +377,22 @@ exports.getOverview = async (user, queryFilters) => {
         recentOverdue,
         upcomingPayments
     };
+
+    setInCache(collectionCache, cacheKey, overviewResult, 200);
+    return overviewResult;
 };
 
 exports.getList = async (user, queryFilters) => {
+    const isBypass = queryFilters.refresh === 'true' || queryFilters.bypassCache === 'true';
+    const cacheKey = getCacheKey("list", user, queryFilters);
+
+    if (!isBypass) {
+        const cached = getFromCache(collectionCache, cacheKey);
+        if (cached) {
+            return cached;
+        }
+    }
+
     const { page = 1, limit = 20, status, search, listType } = queryFilters;
     
     // For Overdue and Upcoming, we ignore specific bounded date range selection by default
@@ -388,7 +474,7 @@ exports.getList = async (user, queryFilters) => {
         daysOverdue: moment(inv.dueDate).isBefore(now) ? Math.max(0, now.diff(moment(inv.dueDate), "days")) : 0
     }));
 
-    return {
+    const listResult = {
         items,
         pagination: {
             total: totalCount,
@@ -397,4 +483,9 @@ exports.getList = async (user, queryFilters) => {
             pages: Math.ceil(totalCount / limitInt)
         }
     };
+
+    setInCache(collectionCache, cacheKey, listResult, 300);
+    return listResult;
 };
+
+exports.clearCollectionCache = clearCollectionCache;

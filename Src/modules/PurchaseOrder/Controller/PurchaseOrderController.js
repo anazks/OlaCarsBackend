@@ -87,6 +87,14 @@ const addPurchaseOrder = async (req, res) => {
             }
         }
 
+        if (typeof poData.attachments === "string") {
+            try {
+                poData.attachments = JSON.parse(poData.attachments);
+            } catch (err) {
+                console.log("[PO Controller] Error parsing attachments:", err.message);
+            }
+        }
+
         // Branch assignment
         if (BRANCH_SCOPED_ROLES.includes(req.user.role)) {
             if (!req.user.branchId) {

@@ -12,7 +12,9 @@ exports.getCollectionsOverview = async (req, res, next) => {
             country: req.query.country,
             branch: req.query.branch,
             startDate: req.query.startDate,
-            endDate: req.query.endDate
+            endDate: req.query.endDate,
+            refresh: req.query.refresh || (req.headers['x-bypass-cache'] === 'true' ? 'true' : undefined),
+            bypassCache: req.query.bypassCache
         };
 
         // Execute analytics aggregating metrics
@@ -41,7 +43,9 @@ exports.getCollectionsList = async (req, res, next) => {
             search: req.query.search,
             page: req.query.page,
             limit: req.query.limit,
-            listType: req.query.listType
+            listType: req.query.listType,
+            refresh: req.query.refresh || (req.headers['x-bypass-cache'] === 'true' ? 'true' : undefined),
+            bypassCache: req.query.bypassCache
         };
 
         const list = await CollectionService.getList(req.user, queryFilters);
@@ -49,6 +53,18 @@ exports.getCollectionsList = async (req, res, next) => {
         res.status(200).json({
             success: true,
             data: list
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+exports.clearCollectionsCache = async (req, res, next) => {
+    try {
+        CollectionService.clearCollectionCache();
+        res.status(200).json({
+            success: true,
+            message: "Collection cache cleared successfully."
         });
     } catch (error) {
         next(error);

@@ -392,6 +392,9 @@ vehicleSchema.index({ "legalDocs.registrationNumber": 1 });
 // vehicleSchema.index({ "insurancePolicy.expiryDate": 1 }); // Removed as moved to Insurance collection
 vehicleSchema.index({ "legalDocs.registrationExpiry": 1 });
 vehicleSchema.index({ "legalDocs.roadTaxExpiry": 1 });
+vehicleSchema.index({ "statusHistory.changedBy": 1, "statusHistory.changedByRole": 1, "statusHistory.timestamp": -1 });
+vehicleSchema.index({ "statusHistory.status": 1, "statusHistory.timestamp": -1 });
+vehicleSchema.index({ isDeleted: 1, "purchaseDetails.branch": 1, status: 1 });
 
 module.exports = {
     Vehicle: mongoose.model("Vehicle", vehicleSchema),

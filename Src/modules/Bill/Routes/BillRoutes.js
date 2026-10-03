@@ -6,7 +6,16 @@ const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
+const upload = require("../../../utils/multerConfig");
+
 router.use(authenticate);
+
+router.post("/upload-attachment", 
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    hasPermission("BILL_CREATE"), 
+    upload.single("file"),
+    BillController.uploadAttachment
+);
 
 router.post("/convert-po", 
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),

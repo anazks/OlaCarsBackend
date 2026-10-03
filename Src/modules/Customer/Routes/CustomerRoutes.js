@@ -6,10 +6,13 @@ const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const { ROLES } = require("../../../shared/constants/roles");
 
+const upload = require("../../../utils/multerConfig");
+
 const ALL_ROLES = Object.values(ROLES);
 
 router.use(authenticate);
 
+router.post('/upload-attachment', authorize(...ALL_ROLES), hasPermission('DRIVER_CREATE'), upload.single('file'), CustomerController.uploadAttachment);
 router.post('/', authorize(...ALL_ROLES), hasPermission('DRIVER_CREATE'), CustomerController.createCustomer);
 router.post('/bulk', authorize(...ALL_ROLES), hasPermission('DRIVER_CREATE'), CustomerController.bulkCreateCustomers);
 router.get('/', authorize(...ALL_ROLES), hasPermission('DRIVER_VIEW'), CustomerController.getAllCustomers);

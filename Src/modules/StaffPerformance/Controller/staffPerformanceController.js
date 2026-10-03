@@ -24,8 +24,16 @@ exports.getPerformance = async (req, res) => {
         }
 
         // Staff type filter
-        if (req.query.type && ["finance", "operation"].includes(req.query.type)) {
+        if (req.query.type) {
             filters.type = req.query.type;
+        }
+
+        // Cache bypass flags
+        if (req.query.refresh || req.headers['x-bypass-cache'] === 'true') {
+            filters.refresh = 'true';
+        }
+        if (req.query.bypassCache) {
+            filters.bypassCache = req.query.bypassCache;
         }
 
         const result = await staffPerformanceService.getStaffPerformance(filters);
@@ -46,7 +54,8 @@ exports.getPerformance = async (req, res) => {
 exports.getIndividualPerformance = async (req, res) => {
     try {
         const { id } = req.params;
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, refresh } = req.query;
+        const isBypass = refresh === 'true' || req.headers['x-bypass-cache'] === 'true';
 
         if (!id) {
             return res.status(400).json({
@@ -55,7 +64,7 @@ exports.getIndividualPerformance = async (req, res) => {
             });
         }
 
-        const result = await staffPerformanceService.getIndividualStaffPerformance(id, startDate, endDate);
+        const result = await staffPerformanceService.getIndividualStaffPerformance(id, startDate, endDate, isBypass);
 
         return res.status(200).json({
             success: true,
@@ -66,6 +75,21 @@ exports.getIndividualPerformance = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to fetch individual staff performance data",
+        });
+    }
+};
+
+exports.clearPerformanceCache = async (req, res) => {
+    try {
+        staffPerformanceService.clearStaffPerformanceCache();
+        return res.status(200).json({
+            success: true,
+            message: "Staff performance cache cleared successfully."
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to clear staff performance cache"
         });
     }
 };

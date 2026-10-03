@@ -269,6 +269,101 @@ class GpsService {
         }
     }
 
+    computeVehiclesSummary(devices = []) {
+        const total = devices.length;
+        let online = 0;
+        let offline = 0;
+        let disabled = 0;
+        let expired = 0;
+        let plateAssigned = 0;
+        let platePending = 0;
+
+        for (let i = 0; i < devices.length; i++) {
+            const v = devices[i];
+            const st = (v.status || '').toUpperCase();
+            if (st === 'NORMAL') online++;
+            else if (st === 'OFFLINE') offline++;
+            else if (st === 'EXPIRED') expired++;
+
+            if (v.enabledFlag === 0) disabled++;
+
+            const plate = v.vehicleNumber;
+            if (plate && typeof plate === 'string' && plate.trim() !== '' && plate !== 'Pending') {
+                plateAssigned++;
+            } else {
+                platePending++;
+            }
+        }
+
+        return {
+            total,
+            online,
+            offline,
+            disabled,
+            expired,
+            plateAssigned,
+            platePending
+        };
+    }
+
+    async getPaginatedVehicles({ page = 1, limit = 25, search = '', status = 'ALL', plateStatus = 'ALL' } = {}) {
+        const allDevices = await this.getVehiclesList();
+        const summary = this.computeVehiclesSummary(allDevices);
+
+        let filtered = allDevices;
+
+        // Filter by Search Query
+        if (search && typeof search === 'string' && search.trim() !== '') {
+            const q = search.trim().toLowerCase();
+            filtered = filtered.filter(v =>
+                (v.deviceName && String(v.deviceName).toLowerCase().includes(q)) ||
+                (v.imei && String(v.imei).toLowerCase().includes(q)) ||
+                (v.sim && String(v.sim).toLowerCase().includes(q)) ||
+                (v.vehicleNumber && String(v.vehicleNumber).toLowerCase().includes(q)) ||
+                (v.carFrame && String(v.carFrame).toLowerCase().includes(q)) ||
+                (v.driverName && String(v.driverName).toLowerCase().includes(q)) ||
+                (v.mcType && String(v.mcType).toLowerCase().includes(q))
+            );
+        }
+
+        // Filter by Status (NORMAL, OFFLINE, EXPIRED, etc.)
+        if (status && status !== 'ALL') {
+            filtered = filtered.filter(v => (v.status || '').toUpperCase() === status.toUpperCase());
+        }
+
+        // Filter by Plate Status (WITH DATA, PENDING)
+        if (plateStatus === 'WITH DATA') {
+            filtered = filtered.filter(v => {
+                const plate = v.vehicleNumber;
+                return plate && typeof plate === 'string' && plate.trim() !== '' && plate !== 'Pending';
+            });
+        } else if (plateStatus === 'PENDING') {
+            filtered = filtered.filter(v => {
+                const plate = v.vehicleNumber;
+                return !plate || typeof plate !== 'string' || plate.trim() === '' || plate === 'Pending';
+            });
+        }
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 25));
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / limitNum) || 1;
+        const safePage = Math.min(pageNum, totalPages);
+        const startIndex = (safePage - 1) * limitNum;
+        const data = filtered.slice(startIndex, startIndex + limitNum);
+
+        return {
+            data,
+            pagination: {
+                total,
+                page: safePage,
+                limit: limitNum,
+                totalPages
+            },
+            summary
+        };
+    }
+
     async getGpsLocations(imeis) {
         try {
             let targetImeis = imeis;

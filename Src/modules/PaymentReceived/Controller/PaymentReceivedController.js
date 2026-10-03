@@ -1,5 +1,16 @@
 const PaymentReceived = require('../Model/PaymentReceivedModel');
 
+const invalidateCollectionCache = () => {
+    try {
+        const CollectionService = require("../../Collection/Service/CollectionService");
+        if (CollectionService && typeof CollectionService.clearCollectionCache === "function") {
+            CollectionService.clearCollectionCache();
+        }
+    } catch (e) {
+        // Non-blocking
+    }
+};
+
 const parsePaymentDate = (dateInput) => {
     if (!dateInput) return new Date();
     
@@ -178,6 +189,7 @@ exports.createPaymentReceived = async (req, res) => {
         const populatedTx = { ...paymentTx.toObject(), accountingCode: accCode };
         await autoGenerateLedgerEntry(populatedTx);
 
+        invalidateCollectionCache();
         res.status(201).json({ success: true, data: savedDoc });
     } catch (error) {
         console.error("[PaymentReceivedController] Error recording payment received:", error);
@@ -328,6 +340,7 @@ exports.updatePaymentReceived = async (req, res) => {
     try {
         const updatedDoc = await PaymentReceived.findByIdAndUpdate(req.params.id, req.body, { new: true });
         if (!updatedDoc) return res.status(404).json({ success: false, message: 'Not found' });
+        invalidateCollectionCache();
         res.status(200).json({ success: true, data: updatedDoc });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -338,6 +351,7 @@ exports.deletePaymentReceived = async (req, res) => {
     try {
         const deletedDoc = await PaymentReceived.findByIdAndDelete(req.params.id);
         if (!deletedDoc) return res.status(404).json({ success: false, message: 'Not found' });
+        invalidateCollectionCache();
         res.status(200).json({ success: true, message: 'Deleted successfully' });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -366,6 +380,7 @@ exports.bulkUploadPayments = async (req, res) => {
             });
         }
 
+        invalidateCollectionCache();
         return res.status(200).json({
             success: true,
             successCount: result.summary.createdCount + result.summary.updatedCount,

@@ -71,5 +71,7 @@ paymentReceivedSchema.index({ driverId: 1 });
 paymentReceivedSchema.index({ paymentDate: -1 });
 paymentReceivedSchema.index({ paymentMethod: 1 });
 paymentReceivedSchema.index({ branch: 1 });
+paymentReceivedSchema.index({ status: 1, paymentDate: -1, branch: 1 });
+paymentReceivedSchema.index({ status: 1, paymentDate: -1, branch: 1, amountReceived: 1 });
 
 module.exports = mongoose.model('PaymentReceived', paymentReceivedSchema);

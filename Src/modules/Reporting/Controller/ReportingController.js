@@ -360,3 +360,8 @@ exports.getBankBalanceSheet = async (req, res) => {
         });
     }
 };
+
+exports.clearReportingCache = (req, res) => {
+    ReportingService.clearReportingCache();
+    res.status(200).json({ status: "success", message: "Reporting cache cleared successfully." });
+};

@@ -7,7 +7,7 @@ const Bill = require('../Src/modules/Bill/Model/BillModel');
 const Customer = require('../Src/modules/Customer/Model/CustomerModel');
 const Supplier = require('../Src/modules/Supplier/Model/SupplierModel');
 const Branch = require('../Src/modules/Branch/Model/BranchModel');
-const Driver = require('../Src/modules/Driver/Model/DriverModel');
+const Driver = require('../Src/modules/Driver/Model/DriverModel'); 
 
 async function createInvoiceAndBill() {
     try {

@@ -91,6 +91,14 @@ const billSchema = new mongoose.Schema(
         notes: {
             type: String,
         },
+        attachments: [{
+            url: { type: String, trim: true },
+            name: { type: String, trim: true },
+            originalName: { type: String, trim: true },
+            fileType: { type: String, trim: true },
+            size: { type: Number },
+            uploadedAt: { type: Date, default: Date.now }
+        }],
         purchaseType: {
             type: String,
             enum: ["CASH", "BANK", "CREDIT"],

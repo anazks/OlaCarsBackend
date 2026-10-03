@@ -70,6 +70,7 @@ router.use(authenticate);
  *         description: Server breakdown.
  */
 router.get("/financial-summary", authorize(...FINANCE_ROLES), DashboardController.getFinancialDashboardSummary);
+router.post("/clear-cache", authorize(...FINANCE_ROLES), DashboardController.clearDashboardCache);
 
 /**
  * @swagger

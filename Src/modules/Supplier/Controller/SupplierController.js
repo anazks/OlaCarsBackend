@@ -189,6 +189,29 @@ const bulkAddSuppliers = async (req, res) => {
     }
 };
 
+const uploadAttachment = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'No file uploaded' });
+        }
+        const uploadToS3 = require('../../../utils/uploadToS3');
+        const url = await uploadToS3(req.file, 'suppliers/attachments');
+        return res.status(200).json({
+            success: true,
+            data: {
+                url,
+                name: req.file.originalname,
+                originalName: req.file.originalname,
+                filename: req.file.originalname,
+                fileType: req.file.mimetype,
+                size: req.file.size
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addSupplier,
     getSuppliers,
@@ -197,4 +220,5 @@ module.exports = {
     deleteSupplier,
     downloadSupplierPdf,
     bulkAddSuppliers,
+    uploadAttachment,
 };

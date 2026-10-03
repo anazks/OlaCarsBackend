@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getPerformance, getIndividualPerformance } = require("../Controller/staffPerformanceController");
+const { getPerformance, getIndividualPerformance, clearPerformanceCache } = require("../Controller/staffPerformanceController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
@@ -94,6 +94,13 @@ router.get(
     "/tasks",
     authenticate,
     taskController.getTasks
+);
+
+router.post(
+    "/clear-cache",
+    authenticate,
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN),
+    clearPerformanceCache
 );
 
 module.exports = router;

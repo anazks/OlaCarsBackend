@@ -164,6 +164,9 @@ invoiceSchema.index({ dueDate: 1 });
 invoiceSchema.index({ status: 1 });
 invoiceSchema.index({ generatedAt: -1 });
 invoiceSchema.index({ isDeleted: 1 });
+invoiceSchema.index({ isDeleted: 1, dueDate: 1, balance: 1 });
+invoiceSchema.index({ isDeleted: 1, customer: 1, dueDate: 1, balance: 1 });
+invoiceSchema.index({ isDeleted: 1, status: 1, dueDate: 1, balance: 1 });
 
 module.exports = {
     Invoice: mongoose.model("Invoice", invoiceSchema)

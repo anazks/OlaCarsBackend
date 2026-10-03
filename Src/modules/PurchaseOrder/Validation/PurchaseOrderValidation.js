@@ -19,7 +19,7 @@ const addPurchaseOrderSchema = {
         branch: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         supplier: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
         paymentDate: Joi.date(),
-    }),
+    }).unknown(true),
 };
 
 const approvePurchaseOrderSchema = {

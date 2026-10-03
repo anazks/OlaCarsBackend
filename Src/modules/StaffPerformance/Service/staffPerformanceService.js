@@ -11,11 +11,59 @@ const OperationAdmin = require("../../OperationAdmin/model/OperationAdminModel")
 const Target = require("../Model/TargetModel");
 const Lease = require("../../Lease/Model/LeaseModel");
 
+// In-Memory Cache configuration for Staff Performance (TTL: 2 minutes)
+const CACHE_TTL_MS = 120 * 1000;
+const performanceCache = new Map();
+const individualCache = new Map();
+
+const getCacheKey = (prefix, filters = {}) => {
+    const keys = Object.keys(filters).sort();
+    const clean = {};
+    for (const k of keys) {
+        if (k !== 'refresh' && k !== 'bypassCache' && filters[k] !== undefined && filters[k] !== null && filters[k] !== '') {
+            clean[k] = String(filters[k]).trim();
+        }
+    }
+    return `${prefix}:${JSON.stringify(clean)}`;
+};
+
+const getFromCache = (cacheMap, key) => {
+    const entry = cacheMap.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+        cacheMap.delete(key);
+        return null;
+    }
+    return entry.data;
+};
+
+const setInCache = (cacheMap, key, data, maxEntries = 100) => {
+    if (cacheMap.size >= maxEntries) {
+        const firstKey = cacheMap.keys().next().value;
+        if (firstKey) cacheMap.delete(firstKey);
+    }
+    cacheMap.set(key, { timestamp: Date.now(), data });
+};
+
+const clearStaffPerformanceCache = () => {
+    performanceCache.clear();
+    individualCache.clear();
+    console.log("[StaffPerformanceService] In-memory cache cleared.");
+};
+
 /**
  * Aggregates performance metrics for finance and operation staff
  * by cross-referencing Driver/Vehicle statusHistory records.
  */
 const getStaffPerformance = async (filters = {}) => {
+    const isBypass = filters.refresh === 'true' || filters.bypassCache === 'true';
+    const cacheKey = getCacheKey("staffPerf", filters);
+
+    if (!isBypass) {
+        const cached = getFromCache(performanceCache, cacheKey);
+        if (cached) return cached;
+    }
+
     const { branchId, country, type = "all", startDate, endDate } = filters;
     let branchIds = branchId ? [branchId] : null;
 
@@ -52,14 +100,21 @@ const getStaffPerformance = async (filters = {}) => {
             .populate("branchId", "name code")
             .lean();
 
-        // Get all driver statusHistory entries attributed to finance staff
-        const driverAgg = await Driver.aggregate([
-            { $match: { isDeleted: false } },
+        const finStaffIds = finStaff.map(s => s._id);
+        const driverAgg = finStaffIds.length === 0 ? [] : await Driver.aggregate([
+            {
+                $match: {
+                    isDeleted: false,
+                    "statusHistory.changedByRole": "FINANCESTAFF",
+                    "statusHistory.changedBy": { $in: finStaffIds },
+                    ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
+                }
+            },
             { $unwind: "$statusHistory" },
             {
                 $match: {
                     "statusHistory.changedByRole": "FINANCESTAFF",
-                    "statusHistory.changedBy": { $in: finStaff.map(s => s._id) },
+                    "statusHistory.changedBy": { $in: finStaffIds },
                     ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
                 },
             },
@@ -163,14 +218,21 @@ const getStaffPerformance = async (filters = {}) => {
             .populate("branchId", "name code")
             .lean();
 
-        // Get all vehicle statusHistory entries attributed to operation staff
-        const vehicleAgg = await Vehicle.aggregate([
-            { $match: { isDeleted: false } },
+        const opStaffIds = opStaff.map(s => s._id);
+        const vehicleAgg = opStaffIds.length === 0 ? [] : await Vehicle.aggregate([
+            {
+                $match: {
+                    isDeleted: false,
+                    "statusHistory.changedByRole": "OPERATIONSTAFF",
+                    "statusHistory.changedBy": { $in: opStaffIds },
+                    ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
+                }
+            },
             { $unwind: "$statusHistory" },
             {
                 $match: {
                     "statusHistory.changedByRole": "OPERATIONSTAFF",
-                    "statusHistory.changedBy": { $in: opStaff.map(s => s._id) },
+                    "statusHistory.changedBy": { $in: opStaffIds },
                     ...(Object.keys(timelineMatch).length > 0 ? { "statusHistory.timestamp": timelineMatch } : {})
                 },
             },
@@ -632,15 +694,24 @@ const getStaffPerformance = async (filters = {}) => {
     result.branchManagers.forEach(s => s.targetStats = mapTargetsToEntity(s.branchId, 'BRANCH', s.metrics));
     result.countryManagers.forEach(s => s.targetStats = mapTargetsToEntity(s.country, 'COUNTRY', s.metrics));
 
+    setInCache(performanceCache, cacheKey, result, 100);
     return result;
 };
 
 const { getStaffDetailsRepo } = require("../Repo/StaffPerformanceRepo");
-const getIndividualStaffPerformance = async (staffId, startDate, endDate) => {
-    return await getStaffDetailsRepo(staffId, startDate, endDate);
+const getIndividualStaffPerformance = async (staffId, startDate, endDate, bypassCache = false) => {
+    const cacheKey = `${staffId}:${startDate || ''}:${endDate || ''}`;
+    if (!bypassCache) {
+        const cached = getFromCache(individualCache, cacheKey);
+        if (cached) return cached;
+    }
+    const data = await getStaffDetailsRepo(staffId, startDate, endDate);
+    setInCache(individualCache, cacheKey, data, 100);
+    return data;
 };
 
 module.exports = {
     getStaffPerformance,
-    getIndividualStaffPerformance
+    getIndividualStaffPerformance,
+    clearStaffPerformanceCache
 };

@@ -1,5 +1,16 @@
 const InvoiceService = require("../Service/InvoiceService");
 
+const invalidateCollectionCache = () => {
+    try {
+        const CollectionService = require("../../Collection/Service/CollectionService");
+        if (CollectionService && typeof CollectionService.clearCollectionCache === "function") {
+            CollectionService.clearCollectionCache();
+        }
+    } catch (e) {
+        // Non-blocking cache invalidation
+    }
+};
+
 exports.getInvoices = async (req, res) => {
     try {
         const queryParams = req.query;
@@ -102,6 +113,7 @@ exports.createManualInvoice = async (req, res) => {
         }
 
         const result = await InvoiceService.createManualInvoice(invoiceData, createdBy, creatorRole);
+        invalidateCollectionCache();
         return res.status(201).json({ success: true, message: "Manual invoice created successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -144,6 +156,7 @@ exports.bulkUploadInvoices = async (req, res) => {
             };
 
             const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole, onProgress);
+            invalidateCollectionCache();
 
             try {
                 res.write(JSON.stringify({
@@ -165,6 +178,7 @@ exports.bulkUploadInvoices = async (req, res) => {
         }
 
         const result = await InvoiceService.bulkUploadInvoices(rows, invoiceType, createdBy, creatorRole);
+        invalidateCollectionCache();
         return res.status(201).json({ success: true, message: "Bulk upload completed", data: result });
     } catch (error) {
         if (!res.headersSent) {
@@ -191,6 +205,7 @@ exports.payInvoice = async (req, res) => {
             creatorRole: req.user.role,
         };
         const result = await InvoiceService.payInvoice(req.params.id, paymentData);
+        invalidateCollectionCache();
         return res.status(200).json({ success: true, message: "Payment recorded successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -200,6 +215,7 @@ exports.payInvoice = async (req, res) => {
 exports.updateInvoice = async (req, res) => {
     try {
         const result = await InvoiceService.updateInvoice(req.params.id, req.body);
+        invalidateCollectionCache();
         return res.status(200).json({ success: true, message: "Invoice updated successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -209,6 +225,7 @@ exports.updateInvoice = async (req, res) => {
 exports.deleteInvoice = async (req, res) => {
     try {
         await InvoiceService.deleteInvoice(req.params.id);
+        invalidateCollectionCache();
         return res.status(200).json({ success: true, message: "Invoice deleted successfully" });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -218,6 +235,7 @@ exports.deleteInvoice = async (req, res) => {
 exports.deleteAllInvoices = async (req, res) => {
     try {
         await InvoiceService.deleteAll();
+        invalidateCollectionCache();
         return res.status(200).json({ success: true, message: "All invoices deleted successfully" });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });
@@ -245,6 +263,7 @@ exports.updateGenerationSettings = async (req, res) => {
 exports.triggerWeeklyGeneration = async (req, res) => {
     try {
         const result = await InvoiceService.triggerWeeklyGeneration(req.user._id, req.user.role);
+        invalidateCollectionCache();
         return res.status(200).json({ 
             success: true, 
             message: `Invoice generation complete. Created ${result.generatedCount} invoices.`,

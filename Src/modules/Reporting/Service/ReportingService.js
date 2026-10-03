@@ -88,7 +88,61 @@ const filterDuplicateLedgerEntries = (entries) => {
     });
 };
 
-exports.getPLReport = async (filters) => {
+// In-Memory Cache configuration for Reporting (TTL: 2 minutes)
+const CACHE_TTL_MS = 120 * 1000;
+const reportsCache = new Map();
+
+const getReportCacheKey = (reportName, filters = {}) => {
+    const keys = Object.keys(filters).sort();
+    const clean = {};
+    for (const k of keys) {
+        if (k !== 'refresh' && k !== 'bypassCache' && filters[k] !== undefined && filters[k] !== null && filters[k] !== '') {
+            clean[k] = String(filters[k]).trim();
+        }
+    }
+    return `${reportName}:${JSON.stringify(clean)}`;
+};
+
+const getReportFromCache = (key) => {
+    const entry = reportsCache.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+        reportsCache.delete(key);
+        return null;
+    }
+    return entry.data;
+};
+
+const setReportInCache = (key, data, maxEntries = 100) => {
+    if (reportsCache.size >= maxEntries) {
+        const firstKey = reportsCache.keys().next().value;
+        if (firstKey) reportsCache.delete(firstKey);
+    }
+    reportsCache.set(key, { timestamp: Date.now(), data });
+};
+
+const clearReportingCache = () => {
+    reportsCache.clear();
+    console.log("[ReportingService] In-memory cache cleared.");
+};
+
+const withReportCache = (reportName, handler) => {
+    return async (filters = {}) => {
+        const isBypass = filters.refresh === 'true' || filters.bypassCache === 'true';
+        const cacheKey = getReportCacheKey(reportName, filters);
+
+        if (!isBypass) {
+            const cached = getReportFromCache(cacheKey);
+            if (cached) return cached;
+        }
+
+        const result = await handler(filters);
+        setReportInCache(cacheKey, result);
+        return result;
+    };
+};
+
+const getPLReportImpl = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
 
     if (!startDate || !endDate) {
@@ -367,7 +421,7 @@ exports.getPLReport = async (filters) => {
     };
 };
 
-exports.getBalanceSheetReport = async (filters) => {
+const getBalanceSheetReportImpl = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
 
     if (!endDate) {
@@ -754,7 +808,7 @@ exports.getBalanceSheetReport = async (filters) => {
     };
 };
 
-exports.getDailyFinanceReport = async (filters) => {
+const getDailyFinanceReportImpl = async (filters) => {
     const { branch, country, startDate, endDate } = filters;
 
     const query = {};
@@ -801,7 +855,7 @@ exports.getDailyFinanceReport = async (filters) => {
     return Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
 };
 
-exports.getDriverPerformanceReport = async (filters) => {
+const getDriverPerformanceReportImpl = async (filters) => {
     const { branch, country } = filters;
 
     const query = { isDeleted: false };
@@ -836,7 +890,7 @@ exports.getDriverPerformanceReport = async (filters) => {
     });
 };
 
-exports.getStaffPerformanceReport = async (filters) => {
+const getStaffPerformanceReportImpl = async (filters) => {
     const { branch, country } = filters;
 
     let branchIds = [];
@@ -890,7 +944,7 @@ exports.getStaffPerformanceReport = async (filters) => {
     });
 };
 
-exports.getBankBalanceSheetReport = async (filters) => {
+const getBankBalanceSheetReportImpl = async (filters) => {
     const { startDate, endDate, bankAccount, branch } = filters;
     const BankAccount = require("../../BankAccount/Model/BankAccountModel");
     const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
@@ -1029,6 +1083,14 @@ exports.getBankBalanceSheetReport = async (filters) => {
         };
     }
 };
+
+exports.getPLReport = withReportCache("PL", getPLReportImpl);
+exports.getBalanceSheetReport = withReportCache("BalanceSheet", getBalanceSheetReportImpl);
+exports.getDailyFinanceReport = withReportCache("DailyFinance", getDailyFinanceReportImpl);
+exports.getDriverPerformanceReport = withReportCache("DriverPerf", getDriverPerformanceReportImpl);
+exports.getStaffPerformanceReport = withReportCache("StaffPerf", getStaffPerformanceReportImpl);
+exports.getBankBalanceSheetReport = withReportCache("BankBalanceSheet", getBankBalanceSheetReportImpl);
+exports.clearReportingCache = clearReportingCache;
 
 // Self-trigger diagnostics on server start
 setTimeout(async () => {

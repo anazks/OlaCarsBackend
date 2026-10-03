@@ -53,6 +53,16 @@ const purchaseOrderSchema = new mongoose.Schema(
             type: [String],
             default: [],
         },
+        attachments: [
+            {
+                url: { type: String, required: true },
+                name: { type: String },
+                originalName: { type: String },
+                fileType: { type: String },
+                size: { type: Number },
+                uploadedAt: { type: Date, default: Date.now },
+            }
+        ],
         rejectionNote: {
             type: String,
         },

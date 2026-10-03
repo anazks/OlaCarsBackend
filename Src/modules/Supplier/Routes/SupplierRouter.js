@@ -8,11 +8,13 @@ const {
     deleteSupplier,
     downloadSupplierPdf,
     bulkAddSuppliers,
+    uploadAttachment,
 } = require("../Controller/SupplierController");
 const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { hasPermission } = require("../../../shared/middlewares/permissionMiddleware");
 const validate = require("../../../shared/middlewares/validate");
+const upload = require("../../../utils/multerConfig");
 const { ROLES } = require("../../../shared/constants/roles");
 const {
     addSupplierSchema,

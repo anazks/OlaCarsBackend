@@ -3,8 +3,43 @@ const { GpsNotification } = require("../Model/GpsNotificationModel");
 
 const getGpsVehicles = async (req, res, next) => {
     try {
-        const vehicles = await GpsService.getVehiclesList();
-        res.status(200).json({ success: true, data: vehicles });
+        const { page, limit, search, status, plateStatus, all, paginate } = req.query;
+
+        // If pagination is requested via 'page', 'limit', or 'paginate=true'
+        const isPaginated = (page !== undefined && page !== '') ||
+                            (limit !== undefined && limit !== '') ||
+                            paginate === 'true';
+
+        if (!isPaginated && (all === 'true' || (!search && !status && !plateStatus))) {
+            const raw = await GpsService.getVehiclesList();
+            const summary = GpsService.computeVehiclesSummary(raw);
+            return res.status(200).json({
+                success: true,
+                data: raw,
+                pagination: {
+                    total: raw.length,
+                    page: 1,
+                    limit: raw.length,
+                    totalPages: 1
+                },
+                summary
+            });
+        }
+
+        const result = await GpsService.getPaginatedVehicles({
+            page,
+            limit,
+            search,
+            status,
+            plateStatus
+        });
+
+        res.status(200).json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+            summary: result.summary
+        });
     } catch (error) {
         next(error);
     }

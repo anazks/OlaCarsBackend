@@ -3,8 +3,11 @@ const router = express.Router();
 const PaymentMadeController = require('../Controller/PaymentMadeController');
 const { authenticate } = require('../../../shared/middlewares/authMiddleware');
 
+const upload = require('../../../utils/multerConfig');
+
 router.use(authenticate);
 
+router.post('/upload-attachment', upload.single('file'), PaymentMadeController.uploadAttachment);
 router.post('/bulk-upload', PaymentMadeController.bulkUploadPaymentsMade);
 router.post('/', PaymentMadeController.createPaymentMade);
 router.get('/', PaymentMadeController.getAllPaymentMades);

@@ -5,7 +5,15 @@ const { authenticate } = require("../../../shared/middlewares/authMiddleware");
 const { authorize } = require("../../../shared/middlewares/roleMiddleWare");
 const { ROLES } = require("../../../shared/constants/roles");
 
+const upload = require("../../../utils/multerConfig");
+
 router.use(authenticate);
+
+router.post("/upload-attachment",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),
+    upload.single("file"),
+    ExpenseController.uploadAttachment
+);
 
 router.post("/bulk-upload",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.FINANCESTAFF),

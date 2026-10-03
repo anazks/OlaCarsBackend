@@ -68,6 +68,7 @@ const DashboardSummarySchema = new mongoose.Schema(
 
 // Unique index on date and branch to prevent duplicates
 DashboardSummarySchema.index({ date: 1, branch: 1 }, { unique: true });
+DashboardSummarySchema.index({ branch: 1, date: -1 });
 DashboardSummarySchema.index({ country: 1 });
 
 module.exports = mongoose.model("DashboardSummary", DashboardSummarySchema);
