@@ -13,7 +13,6 @@ const branchManagerSchema = new mongoose.Schema(
         email: {
             type: String,
             required: true,
-            unique: true,
             lowercase: true,
             trim: true,
         },
@@ -107,6 +106,11 @@ const branchManagerSchema = new mongoose.Schema(
             }
         }
     }
+);
+
+branchManagerSchema.index(
+    { email: 1 },
+    { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const BranchManager = mongoose.model("BranchManager", branchManagerSchema);

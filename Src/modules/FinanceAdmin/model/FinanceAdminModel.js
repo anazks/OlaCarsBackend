@@ -12,7 +12,6 @@ const financeAdminSchema = new mongoose.Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -97,6 +96,11 @@ const financeAdminSchema = new mongoose.Schema(
       }
     }
   }
+);
+
+financeAdminSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const FinanceAdmin = mongoose.models.FinanceAdmin || mongoose.model("FinanceAdmin", financeAdminSchema);

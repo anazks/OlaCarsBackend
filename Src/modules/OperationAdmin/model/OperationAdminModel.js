@@ -12,7 +12,6 @@ const operationalAdminSchema = new mongoose.Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -97,6 +96,11 @@ const operationalAdminSchema = new mongoose.Schema(
       }
     }
   }
+);
+
+operationalAdminSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const OperationalAdmin = mongoose.models.OperationalAdmin || mongoose.model("OperationalAdmin", operationalAdminSchema);

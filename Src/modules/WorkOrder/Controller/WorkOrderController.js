@@ -12,6 +12,64 @@ const {
 } = require("../Service/WorkOrderService");
 const uploadToS3 = require("../../../utils/uploadToS3");
 const crypto = require("crypto");
+require("../../Inventory/Model/InventoryPartModel");
+const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
+
+// Helper to filter parts by vehicle make/model with model specificity
+const filterPartsForVehicle = (parts, vehicleObj) => {
+    if (!vehicleObj || typeof vehicleObj !== 'object') return parts;
+    const rawMake = (vehicleObj.basicDetails?.make || '').toLowerCase().trim();
+    const rawModel = (vehicleObj.basicDetails?.model || '').toLowerCase().trim();
+
+    const makeClean = rawMake.replace(/[^a-z0-9]/g, '');
+    const modelClean = rawModel.replace(/[^a-z0-9]/g, '');
+
+    // Canonical map for brand makes
+    let canonicalMake = makeClean;
+    if (makeClean.includes('jetu') || makeClean.includes('jetour')) canonicalMake = 'jetour';
+    else if (makeClean.includes('gell') || makeClean.includes('geel')) canonicalMake = 'geely';
+    else if (makeClean.includes('soue')) canonicalMake = 'soueast';
+    else if (makeClean.includes('tiggo') || makeClean.includes('cher')) canonicalMake = 'chery';
+    else if (makeClean.includes('kia')) canonicalMake = 'kia';
+    else if (makeClean.includes('honda')) canonicalMake = 'honda';
+
+    // Canonical map for models
+    let canonicalModel = modelClean;
+    if (modelClean.includes('brv')) canonicalModel = 'brv';
+    else if (modelClean.includes('x70')) canonicalModel = 'x70';
+    else if (modelClean.includes('s07')) canonicalModel = 's07';
+    else if (modelClean.includes('okvango') || modelClean.includes('okavango')) canonicalModel = 'okavango';
+    else if (modelClean.includes('carens')) canonicalModel = 'carens';
+    else if (modelClean.includes('soluto')) canonicalModel = 'soluto';
+    else if (modelClean.includes('8pro') || modelClean.includes('tiggo')) canonicalModel = 'tiggo';
+
+    const ALL_KNOWN_MODELS = ['carens', 'soluto', 'brv', 'x70', 's07', 'okavango', 'tiggo'];
+
+    return parts.filter(p => {
+        const nameClean = (p.partName || p.partNumber || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const descClean = (p.description || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const text = `${nameClean} ${descClean}`;
+
+        // 1. Model Specificity Rule:
+        const mentionedModel = ALL_KNOWN_MODELS.find(m => text.includes(m));
+        if (mentionedModel) {
+            return canonicalModel ? text.includes(canonicalModel) : false;
+        }
+
+        // 2. Make Rule:
+        if (canonicalMake) {
+            if (canonicalMake === 'jetour' || canonicalMake === 'soueast') {
+                return text.includes('jetour') || text.includes('soueast') || text.includes('souest');
+            }
+            if (canonicalMake === 'chery') {
+                return text.includes('chery') || text.includes('cherry') || text.includes('tiggo');
+            }
+            return text.includes(canonicalMake);
+        }
+
+        return true;
+    });
+};
 
 /**
  * Create a new Work Order (DRAFT).
@@ -26,36 +84,92 @@ const createWorkOrderHandler = async (req, res) => {
         data.reportedBy = req.user.id;
         data.reportedByRole = req.user.role;
 
-        // Auto-assign tasks from TaskTemplate for the given work order type
+        // Auto-assign tasks and parts from TaskTemplate for the given work order type
         if (data.workOrderType) {
             try {
                 const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
-                const branchId = data.branchId || req.user.branchId;
+                let branchId = data.branchId || req.user.branchId;
+
+                let vehicleObj = null;
+                if (data.vehicleId) {
+                    try {
+                        const VehicleRepo = require("../../Vehicle/Repo/VehicleRepo");
+                        vehicleObj = await VehicleRepo.getVehicleByIdService(data.vehicleId);
+                    } catch (vErr) {
+                        console.error("[TASK-TEMPLATE AUTO-ASSIGN] Vehicle fetch error:", vErr.message);
+                    }
+                }
+
+                if (!branchId && vehicleObj) {
+                    branchId = vehicleObj.purchaseDetails?.branch?._id || vehicleObj.purchaseDetails?.branch || vehicleObj.branchId;
+                }
+
                 const templates = await TaskTemplate.find({
                     workOrderTypes: data.workOrderType,
                     branchId: branchId,
                     isActive: true
-                });
+                }).populate("linkedParts.inventoryPartId", "partName partNumber quantityOnHand quantityReserved unitCost isActive");
 
                 if (templates.length > 0) {
                     if (!data.tasks) data.tasks = [];
-                    templates.forEach(t => {
+                    if (!data.parts) data.parts = [];
+                    let autoPartsCostSum = 0;
+                    const autoAssignedPartIds = [];
+
+                    for (const t of templates) {
                         data.tasks.push({
                             description: t.name,
                             category: t.category,
                             estimatedHours: t.estimatedHours || 0.5,
                             status: "PENDING",
-                            isDoable: false,
+                            isDoable: true,
                             taskTemplateId: t._id,
                         });
-                    });
-                    console.log(`[TASK-TEMPLATE] Auto-assigned ${templates.length} tasks from templates for ${data.workOrderType}`);
+
+                        if (t.linkedParts && t.linkedParts.length > 0) {
+                            const applicableParts = filterPartsForVehicle(t.linkedParts, vehicleObj);
+                            for (const lp of applicableParts) {
+                                const invPart = lp.inventoryPartId;
+                                const partId = invPart?._id || lp.inventoryPartId;
+                                const partIdStr = partId ? partId.toString() : null;
+                                if (!partIdStr) continue;
+
+                                const alreadyExists = data.parts.some(p =>
+                                    (p.inventoryPartId?._id || p.inventoryPartId)?.toString() === partIdStr
+                                );
+
+                                if (!alreadyExists) {
+                                    const qty = lp.defaultQuantity || 1;
+                                    const unitCost = (invPart && invPart.unitCost !== undefined) ? invPart.unitCost : 0;
+                                    const totalCost = unitCost * qty;
+
+                                    data.parts.push({
+                                        partName: lp.partName || invPart?.partName,
+                                        partNumber: lp.partNumber || invPart?.partNumber,
+                                        quantity: qty,
+                                        unitCost: unitCost,
+                                        totalCost: totalCost,
+                                        source: "IN_STOCK",
+                                        inventoryPartId: partId,
+                                        taskTemplateId: t._id,
+                                        status: "RESERVED",
+                                        approvalStatus: "PENDING",
+                                    });
+
+                                    autoPartsCostSum += totalCost;
+                                    autoAssignedPartIds.push({ inventoryPartId: partId, quantity: qty });
+                                }
+                            }
+                        }
+                    }
+
+                    data.estimatedPartsCost = autoPartsCostSum;
+                    data._autoAssignedPartIds = autoAssignedPartIds;
+                    console.log(`[TASK-TEMPLATE] Auto-assigned ${templates.length} tasks and ${data.parts.length} parts from templates for ${data.workOrderType}`);
                 }
             } catch (err) {
                 console.error("[TASK-TEMPLATE AUTO-ASSIGN ERROR]", err.message);
             }
-            data.parts = [];
-            data.estimatedPartsCost = 0;
         }
 
         // Auto-set SLA from priority
@@ -73,6 +187,44 @@ const createWorkOrderHandler = async (req, res) => {
 
         const wo = await WorkOrderRepo.createWorkOrder(data);
 
+        // Auto-reserve stock for any auto-assigned preset parts
+        if (data._autoAssignedPartIds && data._autoAssignedPartIds.length > 0 && wo && wo._id) {
+            try {
+                const { checkAndReserve } = require("../../Inventory/Service/InventoryService");
+                const user = { id: req.user?.id || req.user?._id, role: req.user?.role };
+                const { WorkOrder } = require("../Model/WorkOrderModel");
+                const createdWoDoc = await WorkOrder.findById(wo._id);
+
+                if (createdWoDoc) {
+                    let hasModifications = false;
+                    for (const item of data._autoAssignedPartIds) {
+                        try {
+                            const reserveResult = await checkAndReserve(item.inventoryPartId, item.quantity, user, wo._id);
+                            if (!reserveResult || !reserveResult.success) {
+                                const targetPart = createdWoDoc.parts.find(p => p.inventoryPartId?.toString() === item.inventoryPartId.toString());
+                                if (targetPart) {
+                                    targetPart.status = "REQUESTED";
+                                    hasModifications = true;
+                                }
+                            }
+                        } catch (resErr) {
+                            console.warn(`[TASK-TEMPLATE] Part reservation fallback to REQUESTED:`, resErr.message);
+                            const targetPart = createdWoDoc.parts.find(p => p.inventoryPartId?.toString() === item.inventoryPartId.toString());
+                            if (targetPart) {
+                                targetPart.status = "REQUESTED";
+                                hasModifications = true;
+                            }
+                        }
+                    }
+                    if (hasModifications) {
+                        await createdWoDoc.save();
+                    }
+                }
+            } catch (resMasterErr) {
+                console.error("[TASK-TEMPLATE AUTO-RESERVE ERROR]", resMasterErr.message);
+            }
+        }
+
         // Auto-save matched/resolved gpsSerialNumber (IMEI) to vehicle if not already present
         if (data.vehicleId && data.gpsSerialNumber) {
             try {
@@ -89,7 +241,8 @@ const createWorkOrderHandler = async (req, res) => {
             }
         }
 
-        return res.status(201).json({ success: true, data: wo });
+        const freshWo = await WorkOrderRepo.getWorkOrderById(wo._id);
+        return res.status(201).json({ success: true, data: freshWo || wo });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -500,62 +653,6 @@ const generateBillHandler = async (req, res) => {
 
 // ─── Toggle Task Doable (atomic check + part add/remove) ─────────────
 
-// Helper to filter parts by vehicle make/model with model specificity
-const filterPartsForVehicle = (parts, vehicleObj) => {
-    if (!vehicleObj || typeof vehicleObj !== 'object') return parts;
-    const rawMake = (vehicleObj.basicDetails?.make || '').toLowerCase().trim();
-    const rawModel = (vehicleObj.basicDetails?.model || '').toLowerCase().trim();
-
-    const makeClean = rawMake.replace(/[^a-z0-9]/g, '');
-    const modelClean = rawModel.replace(/[^a-z0-9]/g, '');
-
-    // Canonical map for brand makes
-    let canonicalMake = makeClean;
-    if (makeClean.includes('jetu') || makeClean.includes('jetour')) canonicalMake = 'jetour';
-    else if (makeClean.includes('gell') || makeClean.includes('geel')) canonicalMake = 'geely';
-    else if (makeClean.includes('soue')) canonicalMake = 'soueast';
-    else if (makeClean.includes('tiggo') || makeClean.includes('cher')) canonicalMake = 'chery';
-    else if (makeClean.includes('kia')) canonicalMake = 'kia';
-    else if (makeClean.includes('honda')) canonicalMake = 'honda';
-
-    // Canonical map for models
-    let canonicalModel = modelClean;
-    if (modelClean.includes('brv')) canonicalModel = 'brv';
-    else if (modelClean.includes('x70')) canonicalModel = 'x70';
-    else if (modelClean.includes('s07')) canonicalModel = 's07';
-    else if (modelClean.includes('okvango') || modelClean.includes('okavango')) canonicalModel = 'okavango';
-    else if (modelClean.includes('carens')) canonicalModel = 'carens';
-    else if (modelClean.includes('soluto')) canonicalModel = 'soluto';
-    else if (modelClean.includes('8pro') || modelClean.includes('tiggo')) canonicalModel = 'tiggo';
-
-    const ALL_KNOWN_MODELS = ['carens', 'soluto', 'brv', 'x70', 's07', 'okavango', 'tiggo'];
-
-    return parts.filter(p => {
-        const nameClean = (p.partName || p.partNumber || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const descClean = (p.description || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const text = `${nameClean} ${descClean}`;
-
-        // 1. Model Specificity Rule:
-        const mentionedModel = ALL_KNOWN_MODELS.find(m => text.includes(m));
-        if (mentionedModel) {
-            return canonicalModel ? text.includes(canonicalModel) : false;
-        }
-
-        // 2. Make Rule:
-        if (canonicalMake) {
-            if (canonicalMake === 'jetour' || canonicalMake === 'soueast') {
-                return text.includes('jetour') || text.includes('soueast') || text.includes('souest');
-            }
-            if (canonicalMake === 'chery') {
-                return text.includes('chery') || text.includes('cherry') || text.includes('tiggo');
-            }
-            return text.includes(canonicalMake);
-        }
-
-        return true;
-    });
-};
-
 const toggleTaskDoableHandler = async (req, res) => {
     try {
         const { id, taskId } = req.params;
@@ -568,11 +665,26 @@ const toggleTaskDoableHandler = async (req, res) => {
         const nextDoable = !task.isDoable;
         const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
 
-        // If templateId is missing, attempt auto-linking by task description
+        // If templateId is missing, attempt auto-linking by task description (exact or relaxed)
         if (!task.taskTemplateId && task.description) {
-            const matchedTemplate = await TaskTemplate.findOne({
-                name: { $regex: new RegExp(`^${task.description.trim()}$`, "i") }
+            const cleanDesc = task.description.trim();
+            let matchedTemplate = await TaskTemplate.findOne({
+                branchId: wo.branchId?._id || wo.branchId,
+                name: { $regex: new RegExp(`^${cleanDesc}$`, "i") },
+                isActive: true
             });
+            if (!matchedTemplate) {
+                const baseName = cleanDesc.replace(/\s+change$/i, '');
+                matchedTemplate = await TaskTemplate.findOne({
+                    branchId: wo.branchId?._id || wo.branchId,
+                    $or: [
+                        { name: { $regex: new RegExp(`^${baseName}$`, "i") } },
+                        { name: { $regex: new RegExp(`^${cleanDesc}`, "i") } },
+                        { name: { $regex: new RegExp(cleanDesc, "i") } }
+                    ],
+                    isActive: true
+                });
+            }
             if (matchedTemplate) {
                 task.taskTemplateId = matchedTemplate._id;
             }

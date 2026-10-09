@@ -101,6 +101,12 @@ exports.create = async (data) => {
     validatePassword(data.password);
     const hashedPassword = await bcrypt.hash(data.password, 12);
 
+    const normalizedEmail = data.email.toLowerCase().trim();
+    const existingActive = await FinanceAdmin.findOne({ email: normalizedEmail, isDeleted: false });
+    if (existingActive) {
+        throw new AppError('A Finance Admin with this email already exists.', 400);
+    }
+
     let finalPermissions = data.permissions || [];
     if (finalPermissions.length === 0) {
        const RoleTemplate = require('../../AccessControl/Model/RoleTemplate');
@@ -112,7 +118,7 @@ exports.create = async (data) => {
 
     const newAdmin = await FinanceAdmin.create({
         fullName: data.fullName,
-        email: data.email,
+        email: normalizedEmail,
         passwordHash: hashedPassword,
         status: data.status,
         permissions: finalPermissions,
@@ -131,6 +137,19 @@ exports.update = async (id, body) => {
     const filtered = filterBody(body, ...ALLOWED_UPDATE_FIELDS);
     if (Object.keys(filtered).length === 0) {
         throw new AppError('No valid fields to update', 400);
+    }
+
+    if (filtered.email) {
+        const normalizedEmail = filtered.email.toLowerCase().trim();
+        const existingActive = await FinanceAdmin.findOne({
+            email: normalizedEmail,
+            _id: { $ne: id },
+            isDeleted: false
+        });
+        if (existingActive) {
+            throw new AppError('A Finance Admin with this email already exists.', 400);
+        }
+        filtered.email = normalizedEmail;
     }
 
     if (filtered.permissions) {
@@ -194,11 +213,38 @@ exports.logout = async (id) => {
 const { getFinanceAdminsService } = require('../Repo/FinanceAdminRepo.js');
 
 exports.getAll = async (queryParams = {}) => {
-    return await getFinanceAdminsService(queryParams, {
+    const result = await getFinanceAdminsService(queryParams, {
         baseQuery: { isDeleted: false },
         select: '-passwordHash -refreshToken',
         defaultSort: { createdAt: -1 }
     });
+
+    if (result && Array.isArray(result.data) && result.data.length > 0) {
+        try {
+            const FinanceAdminPaymentAccess = require('../../PaymentPortal/Model/FinanceAdminPaymentAccessModel');
+            const adminIds = result.data.map(a => a._id);
+            const accesses = await FinanceAdminPaymentAccess.find({ financeAdminId: { $in: adminIds } }).lean();
+            const accessMap = new Map();
+            accesses.forEach(acc => accessMap.set(String(acc.financeAdminId), acc));
+
+            result.data = result.data.map(admin => {
+                const doc = typeof admin.toObject === 'function' ? admin.toObject() : { ...admin };
+                const acc = accessMap.get(String(doc._id));
+                const isLocked = acc && acc.lockUntil && new Date(acc.lockUntil) > new Date();
+                doc.isMpinSet = !!acc;
+                doc.mpin = acc ? acc.mpin : null;
+                doc.hasEntryAccess = acc ? !!acc.hasEntryAccess : false;
+                doc.hasApprovalAccess = acc ? !!acc.hasApprovalAccess : false;
+                doc.portalStatus = acc ? (isLocked ? 'LOCKED' : acc.status) : 'NOT_CONFIGURED';
+                doc.failedAttempts = acc ? acc.failedAttempts : 0;
+                return doc;
+            });
+        } catch (enrichErr) {
+            console.error('Error enriching finance admin MPIN status:', enrichErr);
+        }
+    }
+
+    return result;
 };
 
 exports.getById = async (id) => {

@@ -18,6 +18,7 @@ const {
 } = require("./Src/bootstrap/seedBranchPermissions");
 const { seedAccountingCodes } = require("./Src/bootstrap/seedAccountingCodes");
 const { healDriverWeeklyRent } = require("./Src/bootstrap/healDriverWeeklyRent");
+const { healUserIndexes } = require("./Src/bootstrap/healUserIndexes");
 const AdminRouter = require("./Src/modules/Admin/Routes/AdminRoutes");
 const BranchRouter = require("./Src/modules/Branch/Routes/BranchRouter");
 const CountryManagerRouter = require("./Src/modules/CountryManager/Routes/CountryManagerRouter");
@@ -85,6 +86,7 @@ const CollectionRouter = require("./Src/modules/Collection/Routes/CollectionRout
 const EnquiryRouter = require("./Src/modules/Enquiry/Routes/EnquiryRoutes");
 const AccidentReportRouter = require("./Src/modules/AccidentReport/Routes/AccidentReportRoutes");
 const PaymentRequestRouter = require("./Src/modules/PaymentRequest/Routes/PaymentRequestRouter");
+const PaymentPortalRouter = require("./Src/modules/PaymentPortal/Routes/PaymentPortalRoutes");
 const CustomerRouter = require("./Src/modules/Customer/Routes/CustomerRoutes");
 const QuoteRouter = require("./Src/modules/Quote/Routes/QuoteRoutes");
 const SalesOrderRouter = require("./Src/modules/SalesOrder/Routes/SalesOrderRoutes");
@@ -125,9 +127,20 @@ const corsOptions = {
     "Origin",
     "Access-Control-Request-Method",
     "Access-Control-Request-Headers",
-    "X-Skip-Toast"
+    "X-Skip-Toast",
+    "x-portal-token",
+    "X-Portal-Token",
+    "x-payment-portal-token",
+    "X-Payment-Portal-Token",
+    "x-branch-id",
+    "X-Branch-Id"
   ],
-  exposedHeaders: ["Content-Range", "X-Content-Range"]
+  exposedHeaders: [
+    "Content-Range",
+    "X-Content-Range",
+    "x-portal-token",
+    "X-Portal-Token"
+  ]
 };
 
 app.use(cors(corsOptions));
@@ -265,6 +278,7 @@ app.use("/api/gps", GpsRouter);
 app.use("/api/enquiries", EnquiryRouter);
 app.use("/api/accident-reports", AccidentReportRouter);
 app.use("/api/payment-requests", PaymentRequestRouter);
+app.use("/api/payment-portal", PaymentPortalRouter);
 app.use("/api/collections", CollectionRouter);
 app.use("/api/driver-auth", DriverAuthRouter);
 app.use("/api/salaries", SalaryRouter);
@@ -398,8 +412,22 @@ app.get("/health", (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  if (err.code === 11000 || (err.message && err.message.includes("E11000"))) {
+    let duplicateField = "value";
+    if (err.keyPattern) {
+      const keys = Object.keys(err.keyPattern);
+      duplicateField = keys.length > 0 ? keys[0] : "value";
+    } else if (err.message && err.message.includes("email")) {
+      duplicateField = "email";
+    }
+    return res.status(400).json({
+      success: false,
+      message: `An account or record with this ${duplicateField} already exists.`,
+    });
+  }
+
   const statusCode = err.statusCode || 500;
-  const message = err.isOperational ? err.message : "Internal Server Error";
+  const message = err.isOperational ? err.message : (err.message || "Internal Server Error");
 
   if (statusCode === 500) {
     console.error(err.stack);
@@ -415,6 +443,9 @@ const startServer = async () => {
   try {
     await connectDB();
     console.log("Database connected successfully");
+
+    await healUserIndexes();
+    console.log("User email indexes verified/healed");
 
     // Drop deprecated policyNumber index if it exists
     try {

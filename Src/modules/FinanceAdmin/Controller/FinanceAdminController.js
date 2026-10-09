@@ -29,6 +29,9 @@ const addFinanceAdmin = async (req, res) => {
     const newAdmin = await FinanceAdminService.create(data);
     return res.status(201).json({ success: true, data: newAdmin });
   } catch (error) {
+    if (error.code === 11000 || (error.message && error.message.includes('E11000'))) {
+      return res.status(400).json({ success: false, message: 'A Finance Admin with this email already exists.' });
+    }
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({ success: false, message: error.message });
   }
@@ -68,6 +71,9 @@ const editFinanceAdmin = async (req, res) => {
     const updatedAdmin = await FinanceAdminService.update(req.params.id, payload);
     return res.status(200).json({ success: true, data: updatedAdmin });
   } catch (error) {
+    if (error.code === 11000 || (error.message && error.message.includes('E11000'))) {
+      return res.status(400).json({ success: false, message: 'A Finance Admin with this email already exists.' });
+    }
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({ success: false, message: error.message });
   }

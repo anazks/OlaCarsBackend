@@ -11,7 +11,7 @@ async function test() {
         const req = {
             body: {
                 workOrderType: "PREVENTIVE",
-                vehicleId: new mongoose.Types.ObjectId("6a293eb72cb35dd4717a10a0"), // dummy vehicle ID
+                vehicleId: new mongoose.Types.ObjectId("6a282156c3bc996462848a84"), // real Kia Carens vehicle ID
                 branchId: new mongoose.Types.ObjectId("6a293ea52cb35dd4717a1064"), // branch ID where the parts exist
                 faultDescription: "Preventive maintenance scheduled check"
             },

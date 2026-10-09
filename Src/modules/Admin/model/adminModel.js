@@ -12,7 +12,6 @@ const adminSchema = new mongoose.Schema(
     email: {
       type: String,
       required: true,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -88,6 +87,11 @@ const adminSchema = new mongoose.Schema(
       }
     }
   }
+);
+
+adminSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const Admin = mongoose.model("Admin", adminSchema);

@@ -13,7 +13,6 @@ const financeStaffSchema = new mongoose.Schema(
         email: {
             type: String,
             required: true,
-            unique: true,
             lowercase: true,
             trim: true,
         },
@@ -107,6 +106,11 @@ const financeStaffSchema = new mongoose.Schema(
             }
         }
     }
+);
+
+financeStaffSchema.index(
+    { email: 1 },
+    { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const FinanceStaff = mongoose.model("FinanceStaff", financeStaffSchema);

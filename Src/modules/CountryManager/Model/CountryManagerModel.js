@@ -13,7 +13,6 @@ const countryManagerSchema = new mongoose.Schema(
         email: {
             type: String,
             required: true,
-            unique: true,
             lowercase: true,
             trim: true,
         },
@@ -107,6 +106,11 @@ const countryManagerSchema = new mongoose.Schema(
             }
         }
     }
+);
+
+countryManagerSchema.index(
+    { email: 1 },
+    { unique: true, partialFilterExpression: { isDeleted: false } }
 );
 
 const CountryManager = mongoose.model("CountryManager", countryManagerSchema);

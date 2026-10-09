@@ -15,9 +15,24 @@ const addTask = async (woId, taskData) => {
 
     if (!taskData.taskTemplateId && taskData.description) {
         const { TaskTemplate } = require("../../TaskTemplate/Model/TaskTemplateModel");
-        const matchedTemplate = await TaskTemplate.findOne({
-            name: { $regex: new RegExp(`^${taskData.description.trim()}$`, "i") }
+        const cleanDesc = taskData.description.trim();
+        let matchedTemplate = await TaskTemplate.findOne({
+            branchId: wo.branchId?._id || wo.branchId,
+            name: { $regex: new RegExp(`^${cleanDesc}$`, "i") },
+            isActive: true
         });
+        if (!matchedTemplate) {
+            const baseName = cleanDesc.replace(/\s+change$/i, '');
+            matchedTemplate = await TaskTemplate.findOne({
+                branchId: wo.branchId?._id || wo.branchId,
+                $or: [
+                    { name: { $regex: new RegExp(`^${baseName}$`, "i") } },
+                    { name: { $regex: new RegExp(`^${cleanDesc}`, "i") } },
+                    { name: { $regex: new RegExp(cleanDesc, "i") } }
+                ],
+                isActive: true
+            });
+        }
         if (matchedTemplate) {
             taskData.taskTemplateId = matchedTemplate._id;
         }

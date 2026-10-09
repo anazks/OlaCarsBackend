@@ -22,10 +22,18 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     }
 
     // Check WO is in a billable state
-    const billableStatuses = ["QUALITY_CHECK", "READY_FOR_RELEASE", "VEHICLE_RELEASED", "INVOICED", "CLOSED"];
+    const billableStatuses = [
+        "BILLING",
+        "QC_PHOTOS",
+        "QUALITY_CHECK",
+        "READY_FOR_RELEASE",
+        "VEHICLE_RELEASED",
+        "INVOICED",
+        "CLOSED",
+    ];
     if (!billableStatuses.includes(wo.status)) {
         throw new Error(
-            `Work order must be in a billable state (QC onwards) to generate a bill. Current status: ${wo.status}`,
+            `Work order must be in a billable state (QC/Billing onwards) to generate a bill. Current status: ${wo.status}`,
             { cause: 400 }
         );
     }
