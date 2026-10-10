@@ -525,7 +525,9 @@ class PaymentPortalService {
     }
 
     // Only creator (or Super Admin) can edit the entry
-    if (String(entry.createdBy) !== String(user.id) && user.role !== "ADMIN") {
+    const entryCreatorId = String(entry.createdBy?._id || entry.createdBy);
+    const currentUserId = String(user.id || user._id);
+    if (entryCreatorId !== currentUserId && user.role !== "ADMIN") {
       const error = new Error("You can only modify entries created by yourself.");
       error.statusCode = 403;
       throw error;
@@ -642,7 +644,9 @@ class PaymentPortalService {
       throw error;
     }
 
-    if (String(entry.createdBy) !== String(user.id) && user.role !== "ADMIN") {
+    const entryCreatorId = String(entry.createdBy?._id || entry.createdBy);
+    const currentUserId = String(user.id || user._id);
+    if (entryCreatorId !== currentUserId && user.role !== "ADMIN") {
       const error = new Error("You can only delete entries created by yourself.");
       error.statusCode = 403;
       throw error;
