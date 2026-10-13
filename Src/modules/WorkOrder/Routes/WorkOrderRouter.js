@@ -24,12 +24,14 @@ const {
     uploadWorkOrderPhotoHandler,
     removePhotoHandler,
     generateBillHandler,
+    getBillingDriversHandler,
     releaseVehicleHandler,
     toggleTaskDoableHandler,
     getPendingInventoryApprovalsHandler,
     approvePartHandler,
     rejectPartHandler,
     approveAllPartsHandler,
+    addPartQuantityHandler,
 } = require("../Controller/WorkOrderController");
 const upload = require("../../../utils/multerConfig.js");
 
@@ -162,6 +164,12 @@ router.get(
     authenticate,
     authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF),
     getPendingInventoryApprovalsHandler
+);
+
+router.get(
+    "/billing/drivers",
+    authenticate,
+    getBillingDriversHandler
 );
 
 /**
@@ -480,6 +488,13 @@ router.put(
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
     hasPermission("WORK_ORDER_EDIT"),
     updatePartHandler
+);
+
+router.post(
+    "/:id/parts/:partId/add-quantity",
+    authenticate,
+    authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
+    addPartQuantityHandler
 );
 
 router.put(

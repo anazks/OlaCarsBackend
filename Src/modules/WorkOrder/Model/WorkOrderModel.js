@@ -68,7 +68,9 @@ const workOrderTaskSchema = new mongoose.Schema({
 const workOrderPartSchema = new mongoose.Schema({
     partName: { type: String, required: true },
     partNumber: { type: String },
-    quantity: { type: Number, required: true, min: 1 },
+    quantity: { type: Number, required: true, min: 0.001 },
+    approvedQuantity: { type: Number, default: 0 },
+    pendingAdditionalQuantity: { type: Number, default: 0 },
     unitCost: { type: Number, default: 0 },
     totalCost: { type: Number, default: 0 },
     source: {

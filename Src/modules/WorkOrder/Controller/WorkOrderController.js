@@ -8,6 +8,7 @@ const {
     addPart,
     updatePart,
     removePart,
+    addAssignedPartQuantity,
     logLabourEntry,
 } = require("../Service/WorkOrderService");
 const uploadToS3 = require("../../../utils/uploadToS3");
@@ -411,6 +412,28 @@ const removePartHandler = async (req, res) => {
     }
 };
 
+/**
+ * Add quantity to an existing assigned part.
+ * Resets approvalStatus to PENDING so manager must approve.
+ * @route POST /api/work-orders/:id/parts/:partId/add-quantity
+ */
+const addPartQuantityHandler = async (req, res) => {
+    try {
+        const { id, partId } = req.params;
+        const { additionalQuantity } = req.body;
+        const wo = await addAssignedPartQuantity(id, partId, additionalQuantity, req.user);
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({
+            success: true,
+            message: `Successfully requested additional quantity. Part is now pending manager approval.`,
+            data: updated || wo,
+        });
+    } catch (error) {
+        const statusCode = error.cause || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
 // ─── Labour Handlers ─────────────────────────────────────────────────
 
 /**
@@ -651,6 +674,63 @@ const generateBillHandler = async (req, res) => {
     }
 };
 
+/**
+ * Get active drivers and customers for workshop service bill selection
+ * @route GET /api/work-orders/billing/drivers
+ */
+const getBillingDriversHandler = async (req, res) => {
+    try {
+        const { Driver } = require("../../Driver/Model/DriverModel");
+        const Customer = require("../../Customer/Model/CustomerModel");
+
+        const drivers = await Driver.find({ isDeleted: false })
+            .select("personalInfo driverId status currentVehicle phone email")
+            .populate("currentVehicle", "basicDetails legalDocs plateNumber")
+            .sort({ "personalInfo.fullName": 1 })
+            .lean();
+
+        // Also fetch customers linked to these drivers
+        const customers = await Customer.find({ isDeleted: false })
+            .select("name customerId email phone driver isDriver")
+            .lean();
+
+        const customerByDriverId = {};
+        for (const c of customers) {
+            if (c.driver) {
+                customerByDriverId[c.driver.toString()] = c;
+            }
+        }
+
+        const data = drivers.map(d => {
+            const linkedCust = customerByDriverId[d._id.toString()];
+            return {
+                _id: d._id,
+                driverId: d.driverId,
+                fullName: d.personalInfo?.fullName || d.name || "Unnamed Driver",
+                phone: d.personalInfo?.phone || d.phone || "",
+                email: d.personalInfo?.email || d.email || "",
+                status: d.status,
+                currentVehicle: d.currentVehicle ? {
+                    _id: d.currentVehicle._id,
+                    make: d.currentVehicle.basicDetails?.make,
+                    model: d.currentVehicle.basicDetails?.model,
+                    plateNumber: d.currentVehicle.plateNumber || d.currentVehicle.legalDocs?.registrationNumber || "",
+                } : null,
+                customer: linkedCust ? {
+                    _id: linkedCust._id,
+                    customerId: linkedCust.customerId,
+                    name: linkedCust.name,
+                } : null,
+            };
+        });
+
+        return res.status(200).json({ success: true, data });
+    } catch (error) {
+        console.error(`[BILLING DRIVERS ERROR] ${error.message}`);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ─── Toggle Task Doable (atomic check + part add/remove) ─────────────
 
 const toggleTaskDoableHandler = async (req, res) => {
@@ -861,13 +941,42 @@ const approvePartHandler = async (req, res) => {
         const part = wo.parts.id(partId);
         if (!part) return res.status(404).json({ success: false, message: "Part not found." });
 
+        // If part is linked to inventory, deduct the pending/uninstalled stock
+        if (part.inventoryPartId) {
+            const { confirmDirectInstallation } = require("../../Inventory/Service/InventoryService");
+            const performer = { id: req.user?.id || req.user?._id, role: req.user?.role || "manager" };
+
+            let qtyToDeduct = 0;
+            if (part.pendingAdditionalQuantity && part.pendingAdditionalQuantity > 0) {
+                qtyToDeduct = part.pendingAdditionalQuantity;
+            } else if (part.status === "REQUESTED") {
+                qtyToDeduct = part.quantity;
+            }
+
+            if (qtyToDeduct > 0) {
+                await confirmDirectInstallation(part.inventoryPartId, qtyToDeduct, performer, id);
+            }
+        }
+
         part.approvalStatus = "APPROVED";
         part.approvedBy = req.user?.id || req.user?._id;
         part.approvedAt = new Date();
+        part.approvedQuantity = part.quantity;
+        part.pendingAdditionalQuantity = 0;
+        part.status = "INSTALLED";
+
+        // Recalculate actualPartsCost across all parts (INSTALLED parts)
+        wo.actualPartsCost = wo.parts
+            .filter(p => p.status === "INSTALLED")
+            .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
         await wo.save();
         const updated = await WorkOrderRepo.getWorkOrderById(id);
-        return res.status(200).json({ success: true, message: `Part '${part.partName}' approved successfully.`, data: updated });
+        return res.status(200).json({
+            success: true,
+            message: `Part '${part.partName}' approved successfully and inventory stock deducted.`,
+            data: updated,
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -894,14 +1003,30 @@ const rejectPartHandler = async (req, res) => {
             }
         }
 
-        part.approvalStatus = "REJECTED";
-        part.approvedBy = req.user?.id || req.user?._id;
-        part.approvedAt = new Date();
-        part.rejectionReason = reason || "Rejected by Workshop Manager";
+        // If this was an additional quantity on a previously approved part:
+        if (part.approvedQuantity && part.approvedQuantity > 0) {
+            // Revert quantity back to previously approved baseline
+            part.quantity = part.approvedQuantity;
+            part.pendingAdditionalQuantity = 0;
+            part.totalCost = Math.round((part.quantity * (part.unitCost || 0)) * 100) / 100;
+            part.approvalStatus = "APPROVED";
+            part.rejectionReason = reason ? `Additional quantity request rejected: ${reason}` : "Additional quantity request rejected by Workshop Manager";
+        } else {
+            // Whole part rejected
+            part.approvalStatus = "REJECTED";
+            part.approvedBy = req.user?.id || req.user?._id;
+            part.approvedAt = new Date();
+            part.rejectionReason = reason || "Rejected by Workshop Manager";
+        }
+
+        // Recalculate actualPartsCost across all parts (INSTALLED parts)
+        wo.actualPartsCost = wo.parts
+            .filter(p => p.status === "INSTALLED")
+            .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
         await wo.save();
         const updated = await WorkOrderRepo.getWorkOrderById(id);
-        return res.status(200).json({ success: true, message: `Part '${part.partName}' rejected.`, data: updated });
+        return res.status(200).json({ success: true, message: `Part '${part.partName}' rejection processed.`, data: updated });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -914,22 +1039,50 @@ const approveAllPartsHandler = async (req, res) => {
         const wo = await WorkOrder.findById(id);
         if (!wo) return res.status(404).json({ success: false, message: "Work order not found." });
 
+        const { confirmDirectInstallation } = require("../../Inventory/Service/InventoryService");
+        const performer = { id: req.user?.id || req.user?._id, role: req.user?.role || "manager" };
+
         let approvedCount = 0;
-        wo.parts.forEach(p => {
+        for (const p of wo.parts) {
             if (p.approvalStatus === "PENDING") {
+                if (p.inventoryPartId) {
+                    let qtyToDeduct = 0;
+                    if (p.pendingAdditionalQuantity && p.pendingAdditionalQuantity > 0) {
+                        qtyToDeduct = p.pendingAdditionalQuantity;
+                    } else if (p.status === "REQUESTED") {
+                        qtyToDeduct = p.quantity;
+                    }
+
+                    if (qtyToDeduct > 0) {
+                        try {
+                            await confirmDirectInstallation(p.inventoryPartId, qtyToDeduct, performer, id);
+                        } catch (err) {
+                            console.error(`Failed to deduct inventory for part ${p.partName}:`, err);
+                        }
+                    }
+                }
+
                 p.approvalStatus = "APPROVED";
                 p.approvedBy = req.user?.id || req.user?._id;
                 p.approvedAt = new Date();
+                p.approvedQuantity = p.quantity;
+                p.pendingAdditionalQuantity = 0;
+                p.status = "INSTALLED";
                 approvedCount++;
             }
-        });
+        }
+
+        // Recalculate actualPartsCost
+        wo.actualPartsCost = wo.parts
+            .filter(p => p.status === "INSTALLED")
+            .reduce((sum, p) => sum + (p.totalCost || 0), 0);
 
         await wo.save();
         const updated = await WorkOrderRepo.getWorkOrderById(id);
         return res.status(200).json({
             success: true,
-            message: `Successfully approved all ${approvedCount} pending part(s) for Work Order.`,
-            data: updated
+            message: `Successfully approved all ${approvedCount} pending part(s) and deducted inventory.`,
+            data: updated,
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -947,6 +1100,7 @@ module.exports = {
     addPartHandler,
     updatePartHandler,
     removePartHandler,
+    addPartQuantityHandler,
     logLabourHandler,
     generateQcHandler,
     submitQcHandler,
@@ -954,6 +1108,7 @@ module.exports = {
     uploadWorkOrderPhotoHandler,
     removePhotoHandler,
     generateBillHandler,
+    getBillingDriversHandler,
     releaseVehicleHandler,
     toggleTaskDoableHandler,
     getPendingInventoryApprovalsHandler,

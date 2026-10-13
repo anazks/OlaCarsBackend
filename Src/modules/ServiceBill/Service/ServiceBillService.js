@@ -302,6 +302,8 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         vehicleId: wo.vehicleId,
         branchId: wo.branchId,
         isDriverBilled: !!options.isDriverBilled,
+        driverId: options.driverId || undefined,
+        customerId: options.customerId || undefined,
         lineItems,
         subtotal,
         taxProfileId,
@@ -351,16 +353,17 @@ const approveBill = async (billId, user) => {
     try {
         const Customer = require("../../Customer/Model/CustomerModel");
 
-        // If vehicle has a current driver, mark as driver billed
-        const driverId = fullyPopulatedBill.vehicleId?.currentDriver?._id || fullyPopulatedBill.vehicleId?.currentDriver;
+        // Prioritize driverId explicitly saved on the bill, else fallback to currentDriver on vehicle
+        let driverId = fullyPopulatedBill.driverId?._id || fullyPopulatedBill.driverId || fullyPopulatedBill.vehicleId?.currentDriver?._id || fullyPopulatedBill.vehicleId?.currentDriver;
         if (driverId && !fullyPopulatedBill.isDriverBilled) {
-            await updateBill(billId, { isDriverBilled: true });
+            await updateBill(billId, { isDriverBilled: true, driverId });
             fullyPopulatedBill.isDriverBilled = true;
+            fullyPopulatedBill.driverId = driverId;
         }
 
-        // Look up the customer from the driver, or use the default customer
-        let customerId = null;
-        if (driverId) {
+        // Look up the customer from customerId on the bill, or driver, or default customer
+        let customerId = fullyPopulatedBill.customerId?._id || fullyPopulatedBill.customerId || null;
+        if (!customerId && driverId) {
             const customerDoc = await Customer.findOne({ driver: driverId, status: "ACTIVE" });
             if (customerDoc) {
                 customerId = customerDoc._id;

@@ -34,6 +34,8 @@ const serviceBillSchema = new mongoose.Schema(
         workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: "WorkOrder", required: true },
         vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", required: true },
         branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true },
+        driverId: { type: mongoose.Schema.Types.ObjectId, ref: "Driver" },
+        customerId: { type: mongoose.Schema.Types.ObjectId, ref: "Customer" },
 
         isDriverBilled: { type: Boolean, default: false },
 

@@ -328,6 +328,69 @@ const removePart = async (woId, partId, user) => {
     return wo;
 };
 
+/**
+ * Add quantity to an existing assigned part.
+ * Resets approvalStatus to PENDING so workshop manager must approve the additional quantity.
+ * @param {string} woId
+ * @param {string} partId
+ * @param {number} additionalQuantity
+ * @param {Object} user
+ * @returns {Promise<Object>}
+ */
+const addAssignedPartQuantity = async (woId, partId, additionalQuantity, user) => {
+    const wo = await WorkOrder.findById(woId);
+    if (!wo) throw new Error("Work order not found.", { cause: 404 });
+
+    const part = wo.parts.id(partId);
+    if (!part) throw new Error("Part not found.", { cause: 404 });
+
+    const addQty = parseFloat(additionalQuantity);
+    if (isNaN(addQty) || addQty <= 0) {
+        throw new Error("Additional quantity must be a positive number.", { cause: 400 });
+    }
+
+    // If the part is linked to inventory, verify stock is available
+    if (part.inventoryPartId) {
+        const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
+        const inventoryPart = await getPartById(part.inventoryPartId);
+        if (!inventoryPart) throw new Error("Inventory part not found.", { cause: 404 });
+        if (!inventoryPart.isActive) throw new Error("This inventory part has been discontinued.", { cause: 400 });
+        if (inventoryPart.isBlocked) {
+            throw new Error(`Part ${inventoryPart.partNumber} is blocked from issuance. Reason: ${inventoryPart.blockedReason || "Admin Blocked"}`, { cause: 400 });
+        }
+
+        const available = Math.max(0, inventoryPart.quantityOnHand - inventoryPart.quantityReserved - (inventoryPart.quantityBlocked || 0));
+        if (available < addQty) {
+            throw new Error(`Insufficient unblocked stock for ${inventoryPart.partName}. Available: ${available}, Need: ${addQty}`, { cause: 400 });
+        }
+    }
+
+    // Baseline management for re-approval
+    if (part.approvalStatus === "APPROVED") {
+        part.approvedQuantity = part.quantity;
+    } else if (part.approvedQuantity === undefined) {
+        part.approvedQuantity = 0;
+    }
+
+    part.pendingAdditionalQuantity = Math.round(((part.pendingAdditionalQuantity || 0) + addQty) * 1000) / 1000;
+    part.quantity = Math.round((part.quantity + addQty) * 1000) / 1000;
+    part.totalCost = Math.round((part.quantity * (part.unitCost || 0)) * 100) / 100;
+
+    // Reset approval status to PENDING
+    part.approvalStatus = "PENDING";
+    part.approvedBy = null;
+    part.approvedAt = null;
+    part.rejectionReason = null;
+
+    // Recalculate actualPartsCost across all parts (INSTALLED parts)
+    wo.actualPartsCost = wo.parts
+        .filter(p => p.status === "INSTALLED")
+        .reduce((sum, p) => sum + (p.totalCost || 0), 0);
+
+    await wo.save();
+    return wo;
+};
+
 // ─── Labour Tracking ─────────────────────────────────────────────────
 
 /**
@@ -442,6 +505,7 @@ module.exports = {
     addPart,
     updatePart,
     removePart,
+    addAssignedPartQuantity,
     logLabourEntry,
     calculateLabourHours,
 };

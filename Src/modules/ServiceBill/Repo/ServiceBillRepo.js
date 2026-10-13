@@ -7,6 +7,8 @@ try { require("../../WorkshopManager/Model/WorkshopManagerModel"); } catch (e) {
 try { require("../../Admin/Model/AdminModel"); } catch (e) {}
 try { require("../../FinanceAdmin/Model/FinanceAdminModel"); } catch (e) {}
 try { require("../../BranchManager/Model/BranchManagerModel"); } catch (e) {}
+try { require("../../Driver/Model/DriverModel"); } catch (e) {}
+try { require("../../Customer/Model/CustomerModel"); } catch (e) {}
 /**
  * Auto-generates a bill number: SB-YYYYMM-XXXX
  */
@@ -56,6 +58,8 @@ exports.getBills = async (filters = {}) => {
         return await ServiceBill.find(query)
             .populate("workOrderId", "workOrderNumber status")
             .populate("vehicleId", "basicDetails.make basicDetails.model basicDetails.vin")
+            .populate("driverId", "personalInfo driverId status email phone")
+            .populate("customerId", "name customerId email phone isDriver")
             .populate("branchId", "name")
             .sort({ createdAt: -1 });
     } catch (error) {
@@ -75,6 +79,8 @@ exports.getBillById = async (id) => {
                 select: "basicDetails.make basicDetails.model basicDetails.vin currentDriver",
                 populate: { path: "currentDriver" }
             })
+            .populate("driverId", "personalInfo driverId status email phone")
+            .populate("customerId", "name customerId email phone isDriver")
             .populate("branchId", "name")
             .populate("approvedBy", "name email");
     } catch (error) {
