@@ -3,8 +3,8 @@ const mongoose = require("mongoose");
 const TASK_CATEGORIES = ["Mechanical", "Electrical", "Body", "Tyres", "Fluids", "Other"];
 
 const WORK_ORDER_TYPES = [
-    "PREVENTIVE", "CORRECTIVE", "PRE_ENTRY", "ACCIDENT",
-    "RETURN_INSPECTION", "RECALL", "SAFETY_PREP", "WEAR_ITEM", "OTHER",
+    "PREVENTIVE", "INTERVAL_MAINTENANCE", "WEAR_ITEM", "CORRECTIVE", "PRE_ENTRY", "ACCIDENT",
+    "RETURN_INSPECTION", "RECALL", "SAFETY_PREP", "OTHER",
 ];
 
 const linkedPartSchema = new mongoose.Schema({

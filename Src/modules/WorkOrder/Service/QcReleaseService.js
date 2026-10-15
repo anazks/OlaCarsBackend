@@ -42,6 +42,7 @@ const QC_TEMPLATES = {
         { checkItem: "All lights functional", category: "Electrical" },
     ],
 };
+QC_TEMPLATES.INTERVAL_MAINTENANCE = QC_TEMPLATES.PREVENTIVE;
 
 /**
  * Get the QC template for a work order type.
@@ -254,8 +255,8 @@ const executeVehicleRelease = async (woId, releaseData, user) => {
                 "status": "ACTIVE — AVAILABLE" 
             };
 
-            // If it was preventive maintenance, reset the maintenance tracking
-            if (wo.workOrderType === "PREVENTIVE") {
+            // If it was preventive or interval maintenance, reset the maintenance tracking
+            if (wo.workOrderType === "PREVENTIVE" || wo.workOrderType === "INTERVAL_MAINTENANCE") {
                 updatePayload["maintenanceDetails.lastMaintenanceOdometer"] = wo.odometerAtRelease;
                 await resolveMaintenanceAlerts(wo.vehicleId, user.id);
             }

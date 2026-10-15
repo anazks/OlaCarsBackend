@@ -43,20 +43,39 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const hourlyRate = options.hourlyRate !== undefined ? Number(options.hourlyRate) : configuredHourlyRate;
     const discount = options.discount || 0;
 
-    // ─── Tax Profile: Auto-fetch ITBMS from Tax collection if no explicit rate ───
-    let taxRate = 0;
-    let taxName = "";
+    // ─── Tax Profile: Auto-fetch ITBMS (7%) from Tax collection if no explicit rate ───
+    let taxRate = 7;
+    let taxName = "ITBMS 7%";
     let taxProfileId = null;
 
-    if (options.taxRate !== undefined && options.taxRate !== null) {
+    if (options.taxProfileId) {
+        taxProfileId = options.taxProfileId;
+        try {
+            const profile = await Tax.findById(options.taxProfileId);
+            if (profile) {
+                taxRate = options.taxRate !== undefined && options.taxRate !== null ? Number(options.taxRate) : profile.rate;
+                taxName = options.taxName || profile.name;
+            } else {
+                taxRate = options.taxRate !== undefined && options.taxRate !== null ? Number(options.taxRate) : 7;
+                taxName = options.taxName || "ITBMS 7%";
+            }
+        } catch {
+            taxRate = options.taxRate !== undefined && options.taxRate !== null ? Number(options.taxRate) : 7;
+            taxName = options.taxName || "ITBMS 7%";
+        }
+    } else if (options.taxRate !== undefined && options.taxRate !== null) {
         // Explicit tax rate passed from frontend (user override)
         taxRate = Number(options.taxRate);
-        taxName = options.taxName || "Custom Tax";
-        if (options.taxProfileId) taxProfileId = options.taxProfileId;
+        taxName = options.taxName || (taxRate === 7 ? "ITBMS 7%" : "Custom Tax");
     } else {
-        // Auto-fetch ITBMS tax profile (default workshop tax)
+        // Auto-fetch ITBMS 7% tax profile (default workshop tax)
         try {
             const itbmsTax = await Tax.findOne({
+                name: { $regex: /ITBMS/i },
+                rate: 7,
+                isActive: true,
+                isDeleted: { $ne: true }
+            }) || await Tax.findOne({
                 name: { $regex: /ITBMS/i },
                 isActive: true,
                 isDeleted: { $ne: true }
@@ -65,19 +84,15 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
                 taxRate = itbmsTax.rate;
                 taxName = itbmsTax.name;
                 taxProfileId = itbmsTax._id;
-                console.log(`[ServiceBill] Auto-applied tax profile: ${itbmsTax.name} @ ${itbmsTax.rate}%`);
+                console.log(`[ServiceBill] Auto-applied default tax profile: ${itbmsTax.name} @ ${itbmsTax.rate}%`);
             } else {
-                // Fallback: try any active tax profile
-                const anyTax = await Tax.findOne({ isActive: true, isDeleted: { $ne: true } });
-                if (anyTax) {
-                    taxRate = anyTax.rate;
-                    taxName = anyTax.name;
-                    taxProfileId = anyTax._id;
-                    console.log(`[ServiceBill] Fallback tax profile: ${anyTax.name} @ ${anyTax.rate}%`);
-                }
+                taxRate = 7;
+                taxName = "ITBMS 7%";
             }
         } catch (err) {
             console.error("[ServiceBill] Failed to fetch tax profile:", err.message);
+            taxRate = 7;
+            taxName = "ITBMS 7%";
         }
     }
 
@@ -290,9 +305,9 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         accountingEntries.push({
             entryType: "CREDIT",
             accountCode: "2200", // Sales Tax Payable
-            accountName: "VAT/Sales Tax Payable",
+            accountName: "ITBMS/Tax Payable",
             amount: taxAmount,
-            description: `Tax on WO ${wo.workOrderNumber}`,
+            description: `ITBMS (7%) on WO ${wo.workOrderNumber}`,
         });
     }
 

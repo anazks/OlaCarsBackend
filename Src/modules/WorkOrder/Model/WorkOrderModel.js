@@ -27,13 +27,14 @@ const WORK_ORDER_STATUSES = [
 
 const WORK_ORDER_TYPES = [
     "PREVENTIVE",
+    "INTERVAL_MAINTENANCE",
+    "WEAR_ITEM",
     "CORRECTIVE",
     "PRE_ENTRY",
     "ACCIDENT",
     "RETURN_INSPECTION",
     "RECALL",
     "SAFETY_PREP",
-    "WEAR_ITEM",
     "OTHER",
 ];
 

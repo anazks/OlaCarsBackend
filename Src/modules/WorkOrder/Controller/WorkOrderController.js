@@ -420,12 +420,12 @@ const removePartHandler = async (req, res) => {
 const addPartQuantityHandler = async (req, res) => {
     try {
         const { id, partId } = req.params;
-        const { additionalQuantity } = req.body;
-        const wo = await addAssignedPartQuantity(id, partId, additionalQuantity, req.user);
+        const { additionalQuantity, newQuantity, quantity } = req.body;
+        const wo = await addAssignedPartQuantity(id, partId, { additionalQuantity, newQuantity, quantity }, req.user);
         const updated = await WorkOrderRepo.getWorkOrderById(id);
         return res.status(200).json({
             success: true,
-            message: `Successfully requested additional quantity. Part is now pending manager approval.`,
+            message: `Successfully updated part quantity.`,
             data: updated || wo,
         });
     } catch (error) {

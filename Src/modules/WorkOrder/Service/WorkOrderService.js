@@ -337,31 +337,97 @@ const removePart = async (woId, partId, user) => {
  * @param {Object} user
  * @returns {Promise<Object>}
  */
-const addAssignedPartQuantity = async (woId, partId, additionalQuantity, user) => {
+/**
+ * Add or edit quantity to an existing assigned part.
+ * Resets approvalStatus to PENDING if increased so manager must approve.
+ * Checks and validates available stock from inventory backend.
+ * @param {string} woId
+ * @param {string} partId
+ * @param {number|Object} qtyPayload - additionalQuantity number OR { additionalQuantity, newQuantity, quantity }
+ * @param {Object} user
+ * @returns {Promise<Object>}
+ */
+const addAssignedPartQuantity = async (woId, partId, qtyPayload, user) => {
     const wo = await WorkOrder.findById(woId);
     if (!wo) throw new Error("Work order not found.", { cause: 404 });
 
     const part = wo.parts.id(partId);
     if (!part) throw new Error("Part not found.", { cause: 404 });
 
-    const addQty = parseFloat(additionalQuantity);
-    if (isNaN(addQty) || addQty <= 0) {
-        throw new Error("Additional quantity must be a positive number.", { cause: 400 });
+    let addQty = 0;
+    let targetQty = null;
+
+    if (typeof qtyPayload === "number" || typeof qtyPayload === "string") {
+        addQty = parseFloat(qtyPayload);
+        if (isNaN(addQty) || addQty <= 0) {
+            throw new Error("Additional quantity must be a positive number.", { cause: 400 });
+        }
+        targetQty = Math.round((part.quantity + addQty) * 1000) / 1000;
+    } else if (typeof qtyPayload === "object" && qtyPayload !== null) {
+        if (qtyPayload.newQuantity !== undefined || qtyPayload.quantity !== undefined) {
+            const rawTarget = qtyPayload.newQuantity !== undefined ? qtyPayload.newQuantity : qtyPayload.quantity;
+            targetQty = parseFloat(rawTarget);
+            if (isNaN(targetQty) || targetQty <= 0) {
+                throw new Error("Quantity must be a positive number greater than 0.", { cause: 400 });
+            }
+            targetQty = Math.round(targetQty * 1000) / 1000;
+            addQty = Math.round((targetQty - part.quantity) * 1000) / 1000;
+        } else if (qtyPayload.additionalQuantity !== undefined) {
+            addQty = parseFloat(qtyPayload.additionalQuantity);
+            if (isNaN(addQty) || addQty <= 0) {
+                throw new Error("Additional quantity must be a positive number.", { cause: 400 });
+            }
+            targetQty = Math.round((part.quantity + addQty) * 1000) / 1000;
+        }
     }
 
-    // If the part is linked to inventory, verify stock is available
-    if (part.inventoryPartId) {
-        const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
-        const inventoryPart = await getPartById(part.inventoryPartId);
-        if (!inventoryPart) throw new Error("Inventory part not found.", { cause: 404 });
-        if (!inventoryPart.isActive) throw new Error("This inventory part has been discontinued.", { cause: 400 });
+    if (targetQty === null) {
+        throw new Error("Please provide a valid quantity.", { cause: 400 });
+    }
+
+    // If no change in quantity
+    if (addQty === 0) {
+        return wo;
+    }
+
+    // If decreasing quantity manually
+    if (addQty < 0) {
+        const reduction = Math.abs(addQty);
+        if (part.pendingAdditionalQuantity && part.pendingAdditionalQuantity > 0) {
+            part.pendingAdditionalQuantity = Math.max(0, Math.round((part.pendingAdditionalQuantity - reduction) * 1000) / 1000);
+        }
+        part.quantity = targetQty;
+        part.totalCost = Math.round((part.quantity * (part.unitCost || 0)) * 100) / 100;
+        wo.actualPartsCost = wo.parts
+            .filter(p => p.status === "INSTALLED")
+            .reduce((sum, p) => sum + (p.totalCost || 0), 0);
+        await wo.save();
+        return wo;
+    }
+
+    // Increasing quantity: If the part is linked to inventory, verify stock is available
+    const invPartId = (part.inventoryPartId && part.inventoryPartId._id) ? part.inventoryPartId._id : part.inventoryPartId;
+    let inventoryPart = null;
+    const { getPartById } = require("../../Inventory/Repo/InventoryPartRepo");
+
+    if (invPartId) {
+        inventoryPart = await getPartById(invPartId);
+    } else if (part.partNumber) {
+        const { InventoryPart } = require("../../Inventory/Model/InventoryPartModel");
+        inventoryPart = await InventoryPart.findOne({ partNumber: part.partNumber });
+    }
+
+    if (inventoryPart) {
+        if (!inventoryPart.isActive) {
+            throw new Error(`This inventory part (${inventoryPart.partName}) has been discontinued.`, { cause: 400 });
+        }
         if (inventoryPart.isBlocked) {
-            throw new Error(`Part ${inventoryPart.partNumber} is blocked from issuance. Reason: ${inventoryPart.blockedReason || "Admin Blocked"}`, { cause: 400 });
+            throw new Error(`Part ${inventoryPart.partNumber || inventoryPart.partName} is blocked from issuance. Reason: ${inventoryPart.blockedReason || "Admin Blocked"}`, { cause: 400 });
         }
 
-        const available = Math.max(0, inventoryPart.quantityOnHand - inventoryPart.quantityReserved - (inventoryPart.quantityBlocked || 0));
+        const available = Math.max(0, (inventoryPart.quantityOnHand || 0) - (inventoryPart.quantityReserved || 0) - (inventoryPart.quantityBlocked || 0));
         if (available < addQty) {
-            throw new Error(`Insufficient unblocked stock for ${inventoryPart.partName}. Available: ${available}, Need: ${addQty}`, { cause: 400 });
+            throw new Error(`Insufficient inventory stock for ${inventoryPart.partName}. Available stock: ${available}, but requested additional: +${addQty} (Target: ${targetQty}).`, { cause: 400 });
         }
     }
 
@@ -373,7 +439,7 @@ const addAssignedPartQuantity = async (woId, partId, additionalQuantity, user) =
     }
 
     part.pendingAdditionalQuantity = Math.round(((part.pendingAdditionalQuantity || 0) + addQty) * 1000) / 1000;
-    part.quantity = Math.round((part.quantity + addQty) * 1000) / 1000;
+    part.quantity = targetQty;
     part.totalCost = Math.round((part.quantity * (part.unitCost || 0)) * 100) / 100;
 
     // Reset approval status to PENDING
