@@ -31,6 +31,7 @@ const {
     approvePartHandler,
     rejectPartHandler,
     approveAllPartsHandler,
+    updateWorkOrderHandler,
     addPartQuantityHandler,
 } = require("../Controller/WorkOrderController");
 const upload = require("../../../utils/multerConfig.js");
@@ -199,6 +200,57 @@ router.get(
     hasPermission("WORK_ORDER_VIEW"),
     getWorkOrderByIdHandler
 );
+
+/**
+ * @swagger
+ * /api/work-orders/{id}:
+ *   put:
+ *     summary: Update work order details
+ *     tags: [WorkOrder]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               workOrderType:
+ *                 type: string
+ *               faultDescription:
+ *                 type: string
+ *               priority:
+ *                 type: string
+ *               odometerAtEntry:
+ *                 type: number
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Work order updated successfully
+ *       404:
+ *         description: Work order not found
+ */
+router.put(
+    "/:id",
+    authenticate,
+    authorize(
+        ROLES.WORKSHOPSTAFF,
+        ROLES.OPERATIONSTAFF,
+        ROLES.BRANCHMANAGER,
+        ROLES.COUNTRYMANAGER,
+        ROLES.ADMIN,
+        ROLES.WORKSHOPMANAGER
+    ),
+    updateWorkOrderHandler
+);
+
 
 /**
  * @swagger

@@ -39,7 +39,7 @@ const calculateSlaDeadline = (priority) => {
 
 const STATUS_RULES = {
     TASKS: {
-        allowedFrom: [],
+        allowedFrom: ["LABOUR"],
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN],
         minHierarchy: ROLES.BRANCHMANAGER,
     },
@@ -62,7 +62,7 @@ const STATUS_RULES = {
         },
     },
     QC_PHOTOS: {
-        allowedFrom: ["LABOUR"],
+        allowedFrom: ["LABOUR", "BILLING"],
         allowedRoles: [ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN],
         minHierarchy: ROLES.BRANCHMANAGER,
         gateValidator: (wo, payload) => {

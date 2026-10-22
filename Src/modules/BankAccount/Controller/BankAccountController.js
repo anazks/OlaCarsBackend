@@ -415,7 +415,24 @@ const checkAndCleanStaleLock = (accountId) => {
 
 exports.bulkUploadTransactions = async (req, res, next) => {
     const { id } = req.params;
-    const { branchId, transactions, clearExisting, batchIndex, totalBatches, fileName, isLastBatch, skipRecalculate } = req.body || {};
+    const { 
+        branchId, 
+        transactions, 
+        clearExisting, 
+        batchIndex, 
+        totalBatches, 
+        fileName, 
+        isLastBatch, 
+        skipRecalculate,
+        includeDriverTransactions,
+        enableDriverSetOff
+    } = req.body || {};
+
+    const includeDrivers = includeDriverTransactions !== undefined
+        ? (includeDriverTransactions === true || includeDriverTransactions === "true")
+        : (enableDriverSetOff !== undefined
+            ? (enableDriverSetOff === true || enableDriverSetOff === "true")
+            : true);
 
     if (checkAndCleanStaleLock(id)) {
         const currentActive = activeAccountUploads.get(String(id));
@@ -887,6 +904,19 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             let isCustomer = false;
 
             if (driverNameVal && String(driverNameVal).trim()) {
+                if (!includeDrivers) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Driver transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        party: String(driverNameVal).trim(),
+                        reason: "Driver transaction bypassed (Driver processing toggle is turned off)"
+                    });
+                    continue;
+                }
+
                 isDriver = true;
                 const rawName = String(driverNameVal).trim();
                 const normalizedName = normalizeForMap(rawName);
@@ -956,6 +986,19 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                             }
                         }
                     }
+                }
+
+                if (isDriver && !includeDrivers) {
+                    skippedTransactions.push({
+                        transactionId: transactionIdVal || "-",
+                        date: dateVal,
+                        description: finalDescription || descVal || remarksVal || "Driver transaction",
+                        amount: amountVal,
+                        type: typeVal,
+                        party: customerDoc?.name || customerNameVal || "Driver",
+                        reason: "Driver transaction bypassed (Driver processing toggle is turned off)"
+                    });
+                    continue;
                 }
 
                 // If customer is not found in DB, skip row
@@ -2491,6 +2534,67 @@ exports.recalculateAllBankBalances = async (req, res, next) => {
     } catch (error) {
         console.error("Error in recalculateAllBankBalances controller:", error);
         next(error);
+    }
+};
+
+exports.fetchLiveBankTransactions = async (req, res, next) => {
+    try {
+        const BankAccount = require("../Model/BankAccountModel");
+        const { fetchLiveAccountTransactions } = require("../Service/BancoGeneralService");
+
+        const account = await BankAccount.findById(req.params.id);
+        if (!account) {
+            return res.status(404).json({
+                success: false,
+                message: "Bank account not found"
+            });
+        }
+
+        const accountNumber = account.accountNumber;
+        if (!accountNumber) {
+            return res.status(400).json({
+                success: false,
+                message: "This bank account does not have an account number configured."
+            });
+        }
+
+        const bankNameLower = (account.bankName || account.accountName || '').toLowerCase();
+        const isBgAccount = bankNameLower.includes('banco general') || bankNameLower.includes('bg');
+        if (!isBgAccount && (account.accountType === 'Cash' || bankNameLower.includes('petty cash') || bankNameLower.includes('cash'))) {
+            return res.status(400).json({
+                success: false,
+                message: `The live API integration is specific to Banco General accounts. "${account.accountName || account.bankName}" is a cash / non-bank account.`
+            });
+        }
+
+        const liveData = await fetchLiveAccountTransactions(accountNumber, {
+            fechaDesde: req.query.fechaDesde,
+            fechaHasta: req.query.fechaHasta,
+            cantidadRegistros: req.query.cantidadRegistros ? parseInt(req.query.cantidadRegistros, 10) : 50,
+            orden: req.query.orden || "D"
+        });
+
+        res.status(200).json({
+            success: true,
+            account: {
+                _id: account._id,
+                bankName: account.bankName,
+                accountName: account.accountName,
+                accountNumber: account.accountNumber,
+                currency: account.currency,
+                currentBalance: account.currentBalance
+            },
+            data: liveData
+        });
+    } catch (error) {
+        console.error("Error in fetchLiveBankTransactions controller:", error.message || error);
+        console.error("Stack trace in fetchLiveBankTransactions:", error.stack);
+        const statusCode = error.status || (error.message?.includes('403') ? 403 : (error.message?.includes('400') ? 400 : 502));
+        res.status(statusCode).json({
+            success: false,
+            message: error.message || "Failed to fetch live transactions from Banco General",
+            statusCode: statusCode
+        });
     }
 };
 

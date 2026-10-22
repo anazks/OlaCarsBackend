@@ -290,6 +290,43 @@ const getWorkOrdersHandler = async (req, res) => {
  * Get a single Work Order by ID.
  * @route GET /api/work-orders/:id
  */
+
+/**
+ * Update Work Order core details (Work Order Type, Job description, priority, etc.).
+ * Note: Vehicle cannot be changed after creation per business requirements.
+ * @route PUT /api/work-orders/:id
+ */
+const updateWorkOrderHandler = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            workOrderType,
+            faultDescription,
+            priority,
+            odometerAtEntry,
+            notes,
+            requiredPhotos,
+        } = req.body;
+
+        const updatePayload = {};
+        if (workOrderType !== undefined) updatePayload.workOrderType = workOrderType;
+        if (faultDescription !== undefined) updatePayload.faultDescription = faultDescription;
+        if (priority !== undefined) updatePayload.priority = priority;
+        if (odometerAtEntry !== undefined) updatePayload.odometerAtEntry = odometerAtEntry;
+        if (notes !== undefined) updatePayload.notes = notes;
+        if (requiredPhotos !== undefined) updatePayload.requiredPhotos = requiredPhotos;
+
+        const wo = await WorkOrderRepo.updateWorkOrder(id, updatePayload);
+        if (!wo) {
+            return res.status(404).json({ success: false, message: 'Work order not found' });
+        }
+        const updated = await WorkOrderRepo.getWorkOrderById(id);
+        return res.status(200).json({ success: true, data: updated || wo });
+    } catch (error) {
+        return res.status(error.cause || 500).json({ success: false, message: error.message });
+    }
+};
+
 const getWorkOrderByIdHandler = async (req, res) => {
     try {
         const wo = await WorkOrderRepo.getWorkOrderById(req.params.id);
@@ -1115,5 +1152,6 @@ module.exports = {
     approvePartHandler,
     rejectPartHandler,
     approveAllPartsHandler,
+    updateWorkOrderHandler,
 };
 

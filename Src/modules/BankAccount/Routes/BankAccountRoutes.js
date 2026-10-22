@@ -138,6 +138,13 @@ router.get(
     BankAccountController.getBankTransactions
 );
 
+// Fetch live transactions from Banco General API
+router.get(
+    "/:id/live-transactions",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.fetchLiveBankTransactions
+);
+
 // Get ledger PDF
 router.get(
     "/:id/ledger/pdf",
