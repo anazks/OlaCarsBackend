@@ -535,6 +535,13 @@ router.post(
  *         description: Part updated
  */
 router.put(
+    "/:id/parts/approve-all",
+    authenticate,
+    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
+    approveAllPartsHandler
+);
+
+router.put(
     "/:id/parts/:partId",
     authenticate,
     authorize(ROLES.WORKSHOPSTAFF, ROLES.OPERATIONSTAFF, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER),
@@ -561,13 +568,6 @@ router.put(
     authenticate,
     authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
     rejectPartHandler
-);
-
-router.put(
-    "/:id/parts/approve-all",
-    authenticate,
-    authorize(ROLES.WORKSHOPMANAGER, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.COUNTRYMANAGER),
-    approveAllPartsHandler
 );
 
 /**

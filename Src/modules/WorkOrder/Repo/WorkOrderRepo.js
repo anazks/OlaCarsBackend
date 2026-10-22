@@ -1,6 +1,7 @@
 console.log("[DEBUG] Loading WorkOrderRepo.js...");
 const mongoose = require("mongoose");
 const { WorkOrder } = require("../Model/WorkOrderModel");
+const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 
 /**
  * Retrieves all pending part requirements for a branch.
@@ -162,11 +163,34 @@ exports.getWorkOrders = async (filters = {}) => {
         if (filters.priority) query.priority = filters.priority;
         if (filters.workOrderType) query.workOrderType = filters.workOrderType;
 
+        if (filters.startDate || filters.endDate) {
+            query.createdAt = {};
+            if (filters.startDate) {
+                query.createdAt.$gte = new Date(filters.startDate);
+            }
+            if (filters.endDate) {
+                const end = new Date(filters.endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
         if (filters.search && filters.search.trim() !== '') {
             const searchRegex = new RegExp(filters.search.trim(), 'i');
+            const matchingVehicles = await Vehicle.find({
+                $or: [
+                    { "legalDocs.registrationNumber": searchRegex },
+                    { "basicDetails.vin": searchRegex },
+                    { "basicDetails.make": searchRegex },
+                    { "basicDetails.model": searchRegex }
+                ]
+            }).select('_id');
+            const vehicleIds = matchingVehicles.map(v => v._id);
+
             query.$or = [
                 { workOrderNumber: searchRegex },
-                { faultDescription: searchRegex }
+                { faultDescription: searchRegex },
+                { vehicleId: { $in: vehicleIds } }
             ];
         }
 
@@ -179,7 +203,7 @@ exports.getWorkOrders = async (filters = {}) => {
             const docs = await WorkOrder.find(query)
                 .populate({
                     path: "vehicleId",
-                    select: "basicDetails.make basicDetails.model basicDetails.vin status currentDriver",
+                    select: "basicDetails.make basicDetails.model basicDetails.vin legalDocs.registrationNumber status currentDriver",
                     populate: { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
                 })
                 .populate("branchId", "name")
@@ -200,7 +224,7 @@ exports.getWorkOrders = async (filters = {}) => {
         return await WorkOrder.find(query)
             .populate({
                 path: "vehicleId",
-                select: "basicDetails.make basicDetails.model basicDetails.vin status currentDriver",
+                select: "basicDetails.make basicDetails.model basicDetails.vin legalDocs.registrationNumber status currentDriver",
                 populate: { path: "currentDriver", select: "personalInfo.fullName personalInfo.phone driverId" }
             })
             .populate("branchId", "name")

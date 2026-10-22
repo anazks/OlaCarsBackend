@@ -264,6 +264,8 @@ const getWorkOrdersHandler = async (req, res) => {
         if (req.query.page) filters.page = req.query.page;
         if (req.query.limit) filters.limit = req.query.limit;
         if (req.query.search) filters.search = req.query.search;
+        if (req.query.startDate) filters.startDate = req.query.startDate;
+        if (req.query.endDate) filters.endDate = req.query.endDate;
 
         const result = await WorkOrderRepo.getWorkOrders(filters);
 
