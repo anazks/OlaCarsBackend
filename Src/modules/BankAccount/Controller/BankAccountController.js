@@ -271,6 +271,9 @@ exports.recordManualPayment = async (req, res, next) => {
             branchId,
             customerId,
             invoiceId,
+            supplierId,
+            vendorId,
+            billId,
             entryType: rawEntryType,
             type: rawType
         } = req.body;
@@ -279,6 +282,9 @@ exports.recordManualPayment = async (req, res, next) => {
         
         const cleanCustomerId = (customerId && customerId !== "undefined" && customerId !== "null" && String(customerId).trim() !== "") ? String(customerId).trim() : null;
         const cleanInvoiceId = (invoiceId && invoiceId !== "undefined" && invoiceId !== "null" && String(invoiceId).trim() !== "") ? String(invoiceId).trim() : null;
+        const rawSupplier = supplierId || vendorId;
+        const cleanSupplierId = (rawSupplier && rawSupplier !== "undefined" && rawSupplier !== "null" && String(rawSupplier).trim() !== "") ? String(rawSupplier).trim() : null;
+        const cleanBillId = (billId && billId !== "undefined" && billId !== "null" && String(billId).trim() !== "") ? String(billId).trim() : null;
         const cleanToAccountId = (toAccountId && toAccountId !== "undefined" && toAccountId !== "null" && String(toAccountId).trim() !== "") ? String(toAccountId).trim() : null;
         const cleanFromAccountId = (fromAccountId && fromAccountId !== "undefined" && fromAccountId !== "null" && String(fromAccountId).trim() !== "") ? String(fromAccountId).trim() : null;
         const targetOffsetAccountId = cleanToAccountId || cleanFromAccountId;
@@ -292,8 +298,8 @@ exports.recordManualPayment = async (req, res, next) => {
         if (!paymentMode) {
             return res.status(400).json({ success: false, message: "Payment Mode is required" });
         }
-        if (entryType === "PAYMENT" && !targetOffsetAccountId) {
-            return res.status(400).json({ success: false, message: "To Account (Destination / Offset Account) is required for Payment" });
+        if (entryType === "PAYMENT" && !cleanSupplierId && !targetOffsetAccountId) {
+            return res.status(400).json({ success: false, message: "Please select either a Vendor (for auto set-off) or a To Account from Chart of Accounts for Payment" });
         }
         if (entryType === "RECEIPT" && !cleanCustomerId && !targetOffsetAccountId) {
             return res.status(400).json({ success: false, message: "Please select either a Customer or a To Account for Receipt" });
@@ -322,6 +328,8 @@ exports.recordManualPayment = async (req, res, next) => {
             supportingDocument,
             customerId: cleanCustomerId,
             invoiceId: cleanInvoiceId,
+            supplierId: cleanSupplierId,
+            billId: cleanBillId,
             entryType,
             userId: req.user?._id || req.user?.id,
             userRole: req.user?.role

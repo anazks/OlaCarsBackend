@@ -599,6 +599,9 @@ const recordManualPayment = async (targetId, data) => {
         userRole,
         customerId,
         invoiceId,
+        supplierId,
+        vendorId,
+        billId,
         entryType = "RECEIPT"
     } = data;
 
@@ -675,6 +678,9 @@ const recordManualPayment = async (targetId, data) => {
 
     const cleanCustomerId = (customerId && customerId !== "undefined" && customerId !== "null" && String(customerId).trim() !== "") ? String(customerId).trim() : null;
     const cleanInvoiceId = (invoiceId && invoiceId !== "undefined" && invoiceId !== "null" && String(invoiceId).trim() !== "") ? String(invoiceId).trim() : null;
+    const rawSupplier = supplierId || vendorId;
+    const cleanSupplierId = (rawSupplier && rawSupplier !== "undefined" && rawSupplier !== "null" && String(rawSupplier).trim() !== "") ? String(rawSupplier).trim() : null;
+    const cleanBillId = (billId && billId !== "undefined" && billId !== "null" && String(billId).trim() !== "") ? String(billId).trim() : null;
 
     // -------------------------------------------------------------
     // RECEIPTS OR PAYMENTS (Double-entry recording with optional auto set-off)
@@ -710,6 +716,19 @@ const recordManualPayment = async (targetId, data) => {
         }
     }
 
+    // If Vendor Payment, automatically route to Accounts Payable (2.1.01) if offset accounting code not explicitly selected
+    if (normalizedEntryType === "PAYMENT" && (cleanSupplierId || cleanBillId)) {
+        if (!offsetAccountingCode) {
+            const apAccount = await AccountingCode.findOne({ code: "2.1.01" })
+                || await AccountingCode.findOne({ code: "2100" })
+                || await AccountingCode.findOne({ code: "2200" })
+                || await AccountingCode.findOne({ category: "Accounts Payable" });
+            if (apAccount) {
+                offsetAccountingCode = apAccount._id;
+            }
+        }
+    }
+
     if (!targetAccount.accountingCode) {
         throw new AppError("Target bank account is not linked to any accounting code", 400);
     }
@@ -721,6 +740,12 @@ const recordManualPayment = async (targetId, data) => {
     if (invoiceId) {
         const { Invoice } = require("../../Invoice/Model/InvoiceModel");
         invoiceDoc = await Invoice.findOne({ _id: invoiceId, isDeleted: false });
+    }
+
+    let billDoc = null;
+    if (cleanBillId) {
+        const Bill = require("../../Bill/Model/BillModel");
+        billDoc = await Bill.findOne({ _id: cleanBillId, isDeleted: false });
     }
 
     let isOffsetBank = Boolean(offsetAccount);
@@ -737,6 +762,8 @@ const recordManualPayment = async (targetId, data) => {
     let manualTxType;
     if (isOffsetBank) {
         manualTxType = "INTER_BANK";
+    } else if (cleanSupplierId) {
+        manualTxType = "SUPPLIER";
     } else if (cleanCustomerId) {
         const Customer = require("../../Customer/Model/CustomerModel");
         const cust = await Customer.findById(cleanCustomerId);
@@ -747,7 +774,7 @@ const recordManualPayment = async (targetId, data) => {
     if (normalizedEntryType === "PAYMENT") {
         // PAYMENT (Money Out): DEBIT Offset Account (Expense/Vendor), CREDIT Bank Account
         journalPayload = {
-            description: description || `Manual Payment Sent via ${paymentMode}`,
+            description: description || `Manual Payment Sent via ${paymentMode}${billDoc ? ` (BILL: ${billDoc.billNumber})` : ''}`,
             date: parsedDate,
             branch: finalBranchId,
             paymentMode,
@@ -760,21 +787,22 @@ const recordManualPayment = async (targetId, data) => {
                     accountingCode: offsetAccountingCode,
                     type: "DEBIT",
                     amount: numericAmount,
-                    description: description || `Manual Payment Sent - Mode: ${paymentMode}`,
-                    contact: cleanCustomerId || undefined,
+                    description: description || `Manual Payment Sent - Mode: ${paymentMode}${billDoc ? ` (BILL: ${billDoc.billNumber})` : ''}`,
+                    contact: cleanSupplierId || cleanCustomerId || undefined,
                     bankTxType: manualTxType
                 },
                 {
                     accountingCode: targetAccount.accountingCode,
                     type: "CREDIT",
                     amount: numericAmount,
-                    description: description || `Manual Payment Sent via Bank - Mode: ${paymentMode}`,
-                    contact: cleanCustomerId || undefined,
+                    description: description || `Manual Payment Sent via Bank - Mode: ${paymentMode}${billDoc ? ` (BILL: ${billDoc.billNumber})` : ''}`,
+                    contact: cleanSupplierId || cleanCustomerId || undefined,
                     bankTxType: manualTxType
                 }
             ],
-            contact: cleanCustomerId || undefined,
-            contactModel: cleanCustomerId ? "Customer" : undefined,
+            contact: cleanSupplierId || cleanCustomerId || undefined,
+            contactModel: cleanSupplierId ? "Supplier" : (cleanCustomerId ? "Customer" : undefined),
+            autoSetOff: Boolean(cleanSupplierId && !cleanBillId),
             createdBy: userId,
             creatorRole: finalRole
         };
@@ -816,6 +844,32 @@ const recordManualPayment = async (targetId, data) => {
     }
 
     const result = await ManualJournalService.createManualJournal(journalPayload);
+
+    // Apply payment to single Bill if selected
+    if (normalizedEntryType === "PAYMENT" && billDoc && billDoc.status !== "PAID") {
+        try {
+            const timestamp = new Date();
+            const currentBal = billDoc.balanceDue !== undefined ? billDoc.balanceDue : (billDoc.totalAmount - (billDoc.amountPaid || 0));
+            let newPaid = (billDoc.amountPaid || 0) + numericAmount;
+            let newBalance = Math.max(0, currentBal - numericAmount);
+            let newStatus = newBalance <= 0 ? "PAID" : "PARTIALLY_PAID";
+
+            billDoc.amountPaid = newPaid;
+            billDoc.balanceDue = newBalance;
+            billDoc.status = newStatus;
+            if (!Array.isArray(billDoc.payments)) billDoc.payments = [];
+            billDoc.payments.push({
+                amount: numericAmount,
+                paidAt: timestamp,
+                paymentMethod: paymentMode || "Bank Transfer",
+                reference: result.journal?.journalNumber,
+                notes: description || `Payment recorded via bank manual payment`
+            });
+            await billDoc.save();
+        } catch (bErr) {
+            console.error("Failed to update single bill during manual payment:", bErr);
+        }
+    }
 
     // Apply the payment to the Invoice if one is selected
     if (normalizedEntryType === "RECEIPT" && invoiceDoc && invoiceDoc.status !== "PAID") {
@@ -926,11 +980,28 @@ const recordManualPayment = async (targetId, data) => {
         accountingCode: offsetAccountingCode || undefined,
         customer: cleanCustomerId || undefined,
         invoice: cleanInvoiceId || undefined,
+        supplier: cleanSupplierId || undefined,
+        bill: cleanBillId || undefined,
+        bills: result.journal?.bills || undefined,
+        setOffSummary: result.journal?.setOffSummary || undefined,
         paymentMode: paymentMode || "Bank Transfer",
         currency: currency || "USD",
         createdBy: userId,
         creatorRole: finalRole
     });
+
+    if (cleanSupplierId) {
+        try {
+            const Supplier = require("../../Supplier/Model/SupplierModel");
+            const supDoc = await Supplier.findById(cleanSupplierId);
+            if (supDoc) {
+                targetBankTx.supplierName = supDoc.name || supDoc.companyName || undefined;
+            }
+        } catch (supErr) {
+            console.warn("Could not populate supplierName on targetBankTx:", supErr);
+        }
+    }
+
     await targetBankTx.save();
 
     // Update offset balance if offset account is a BankAccount

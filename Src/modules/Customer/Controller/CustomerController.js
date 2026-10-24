@@ -432,27 +432,32 @@ exports.updateCustomer = async (req, res) => {
 
         if (!updatedDoc) return res.status(404).json({ success: false, message: 'Customer not found' });
 
-        // If name was updated, sync to the connected driver document
-        if (req.body.name) {
+        // If name or contact fields were updated, sync to the connected driver document
+        const driverSyncFields = {};
+        if (req.body.name) driverSyncFields["personalInfo.fullName"] = String(req.body.name).trim();
+        if (req.body.email) driverSyncFields["personalInfo.email"] = String(req.body.email).trim().toLowerCase();
+        if (req.body.phone) driverSyncFields["personalInfo.phone"] = String(req.body.phone).trim();
+        if (req.body.whatsappNumber) driverSyncFields["personalInfo.whatsappNumber"] = String(req.body.whatsappNumber).trim();
+
+        if (Object.keys(driverSyncFields).length > 0) {
             try {
                 const { Driver } = require('../../Driver/Model/DriverModel');
-                const trimmedName = String(req.body.name).trim();
                 if (updatedDoc.driver) {
                     const driverId = updatedDoc.driver._id || updatedDoc.driver;
                     await Driver.findByIdAndUpdate(driverId, {
-                        $set: { "personalInfo.fullName": trimmedName }
+                        $set: driverSyncFields
                     });
                 } else if (updatedDoc.email) {
                     const matchedDriver = await Driver.findOne({ "personalInfo.email": updatedDoc.email.toLowerCase(), isDeleted: false });
                     if (matchedDriver) {
                         await Driver.findByIdAndUpdate(matchedDriver._id, {
-                            $set: { "personalInfo.fullName": trimmedName }
+                            $set: driverSyncFields
                         });
                         await Customer.findByIdAndUpdate(updatedDoc._id, { $set: { driver: matchedDriver._id } });
                     }
                 }
             } catch (driverSyncErr) {
-                console.error(`[updateCustomer] Failed to sync name to Driver:`, driverSyncErr);
+                console.error(`[updateCustomer] Failed to sync fields to Driver:`, driverSyncErr);
             }
         }
 
