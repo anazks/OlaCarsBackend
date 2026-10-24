@@ -1,11 +1,66 @@
 const SupplierService = require('../Service/SupplierService.js');
 const SupplierPdfService = require('../Service/SupplierPdfService.js');
+const uploadToS3 = require('../../../utils/uploadToS3');
+const uploadLocal = require('../../../utils/uploadLocal');
+
+const uploadSupplierFiles = async (req) => {
+    const filesToUpload = [];
+    if (req.files && Array.isArray(req.files)) {
+        filesToUpload.push(...req.files);
+    } else if (req.files && typeof req.files === "object") {
+        Object.values(req.files).forEach((arr) => {
+            if (Array.isArray(arr)) filesToUpload.push(...arr);
+        });
+    } else if (req.file) {
+        filesToUpload.push(req.file);
+    }
+
+    const uploadedDocs = [];
+    for (const file of filesToUpload) {
+        let fileUrl;
+        try {
+            fileUrl = await uploadToS3(file, "suppliers/documents");
+        } catch (s3Error) {
+            console.log("[Supplier Upload] S3 upload failed, falling back to local storage:", s3Error.message);
+            fileUrl = uploadLocal(file, "suppliers/documents");
+        }
+        uploadedDocs.push({
+            name: file.originalname,
+            url: fileUrl,
+            mimeType: file.mimetype,
+            size: file.size,
+            uploadedAt: new Date()
+        });
+    }
+    return uploadedDocs;
+};
 
 const addSupplier = async (req, res) => {
     try {
         const data = { ...req.body };
         data.createdBy = req.user.id;
         data.creatorRole = req.user.role;
+
+        if (typeof data.isActive === 'string') {
+            data.isActive = data.isActive === 'true';
+        }
+
+        let initialDocs = [];
+        if (data.documents) {
+            if (typeof data.documents === 'string') {
+                try {
+                    initialDocs = JSON.parse(data.documents);
+                } catch (e) {
+                    initialDocs = [];
+                }
+            } else if (Array.isArray(data.documents)) {
+                initialDocs = data.documents;
+            }
+        }
+
+        const uploadedDocs = await uploadSupplierFiles(req);
+        data.documents = [...initialDocs, ...uploadedDocs];
+
         const newSupplier = await SupplierService.create(data);
         return res.status(201).json({ success: true, data: newSupplier });
     } catch (error) {
@@ -45,7 +100,38 @@ const getSupplierById = async (req, res) => {
 
 const updateSupplier = async (req, res) => {
     try {
-        const updatedSupplier = await SupplierService.update(req.params.id, req.body);
+        const data = { ...req.body };
+        if (typeof data.isActive === 'string') {
+            data.isActive = data.isActive === 'true';
+        }
+
+        const uploadedDocs = await uploadSupplierFiles(req);
+
+        let baseDocs = undefined;
+        const rawExisting = data.existingDocuments !== undefined ? data.existingDocuments : data.documents;
+        if (rawExisting !== undefined) {
+            if (typeof rawExisting === 'string') {
+                try {
+                    baseDocs = JSON.parse(rawExisting);
+                } catch (e) {
+                    baseDocs = [];
+                }
+            } else if (Array.isArray(rawExisting)) {
+                baseDocs = rawExisting;
+            }
+        }
+
+        if (baseDocs !== undefined || uploadedDocs.length > 0) {
+            if (baseDocs === undefined) {
+                const currentSupplier = await SupplierService.getById(req.params.id);
+                baseDocs = (currentSupplier && currentSupplier.documents) ? currentSupplier.documents : [];
+            }
+            data.documents = [...baseDocs, ...uploadedDocs];
+        }
+
+        delete data.existingDocuments;
+
+        const updatedSupplier = await SupplierService.update(req.params.id, data);
         return res.status(200).json({ success: true, data: updatedSupplier });
     } catch (error) {
         const statusCode = error.statusCode || 500;

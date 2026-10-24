@@ -20,6 +20,7 @@ const {
     getSupplierByIdSchema,
     deleteSupplierSchema
 } = require("../Validation/SupplierValidation");
+const upload = require("../../../utils/multerConfig");
 
 const AUTHORIZED_ROLES = [
     ROLES.ADMIN,
@@ -74,7 +75,7 @@ const AUTHORIZED_ROLES = [
  *       201:
  *         description: Supplier created successfully
  */
-router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), validate(addSupplierSchema), addSupplier);
+router.post("/", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), upload.any(), validate(addSupplierSchema), addSupplier);
 
 router.post("/bulk", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_CREATE"), bulkAddSuppliers);
 
@@ -156,7 +157,7 @@ router.get("/:id", authenticate, hasPermission("SUPPLIER_VIEW"), validate(getSup
  *       200:
  *         description: Supplier updated successfully
  */
-router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_EDIT"), validate(updateSupplierSchema), updateSupplier);
+router.put("/:id", authenticate, authorize(...AUTHORIZED_ROLES), hasPermission("SUPPLIER_EDIT"), upload.any(), validate(updateSupplierSchema), updateSupplier);
 
 /**
  * @swagger

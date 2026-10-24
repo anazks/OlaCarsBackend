@@ -8,8 +8,10 @@ const addSupplierSchema = {
         phone: Joi.string().trim().allow("", null),
         address: Joi.string().trim().allow("", null),
         category: Joi.string().trim().valid("Vehicles", "Parts", "Spare Parts", "Services", "Insurance", "Office Supplies", "IT Equipment", "Marketing", "Other", "General").default("General"),
-        isActive: Joi.boolean().default(true),
-    }),
+        isActive: Joi.alternatives().try(Joi.boolean(), Joi.string()).default(true),
+        documents: Joi.any().optional(),
+        existingDocuments: Joi.any().optional(),
+    }).unknown(true),
 };
 
 const updateSupplierSchema = {
@@ -23,8 +25,10 @@ const updateSupplierSchema = {
         phone: Joi.string().trim().allow("", null),
         address: Joi.string().trim().allow("", null),
         category: Joi.string().trim().valid("Vehicles", "Parts", "Spare Parts", "Services", "Insurance", "Office Supplies", "IT Equipment", "Marketing", "Other", "General"),
-        isActive: Joi.boolean(),
-    }).min(1),
+        isActive: Joi.alternatives().try(Joi.boolean(), Joi.string()),
+        documents: Joi.any().optional(),
+        existingDocuments: Joi.any().optional(),
+    }).min(1).unknown(true),
 };
 
 const getSupplierByIdSchema = {

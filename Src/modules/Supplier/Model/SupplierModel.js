@@ -76,6 +76,15 @@ const supplierSchema = new mongoose.Schema(
         cfActiveDate: { type: Date },
         cfRuc: { type: String, trim: true },
         cfDv: { type: String, trim: true },
+        documents: [
+            {
+                name: { type: String, trim: true },
+                url: { type: String, trim: true },
+                mimeType: { type: String, trim: true },
+                size: { type: Number },
+                uploadedAt: { type: Date, default: Date.now },
+            },
+        ],
         isActive: {
             type: Boolean,
             default: true,

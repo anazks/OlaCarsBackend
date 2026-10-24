@@ -119,6 +119,16 @@ const customerSchema = new mongoose.Schema({
     cfEndDate: { type: Date },
     cfSection: { type: String, trim: true },
 
+    documents: [
+        {
+            name: { type: String, trim: true },
+            url: { type: String, trim: true },
+            mimeType: { type: String, trim: true },
+            size: { type: Number },
+            uploadedAt: { type: Date, default: Date.now }
+        }
+    ],
+
     status: {
         type: String,
         enum: ["ACTIVE", "INACTIVE"],

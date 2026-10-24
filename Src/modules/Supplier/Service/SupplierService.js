@@ -12,7 +12,7 @@ const ALLOWED_CREATE_FIELDS = [
     'billingCode', 'billingPhone', 'billingFax', 'shippingAttention', 'shippingAddress',
     'shippingStreet2', 'shippingCity', 'shippingState', 'shippingCountry', 'shippingCode',
     'shippingPhone', 'shippingFax', 'source', 'primaryContactId', 'companyId',
-    'cfFleetNo', 'cfActiveDate', 'cfRuc', 'cfDv'
+    'cfFleetNo', 'cfActiveDate', 'cfRuc', 'cfDv', 'documents'
 ];
 const ALLOWED_UPDATE_FIELDS = [...ALLOWED_CREATE_FIELDS];
 

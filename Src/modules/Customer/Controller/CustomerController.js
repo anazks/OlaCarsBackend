@@ -4,6 +4,40 @@ const { getNextCustomerId, getNextDriverId } = require('../../SystemSettings/Mod
 const { addDriverService } = require('../../Driver/Repo/DriverRepo');
 const { Driver } = require('../../Driver/Model/DriverModel');
 const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
+const uploadToS3 = require('../../../utils/uploadToS3');
+const uploadLocal = require('../../../utils/uploadLocal');
+
+const uploadCustomerFiles = async (req) => {
+    const filesToUpload = [];
+    if (req.files && Array.isArray(req.files)) {
+        filesToUpload.push(...req.files);
+    } else if (req.files && typeof req.files === "object") {
+        Object.values(req.files).forEach((arr) => {
+            if (Array.isArray(arr)) filesToUpload.push(...arr);
+        });
+    } else if (req.file) {
+        filesToUpload.push(req.file);
+    }
+
+    const uploadedDocs = [];
+    for (const file of filesToUpload) {
+        let fileUrl;
+        try {
+            fileUrl = await uploadToS3(file, "customers/documents");
+        } catch (s3Error) {
+            console.log("[Customer Upload] S3 upload failed, falling back to local storage:", s3Error.message);
+            fileUrl = uploadLocal(file, "customers/documents");
+        }
+        uploadedDocs.push({
+            name: file.originalname,
+            url: fileUrl,
+            mimeType: file.mimetype,
+            size: file.size,
+            uploadedAt: new Date()
+        });
+    }
+    return uploadedDocs;
+};
 
 exports.createCustomer = async (req, res) => {
     try {
@@ -15,6 +49,21 @@ exports.createCustomer = async (req, res) => {
             customerData.createdBy = req.user.id || req.user._id;
             customerData.creatorRole = req.user.role;
         }
+
+        let initialDocs = [];
+        if (customerData.documents) {
+            if (typeof customerData.documents === 'string') {
+                try {
+                    initialDocs = JSON.parse(customerData.documents);
+                } catch (e) {
+                    initialDocs = [];
+                }
+            } else if (Array.isArray(customerData.documents)) {
+                initialDocs = customerData.documents;
+            }
+        }
+        const uploadedDocs = await uploadCustomerFiles(req);
+        customerData.documents = [...initialDocs, ...uploadedDocs];
 
         const isDriver = customerData.isDriver === true || customerData.isDriver === 'true';
         const { vehicleId, startDate, weeklyRent } = customerData;
@@ -424,9 +473,35 @@ exports.updateCustomer = async (req, res) => {
             queryOr.push({ driver: req.params.id });
         }
 
+        const updateData = { ...req.body };
+        const uploadedDocs = await uploadCustomerFiles(req);
+
+        let baseDocs = undefined;
+        const rawExisting = updateData.existingDocuments !== undefined ? updateData.existingDocuments : updateData.documents;
+        if (rawExisting !== undefined) {
+            if (typeof rawExisting === 'string') {
+                try {
+                    baseDocs = JSON.parse(rawExisting);
+                } catch (e) {
+                    baseDocs = [];
+                }
+            } else if (Array.isArray(rawExisting)) {
+                baseDocs = rawExisting;
+            }
+        }
+
+        if (baseDocs !== undefined || uploadedDocs.length > 0) {
+            if (baseDocs === undefined) {
+                const currentCustomer = await Customer.findOne({ $or: queryOr, isDeleted: false });
+                baseDocs = (currentCustomer && currentCustomer.documents) ? currentCustomer.documents : [];
+            }
+            updateData.documents = [...baseDocs, ...uploadedDocs];
+        }
+        delete updateData.existingDocuments;
+
         const updatedDoc = await Customer.findOneAndUpdate(
             { $or: queryOr, isDeleted: false },
-            req.body,
+            updateData,
             { new: true }
         );
 
