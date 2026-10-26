@@ -176,6 +176,21 @@ exports.getDriverByIdService = async (id, options = {}) => {
         });
     }
 
+    if (driver) {
+        try {
+            const Customer = require("../../Customer/Model/CustomerModel");
+            const customer = await Customer.findOne({ driver: driver._id, isDeleted: false })
+                .select("_id customerId name email phone status isDriver branch");
+            if (customer) {
+                const driverObj = typeof driver.toObject === 'function' ? driver.toObject() : driver;
+                driverObj.customer = customer;
+                return driverObj;
+            }
+        } catch (custErr) {
+            console.error("[getDriverByIdService] Error attaching customer:", custErr);
+        }
+    }
+
     return driver;
 };
 

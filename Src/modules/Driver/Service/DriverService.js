@@ -106,10 +106,21 @@ exports.getByEmail = async (email, options = {}) => {
  */
 exports.update = async (id, data) => {
     const allowStatusActivation = data.status === "ACTIVE" && data.currentVehicle;
+    const allowStatusDeactivation = data.status === "INACTIVE";
     // Strip all workflow-controlled and sensitive fields
     for (const field of BLOCKED_FIELDS) {
-        if (field === "status" && allowStatusActivation) continue;
+        if (field === "status" && (allowStatusActivation || allowStatusDeactivation)) continue;
         delete data[field];
+    }
+    if (allowStatusDeactivation) {
+        data.deactivationDate = new Date();
+        data.$push = {
+            statusHistory: {
+                status: "INACTIVE",
+                timestamp: new Date(),
+                notes: data.notes || "Driver deactivated"
+            }
+        };
     }
     const updated = await updateDriverService(id, data);
     if (allowStatusActivation) {

@@ -1342,18 +1342,21 @@ const cancelContract = async (req, res) => {
         });
         await driver.save({ session, validateModifiedOnly: true });
 
-        // Sync Customer status to INACTIVE and clear assigned vehicle fields
+        // Sync Customer vehicle fields, and only set Customer status to INACTIVE if cancelling customer
+        const customerUpdates = {
+            cfVehicleNo: '',
+            cfFleetNo: '',
+            cfVehicleModel: '',
+            cfVinNumber: '',
+            cfWeeklyRent: null,
+            cfActiveDate: null
+        };
+        if (req.body?.target === 'CUSTOMER' || req.body?.deactivateCustomer) {
+            customerUpdates.status = 'INACTIVE';
+        }
         await Customer.findOneAndUpdate(
             { driver: driverId },
-            { 
-                status: 'INACTIVE',
-                cfVehicleNo: '',
-                cfFleetNo: '',
-                cfVehicleModel: '',
-                cfVinNumber: '',
-                cfWeeklyRent: null,
-                cfActiveDate: null
-            },
+            customerUpdates,
             { session }
         );
 

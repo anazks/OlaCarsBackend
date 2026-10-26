@@ -4,6 +4,8 @@ const { getNextCustomerId, getNextDriverId } = require('../../SystemSettings/Mod
 const { addDriverService } = require('../../Driver/Repo/DriverRepo');
 const { Driver } = require('../../Driver/Model/DriverModel');
 const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
+const Branch = require('../../Branch/Model/BranchModel');
+const Fleet = require('../../Fleet/Model/FleetModel');
 const uploadToS3 = require('../../../utils/uploadToS3');
 const uploadLocal = require('../../../utils/uploadLocal');
 
@@ -1254,14 +1256,12 @@ exports.assignVehicleToCustomer = async (req, res) => {
         const Customer = require('../Model/CustomerModel');
         const { Driver } = require('../../Driver/Model/DriverModel');
         const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
-        const { getNextDriverId, addDriverService } = require('../../Driver/Repo/DriverRepo');
+        const Branch = require('../../Branch/Model/BranchModel');
+        const Fleet = require('../../Fleet/Model/FleetModel');
+        const { addDriverService } = require('../../Driver/Repo/DriverRepo');
         const DriverService = require('../../Driver/Service/DriverService');
-
+        const { getNextDriverId } = require('../../SystemSettings/Model/CounterModel');
         const { vehicleId, startDate, durationWeeks, weeklyRent } = req.body;
-
-        if (!vehicleId || !mongoose.Types.ObjectId.isValid(vehicleId)) {
-            return res.status(400).json({ success: false, message: 'Please select a valid vehicle to assign.' });
-        }
 
         const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
         const queryOr = [{ customerId: req.params.id }];
@@ -1275,33 +1275,96 @@ exports.assignVehicleToCustomer = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Customer not found.' });
         }
 
+        // Load existing linked driver only if already explicitly attached to this customer; otherwise always create a brand-new driver profile
+        let driver = null;
+        if (customer.driver) {
+            driver = await Driver.findById(customer.driver);
+        }
+
+        const effectiveStartDate = startDate ? new Date(startDate) : new Date();
+        const effectiveDurationWeeks = durationWeeks && !isNaN(Number(durationWeeks)) ? Number(durationWeeks) : 60;
+
+        // If no vehicleId provided, convert customer to a driver profile
+        if (!vehicleId) {
+            if (!driver) {
+                const driverId = await getNextDriverId();
+                const driverData = {
+                    driverId,
+                    status: 'ACTIVE',
+                    personalInfo: {
+                        fullName: customer.name ? customer.name.trim() : undefined,
+                        email: customer.email ? customer.email.trim().toLowerCase() : undefined,
+                        phone: customer.phone ? customer.phone.trim() : (customer.mobilePhone ? customer.mobilePhone.trim() : undefined),
+                        whatsappNumber: customer.whatsappNumber ? customer.whatsappNumber.trim() : undefined,
+                    },
+                    branch: customer.branch,
+                    activationDate: effectiveStartDate,
+                    weeklyRent: weeklyRent && !isNaN(Number(weeklyRent)) ? Number(weeklyRent) : undefined,
+                    createdBy: req.user ? (req.user.id || req.user._id) : undefined,
+                    creatorRole: req.user?.role || 'SYSTEM',
+                    assignmentHistory: [],
+                    statusHistory: [{
+                        status: 'ACTIVE',
+                        changedBy: req.user ? (req.user.id || req.user._id) : undefined,
+                        changedByRole: req.user?.role || 'SYSTEM',
+                        timestamp: new Date(),
+                        notes: 'Driver profile auto-created from customer profile (Make as Driver flow).'
+                    }]
+                };
+                driver = await addDriverService(driverData);
+            } else {
+                driver.status = 'ACTIVE';
+                await driver.save();
+            }
+
+            customer.driver = driver._id;
+            customer.isDriver = true;
+            customer.status = 'ACTIVE';
+            await customer.save();
+
+            const populatedDoc = await Customer.findById(customer._id)
+                .populate('branch')
+                .populate({
+                    path: 'driver',
+                    populate: [
+                        {
+                            path: 'currentVehicle',
+                            populate: { path: 'fleet' }
+                        },
+                        {
+                            path: 'assignmentHistory.vehicle',
+                            select: 'basicDetails legalDocs status'
+                        }
+                    ]
+                });
+
+            return res.status(200).json({
+                success: true,
+                message: 'Customer successfully registered as driver.',
+                data: populatedDoc
+            });
+        }
+
+        if (!mongoose.Types.ObjectId.isValid(vehicleId)) {
+            return res.status(400).json({ success: false, message: 'Please select a valid vehicle to assign.' });
+        }
+
         const vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: { $ne: true } });
         if (!vehicle) {
             return res.status(404).json({ success: false, message: 'Vehicle not found.' });
         }
 
         // Check if vehicle is already assigned to someone else
-        if (vehicle.currentDriver && (!customer.driver || String(vehicle.currentDriver) !== String(customer.driver))) {
+        if (vehicle.currentDriver && (!driver || String(vehicle.currentDriver) !== String(driver._id))) {
             return res.status(400).json({ 
                 success: false, 
                 message: 'This vehicle is already assigned with another driver. Please cancel the existing contract first.' 
             });
         }
 
-        const effectiveStartDate = startDate ? new Date(startDate) : new Date();
-        const effectiveDurationWeeks = durationWeeks && !isNaN(Number(durationWeeks)) ? Number(durationWeeks) : 60;
         const effectiveWeeklyRent = weeklyRent !== undefined && weeklyRent !== '' && !isNaN(Number(weeklyRent))
             ? Number(weeklyRent)
             : (vehicle.basicDetails?.weeklyRent || 150);
-
-        let driver = null;
-        if (customer.driver) {
-            driver = await Driver.findById(customer.driver);
-        }
-
-        if (!driver && customer.email) {
-            driver = await Driver.findOne({ 'personalInfo.email': customer.email.toLowerCase().trim(), isDeleted: false });
-        }
 
         const regNo = vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle.basicDetails?.plateNumber || '';
         const vehicleModelStr = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
@@ -1343,7 +1406,6 @@ exports.assignVehicleToCustomer = async (req, res) => {
                 }]
             };
             driver = await addDriverService(driverData);
-            customer.driver = driver._id;
         } else {
             // Close any existing ACTIVE assignment in history
             if (!driver.assignmentHistory) driver.assignmentHistory = [];
@@ -1399,6 +1461,7 @@ exports.assignVehicleToCustomer = async (req, res) => {
         await vehicle.save();
 
         // Update Customer
+        customer.driver = driver._id;
         customer.cfVehicleNo = regNo;
         customer.cfActiveDate = effectiveStartDate;
         customer.cfEndDate = null;
@@ -1440,7 +1503,7 @@ exports.assignVehicleToCustomer = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Vehicle ${regNo} assigned successfully!`,
+            message: `Vehicle ${regNo} assigned & driver profile created successfully!`,
             data: populatedDoc
         });
     } catch (error) {
