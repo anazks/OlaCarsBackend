@@ -71,6 +71,23 @@ const rentChangeHistorySchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now },
 }, { _id: true });
 
+const contractDurationHistorySchema = new mongoose.Schema({
+    previousDurationWeeks: { type: Number },
+    newDurationWeeks: { type: Number, required: true },
+    differenceWeeks: { type: Number, required: true },
+    effectiveDate: { type: Date, default: Date.now },
+    remark: { type: String, required: true, trim: true },
+    vehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+    vehicleRegistrationNumber: { type: String, trim: true },
+    vehicleModel: { type: String, trim: true },
+    fleetNumber: { type: String, trim: true },
+    vin: { type: String, trim: true },
+    changedBy: { type: mongoose.Schema.Types.ObjectId },
+    changedByName: { type: String, trim: true },
+    changedByRole: { type: String, trim: true },
+    createdAt: { type: Date, default: Date.now },
+}, { _id: true });
+
 // ─── Vehicle Assignment History (tracks every assign → deactivate cycle) ──
 const vehicleAssignmentSchema = new mongoose.Schema({
     vehicle:      { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
@@ -78,6 +95,7 @@ const vehicleAssignmentSchema = new mongoose.Schema({
     fleetNumber:  { type: String, trim: true },       // snapshot
     vehicleModel: { type: String, trim: true },       // snapshot ("Make Model")
     weeklyRent:   { type: Number },
+    durationWeeks: { type: Number },
     startDate:    { type: Date, required: true },
     endDate:      { type: Date },                     // null = ongoing/active
     status:       { type: String, enum: ["ACTIVE", "CANCELLED", "COMPLETED"], default: "ACTIVE" },
@@ -111,6 +129,8 @@ const driverSchema = new mongoose.Schema(
         // ── Migration / Lifecycle Dates ─────────────────────────────
         activationDate: { type: Date },
         deactivationDate: { type: Date },
+        durationWeeks: { type: Number },
+        weeklyRent: { type: Number },
         remarks: { type: String, trim: true },
 
         // ── Auth Fields ──────────────────────────────────────────────
@@ -294,6 +314,7 @@ const driverSchema = new mongoose.Schema(
         // ── 15. Rent Tracking ────────────────────────────────────────
         rentTracking: [{
             vehicle: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle" },
+            assignmentId: { type: mongoose.Schema.Types.ObjectId },
             weekNumber: { type: Number }, // 1, 2, 3...
             weekLabel: { type: String }, // e.g., "Week 1", "Week 2 - May 2026"
             dueDate: { type: Date },
@@ -340,6 +361,7 @@ const driverSchema = new mongoose.Schema(
         statusHistory: [statusHistorySchema],
         weeklyRent: { type: Number },
         rentChangeHistory: [rentChangeHistorySchema],
+        contractDurationHistory: [contractDurationHistorySchema],
 
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,

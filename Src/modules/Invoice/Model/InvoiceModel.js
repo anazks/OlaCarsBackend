@@ -161,7 +161,7 @@ invoiceSchema.virtual("ledgerEntries", {
     foreignField: "invoice"
 });
 
-invoiceSchema.index({ customer: 1, weekNumber: 1 }, {
+invoiceSchema.index({ customer: 1, vehicle: 1, weekNumber: 1 }, {
     unique: true,
     partialFilterExpression: { invoiceType: 'RENTAL' }
 });

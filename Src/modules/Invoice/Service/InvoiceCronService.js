@@ -107,13 +107,26 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
 
             // Find the most recent RENTAL invoice to get the next week number
             // Sort by dueDate (not weekNumber) to avoid string-sorting corruption bugs
-            let lastInvoice = await Invoice.findOne({ 
+            // Scope to current vehicle
+            const currentVehId = driver.currentVehicle?._id || driver.currentVehicle || null;
+            const lastInvoiceQuery = { 
                 driver: driver._id, 
                 invoiceType: 'RENTAL',
                 isDeleted: false 
-            }).sort({ dueDate: -1, _id: -1 });
+            };
+            if (currentVehId) {
+                lastInvoiceQuery.vehicle = currentVehId;
+            }
+            let lastInvoice = await Invoice.findOne(lastInvoiceQuery).sort({ dueDate: -1, _id: -1 });
 
-            const tracking = [...driver.rentTracking].sort((a, b) => a.weekNumber - b.weekNumber);
+            // Filter tracking for the driver's current vehicle only
+            const tracking = [...driver.rentTracking]
+                .filter(t => {
+                    if (t.status === 'CANCELLED') return false;
+                    const itemVehId = t.vehicle?._id || t.vehicle;
+                    return !currentVehId || !itemVehId || String(itemVehId) === String(currentVehId);
+                })
+                .sort((a, b) => (a.weekNumber || 0) - (b.weekNumber || 0));
 
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -125,7 +138,7 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
             while (true) {
                 let nextPeriod;
                 if (!lastInvoice) {
-                    // If no invoices exist, start with the first period in tracking
+                    // If no invoices exist for this vehicle, start with the first period in tracking
                     nextPeriod = tracking[0];
                 } else {
                     const lastWeekNum = Number(lastInvoice.weekNumber);
@@ -158,13 +171,17 @@ exports.generateCurrentWeekInvoices = async (manual = false, userId = null, user
                     break;
                 }
 
-                // Ensure we don't generate the same week twice (extra safety)
-                const existing = await Invoice.findOne({ 
+                // Ensure we don't generate the same week twice for this vehicle
+                const existingQuery = { 
                     driver: driver._id, 
                     invoiceType: 'RENTAL',
                     weekNumber: nextPeriod.weekNumber, 
                     isDeleted: false 
-                });
+                };
+                if (currentVehId) {
+                    existingQuery.vehicle = currentVehId;
+                }
+                const existing = await Invoice.findOne(existingQuery);
                 
                 if (existing) {
                     console.log(`[InvoiceCronService] SKIPPING ${driver.driverId}: Invoice for Week ${nextPeriod.weekNumber} already exists.`);

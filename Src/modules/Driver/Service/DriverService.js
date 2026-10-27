@@ -13,6 +13,7 @@ const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel")
 const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
 const InvoiceService = require("../../Invoice/Service/InvoiceService");
 const Customer = require("../../Customer/Model/CustomerModel");
+require("../../Branch/Model/BranchModel");
 
 // ─── Fields that CANNOT be set via the edit endpoint ──────────────────
 const BLOCKED_FIELDS = [
@@ -320,12 +321,18 @@ exports.deduplicateRentTracking = async (driverId) => {
     const mergedTracking = [];
 
     for (const week of driver.rentTracking) {
-        if (!seenWeeks.has(week.weekNumber)) {
-            seenWeeks.set(week.weekNumber, { ...week.toObject ? week.toObject() : week });
-            mergedTracking.push(seenWeeks.get(week.weekNumber));
+        // Unique key must isolate by assignmentId (or vehicle) + weekNumber
+        const assId = week.assignmentId 
+            ? String(week.assignmentId) 
+            : (week.vehicle ? String(week.vehicle._id || week.vehicle) : 'legacy');
+        const key = `${assId}_${week.weekNumber}`;
+
+        if (!seenWeeks.has(key)) {
+            seenWeeks.set(key, { ...(week.toObject ? week.toObject() : week) });
+            mergedTracking.push(seenWeeks.get(key));
         } else {
             hasDuplicates = true;
-            const existing = seenWeeks.get(week.weekNumber);
+            const existing = seenWeeks.get(key);
             
             // Merge logic:
             // 1. Sum up amountPaid
@@ -336,17 +343,19 @@ exports.deduplicateRentTracking = async (driverId) => {
                 existing.payments = [...(existing.payments || []), ...week.payments];
             }
             
-            // 3. Keep the most accurate carryOver (usually one will be 0)
+            // 3. Keep the most accurate carryOver
             existing.carryOver = Math.max(existing.carryOver || 0, week.carryOver || 0);
 
             // 4. Recalculate totalDue and balance
             existing.totalDue = existing.amount + existing.carryOver;
             existing.balance = Math.max(0, existing.totalDue - existing.amountPaid);
 
-            // 5. Update status
-            if (existing.balance === 0) existing.status = 'PAID';
-            else if (existing.amountPaid > 0) existing.status = 'PARTIAL';
-            else existing.status = 'PENDING';
+            // 5. Update status (do not overwrite CANCELLED status)
+            if (existing.status !== 'CANCELLED') {
+                if (existing.balance === 0) existing.status = 'PAID';
+                else if (existing.amountPaid > 0) existing.status = 'PARTIAL';
+                else existing.status = 'PENDING';
+            }
 
             // 6. Update paidAt if now paid
             if (existing.status === 'PAID' && !existing.paidAt) {
@@ -374,18 +383,36 @@ exports.rolloverOverdueRent = async (driverId) => {
     
     if (!driver || !driver.rentTracking || driver.rentTracking.length === 0) return driver;
 
+    // Identify active assignment to isolate rollover calculation
+    const activeAssignment = Array.isArray(driver.assignmentHistory) 
+        ? driver.assignmentHistory.find(a => a.status === 'ACTIVE') 
+        : null;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Sort by weekNumber ascending
-    const sorted = [...driver.rentTracking].sort((a, b) => a.weekNumber - b.weekNumber);
+    // Only roll over within the active assignment contract
+    const activeInstallments = driver.rentTracking
+        .map((item, originalIndex) => ({ item, originalIndex }))
+        .filter(({ item }) => {
+            if (item.status === 'CANCELLED') return false;
+            if (activeAssignment?._id && item.assignmentId) {
+                return String(item.assignmentId) === String(activeAssignment._id);
+            }
+            if (activeAssignment?.vehicle && item.vehicle) {
+                const itemVeh = String(item.vehicle._id || item.vehicle);
+                const aVeh = String(activeAssignment.vehicle._id || activeAssignment.vehicle);
+                return itemVeh === aVeh;
+            }
+            return true;
+        })
+        .sort((a, b) => (a.item.weekNumber || 0) - (b.item.weekNumber || 0));
 
     let totalCarryOver = 0;
     const updates = {};
 
-    for (let i = 0; i < sorted.length; i++) {
-        const week = sorted[i];
-        const originalIndex = driver.rentTracking.findIndex(r => r.weekNumber === week.weekNumber);
+    for (let i = 0; i < activeInstallments.length; i++) {
+        const { item: week, originalIndex } = activeInstallments[i];
         const dueDate = week.dueDate ? new Date(week.dueDate) : null;
         const isOverdue = dueDate && dueDate < today;
 
@@ -428,7 +455,7 @@ exports.rolloverOverdueRent = async (driverId) => {
  * - Monthly: Due on the 1st of every month, starting the month after assignment.
  * - Weekly: Due on every Wednesday.
  */
-exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY', activationDate }, session = null) => {
+exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationMonths, durationWeeks, frequency = 'MONTHLY', activationDate, assignmentId }, session = null) => {
     // Load existing rent tracking history to preserve it during re-contracting
     const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
     const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
@@ -474,9 +501,10 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
             dueDate.setDate(1); // Ensure it's always the 1st
         }
         
-        const periodNum = maxWeekNum + i + 1;
+        const periodNum = i + 1;
         installments.push({
             vehicle: currentVehId,
+            assignmentId: assignmentId || null,
             weekNumber: periodNum,
             weekLabel: isWeekly 
                 ? `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`
@@ -530,15 +558,18 @@ exports.generateRentPlan = async (driverId, { monthlyRent, weeklyRent, durationM
  * the installments that have due dates >= today. 
  * Does NOT generate past invoices (these will be done via a separate upload).
  */
-exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate, deactivationDate, vehicleId }, session = null) => {
-    const driverRecord = await getDriverByIdService(driverId, { includeSensitive: true });
-    const existingTracking = (driverRecord && driverRecord.rentTracking) || [];
-    const targetVehicleId = vehicleId || driverRecord?.currentVehicle?._id || driverRecord?.currentVehicle || null;
-
-    let maxWeekNum = 0;
-    if (existingTracking.length > 0) {
-        maxWeekNum = Math.max(...existingTracking.map(t => t.weekNumber || 0));
+exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks, activationDate, deactivationDate, vehicleId, assignmentId }, session = null) => {
+    const { Driver } = require("../Model/DriverModel");
+    const driverRecord = await Driver.findById(driverId);
+    if (!driverRecord) {
+        throw new Error(`Driver with ID ${driverId} not found`);
     }
+
+    const existingTracking = driverRecord.rentTracking || [];
+    const targetVehicleId = vehicleId || driverRecord.currentVehicle || null;
+
+    const numWeeks = durationWeeks && !isNaN(Number(durationWeeks)) ? Number(durationWeeks) : 60;
+    const rentAmount = weeklyRent !== undefined && !isNaN(Number(weeklyRent)) ? Number(weeklyRent) : (driverRecord.weeklyRent || 150);
 
     const installments = [];
     
@@ -554,8 +585,15 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
     let nextDueDate = new Date(parsedActivationDate);
 
     const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
-    const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
-    const targetDay = setting && setting.value !== undefined ? Number(setting.value) : 3;
+    let targetDay = 3;
+    try {
+        const setting = await SystemSettings.findOne({ key: 'invoice_generation_day' });
+        if (setting && setting.value !== undefined) {
+            targetDay = Number(setting.value);
+        }
+    } catch (sErr) {
+        targetDay = 3;
+    }
 
     // Set to the first configured target day after activationDate
     const currentDay = nextDueDate.getDay();
@@ -563,7 +601,7 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
     const offset = daysUntilTarget === 0 ? 7 : daysUntilTarget;
     nextDueDate.setDate(nextDueDate.getDate() + offset);
 
-    for (let i = 0; i < durationWeeks; i++) {
+    for (let i = 0; i < numWeeks; i++) {
         const dueDate = new Date(nextDueDate);
         dueDate.setDate(nextDueDate.getDate() + (i * 7));
         
@@ -572,27 +610,30 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
             break;
         }
 
-        const periodNum = maxWeekNum + i + 1;
+        const periodNum = i + 1;
 
         installments.push({
             vehicle: targetVehicleId,
+            assignmentId: assignmentId || null,
             weekNumber: periodNum,
             weekLabel: `Week ${periodNum} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`,
             dueDate: dueDate,
-            amount: weeklyRent,
+            amount: rentAmount,
             carryOver: 0,
-            totalDue: weeklyRent,
+            totalDue: rentAmount,
             amountPaid: 0,
-            balance: weeklyRent,
+            balance: rentAmount,
             status: "PENDING",
             payments: [],
         });
     }
 
-    // Preserve existing tracking items and combine
+    // Preserve existing tracking items and ensure vehicle is an ObjectId/string, not a nested populated object
     const sanitizedExisting = existingTracking.map(t => {
         const itemObj = typeof t.toObject === 'function' ? t.toObject() : { ...t };
-        if (!itemObj.vehicle && targetVehicleId) {
+        if (itemObj.vehicle) {
+            itemObj.vehicle = itemObj.vehicle._id || itemObj.vehicle;
+        } else if (targetVehicleId) {
             itemObj.vehicle = targetVehicleId;
         }
         return itemObj;
@@ -600,24 +641,28 @@ exports.generateMigrationRentPlan = async (driverId, { weeklyRent, durationWeeks
 
     const combinedTracking = [...sanitizedExisting, ...installments];
 
-    const updatedDriver = await updateDriverService(driverId, {
-        $set: { 
-            rentTracking: combinedTracking,
-            ...(weeklyRent !== undefined && !isNaN(weeklyRent) ? { weeklyRent: Number(weeklyRent) } : {})
-        }
-    }, session);
+    driverRecord.rentTracking = combinedTracking;
+    driverRecord.markModified('rentTracking');
+    if (rentAmount !== undefined && !isNaN(rentAmount)) {
+        driverRecord.weeklyRent = rentAmount;
+    }
+    if (numWeeks !== undefined && !isNaN(numWeeks)) {
+        driverRecord.durationWeeks = numWeeks;
+    }
+    await driverRecord.save({ validateModifiedOnly: true });
 
-    if (targetVehicleId && weeklyRent !== undefined && !isNaN(weeklyRent)) {
+    if (targetVehicleId && rentAmount !== undefined && !isNaN(rentAmount)) {
         try {
             const { updateVehicleService } = require("../../Vehicle/Repo/VehicleRepo");
-            await updateVehicleService(targetVehicleId, { 'basicDetails.weeklyRent': Number(weeklyRent) }, session);
+            await updateVehicleService(targetVehicleId, { 'basicDetails.weeklyRent': Number(rentAmount) }, session);
         } catch (vehErr) {
             console.error(`[generateMigrationRentPlan] Could not sync weeklyRent to vehicle ${targetVehicleId}:`, vehErr.message);
         }
     }
 
-    return updatedDriver;
+    return driverRecord;
 };
+
 
 let currentReconfigProgress = {
     inProgress: false,

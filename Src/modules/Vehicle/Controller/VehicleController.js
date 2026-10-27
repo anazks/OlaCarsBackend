@@ -519,7 +519,9 @@ const assignCarToDriver = async (req, res, next) => {
                 driverDoc.assignmentHistory[activeIdx].endDate = actDate;
                 driverDoc.assignmentHistory[activeIdx].status = 'COMPLETED';
             }
+            const newAssignmentId = new mongoose.Types.ObjectId();
             driverDoc.assignmentHistory.push({
+                _id: newAssignmentId,
                 vehicle: vehicleId,
                 plateNumber: regNo,
                 fleetNumber: fleetNo,
@@ -529,6 +531,7 @@ const assignCarToDriver = async (req, res, next) => {
                 endDate: null,
                 status: 'ACTIVE',
             });
+            req._newAssignmentId = newAssignmentId;
             driverDoc.currentVehicle = vehicleId;
             driverDoc.status = "ACTIVE";
             driverDoc.activationDate = actDate;
@@ -627,7 +630,8 @@ const assignCarToDriver = async (req, res, next) => {
             durationMonths: durationMonths,
             durationWeeks: req.body.durationWeeks,
             frequency: req.body.frequency || 'MONTHLY',
-            activationDate: activationDate
+            activationDate: activationDate,
+            assignmentId: req._newAssignmentId
         }, session);
 
         await session.commitTransaction();

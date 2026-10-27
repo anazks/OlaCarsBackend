@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const { Driver } = require("../Model/DriverModel");
+require("../../Branch/Model/BranchModel");
+require("../../Vehicle/Model/VehicleModel");
 
 // ─── Sensitive fields hidden from non-finance roles ───────────────────
 const SENSITIVE_FIELDS = "-bankDetails -creditCheck.reportS3Key";
@@ -158,6 +160,10 @@ exports.getDriverByIdService = async (id, options = {}) => {
         .populate("branch", "name code city state country")
         .populate("currentVehicle")
         .populate({
+            path: "assignmentHistory.vehicle",
+            select: "basicDetails registrationNumber vin licensePlate vehicleId status"
+        })
+        .populate({
             path: "rentTracking.vehicle",
             select: "basicDetails registrationNumber vin licensePlate vehicleId status"
         });
@@ -169,9 +175,54 @@ exports.getDriverByIdService = async (id, options = {}) => {
     const driver = await q;
     if (driver && driver.rentTracking && driver.rentTracking.length > 0) {
         const defaultVeh = driver.currentVehicle;
+        const assignments = Array.isArray(driver.assignmentHistory) ? driver.assignmentHistory : [];
+
         driver.rentTracking.forEach(item => {
             if (!item.vehicle && defaultVeh) {
                 item.vehicle = defaultVeh;
+            }
+            // Auto-link missing assignmentId if assignments exist in history
+            if (!item.assignmentId && assignments.length > 0) {
+                const itemVehId = item.vehicle ? String(item.vehicle._id || item.vehicle) : null;
+                const matchingAss = assignments.filter(a => {
+                    if (!itemVehId) return true;
+                    const aVehId = a.vehicle ? String(a.vehicle._id || a.vehicle) : null;
+                    return aVehId === itemVehId;
+                });
+
+                if (matchingAss.length === 1) {
+                    item.assignmentId = matchingAss[0]._id;
+                } else if (matchingAss.length > 1) {
+                    if (item.status === 'CANCELLED') {
+                        const cancelledAss = matchingAss.find(a => a.status === 'CANCELLED' || a.status === 'COMPLETED');
+                        if (cancelledAss) item.assignmentId = cancelledAss._id;
+                    } else if (item.dueDate) {
+                        const itemTime = new Date(item.dueDate).getTime();
+                        for (const a of matchingAss) {
+                            const sTime = a.startDate ? new Date(a.startDate).getTime() : 0;
+                            const eTime = a.endDate ? new Date(a.endDate).getTime() : Infinity;
+                            if (itemTime >= sTime && itemTime <= eTime) {
+                                item.assignmentId = a._id;
+                                break;
+                            }
+                        }
+                    }
+                    if (!item.assignmentId) {
+                        const activeAss = matchingAss.find(a => a.status === 'ACTIVE');
+                        if (activeAss && item.status !== 'CANCELLED') {
+                            item.assignmentId = activeAss._id;
+                        }
+                    }
+                }
+            }
+
+            // If the item belongs to a CANCELLED assignment and was never paid, ensure status is CANCELLED
+            if (item.assignmentId) {
+                const assignedHistory = assignments.find(a => String(a._id) === String(item.assignmentId));
+                if (assignedHistory && assignedHistory.status === 'CANCELLED' && item.status === 'PENDING') {
+                    item.status = 'CANCELLED';
+                    item.balance = 0;
+                }
             }
         });
     }

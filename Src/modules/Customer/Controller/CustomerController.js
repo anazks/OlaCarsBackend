@@ -246,6 +246,10 @@ exports.createCustomer = async (req, res) => {
                             ? Number(customerData.durationWeeks)
                             : 60;
 
+                        customerData.cfDurationWeeks = durationWeeks;
+                        savedDriver.durationWeeks = durationWeeks;
+                        await savedDriver.save({ validateModifiedOnly: true });
+
                         await DriverService.generateMigrationRentPlan(savedDriver._id, {
                             weeklyRent: Number(effectiveWeeklyRent),
                             durationWeeks: durationWeeks,
@@ -391,6 +395,10 @@ exports.getCustomerById = async (req, res) => {
                     {
                         path: 'assignmentHistory.vehicle',
                         select: 'basicDetails legalDocs status'
+                    },
+                    {
+                        path: 'rentTracking.vehicle',
+                        select: 'basicDetails registrationNumber vin licensePlate vehicleId status'
                     }
                 ]
             });
@@ -431,6 +439,7 @@ exports.getCustomerById = async (req, res) => {
                     fleetNumber,
                     vehicleModel,
                     weeklyRent: weeklyRent ? Number(weeklyRent) : undefined,
+                    durationWeeks: doc.cfDurationWeeks || driverObj.durationWeeks || (currentVeh?.basicDetails?.leaseDurationWeeks) || undefined,
                     startDate,
                     endDate: null,
                     status: 'ACTIVE',
@@ -779,6 +788,291 @@ exports.updateCustomerWeeklyRent = async (req, res) => {
         });
     } catch (error) {
         console.error('Error updating customer weekly rent:', error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.updateCustomerContractWeeks = async (req, res) => {
+    try {
+        const { durationWeeks, remark } = req.body;
+        const newWeeks = parseInt(durationWeeks, 10);
+
+        if (isNaN(newWeeks) || newWeeks <= 0) {
+            return res.status(400).json({ success: false, message: 'Valid contract duration (weeks) greater than 0 is required.' });
+        }
+
+        if (!remark || !String(remark).trim()) {
+            return res.status(400).json({ success: false, message: 'Remark / reason for contract duration change is required.' });
+        }
+
+        const isValidObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+        const queryOr = [{ customerId: req.params.id }];
+        if (isValidObjectId) {
+            queryOr.push({ _id: req.params.id });
+            queryOr.push({ driver: req.params.id });
+        }
+
+        const customer = await Customer.findOne({ $or: queryOr, isDeleted: false });
+        if (!customer) {
+            return res.status(404).json({ success: false, message: 'Customer not found.' });
+        }
+
+        if (!customer.driver) {
+            return res.status(400).json({ success: false, message: 'Customer is not registered as a driver.' });
+        }
+
+        const DriverModel = mongoose.models.Driver || mongoose.model('Driver');
+        const VehicleModel = mongoose.models.Vehicle || mongoose.model('Vehicle');
+        const Invoice = mongoose.models.Invoice || mongoose.model('Invoice');
+
+        const driver = await DriverModel.findById(customer.driver);
+        if (!driver) {
+            return res.status(404).json({ success: false, message: 'Driver record not found.' });
+        }
+
+        if (!driver.currentVehicle) {
+            return res.status(400).json({ success: false, message: 'No vehicle is currently assigned to this driver/customer.' });
+        }
+
+        const vehicle = await VehicleModel.findById(driver.currentVehicle);
+        const currentVehId = vehicle?._id || driver.currentVehicle;
+
+        // Find active assignment in history
+        if (!driver.assignmentHistory) driver.assignmentHistory = [];
+        const activeIdx = driver.assignmentHistory.findIndex(a => 
+            a.status === 'ACTIVE' && 
+            (!a.endDate || new Date(a.endDate) > new Date()) &&
+            String(a.vehicle?._id || a.vehicle) === String(currentVehId)
+        );
+
+        // Previous duration
+        const activeAssignment = activeIdx !== -1 ? driver.assignmentHistory[activeIdx] : null;
+        const previousDurationWeeks = Number(
+            activeAssignment?.durationWeeks || 
+            driver.durationWeeks || 
+            customer.cfDurationWeeks || 
+            60
+        );
+
+        if (newWeeks === previousDurationWeeks) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Contract duration is already set to ${newWeeks} weeks.` 
+            });
+        }
+
+        // Identify current vehicle tracking installments
+        if (!driver.rentTracking) driver.rentTracking = [];
+        const vehTracking = driver.rentTracking.filter(t => {
+            const itemVehId = t.vehicle?._id || t.vehicle;
+            return !currentVehId || !itemVehId || String(itemVehId) === String(currentVehId);
+        });
+
+        // 1. DETERMINE HIGHEST PAID WEEK (Safety Guard)
+        // Check both driver.rentTracking AND Invoice collection
+        let maxPaidWeekInTracking = 0;
+        vehTracking.forEach(t => {
+            const isPaid = t.status === 'PAID' || (t.amountPaid && Number(t.amountPaid) > 0);
+            if (isPaid && Number(t.weekNumber) > maxPaidWeekInTracking) {
+                maxPaidWeekInTracking = Number(t.weekNumber);
+            }
+        });
+
+        const paidInvoices = await Invoice.find({
+            driver: driver._id,
+            vehicle: currentVehId,
+            invoiceType: 'RENTAL',
+            $or: [
+                { status: { $in: ['PAID', 'PARTIALLY_PAID'] } },
+                { amountPaid: { $gt: 0 } }
+            ],
+            isDeleted: false
+        });
+
+        let maxPaidWeekInInvoices = 0;
+        paidInvoices.forEach(inv => {
+            const wk = Number(inv.weekNumber);
+            if (!isNaN(wk) && wk > maxPaidWeekInInvoices) {
+                maxPaidWeekInInvoices = wk;
+            }
+        });
+
+        const minAllowedWeeks = Math.max(maxPaidWeekInTracking, maxPaidWeekInInvoices);
+
+        // If user wants to reduce weeks below already paid installments, reject with error
+        if (newWeeks < minAllowedWeeks) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot reduce contract to ${newWeeks} weeks. The customer has already made payments up to Week ${minAllowedWeeks}. Minimum allowable contract duration is ${minAllowedWeeks} weeks.`
+            });
+        }
+
+        // Capture user info
+        const changedBy = req.user?._id || req.user?.id || null;
+        const changedByName = req.user?.fullName || req.user?.name || req.user?.email || 'System User';
+        const changedByRole = req.user?.role || 'Staff';
+
+        // Vehicle details for history
+        const regNo = vehicle?.legalDocs?.registrationNumber || vehicle?.basicDetails?.registrationNumber || '';
+        const vehMake = vehicle?.basicDetails?.make || '';
+        const vehModelName = vehicle?.basicDetails?.model || '';
+        const fullVehModel = [vehMake, vehModelName].filter(Boolean).join(' ');
+        const fleetNo = vehicle?.basicDetails?.fleetNumber || vehicle?.fleet?.fleetNumber || vehicle?.fleetNumber || '';
+        const vinNo = vehicle?.basicDetails?.vin || '';
+
+        const diffWeeks = newWeeks - previousDurationWeeks;
+
+        // 2. APPLY ADJUSTMENT: APPEND OR DEDUCT
+        const effectiveWeeklyRent = Number(
+            driver.weeklyRent || 
+            activeAssignment?.weeklyRent || 
+            vehicle?.basicDetails?.weeklyRent || 
+            (vehTracking.length > 0 ? vehTracking[0].amount : 0)
+        );
+
+        if (newWeeks > previousDurationWeeks) {
+            // APPEND WEEKS: Generate installments from currentMaxWeek + 1 to newWeeks
+            const sortedVehTracking = [...vehTracking].sort((a, b) => (a.weekNumber || 0) - (b.weekNumber || 0));
+            const lastInstallment = sortedVehTracking.length > 0 ? sortedVehTracking[sortedVehTracking.length - 1] : null;
+
+            let baseDate;
+            if (lastInstallment && lastInstallment.dueDate) {
+                baseDate = new Date(lastInstallment.dueDate);
+            } else {
+                baseDate = driver.activationDate ? new Date(driver.activationDate) : new Date();
+            }
+
+            const currentMaxWeek = sortedVehTracking.length > 0 
+                ? Math.max(...sortedVehTracking.map(t => Number(t.weekNumber) || 0)) 
+                : 0;
+
+            const newInstallments = [];
+            for (let w = currentMaxWeek + 1; w <= newWeeks; w++) {
+                const dueDate = new Date(baseDate);
+                const weekOffset = w - currentMaxWeek;
+                dueDate.setDate(baseDate.getDate() + (weekOffset * 7));
+
+                newInstallments.push({
+                    vehicle: currentVehId,
+                    weekNumber: w,
+                    weekLabel: `Week ${w} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`,
+                    dueDate: dueDate,
+                    amount: effectiveWeeklyRent,
+                    carryOver: 0,
+                    totalDue: effectiveWeeklyRent,
+                    amountPaid: 0,
+                    balance: effectiveWeeklyRent,
+                    status: 'PENDING',
+                    payments: []
+                });
+            }
+
+            driver.rentTracking.push(...newInstallments);
+        } else {
+            // DEDUCT WEEKS: Remove unpaid installments for this vehicle where weekNumber > newWeeks
+            // We already validated newWeeks >= minAllowedWeeks so any week > newWeeks is 100% unpaid!
+            driver.rentTracking = driver.rentTracking.filter(t => {
+                const itemVehId = t.vehicle?._id || t.vehicle;
+                const isCurrentVeh = !currentVehId || !itemVehId || String(itemVehId) === String(currentVehId);
+                if (isCurrentVeh && Number(t.weekNumber) > newWeeks) {
+                    return false; // Remove
+                }
+                return true;
+            });
+
+            // Cancel any generated unpaid/open invoices for this vehicle where weekNumber > newWeeks
+            await Invoice.updateMany({
+                driver: driver._id,
+                vehicle: currentVehId,
+                invoiceType: 'RENTAL',
+                weekNumber: { $gt: newWeeks },
+                status: { $ne: 'PAID' },
+                amountPaid: { $lte: 0 },
+                isDeleted: false
+            }, {
+                $set: {
+                    status: 'CANCELLED',
+                    cancelReason: `Cancelled due to contract duration shortened from ${previousDurationWeeks} to ${newWeeks} weeks.`
+                }
+            });
+        }
+
+        // Sort rentTracking
+        driver.rentTracking.sort((a, b) => (a.weekNumber || 0) - (b.weekNumber || 0));
+        driver.markModified('rentTracking');
+
+        // Recalculate end date
+        const startDate = activeAssignment?.startDate || driver.activationDate || customer.cfActiveDate || new Date();
+        const calculatedEndDate = new Date(new Date(startDate).getTime() + (newWeeks * 7 * 24 * 60 * 60 * 1000));
+
+        // Update driver fields
+        driver.durationWeeks = newWeeks;
+        if (activeIdx !== -1) {
+            driver.assignmentHistory[activeIdx].durationWeeks = newWeeks;
+            driver.assignmentHistory[activeIdx].endDate = calculatedEndDate;
+            driver.markModified('assignmentHistory');
+        }
+
+        // Add history log
+        if (!driver.contractDurationHistory) driver.contractDurationHistory = [];
+        driver.contractDurationHistory.unshift({
+            previousDurationWeeks,
+            newDurationWeeks: newWeeks,
+            differenceWeeks: diffWeeks,
+            effectiveDate: new Date(),
+            remark: String(remark).trim(),
+            vehicle: currentVehId,
+            vehicleRegistrationNumber: regNo,
+            vehicleModel: fullVehModel,
+            fleetNumber: fleetNo,
+            vin: vinNo,
+            changedBy,
+            changedByName,
+            changedByRole,
+            createdAt: new Date()
+        });
+        driver.markModified('contractDurationHistory');
+
+        if (!driver.statusHistory) driver.statusHistory = [];
+        driver.statusHistory.push({
+            status: driver.status || 'ACTIVE',
+            changedBy,
+            changedByRole,
+            timestamp: new Date(),
+            notes: `Contract duration adjusted from ${previousDurationWeeks} to ${newWeeks} weeks (${diffWeeks > 0 ? '+' + diffWeeks : diffWeeks} weeks). Reason: ${String(remark).trim()}`
+        });
+        driver.markModified('statusHistory');
+
+        await driver.save();
+
+        // Update customer fields
+        customer.cfDurationWeeks = newWeeks;
+        customer.cfEndDate = calculatedEndDate;
+        await customer.save();
+
+        // Return updated customer doc
+        const updatedCustomer = await Customer.findOne({ _id: customer._id })
+            .populate('branch')
+            .populate({
+                path: 'driver',
+                populate: [
+                    {
+                        path: 'currentVehicle',
+                        populate: { path: 'fleet' }
+                    },
+                    {
+                        path: 'assignmentHistory.vehicle'
+                    }
+                ]
+            });
+
+        return res.status(200).json({
+            success: true,
+            message: `Contract duration successfully updated to ${newWeeks} weeks (${diffWeeks > 0 ? '+' + diffWeeks : diffWeeks} weeks).`,
+            data: updatedCustomer
+        });
+    } catch (error) {
+        console.error('Error updating customer contract weeks:', error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -1370,6 +1664,8 @@ exports.assignVehicleToCustomer = async (req, res) => {
         const vehicleModelStr = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
         const fleetNo = vehicle.basicDetails?.fleetNumber || '';
 
+        const newAssignmentId = new mongoose.Types.ObjectId();
+
         if (!driver) {
             const driverId = await getNextDriverId();
             const driverData = {
@@ -1385,14 +1681,17 @@ exports.assignVehicleToCustomer = async (req, res) => {
                 currentVehicle: vehicle._id,
                 activationDate: effectiveStartDate,
                 weeklyRent: effectiveWeeklyRent,
+                durationWeeks: effectiveDurationWeeks,
                 createdBy: req.user ? (req.user.id || req.user._id) : undefined,
                 creatorRole: req.user?.role || 'SYSTEM',
                 assignmentHistory: [{
+                    _id: newAssignmentId,
                     vehicle: vehicle._id,
                     plateNumber: regNo,
                     fleetNumber: fleetNo,
                     vehicleModel: vehicleModelStr,
                     weeklyRent: effectiveWeeklyRent,
+                    durationWeeks: effectiveDurationWeeks,
                     startDate: effectiveStartDate,
                     endDate: null,
                     status: 'ACTIVE',
@@ -1411,17 +1710,33 @@ exports.assignVehicleToCustomer = async (req, res) => {
             if (!driver.assignmentHistory) driver.assignmentHistory = [];
             const activeIdx = driver.assignmentHistory.findIndex(a => a.status === 'ACTIVE');
             if (activeIdx !== -1) {
-                driver.assignmentHistory[activeIdx].endDate = effectiveStartDate;
-                driver.assignmentHistory[activeIdx].status = 'COMPLETED';
+                const prevAssignment = driver.assignmentHistory[activeIdx];
+                prevAssignment.endDate = effectiveStartDate;
+                prevAssignment.status = 'COMPLETED';
+
+                // Cancel any pending installments from the previous assignment so they don't remain pending
+                if (Array.isArray(driver.rentTracking)) {
+                    driver.rentTracking.forEach(t => {
+                        const matchAss = prevAssignment._id && t.assignmentId && String(t.assignmentId) === String(prevAssignment._id);
+                        const matchVeh = !t.assignmentId && String(t.vehicle) === String(prevAssignment.vehicle);
+                        if ((matchAss || matchVeh) && t.status === 'PENDING') {
+                            t.status = 'CANCELLED';
+                            t.balance = 0;
+                        }
+                    });
+                    driver.markModified('rentTracking');
+                }
             }
 
-            // Push new assignment entry
+            // Push new assignment entry with unique ID
             driver.assignmentHistory.push({
+                _id: newAssignmentId,
                 vehicle: vehicle._id,
                 plateNumber: regNo,
                 fleetNumber: fleetNo,
                 vehicleModel: vehicleModelStr,
                 weeklyRent: effectiveWeeklyRent,
+                durationWeeks: effectiveDurationWeeks,
                 startDate: effectiveStartDate,
                 endDate: null,
                 status: 'ACTIVE',
@@ -1432,6 +1747,7 @@ exports.assignVehicleToCustomer = async (req, res) => {
             driver.activationDate = effectiveStartDate;
             driver.deactivationDate = null;
             driver.weeklyRent = effectiveWeeklyRent;
+            driver.durationWeeks = effectiveDurationWeeks;
             if (!driver.statusHistory) driver.statusHistory = [];
             driver.statusHistory.push({
                 status: 'ACTIVE',
@@ -1469,17 +1785,19 @@ exports.assignVehicleToCustomer = async (req, res) => {
         customer.cfVehicleModel = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
         customer.cfVinNumber = vehicle.basicDetails?.vin || '';
         customer.cfWeeklyRent = effectiveWeeklyRent;
+        customer.cfDurationWeeks = effectiveDurationWeeks;
         customer.isDriver = true;
         customer.status = 'ACTIVE';
         await customer.save();
 
-        // Generate rent repayment plan
+        // Generate rent repayment plan for this specific assignment
         try {
             await DriverService.generateMigrationRentPlan(driver._id, {
                 weeklyRent: Number(effectiveWeeklyRent),
                 durationWeeks: effectiveDurationWeeks,
                 activationDate: effectiveStartDate,
-                vehicleId: vehicle._id
+                vehicleId: vehicle._id,
+                assignmentId: newAssignmentId
             });
         } catch (planErr) {
             console.error('[assignVehicleToCustomer] Error generating rent plan:', planErr);
@@ -1497,6 +1815,10 @@ exports.assignVehicleToCustomer = async (req, res) => {
                     {
                         path: 'assignmentHistory.vehicle',
                         select: 'basicDetails legalDocs status'
+                    },
+                    {
+                        path: 'rentTracking.vehicle',
+                        select: 'basicDetails registrationNumber vin licensePlate vehicleId status'
                     }
                 ]
             });

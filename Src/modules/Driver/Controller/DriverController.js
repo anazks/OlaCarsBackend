@@ -1309,9 +1309,28 @@ const cancelContract = async (req, res) => {
             activeAssignment.status = 'CANCELLED';
             activeAssignment.cancelledBy = effectiveUserId;
             activeAssignment.cancelNotes = notes || 'Contract cancelled';
+
+            // Permanently mark all unpaid installments for this cancelled assignment as CANCELLED
+            if (Array.isArray(driver.rentTracking)) {
+                driver.rentTracking.forEach(item => {
+                    const matchAss = activeAssignment._id && item.assignmentId && String(item.assignmentId) === String(activeAssignment._id);
+                    const matchVeh = vehicleId && item.vehicle && String(item.vehicle) === String(vehicleId);
+                    if (matchAss || matchVeh) {
+                        if (item.status !== 'PAID') {
+                            item.status = 'CANCELLED';
+                            item.balance = 0;
+                        }
+                        if (!item.assignmentId && activeAssignment._id) {
+                            item.assignmentId = activeAssignment._id;
+                        }
+                    }
+                });
+            }
         } else if (vehicleId) {
             const vDoc = await Vehicle.findById(vehicleId).session(session);
+            const cancelledAssId = new mongoose.Types.ObjectId();
             driver.assignmentHistory.push({
+                _id: cancelledAssId,
                 vehicle: vehicleId,
                 plateNumber: vDoc?.legalDocs?.registrationNumber || vDoc?.basicDetails?.plateNumber || '',
                 fleetNumber: vDoc?.basicDetails?.fleetNumber || '',
@@ -1323,7 +1342,26 @@ const cancelContract = async (req, res) => {
                 cancelledBy: effectiveUserId,
                 cancelNotes: notes || 'Contract cancelled',
             });
+
+            // Mark unpaid installments for this vehicle as CANCELLED
+            if (Array.isArray(driver.rentTracking)) {
+                driver.rentTracking.forEach(item => {
+                    const matchVeh = item.vehicle && String(item.vehicle) === String(vehicleId);
+                    if (matchVeh) {
+                        if (item.status !== 'PAID') {
+                            item.status = 'CANCELLED';
+                            item.balance = 0;
+                        }
+                        if (!item.assignmentId) {
+                            item.assignmentId = cancelledAssId;
+                        }
+                    }
+                });
+            }
         }
+
+        driver.markModified('rentTracking');
+        driver.markModified('assignmentHistory');
 
         // Ensure createdBy/creatorRole are present if missing so validation never blocks cancellation
         if (!driver.createdBy && effectiveUserId) {

@@ -117,6 +117,7 @@ const customerSchema = new mongoose.Schema({
     cfActiveDate: { type: Date },
     cfVehicleNo: { type: String, trim: true },
     cfEndDate: { type: Date },
+    cfDurationWeeks: { type: Number },
     cfSection: { type: String, trim: true },
 
     documents: [
