@@ -864,6 +864,10 @@ exports.updateCustomerContractWeeks = async (req, res) => {
         // Identify current vehicle tracking installments
         if (!driver.rentTracking) driver.rentTracking = [];
         const vehTracking = driver.rentTracking.filter(t => {
+            if (t.status === 'CANCELLED') return false;
+            if (activeAssignment?._id && t.assignmentId) {
+                return String(t.assignmentId) === String(activeAssignment._id);
+            }
             const itemVehId = t.vehicle?._id || t.vehicle;
             return !currentVehId || !itemVehId || String(itemVehId) === String(currentVehId);
         });
@@ -954,6 +958,7 @@ exports.updateCustomerContractWeeks = async (req, res) => {
 
                 newInstallments.push({
                     vehicle: currentVehId,
+                    assignmentId: activeAssignment?._id || undefined,
                     weekNumber: w,
                     weekLabel: `Week ${w} - ${dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}`,
                     dueDate: dueDate,
@@ -972,6 +977,10 @@ exports.updateCustomerContractWeeks = async (req, res) => {
             // DEDUCT WEEKS: Remove unpaid installments for this vehicle where weekNumber > newWeeks
             // We already validated newWeeks >= minAllowedWeeks so any week > newWeeks is 100% unpaid!
             driver.rentTracking = driver.rentTracking.filter(t => {
+                if (t.status === 'CANCELLED') return true;
+                if (activeAssignment?._id && t.assignmentId && String(t.assignmentId) !== String(activeAssignment._id)) {
+                    return true;
+                }
                 const itemVehId = t.vehicle?._id || t.vehicle;
                 const isCurrentVeh = !currentVehId || !itemVehId || String(itemVehId) === String(currentVehId);
                 if (isCurrentVeh && Number(t.weekNumber) > newWeeks) {
