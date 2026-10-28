@@ -566,9 +566,174 @@ const voidBill = async (billId, reason) => {
     return await updateBill(billId, { status: "VOID", voidReason: reason });
 };
 
+/**
+ * Edit a draft service bill before approval.
+ * Updates line items, driver/customer, tax, discount, notes and recalculates totals and entries.
+ */
+const updateDraftBill = async (billId, updateData = {}, user) => {
+    const { ServiceBill } = require("../Model/ServiceBillModel");
+    const bill = await ServiceBill.findById(billId);
+    if (!bill) {
+        throw new Error("Service bill not found.", { cause: 404 });
+    }
+
+    if (bill.status !== "DRAFT") {
+        throw new Error(`Only DRAFT bills can be edited. This bill is already ${bill.status}.`, { cause: 400 });
+    }
+
+    // 1. Line Items
+    if (updateData.lineItems && Array.isArray(updateData.lineItems)) {
+        bill.lineItems = updateData.lineItems.map(item => ({
+            type: ["LABOUR", "PART", "MISC"].includes(item.type) ? item.type : "PART",
+            description: String(item.description || "Service Item").trim(),
+            quantity: Math.max(0, Number(item.quantity) || 1),
+            unitPrice: Math.max(0, Number(item.unitPrice) || 0),
+            lineTotal: Math.round((Math.max(0, Number(item.quantity) || 1) * Math.max(0, Number(item.unitPrice) || 0)) * 100) / 100,
+            partId: item.partId || undefined
+        }));
+    }
+
+    // 2. Driver / Customer
+    if (updateData.isDriverBilled !== undefined) {
+        bill.isDriverBilled = Boolean(updateData.isDriverBilled);
+    }
+    if (bill.isDriverBilled) {
+        if (updateData.driverId !== undefined) {
+            bill.driverId = updateData.driverId || null;
+        }
+        if (updateData.customerId !== undefined) {
+            bill.customerId = updateData.customerId || null;
+        }
+        // Auto-find customer if driver provided without customer
+        if (bill.driverId && !bill.customerId) {
+            const Customer = require("../../Customer/Model/CustomerModel");
+            const customerDoc = await Customer.findOne({ driver: bill.driverId, status: "ACTIVE" });
+            if (customerDoc) {
+                bill.customerId = customerDoc._id;
+            }
+        }
+    } else {
+        if (updateData.isDriverBilled === false) {
+            bill.driverId = null;
+            bill.customerId = null;
+        }
+    }
+
+    // 3. Tax & Discount & Notes
+    if (updateData.taxRate !== undefined && updateData.taxRate !== null) {
+        bill.taxRate = Number(updateData.taxRate);
+    }
+    if (updateData.taxName) {
+        bill.taxName = String(updateData.taxName).trim();
+    }
+    if (updateData.taxProfileId !== undefined) {
+        bill.taxProfileId = updateData.taxProfileId || undefined;
+    }
+    if (updateData.discount !== undefined) {
+        bill.discount = Math.max(0, Number(updateData.discount) || 0);
+    }
+    if (updateData.notes !== undefined) {
+        bill.notes = updateData.notes;
+    }
+
+    // 4. Recalculate Totals (Tax Exclusive)
+    const partsTotal = bill.lineItems.filter(i => i.type === "PART").reduce((sum, item) => sum + item.lineTotal, 0);
+    const labourTotal = bill.lineItems.filter(i => i.type === "LABOUR").reduce((sum, item) => sum + item.lineTotal, 0);
+    const miscTotal = bill.lineItems.filter(i => i.type === "MISC").reduce((sum, item) => sum + item.lineTotal, 0);
+
+    bill.subtotal = Math.round((partsTotal + labourTotal + miscTotal) * 100) / 100;
+    const taxableSubtotal = Math.max(0, Math.round((bill.subtotal - (bill.discount || 0)) * 100) / 100);
+    bill.taxAmount = Math.round(taxableSubtotal * ((bill.taxRate || 0) / 100) * 100) / 100;
+    bill.totalAmount = Math.round((taxableSubtotal + bill.taxAmount) * 100) / 100;
+
+    // 5. Update Labour Summary if labour changed
+    const labourItems = bill.lineItems.filter(i => i.type === "LABOUR");
+    if (labourItems.length > 0) {
+        const totalHours = labourItems.reduce((sum, item) => sum + item.quantity, 0);
+        const avgRate = totalHours > 0 ? (labourTotal / totalHours) : (bill.labourSummary?.hourlyRate || 150);
+        bill.labourSummary = {
+            totalHours,
+            hourlyRate: Math.round(avgRate * 100) / 100,
+            labourTotal: Math.round(labourTotal * 100) / 100
+        };
+    }
+
+    // 6. Recalculate Accounting Entries
+    const arCodeDoc = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
+    const arCode = arCodeDoc ? arCodeDoc.code : "1100";
+    const billRefNumber = bill.billNumber;
+
+    const accountingEntries = [
+        {
+            entryType: "DEBIT",
+            accountCode: arCode,
+            accountName: "Accounts Receivable",
+            amount: bill.totalAmount,
+            description: `Receivable for Workshop Bill ${billRefNumber}`,
+        }
+    ];
+
+    if (bill.discount > 0) {
+        accountingEntries.push({
+            entryType: "DEBIT",
+            accountCode: "4900",
+            accountName: "Discounts Allowed",
+            amount: Math.round(bill.discount * 100) / 100,
+            description: `Discount on Workshop Bill ${billRefNumber}`,
+        });
+    }
+
+    if (labourTotal > 0) {
+        accountingEntries.push({
+            entryType: "CREDIT",
+            accountCode: "4030",
+            accountName: "Labour Charges Income",
+            amount: Math.round(labourTotal * 100) / 100,
+            description: `Labour income for Workshop Bill ${billRefNumber}`,
+        });
+    }
+
+    if (partsTotal > 0) {
+        const fallbackIncome = await AccountingCode.findOne({ code: "IN0008" }) || await AccountingCode.findOne({ code: "4040" }) || { code: "4040", name: "Spare Parts Sales" };
+        accountingEntries.push({
+            entryType: "CREDIT",
+            accountCode: fallbackIncome.code,
+            accountName: fallbackIncome.name || "Parts Sales Income",
+            amount: Math.round(partsTotal * 100) / 100,
+            description: `Parts sales for Workshop Bill ${billRefNumber}`,
+        });
+    }
+
+    if (miscTotal > 0) {
+        accountingEntries.push({
+            entryType: "CREDIT",
+            accountCode: "4010",
+            accountName: "Workshop Service Income",
+            amount: Math.round(miscTotal * 100) / 100,
+            description: `Misc service income for Workshop Bill ${billRefNumber}`,
+        });
+    }
+
+    if (bill.taxAmount > 0) {
+        accountingEntries.push({
+            entryType: "CREDIT",
+            accountCode: "2200",
+            accountName: "ITBMS/Tax Payable",
+            amount: bill.taxAmount,
+            description: `ITBMS (${bill.taxRate}%) on Workshop Bill ${billRefNumber}`,
+        });
+    }
+
+    bill.accountingEntries = accountingEntries;
+    await bill.save();
+
+    return await getBillById(bill._id);
+};
+
 module.exports = {
     generateFromWorkOrder,
     approveBill,
+    updateDraftBill,
     addPayment,
     voidBill,
 };

@@ -4,6 +4,7 @@ const {
     generateBillHandler,
     getBillsHandler,
     getBillByIdHandler,
+    updateBillHandler,
     approveBillHandler,
     addPaymentHandler,
     voidBillHandler,
@@ -116,6 +117,34 @@ router.get("/", authenticate, hasPermission("SERVICE_BILL_VIEW"), getBillsHandle
  *         description: Not found
  */
 router.get("/:id", authenticate, hasPermission("SERVICE_BILL_VIEW"), getBillByIdHandler);
+
+/**
+ * @swagger
+ * /api/service-bills/{id}:
+ *   put:
+ *     summary: Update a draft service bill (line items, driver/customer, tax, discount)
+ *     tags: [ServiceBill]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Bill updated
+ *       400:
+ *         description: Bill not in draft status or invalid data
+ */
+router.put(
+    "/:id",
+    authenticate,
+    authorize(ROLES.FINANCESTAFF, ROLES.FINANCEADMIN, ROLES.BRANCHMANAGER, ROLES.ADMIN, ROLES.WORKSHOPMANAGER, ROLES.WORKSHOPSTAFF),
+    hasPermission("SERVICE_BILL_CREATE"),
+    updateBillHandler
+);
 
 /**
  * @swagger

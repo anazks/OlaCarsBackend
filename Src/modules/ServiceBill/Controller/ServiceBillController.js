@@ -1,5 +1,5 @@
 const { getBills, getBillById } = require("../Repo/ServiceBillRepo");
-const { generateFromWorkOrder, approveBill, addPayment, voidBill } = require("../Service/ServiceBillService");
+const { generateFromWorkOrder, approveBill, updateDraftBill, addPayment, voidBill } = require("../Service/ServiceBillService");
 
 /**
  * Generate a bill from a work order.
@@ -86,6 +86,20 @@ const getBillByIdHandler = async (req, res) => {
 };
 
 /**
+ * Edit a draft service bill before approval.
+ * @route PUT /api/service-bills/:id
+ */
+const updateBillHandler = async (req, res) => {
+    try {
+        const bill = await updateDraftBill(req.params.id, req.body, req.user);
+        return res.status(200).json({ success: true, data: bill });
+    } catch (error) {
+        const statusCode = error.cause || error.statusCode || 500;
+        return res.status(statusCode).json({ success: false, message: error.message });
+    }
+};
+
+/**
  * Approve a bill.
  * @route PUT /api/service-bills/:id/approve
  */
@@ -132,6 +146,7 @@ module.exports = {
     generateBillHandler,
     getBillsHandler,
     getBillByIdHandler,
+    updateBillHandler,
     approveBillHandler,
     addPaymentHandler,
     voidBillHandler,
