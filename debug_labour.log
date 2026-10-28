@@ -58,3 +58,6 @@
 [2026-10-15T06:37:03.870Z] Called for WO: 6ad05b0dd51c671cb480cf86 | Body: {"workStartTime":"2026-10-14T19:30:00.000Z","workEndTime":"2026-10-14T20:30:00.000Z"}
 [2026-10-15T06:37:03.876Z] Calculated actualLabourHours: 1
 [2026-10-15T06:37:03.924Z] Saved WO. actualLabourHours: 1 | workStartTime: 2026-10-14T19:30:00.000Z | workEndTime: 2026-10-14T20:30:00.000Z
+[2026-10-28T06:47:57.910Z] Called for WO: 6ad995b23d53f2c0240bd84e | Body: {"workStartTime":"2026-10-21T19:30:00.000Z","workEndTime":"2026-10-21T20:30:00.000Z"}
+[2026-10-28T06:47:57.917Z] Calculated actualLabourHours: 1
+[2026-10-28T06:47:57.963Z] Saved WO. actualLabourHours: 1 | workStartTime: 2026-10-21T19:30:00.000Z | workEndTime: 2026-10-21T20:30:00.000Z

@@ -142,17 +142,13 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     const labourTotal = lineItems.filter(i => i.type === "LABOUR").reduce((sum, item) => sum + item.lineTotal, 0);
     const miscTotal = lineItems.filter(i => i.type === "MISC").reduce((sum, item) => sum + item.lineTotal, 0);
 
-    const subtotal = partsTotal + labourTotal + miscTotal;
+    const subtotal = Math.round((partsTotal + labourTotal + miscTotal) * 100) / 100;
 
-    // ─── INCLUSIVE Tax Calculation ───
-    // Subtotal (parts + labour + misc) already includes the tax
-    const totalAmount = subtotal - discount;
-    const taxAmount = Math.round((totalAmount - (totalAmount / (1 + taxRate / 100))) * 100) / 100;
-    const preTaxTotal = totalAmount - taxAmount;
-
-    // Revenue scale factor to scale down the inclusive prices to pre-tax revenue
-    const revenueFactor = subtotal > 0 ? preTaxTotal / subtotal : 0;
-    let remainingPreTax = preTaxTotal;
+    // ─── EXCLUSIVE Tax Calculation ───
+    // Subtotal (parts + labour + misc) is the taxable amount before tax
+    const taxableSubtotal = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+    const taxAmount = Math.round(taxableSubtotal * (taxRate / 100) * 100) / 100;
+    const totalAmount = Math.round((taxableSubtotal + taxAmount) * 100) / 100;
 
     const arCodeDoc = await AccountingCode.findOne({ code: "1100" }) || await AccountingCode.findOne({ code: "1200" });
     const arCode = arCodeDoc ? arCodeDoc.code : "1100";
@@ -166,14 +162,22 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
         }
     ];
 
+    if (discount > 0) {
+        accountingEntries.push({
+            entryType: "DEBIT",
+            accountCode: "4900", // Discounts Allowed
+            accountName: "Discounts Allowed",
+            amount: Math.round(discount * 100) / 100,
+            description: `Discount on Workshop Bill ${wo.workOrderNumber}`,
+        });
+    }
+
     if (labourTotal > 0) {
-        const amt = Math.round(labourTotal * revenueFactor * 100) / 100;
-        remainingPreTax -= amt;
         accountingEntries.push({
             entryType: "CREDIT",
             accountCode: "4030",
             accountName: "Labour Charges Income",
-            amount: amt,
+            amount: Math.round(labourTotal * 100) / 100,
             description: `Labour income for WO ${wo.workOrderNumber}`,
         });
     }
@@ -239,13 +243,11 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     for (const code of salesGroupKeys) {
         const grp = salesGroups[code];
         if (grp.amount > 0) {
-            let amt = Math.round(grp.amount * revenueFactor * 100) / 100;
-            remainingPreTax -= amt;
             accountingEntries.push({
                 entryType: "CREDIT",
                 accountCode: grp.accountCode,
                 accountName: grp.accountName,
-                amount: amt,
+                amount: Math.round(grp.amount * 100) / 100,
                 description: `Parts sales for WO ${wo.workOrderNumber}`,
             });
         }
@@ -275,30 +277,13 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
     }
 
     if (miscTotal > 0) {
-        let amt = Math.round(miscTotal * revenueFactor * 100) / 100;
-        // Sweep any penny rounding differences on the last entry if it's safe
-        if (Math.abs(remainingPreTax - amt) < 0.1) {
-            amt = Math.round(remainingPreTax * 100) / 100;
-        }
-        remainingPreTax -= amt;
         accountingEntries.push({
             entryType: "CREDIT",
             accountCode: "4010",
             accountName: "Workshop Service Income",
-            amount: amt,
+            amount: Math.round(miscTotal * 100) / 100,
             description: `Misc service income for WO ${wo.workOrderNumber}`,
         });
-    } else {
-        // If no misc items, sweep the penny rounding differences on the last pushed revenue entry
-        if (remainingPreTax !== 0 && Math.abs(remainingPreTax) < 0.1) {
-            for (let i = accountingEntries.length - 1; i >= 0; i--) {
-                if (accountingEntries[i].entryType === "CREDIT" && accountingEntries[i].accountCode !== "2200") {
-                    accountingEntries[i].amount = Math.round((accountingEntries[i].amount + remainingPreTax) * 100) / 100;
-                    remainingPreTax = 0;
-                    break;
-                }
-            }
-        }
     }
 
     if (taxAmount > 0) {
@@ -307,7 +292,7 @@ const generateFromWorkOrder = async (woId, options = {}, user) => {
             accountCode: "2200", // Sales Tax Payable
             accountName: "ITBMS/Tax Payable",
             amount: taxAmount,
-            description: `ITBMS (7%) on WO ${wo.workOrderNumber}`,
+            description: `ITBMS (${taxRate}%) on WO ${wo.workOrderNumber}`,
         });
     }
 
@@ -423,14 +408,14 @@ const approveBill = async (billId, user) => {
             vehicle: fullyPopulatedBill.vehicleId?._id || fullyPopulatedBill.vehicleId,
             serviceBill: fullyPopulatedBill._id,
             dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000), // Default 1 day due
-            // Tax-inclusive totals
+            // Tax-exclusive totals
             lineItems: invoiceLineItems,
             subtotal: fullyPopulatedBill.subtotal || 0,
             taxRate: fullyPopulatedBill.taxRate || 0,
             taxAmount: fullyPopulatedBill.taxAmount || 0,
             tax: fullyPopulatedBill.taxProfileId || undefined,
-            isTaxInclusive: true,
-            baseAmount: fullyPopulatedBill.totalAmount - (fullyPopulatedBill.taxAmount || 0),
+            isTaxInclusive: false,
+            baseAmount: fullyPopulatedBill.subtotal || (fullyPopulatedBill.totalAmount - (fullyPopulatedBill.taxAmount || 0)),
             totalAmountDue: fullyPopulatedBill.totalAmount,
             balance: fullyPopulatedBill.totalAmount,
             status: "PENDING",
