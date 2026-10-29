@@ -1,11 +1,62 @@
 const BranchService = require('../Service/BranchService.js');
 const BranchPdfService = require('../Service/BranchPdfService.js');
+const uploadToS3 = require('../../../utils/uploadToS3');
+const uploadLocal = require('../../../utils/uploadLocal');
+
+const uploadBranchFiles = async (req) => {
+    const filesToUpload = [];
+    if (req.files && Array.isArray(req.files)) {
+        filesToUpload.push(...req.files);
+    } else if (req.files && typeof req.files === "object") {
+        Object.values(req.files).forEach((arr) => {
+            if (Array.isArray(arr)) filesToUpload.push(...arr);
+        });
+    } else if (req.file) {
+        filesToUpload.push(req.file);
+    }
+
+    const uploadedDocs = [];
+    for (const file of filesToUpload) {
+        let fileUrl;
+        try {
+            fileUrl = await uploadToS3(file, "branches/documents");
+        } catch (s3Error) {
+            console.log("[Branch Upload] S3 upload failed, falling back to local storage:", s3Error.message);
+            fileUrl = uploadLocal(file, "branches/documents");
+        }
+        uploadedDocs.push({
+            name: file.originalname,
+            url: fileUrl,
+            mimeType: file.mimetype,
+            size: file.size,
+            uploadedAt: new Date()
+        });
+    }
+    return uploadedDocs;
+};
 
 const addBranch = async (req, res) => {
     try {
         const branchData = { ...req.body };
         branchData.createdBy = req.user.id;
         branchData.creatorRole = req.user.role;
+
+        let initialDocs = [];
+        if (branchData.documents) {
+            if (typeof branchData.documents === 'string') {
+                try {
+                    initialDocs = JSON.parse(branchData.documents);
+                } catch (e) {
+                    initialDocs = [];
+                }
+            } else if (Array.isArray(branchData.documents)) {
+                initialDocs = branchData.documents;
+            }
+        }
+
+        const newUploadedDocs = await uploadBranchFiles(req);
+        branchData.documents = [...initialDocs, ...newUploadedDocs];
+
         const newBranch = await BranchService.create(branchData);
         return res.status(201).json({ success: true, data: newBranch });
     } catch (error) {
@@ -56,6 +107,35 @@ const getBranchById = async (req, res) => {
 const editBranch = async (req, res) => {
     try {
         const { id, ...data } = req.body;
+
+        let existingDocs = [];
+        if (data.existingDocuments) {
+            if (typeof data.existingDocuments === 'string') {
+                try {
+                    existingDocs = JSON.parse(data.existingDocuments);
+                } catch (e) {
+                    existingDocs = [];
+                }
+            } else if (Array.isArray(data.existingDocuments)) {
+                existingDocs = data.existingDocuments;
+            }
+        } else if (data.documents) {
+            if (typeof data.documents === 'string') {
+                try {
+                    existingDocs = JSON.parse(data.documents);
+                } catch (e) {
+                    existingDocs = [];
+                }
+            } else if (Array.isArray(data.documents)) {
+                existingDocs = data.documents;
+            }
+        }
+
+        const newUploadedDocs = await uploadBranchFiles(req);
+        if (newUploadedDocs.length > 0 || req.body.existingDocuments !== undefined || req.body.documents !== undefined) {
+            data.documents = [...existingDocs, ...newUploadedDocs];
+        }
+
         const updatedBranch = await BranchService.update(id, data);
         return res.status(200).json({ success: true, data: updatedBranch });
     } catch (error) {

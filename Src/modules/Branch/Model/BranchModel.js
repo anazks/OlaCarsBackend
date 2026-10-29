@@ -83,6 +83,16 @@ const branchSchema = new mongoose.Schema(
       default: "ACTIVE",
     },
 
+    documents: [
+      {
+        name: { type: String, trim: true },
+        url: { type: String, trim: true },
+        mimeType: { type: String, trim: true },
+        size: { type: Number },
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
+
     isDeleted: {
       type: Boolean,
       default: false, // Soft delete

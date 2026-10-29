@@ -22,6 +22,11 @@ const addVehicle = async (req, res, next) => {
         vehicleData.creatorRole = req.user.role;
         vehicleData.status = "PENDING ENTRY";
 
+        // Clean up empty purchaseOrder if not selected
+        if (vehicleData.purchaseDetails && !vehicleData.purchaseDetails.purchaseOrder) {
+            delete vehicleData.purchaseDetails.purchaseOrder;
+        }
+
         // Handle Handling Staff and Fleet Number logic
         if (vehicleData.handlingStaff) {
             console.log('[DEBUG] addVehicle - Fetching staff with ID:', vehicleData.handlingStaff);
@@ -457,7 +462,7 @@ const assignCarToDriver = async (req, res, next) => {
             res.status(404);
             throw new Error("Vehicle not found");
         }
-        if (vehicle.status !== "ACTIVE — AVAILABLE") {
+        if (vehicle.status !== "ACTIVE — AVAILABLE" && vehicle.status !== "ACTIVE — RENTED") {
             res.status(400);
             throw new Error(`Vehicle is not available for lease. Current status: ${vehicle.status}`);
         }
@@ -480,9 +485,9 @@ const assignCarToDriver = async (req, res, next) => {
         const lease = await createLeaseService({
             driver: driverId,
             vehicle: vehicleId,
-            durationWeeks: durationMonths * 4, // approximate for lease record compat
-            weeklyRent: Math.ceil(monthlyRent / 4), // approximate for lease record compat
-            notes: `Monthly: ${durationMonths}mo @ $${monthlyRent}/mo. Deposit: $${depositAmount}`,
+            durationWeeks: req.body.durationWeeks ? Number(req.body.durationWeeks) : (durationMonths * 4),
+            weeklyRent: req.body.weeklyRent ? Number(req.body.weeklyRent) : Math.ceil(monthlyRent / 4),
+            notes: notes || (req.body.frequency === 'WEEKLY' ? `Weekly: ${req.body.durationWeeks || durationMonths * 4}w @ $${req.body.weeklyRent || Math.ceil(monthlyRent / 4)}/wk. Deposit: $${depositAmount}` : `Monthly: ${durationMonths}mo @ $${monthlyRent}/mo. Deposit: $${depositAmount}`),
             agreementVersion,
             generatedS3Key,
             signedS3Key
@@ -504,7 +509,7 @@ const assignCarToDriver = async (req, res, next) => {
 
         // 6. Update Driver — link vehicle, update assignmentHistory, and set ACTIVE status
         const actDate = activationDate ? new Date(activationDate) : new Date();
-        const weeklyRentVal = Math.ceil(monthlyRent / 4);
+        const weeklyRentVal = req.body.weeklyRent ? Number(req.body.weeklyRent) : Math.ceil(monthlyRent / 4);
         const vehicleModelStr = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
         const regNo = vehicle.legalDocs?.registrationNumber || vehicle.basicDetails?.plateNumber || vehicle.plateNumber || '';
         const fleetNo = vehicle.basicDetails?.fleetNumber || '';

@@ -140,12 +140,7 @@ const STATUS_RULES = {
         allowedRoles: [ROLES.BRANCHMANAGER, ROLES.COUNTRYMANAGER, ROLES.FINANCEADMIN, ROLES.OPERATIONADMIN, ROLES.ADMIN],
         minHierarchy: ROLES.ADMIN,
         gateValidator: (vehicle, payload) => {
-            if (vehicle.status === "BRANCH MANAGER APPROVAL") {
-                const combinedBasic = { ...vehicle.basicDetails, ...payload.basicDetails };
-                if (!combinedBasic.sellingValue || combinedBasic.sellingValue <= 0) {
-                    return "Current Selling Value is mandatory and must be greater than 0 before final approval.";
-                }
-            }
+            // Selling value is optional upon commissioning
             return null;
         }
     },

@@ -13,6 +13,7 @@ const {
     deleteBranchSchema,
     getBranchByIdSchema,
 } = require("../Validation/BranchValidation.js");
+const upload = require("../../../utils/multerConfig");
 
 /**
  * @swagger
@@ -78,6 +79,7 @@ router.post(
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   hasPermission("BRANCH_CREATE"),
+  upload.any(),
   validate(addBranchSchema),
   addBranch
 );
@@ -222,6 +224,7 @@ router.put(
   authenticate,
   authorize(ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER),
   hasPermission("BRANCH_EDIT"),
+  upload.any(),
   validate(editBranchSchema),
   editBranch
 );

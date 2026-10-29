@@ -24,11 +24,11 @@ const VEHICLE_STATUSES = [
 const addVehicleSchema = {
     body: Joi.object({
         purchaseDetails: Joi.object({
-            purchaseOrder: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/),
-            vendorName: Joi.string().trim(),
-            purchaseDate: Joi.date(),
+            purchaseOrder: Joi.string().trim().pattern(/^[0-9a-fA-F]{24}$/).allow("", null),
+            vendorName: Joi.string().trim().allow("", null),
+            purchaseDate: Joi.date().allow("", null),
             purchasePrice: Joi.number().min(0),
-            currency: Joi.string().trim(),
+            currency: Joi.string().trim().allow("", null),
             paymentMethod: Joi.string().trim().valid("Cash", "Bank Transfer", "Finance"),
             financeDetails: Joi.object({
                 lenderName: Joi.string().trim(),
