@@ -1,6 +1,14 @@
 {
   "totalEntriesUpToDate": 0,
-  "totalEntriesAllTime": 0,
+  "totalEntriesAllTime": 1,
   "entriesUpToDate": [],
-  "allEntries": []
+  "allEntries": [
+    {
+      "id": "6ae4466c4ceaf2f42dec66a0",
+      "entryDate": "2026-10-30T00:00:00.000Z",
+      "type": "DEBIT",
+      "amount": 30,
+      "description": "Bill YKER-3739 - Item: samplebill"
+    }
+  ]
 }

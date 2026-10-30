@@ -521,8 +521,21 @@ const assignCarToDriver = async (req, res, next) => {
             // Close any existing active assignment
             const activeIdx = driverDoc.assignmentHistory.findIndex(a => a.status === 'ACTIVE' || !a.endDate);
             if (activeIdx !== -1) {
-                driverDoc.assignmentHistory[activeIdx].endDate = actDate;
-                driverDoc.assignmentHistory[activeIdx].status = 'COMPLETED';
+                const prevAss = driverDoc.assignmentHistory[activeIdx];
+                prevAss.endDate = actDate;
+                const durWeeks = Number(prevAss.durationWeeks) || 0;
+                let isFullTerm = false;
+                if (durWeeks > 0 && prevAss.startDate) {
+                    const diffDays = Math.floor((new Date(actDate) - new Date(prevAss.startDate)) / (1000 * 60 * 60 * 24));
+                    const elapsedWeeks = Math.floor(diffDays / 7);
+                    if (elapsedWeeks >= durWeeks) {
+                        isFullTerm = true;
+                    }
+                }
+                prevAss.status = isFullTerm ? 'COMPLETED' : 'CANCELLED';
+                prevAss.cancelNotes = isFullTerm
+                    ? (prevAss.cancelNotes || 'Contract completed full term')
+                    : (prevAss.cancelNotes && prevAss.cancelNotes !== 'Current Active Assignment' ? prevAss.cancelNotes : 'Replaced by vehicle reassignment');
             }
             const newAssignmentId = new mongoose.Types.ObjectId();
             driverDoc.assignmentHistory.push({
@@ -747,6 +760,37 @@ const updateVehicle = async (req, res, next) => {
 
         if (!updatedVehicle) {
             return res.status(404).json({ success: false, message: "Vehicle not found" });
+        }
+
+        // If registration / plate number was updated, sync to assigned driver and customer
+        const newPlate = updatedVehicle.legalDocs?.registrationNumber || updatedVehicle.basicDetails?.plateNumber;
+        if (newPlate && (updateData['legalDocs.registrationNumber'] || updateData.legalDocs?.registrationNumber || updateData['basicDetails.plateNumber'] || updateData.basicDetails?.plateNumber)) {
+            try {
+                const { Driver } = require("../../Driver/Model/DriverModel");
+                const Customer = require("../../Customer/Model/CustomerModel");
+
+                // Update active assignmentHistory in Driver
+                await Driver.updateMany(
+                    { "assignmentHistory.vehicle": updatedVehicle._id, "assignmentHistory.status": "ACTIVE" },
+                    { $set: { "assignmentHistory.$[elem].plateNumber": newPlate } },
+                    { arrayFilters: [{ "elem.vehicle": updatedVehicle._id, "elem.status": "ACTIVE" }] }
+                );
+
+                // Update customer cfVehicleNo if vehicle is currently assigned
+                if (updatedVehicle.currentDriver) {
+                    await Customer.updateMany(
+                        { driver: updatedVehicle.currentDriver, isDeleted: false },
+                        { $set: { cfVehicleNo: newPlate } }
+                    );
+                }
+                if (updatedVehicle.currentCustomer) {
+                    await Customer.findByIdAndUpdate(updatedVehicle.currentCustomer, {
+                        $set: { cfVehicleNo: newPlate }
+                    });
+                }
+            } catch (syncErr) {
+                console.error("[updateVehicle] Plate sync error:", syncErr);
+            }
         }
 
         return res.status(200).json({ success: true, data: updatedVehicle });

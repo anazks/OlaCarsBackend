@@ -724,8 +724,17 @@ const dataMigrateDrivers = async (req, res) => {
                             // Close any existing ACTIVE assignment
                             const activeIdx = driverDoc.assignmentHistory.findIndex(a => a.status === 'ACTIVE');
                             if (activeIdx !== -1) {
-                                driverDoc.assignmentHistory[activeIdx].endDate = isDeactivated ? new Date(row.deactivationDate) : importStartDate;
-                                driverDoc.assignmentHistory[activeIdx].status = isDeactivated ? 'CANCELLED' : 'COMPLETED';
+                                const prevAss = driverDoc.assignmentHistory[activeIdx];
+                                prevAss.endDate = isDeactivated ? new Date(row.deactivationDate) : importStartDate;
+                                const durWeeks = Number(prevAss.durationWeeks) || 0;
+                                let isFullTerm = false;
+                                if (durWeeks > 0 && prevAss.startDate) {
+                                    const diffDays = Math.floor((new Date(prevAss.endDate) - new Date(prevAss.startDate)) / (1000 * 60 * 60 * 24));
+                                    const elapsedWeeks = Math.floor(diffDays / 7);
+                                    if (elapsedWeeks >= durWeeks) isFullTerm = true;
+                                }
+                                prevAss.status = isFullTerm ? 'COMPLETED' : 'CANCELLED';
+                                prevAss.cancelNotes = isDeactivated ? 'Driver deactivated' : (isFullTerm ? 'Contract completed full term' : 'Replaced by vehicle reassignment / import update');
                             }
                             // Push new assignment if not deactivated
                             if (!isDeactivated) {

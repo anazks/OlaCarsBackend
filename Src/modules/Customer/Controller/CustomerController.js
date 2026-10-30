@@ -216,15 +216,37 @@ exports.createCustomer = async (req, res) => {
 
             // Link Vehicle <-> Driver if vehicle selected
             if (vehicle) {
-                const regNo = vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle.basicDetails?.plateNumber;
+                const regNo = vehicle.legalDocs?.registrationNumber || vehicle.plateNumber || vehicle.basicDetails?.plateNumber || (vehicle.basicDetails?.vin ? `VIN: ${vehicle.basicDetails.vin}` : 'Assigned');
                 customerData.cfVehicleNo = regNo;
                 customerData.cfActiveDate = effectiveStartDate;
                 customerData.cfFleetNo = vehicle.basicDetails?.fleetNumber;
-                customerData.cfVehicleModel = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim();
+                customerData.cfVehicleModel = `${vehicle.basicDetails?.make || ''} ${vehicle.basicDetails?.model || ''}`.trim() || 'Assigned Vehicle';
                 customerData.cfVinNumber = vehicle.basicDetails?.vin;
                 if (effectiveWeeklyRent) {
                     customerData.cfWeeklyRent = effectiveWeeklyRent;
                 }
+
+                const durationWeeks = customerData.durationWeeks && !isNaN(Number(customerData.durationWeeks))
+                    ? Number(customerData.durationWeeks)
+                    : 60;
+                customerData.cfDurationWeeks = durationWeeks;
+                savedDriver.durationWeeks = durationWeeks;
+
+                const newAssignmentId = new mongoose.Types.ObjectId();
+                if (!savedDriver.assignmentHistory) savedDriver.assignmentHistory = [];
+                savedDriver.assignmentHistory.push({
+                    _id: newAssignmentId,
+                    vehicle: vehicle._id,
+                    plateNumber: regNo,
+                    fleetNumber: vehicle.basicDetails?.fleetNumber || '',
+                    vehicleModel: customerData.cfVehicleModel,
+                    weeklyRent: effectiveWeeklyRent,
+                    durationWeeks: durationWeeks,
+                    startDate: effectiveStartDate,
+                    endDate: null,
+                    status: 'ACTIVE',
+                });
+                await savedDriver.save({ validateModifiedOnly: true });
 
                 vehicle.currentDriver = savedDriver._id;
                 vehicle.status = 'ACTIVE — RENTED';
@@ -234,7 +256,15 @@ exports.createCustomer = async (req, res) => {
                     changedBy: req.user ? (req.user.id || req.user._id) : undefined,
                     changedByRole: req.user?.role || 'SYSTEM',
                     timestamp: effectiveStartDate || new Date(),
-                    notes: `Assigned to customer/driver ${customerData.name} (${savedDriver.driverId}) starting ${customerData.startDate}`
+                    notes: `Assigned to customer/driver ${customerData.name} (${savedDriver.driverId}) starting ${customerData.startDate || effectiveStartDate}`
+                });
+                if (!vehicle.assignmentHistory) vehicle.assignmentHistory = [];
+                vehicle.assignmentHistory.push({
+                    driver: savedDriver._id,
+                    customer: null, // Will be linked when customer is saved
+                    startDate: effectiveStartDate || new Date(),
+                    weeklyRent: effectiveWeeklyRent,
+                    status: 'ACTIVE'
                 });
                 await vehicle.save();
 
@@ -242,14 +272,6 @@ exports.createCustomer = async (req, res) => {
                 if (effectiveWeeklyRent && effectiveStartDate) {
                     try {
                         const DriverService = require('../../Driver/Service/DriverService');
-                        const durationWeeks = customerData.durationWeeks && !isNaN(Number(customerData.durationWeeks))
-                            ? Number(customerData.durationWeeks)
-                            : 60;
-
-                        customerData.cfDurationWeeks = durationWeeks;
-                        savedDriver.durationWeeks = durationWeeks;
-                        await savedDriver.save({ validateModifiedOnly: true });
-
                         await DriverService.generateMigrationRentPlan(savedDriver._id, {
                             weeklyRent: Number(effectiveWeeklyRent),
                             durationWeeks: durationWeeks,
@@ -410,7 +432,7 @@ exports.getCustomerById = async (req, res) => {
             const driverObj = doc.driver;
             const currentVeh = driverObj.currentVehicle;
             const hasAssignedVehicle = Boolean(
-                (currentVeh && (currentVeh.legalDocs?.registrationNumber || currentVeh.basicDetails?.plateNumber) && currentVeh.status !== 'INACTIVE') ||
+                (currentVeh && currentVeh.status !== 'INACTIVE' && (currentVeh.legalDocs?.registrationNumber || currentVeh.basicDetails?.plateNumber || currentVeh.basicDetails?.vin || currentVeh._id)) ||
                 (doc.cfVehicleNo && !['nill', 'nil', 'na', 'n/a', 'none', '-', '—', ''].includes(String(doc.cfVehicleNo).trim().toLowerCase()) && driverObj.status === 'ACTIVE')
             );
 
@@ -423,7 +445,7 @@ exports.getCustomerById = async (req, res) => {
             );
 
             if (!hasActiveInHistory && hasAssignedVehicle) {
-                const plateNumber = currentVeh?.legalDocs?.registrationNumber || currentVeh?.basicDetails?.plateNumber || doc.cfVehicleNo || '';
+                const plateNumber = currentVeh?.legalDocs?.registrationNumber || currentVeh?.basicDetails?.plateNumber || doc.cfVehicleNo || (currentVeh?.basicDetails?.vin ? `VIN: ${currentVeh.basicDetails.vin}` : 'Assigned');
                 const fleetNumber = currentVeh?.basicDetails?.fleetNumber || doc.cfFleetNo || '';
                 const vehicleModel = currentVeh?.basicDetails
                     ? `${currentVeh.basicDetails.make || ''} ${currentVeh.basicDetails.model || ''}`.trim()
@@ -1721,7 +1743,19 @@ exports.assignVehicleToCustomer = async (req, res) => {
             if (activeIdx !== -1) {
                 const prevAssignment = driver.assignmentHistory[activeIdx];
                 prevAssignment.endDate = effectiveStartDate;
-                prevAssignment.status = 'COMPLETED';
+                const durWeeks = Number(prevAssignment.durationWeeks) || 0;
+                let isFullTerm = false;
+                if (durWeeks > 0 && prevAssignment.startDate) {
+                    const diffDays = Math.floor((new Date(effectiveStartDate) - new Date(prevAssignment.startDate)) / (1000 * 60 * 60 * 24));
+                    const elapsedWeeks = Math.floor(diffDays / 7);
+                    if (elapsedWeeks >= durWeeks) {
+                        isFullTerm = true;
+                    }
+                }
+                prevAssignment.status = isFullTerm ? 'COMPLETED' : 'CANCELLED';
+                prevAssignment.cancelNotes = isFullTerm
+                    ? (prevAssignment.cancelNotes || 'Contract completed full term')
+                    : (prevAssignment.cancelNotes && prevAssignment.cancelNotes !== 'Current Active Assignment' ? prevAssignment.cancelNotes : 'Replaced by vehicle reassignment');
 
                 // Cancel any pending installments from the previous assignment so they don't remain pending
                 if (Array.isArray(driver.rentTracking)) {
