@@ -210,6 +210,71 @@ exports.approveRequest = async (req, res) => {
 
         await request.save();
 
+        if (request.status === "RELEASED") {
+            try {
+                const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel.js");
+                let existingPO = await PurchaseOrder.findOne({ "linkedPRs.prId": request._id });
+                if (!existingPO) {
+                    const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+                    const poNumber = `PO-${Date.now()}-${randomString}`;
+                    const po = new PurchaseOrder({
+                        purchaseOrderNumber: poNumber,
+                        branch: request.branch,
+                        purpose: "Spare Parts",
+                        status: "MANAGER_APPROVED",
+                        createdBy: request.requestedBy,
+                        creatorRole: request.requestedByRole || "WORKSHOPSTAFF",
+                        approvedBy: req.user.id,
+                        approverRole: req.user.role,
+                        totalAmount: Number(request.quantity || 1) * Number(request.part?.unitCost || 0),
+                        items: [{
+                            itemName: request.partName || (request.part?.partName) || "Spare Part",
+                            quantity: Number(request.quantity) || 1,
+                            unitPrice: Number(request.part?.unitCost) || 0,
+                            description: request.notes || request.partNumber || "",
+                            images: [request.fullSizePhoto, request.closeUpPhoto].filter(Boolean),
+                            prAllocations: [{
+                                prId: request._id,
+                                prNumber: request.requestNumber,
+                                allocatedQuantity: Number(request.quantity) || 1,
+                                originalPRQuantity: Number(request.quantity) || 1
+                            }]
+                        }],
+                        linkedPRs: [{
+                            prId: request._id,
+                            prNumber: request.requestNumber,
+                            allocatedQuantity: Number(request.quantity) || 1,
+                            originalPRQuantity: Number(request.quantity) || 1
+                        }],
+                        notes: request.notes || "",
+                        editHistory: [{
+                            editedAt: new Date(),
+                            editedBy: req.user.id,
+                            editorRole: req.user.role,
+                            editorName: req.user.fullName || req.user.name || "Workshop Manager",
+                            action: "CREATED",
+                            previousStatus: "NONE",
+                            newStatus: "MANAGER_APPROVED",
+                            changesSummary: `PR Quotation ${poNumber} auto-released from Workshop PR ${request.requestNumber}.`,
+                            notes: request.notes || ""
+                        }]
+                    });
+                    await po.save();
+
+                    if (!request.linkedPOs) request.linkedPOs = [];
+                    request.linkedPOs.push({
+                        poId: po._id,
+                        poNumber: po.purchaseOrderNumber,
+                        allocatedQuantity: Number(request.quantity) || 1,
+                        allocatedAt: new Date()
+                    });
+                    await request.save();
+                }
+            } catch (autoErr) {
+                console.error("Auto PO creation error on PR release:", autoErr);
+            }
+        }
+
         res.status(200).json({ success: true, data: request, message: `PR successfully ${actionText.toLowerCase()}` });
     } catch (error) {
         console.error("Error approving procurement request:", error);

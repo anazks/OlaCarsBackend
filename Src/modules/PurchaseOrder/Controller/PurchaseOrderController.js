@@ -423,6 +423,80 @@ const getPurchaseOrders = async (req, res) => {
             ];
         }
 
+        // Auto-sync any released PRs that don't have PO quotations yet
+        if ([ROLES.MERCHENDISE, ROLES.ADMIN, ROLES.FINANCEADMIN].includes(role)) {
+            try {
+                const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+                const unlinkedPRs = await WorkshopProcurement.find({
+                    status: { $in: ["RELEASED", "APPROVED"] },
+                    $or: [
+                        { linkedPOs: { $size: 0 } },
+                        { linkedPOs: { $exists: false } }
+                    ]
+                }).populate("part branch requestedBy");
+
+                for (const pr of unlinkedPRs) {
+                    const existing = await PurchaseOrder.findOne({ "linkedPRs.prId": pr._id });
+                    if (!existing) {
+                        const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+                        const poNumber = `PO-${Date.now()}-${randomString}`;
+                        const newPO = new PurchaseOrder({
+                            purchaseOrderNumber: poNumber,
+                            branch: pr.branch?._id || pr.branch,
+                            purpose: "Spare Parts",
+                            status: "MANAGER_APPROVED",
+                            createdBy: pr.requestedBy?._id || pr.requestedBy,
+                            creatorRole: pr.requestedByRole || "WORKSHOPSTAFF",
+                            totalAmount: Number(pr.quantity || 1) * Number(pr.part?.unitCost || 0),
+                            items: [{
+                                itemName: pr.partName || pr.part?.partName || "Spare Part",
+                                quantity: Number(pr.quantity) || 1,
+                                unitPrice: Number(pr.part?.unitCost) || 0,
+                                description: pr.notes || pr.partNumber || "",
+                                images: [pr.fullSizePhoto, pr.closeUpPhoto].filter(Boolean),
+                                prAllocations: [{
+                                    prId: pr._id,
+                                    prNumber: pr.requestNumber,
+                                    allocatedQuantity: Number(pr.quantity) || 1,
+                                    originalPRQuantity: Number(pr.quantity) || 1
+                                }]
+                            }],
+                            linkedPRs: [{
+                                prId: pr._id,
+                                prNumber: pr.requestNumber,
+                                allocatedQuantity: Number(pr.quantity) || 1,
+                                originalPRQuantity: Number(pr.quantity) || 1
+                            }],
+                            notes: pr.notes || "",
+                            editHistory: [{
+                                editedAt: new Date(),
+                                editedBy: pr.requestedBy?._id || pr.requestedBy,
+                                editorRole: "SYSTEM",
+                                editorName: "System",
+                                action: "CREATED",
+                                previousStatus: "NONE",
+                                newStatus: "MANAGER_APPROVED",
+                                changesSummary: `PR Quotation ${poNumber} linked to Released PR ${pr.requestNumber}.`,
+                                notes: pr.notes || ""
+                            }]
+                        });
+                        await newPO.save();
+
+                        if (!pr.linkedPOs) pr.linkedPOs = [];
+                        pr.linkedPOs.push({
+                            poId: newPO._id,
+                            poNumber: newPO.purchaseOrderNumber,
+                            allocatedQuantity: Number(pr.quantity) || 1,
+                            allocatedAt: new Date()
+                        });
+                        await pr.save();
+                    }
+                }
+            } catch (syncErr) {
+                console.error("Error auto-syncing released PRs to PO quotations:", syncErr);
+            }
+        }
+
         // 2. Execute with queryHelper (Repository takes care of search/filter/sort/pagination)
         const result = await getPurchaseOrdersService(req.query, { baseQuery });
 
@@ -446,7 +520,80 @@ const getPurchaseOrders = async (req, res) => {
  */
 const getPurchaseOrderById = async (req, res) => {
     try {
-        const po = await getPurchaseOrderByIdService(req.params.id);
+        let po = await getPurchaseOrderByIdService(req.params.id);
+        if (!po) {
+            po = await PurchaseOrder.findOne({ "linkedPRs.prId": req.params.id })
+                .populate("supplier")
+                .populate("branch")
+                .populate("createdBy", "fullName name email role")
+                .populate("approvedBy", "fullName name email role")
+                .populate("editHistory.editedBy", "fullName name email role");
+        }
+
+        if (!po) {
+            // Check if it's a Workshop Procurement request ID directly
+            try {
+                const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+                const pr = await WorkshopProcurement.findById(req.params.id).populate("part branch requestedBy");
+                if (pr && ["RELEASED", "APPROVED", "WAITING_QUOTATION", "PARTIALLY_CONVERTED"].includes(pr.status)) {
+                    const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+                    const poNumber = `PO-${Date.now()}-${randomString}`;
+                    po = new PurchaseOrder({
+                        purchaseOrderNumber: poNumber,
+                        branch: pr.branch?._id || pr.branch,
+                        purpose: "Spare Parts",
+                        status: "MANAGER_APPROVED",
+                        createdBy: pr.requestedBy?._id || pr.requestedBy,
+                        creatorRole: pr.requestedByRole || "WORKSHOPSTAFF",
+                        totalAmount: Number(pr.quantity || 1) * Number(pr.part?.unitCost || 0),
+                        items: [{
+                            itemName: pr.partName || pr.part?.partName || "Spare Part",
+                            quantity: Number(pr.quantity) || 1,
+                            unitPrice: Number(pr.part?.unitCost) || 0,
+                            description: pr.notes || pr.partNumber || "",
+                            images: [pr.fullSizePhoto, pr.closeUpPhoto].filter(Boolean),
+                            prAllocations: [{
+                                prId: pr._id,
+                                prNumber: pr.requestNumber,
+                                allocatedQuantity: Number(pr.quantity) || 1,
+                                originalPRQuantity: Number(pr.quantity) || 1
+                            }]
+                        }],
+                        linkedPRs: [{
+                            prId: pr._id,
+                            prNumber: pr.requestNumber,
+                            allocatedQuantity: Number(pr.quantity) || 1,
+                            originalPRQuantity: Number(pr.quantity) || 1
+                        }],
+                        notes: pr.notes || "",
+                        editHistory: [{
+                            editedAt: new Date(),
+                            editedBy: req.user.id,
+                            editorRole: req.user.role,
+                            editorName: req.user.fullName || req.user.name || "System",
+                            action: "CREATED",
+                            previousStatus: "NONE",
+                            newStatus: "MANAGER_APPROVED",
+                            changesSummary: `PR Quotation ${poNumber} linked to Released PR ${pr.requestNumber}.`,
+                            notes: pr.notes || ""
+                        }]
+                    });
+                    await po.save();
+
+                    if (!pr.linkedPOs) pr.linkedPOs = [];
+                    pr.linkedPOs.push({
+                        poId: po._id,
+                        poNumber: po.purchaseOrderNumber,
+                        allocatedQuantity: Number(pr.quantity) || 1,
+                        allocatedAt: new Date()
+                    });
+                    await pr.save();
+                }
+            } catch (prErr) {
+                console.error("Error creating PO quotation from PR:", prErr);
+            }
+        }
+
         if (!po) {
             return res.status(404).json({ success: false, message: "Purchase Order not found" });
         }
@@ -1065,7 +1212,7 @@ const reviewRevision = async (req, res) => {
             po.isRevisionAllowed = true;
             po.revisionDecisionNote = note || "Revision approved. Merchandiser may edit line items.";
         } else {
-            po.status = "MANAGER_APPROVED";
+            po.status = "REJECTED";
             po.isRevisionAllowed = false;
             po.revisionDecisionNote = note || "Revision request denied by Finance.";
         }
