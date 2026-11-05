@@ -8,9 +8,24 @@ const purchaseOrderSchema = new mongoose.Schema(
             required: true,
             unique: true,
         },
+        officialPONumber: {
+            type: String,
+        },
         status: {
             type: String,
-            enum: ["REQUESTED", "MANAGER_APPROVED", "WAITING", "APPROVED", "REJECTED", "DISPOSED", "PENDING_FINANCE_APPROVAL", "RECEIVED"],
+            enum: [
+                "REQUESTED", 
+                "MANAGER_APPROVED", 
+                "WAITING", 
+                "REVISION_REQUESTED", 
+                "REVISION_APPROVED", 
+                "PENDING_FINANCE_APPROVAL", 
+                "APPROVED", 
+                "PO_ISSUED", 
+                "REJECTED", 
+                "DISPOSED", 
+                "RECEIVED"
+            ],
             default: "WAITING",
         },
         purpose: {
@@ -27,6 +42,14 @@ const purchaseOrderSchema = new mongoose.Schema(
                 unitPrice: { type: Number, required: true },
                 accountId: { type: mongoose.Schema.Types.ObjectId, ref: "AccountingCode" },
                 merchandiserPrice: { type: Number },
+                prAllocations: [
+                    {
+                        prId: { type: mongoose.Schema.Types.ObjectId, ref: "WorkshopProcurement" },
+                        prNumber: { type: String },
+                        allocatedQuantity: { type: Number, default: 0 },
+                        originalPRQuantity: { type: Number }
+                    }
+                ],
                 images: {
                     type: [String],
                     validate: {
@@ -37,6 +60,14 @@ const purchaseOrderSchema = new mongoose.Schema(
                     },
                     default: []
                 }
+            }
+        ],
+        linkedPRs: [
+            {
+                prId: { type: mongoose.Schema.Types.ObjectId, ref: "WorkshopProcurement" },
+                prNumber: { type: String },
+                allocatedQuantity: { type: Number, default: 0 },
+                originalPRQuantity: { type: Number }
             }
         ],
         totalAmount: {
@@ -59,7 +90,29 @@ const purchaseOrderSchema = new mongoose.Schema(
         approvalNote: {
             type: String,
         },
+        revisionReason: {
+            type: String,
+        },
+        revisionDecisionNote: {
+            type: String,
+        },
+        isRevisionAllowed: {
+            type: Boolean,
+            default: false,
+        },
+        deliveryDate: {
+            type: Date,
+        },
+        paymentTerms: {
+            type: String,
+        },
+        shippingTerms: {
+            type: String,
+        },
         description: {
+            type: String,
+        },
+        notes: {
             type: String,
         },
         purchaseOrderDate: {
@@ -92,7 +145,7 @@ const purchaseOrderSchema = new mongoose.Schema(
         creatorRole: {
             type: String,
             required: true,
-            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER],
+            enum: [ROLES.ADMIN, ROLES.OPERATIONADMIN, ROLES.FINANCEADMIN, ROLES.COUNTRYMANAGER, ROLES.BRANCHMANAGER, ROLES.OPERATIONSTAFF, ROLES.FINANCESTAFF, ROLES.WORKSHOPSTAFF, ROLES.WORKSHOPMANAGER, ROLES.MERCHENDISE],
         },
         approvedBy: {
             type: mongoose.Schema.Types.ObjectId,
@@ -117,10 +170,14 @@ const purchaseOrderSchema = new mongoose.Schema(
         editHistory: [
             {
                 editedAt: { type: Date, default: Date.now },
-                editedBy: { type: mongoose.Schema.Types.ObjectId, required: true, refPath: "editHistory.editorRole" },
-                editorRole: { type: String, required: true },
-                previousStatus: { type: String, required: true },
-                changesSummary: { type: String, required: true },
+                editedBy: { type: mongoose.Schema.Types.ObjectId },
+                editorRole: { type: String },
+                editorName: { type: String },
+                action: { type: String },
+                previousStatus: { type: String },
+                newStatus: { type: String },
+                changesSummary: { type: String },
+                notes: { type: String },
             }
         ],
     },

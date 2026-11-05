@@ -5,6 +5,7 @@ const {
     updateProcurementRequest
 } = require("../Repo/WorkshopProcurementRepo.js");
 const { ROLES } = require("../../../shared/constants/roles.js");
+const uploadToS3 = require("../../../utils/uploadToS3");
 
 const WorkshopProcurement = require("../Model/WorkshopProcurementModel.js");
 
@@ -35,10 +36,10 @@ exports.createRequest = async (req, res) => {
 
         if (req.files) {
             if (req.files.fullSizePhoto && req.files.fullSizePhoto[0]) {
-                fullSizePhoto = `/uploads/${req.files.fullSizePhoto[0].filename}`;
+                fullSizePhoto = await uploadToS3(req.files.fullSizePhoto[0], "workshop-procurement");
             }
             if (req.files.closeUpPhoto && req.files.closeUpPhoto[0]) {
-                closeUpPhoto = `/uploads/${req.files.closeUpPhoto[0].filename}`;
+                closeUpPhoto = await uploadToS3(req.files.closeUpPhoto[0], "workshop-procurement");
             }
         }
 
@@ -54,9 +55,8 @@ exports.createRequest = async (req, res) => {
             status: "PENDING"
         };
 
-        if (req.user.role === ROLES.WORKSHOPMANAGER || req.user.role === ROLES.BRANCHMANAGER) {
-            data.status = "WAITING_QUOTATION";
-        }
+        data.remainingQuantity = Number(data.quantity) || 1;
+        data.fulfilledQuantity = 0;
 
         if (!data.branch) {
             return res.status(400).json({ success: false, message: "Branch ID is required" });
@@ -72,6 +72,14 @@ exports.createRequest = async (req, res) => {
             newStatus: data.status,
             changesSummary: `Purchase request ${reqNumber} created by ${data.technicianName} with status: ${data.status}.`
         }];
+
+                const validCategories = ["Engine", "Electrical", "Suspension", "Lubricants", "Consumables", "Body", "Tyres", "Parts", "Spare Parts", "Other"];
+        if (data.category && !validCategories.includes(data.category)) {
+            data.category = "Other";
+        }
+        if (!data.category) {
+            data.category = "Other";
+        }
 
         const request = await addProcurementRequest(data);
         res.status(201).json({ success: true, data: request });
@@ -165,14 +173,17 @@ exports.approveRequest = async (req, res) => {
         if (transportationMode) request.transportationMode = transportationMode;
 
         // Decision logic
-        if (status === "APPROVED") {
-            request.status = "WAITING_QUOTATION";
+        if (status === "APPROVED" || status === "RELEASED") {
+            request.status = "RELEASED";
+            request.remainingQuantity = request.remainingQuantity ?? request.quantity;
+            request.fulfilledQuantity = request.fulfilledQuantity ?? 0;
             request.approvedBy = req.user.id;
             request.approvedByRole = req.user.role;
             request.isInformationVerified = isInformationVerified ?? true;
             request.verifiedBy = req.user.id;
             request.verifiedByName = req.user.fullName || req.user.name || 'Workshop Manager';
             request.verifiedAt = new Date();
+            request.releasedAt = new Date();
         } else if (status === "RETURNED_TO_TECHNICIAN") {
             request.status = "RETURNED_TO_TECHNICIAN";
             request.returnReason = returnReason || "Details need correction by technician";
@@ -181,7 +192,7 @@ exports.approveRequest = async (req, res) => {
             request.rejectionReason = rejectionReason || "Request rejected by Workshop Manager";
         }
 
-        const actionText = status === "APPROVED" ? "APPROVED" : status === "RETURNED_TO_TECHNICIAN" ? "RETURNED TO TECHNICIAN" : "REJECTED";
+        const actionText = (status === "APPROVED" || status === "RELEASED") ? "APPROVED & RELEASED" : status === "RETURNED_TO_TECHNICIAN" ? "RETURNED TO TECHNICIAN" : "REJECTED";
         const historyRecord = {
             editedAt: new Date(),
             editedBy: req.user.id,
@@ -190,7 +201,7 @@ exports.approveRequest = async (req, res) => {
             action: actionText,
             previousStatus: previousStatus,
             newStatus: request.status,
-            changesSummary: `Workshop Manager decision: ${actionText}. Sourcing mode: ${request.transportationMode || 'SEA'}, Quality: ${request.qualityPreference || 'GENUINE_OEM'}.`,
+            changesSummary: `Workshop Manager decision: ${actionText}. Released to Merchandiser. Sourcing mode: ${request.transportationMode || 'SEA'}, Quality: ${request.qualityPreference || 'GENUINE_OEM'}.`,
             notes: returnReason || rejectionReason || notes || ''
         };
 
@@ -220,10 +231,10 @@ exports.resubmitRequest = async (req, res) => {
         // Handle uploaded photos if present
         if (req.files) {
             if (req.files.fullSizePhoto && req.files.fullSizePhoto[0]) {
-                request.fullSizePhoto = `/uploads/${req.files.fullSizePhoto[0].filename}`;
+                request.fullSizePhoto = await uploadToS3(req.files.fullSizePhoto[0], "workshop-procurement");
             }
             if (req.files.closeUpPhoto && req.files.closeUpPhoto[0]) {
-                request.closeUpPhoto = `/uploads/${req.files.closeUpPhoto[0].filename}`;
+                request.closeUpPhoto = await uploadToS3(req.files.closeUpPhoto[0], "workshop-procurement");
             }
         }
 

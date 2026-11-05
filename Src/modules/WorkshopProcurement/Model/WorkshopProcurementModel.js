@@ -35,7 +35,7 @@ const WorkshopProcurementSchema = new mongoose.Schema(
         },
         category: {
             type: String,
-            enum: ["Engine", "Electrical", "Suspension", "Lubricants", "Consumables", "Body", "Tyres", "Other"],
+            enum: ["Engine", "Electrical", "Suspension", "Lubricants", "Consumables", "Body", "Tyres", "Parts", "Spare Parts", "Other"],
             default: "Other",
         },
         unitOfMeasure: {
@@ -74,18 +74,37 @@ const WorkshopProcurementSchema = new mongoose.Schema(
             required: true,
             min: 1,
         },
+        fulfilledQuantity: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        remainingQuantity: {
+            type: Number,
+            min: 0,
+        },
+        linkedPOs: [
+            {
+                poId: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseOrder" },
+                poNumber: { type: String },
+                allocatedQuantity: { type: Number, default: 0 },
+                allocatedAt: { type: Date, default: Date.now },
+            }
+        ],
         status: {
             type: String,
             enum: [
                 "PENDING",
                 "RETURNED_TO_TECHNICIAN",
                 "APPROVED",
+                "RELEASED",
                 "PENDING_FINANCE_APPROVAL",
                 "COST_APPROVED",
                 "IN_TRANSIT",
                 "RECEIVED",
                 "REJECTED",
                 "CONVERTED_TO_PO",
+                "PARTIALLY_CONVERTED",
                 "WAITING_QUOTATION"
             ],
             default: "PENDING",
@@ -153,6 +172,9 @@ const WorkshopProcurementSchema = new mongoose.Schema(
             type: String,
         },
         verifiedAt: {
+            type: Date,
+        },
+        releasedAt: {
             type: Date,
         },
         supplier: {

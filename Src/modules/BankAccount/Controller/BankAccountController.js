@@ -1646,7 +1646,8 @@ exports.getBankTransactions = async (req, res, next) => {
         const transactions = await LedgerEntry.find(query)
             .sort({ entryDate: sortOrder, _id: sortOrder })
             .skip(skip)
-            .limit(limitNum);
+            .limit(limitNum)
+            .lean();
 
         // Gather all manualJournal IDs
         const manualJournalIds = transactions
@@ -1661,7 +1662,7 @@ exports.getBankTransactions = async (req, res, next) => {
                     populate: {
                         path: "parentAccount"
                     }
-                });
+                }).lean();
 
             // Group by manualJournal ID
             partnerEntries.forEach(entry => {
@@ -1679,46 +1680,42 @@ exports.getBankTransactions = async (req, res, next) => {
         const BankTransaction = require("../Model/BankTransactionModel");
         const txIds = transactions.map(tx => tx.transactionId).filter(Boolean);
 
-        // Build fallback OR conditions for matching by date, amount, type in case transactionId is missing
-        const fallbackOrConditions = transactions.map(tx => {
-            const dateStart = new Date(tx.entryDate);
-            dateStart.setMinutes(dateStart.getMinutes() - 1);
-            const dateEnd = new Date(tx.entryDate);
-            dateEnd.setMinutes(dateEnd.getMinutes() + 1);
-
-            return {
-                amount: tx.amount,
-                type: tx.type,
-                entryDate: { $gte: dateStart, $lte: dateEnd }
-            };
-        });
-
-        const btOrConditions = [];
-        if (txIds.length > 0) {
-            btOrConditions.push({ transactionId: { $in: txIds } });
-        }
-        if (fallbackOrConditions.length > 0) {
-            btOrConditions.push(...fallbackOrConditions);
+        // Avoid building massive 25,000 $or branches which chokes MongoDB query planner
+        const btQuery = { bankAccount: id };
+        if (query.entryDate) {
+            btQuery.entryDate = query.entryDate;
+        } else if (txIds.length > 0) {
+            btQuery.transactionId = { $in: txIds };
         }
 
-        let bankTransactions = [];
-        if (btOrConditions.length > 0) {
-            bankTransactions = await BankTransaction.find({
-                bankAccount: id,
-                $or: btOrConditions
-            });
+        const bankTransactions = await BankTransaction.find(btQuery).lean();
+
+        // Build O(1) fast lookup index maps for bankTransactions
+        const btByTxId = new Map();
+        const btByApproxKey = new Map();
+        for (const bt of bankTransactions) {
+            if (bt.transactionId) {
+                btByTxId.set(String(bt.transactionId).trim(), bt);
+            }
+            const approxKey = `${Number(bt.amount).toFixed(2)}_${bt.type}`;
+            if (!btByApproxKey.has(approxKey)) {
+                btByApproxKey.set(approxKey, []);
+            }
+            btByApproxKey.get(approxKey).push(bt);
         }
 
         const findBankTx = (tx) => {
             if (tx.transactionId) {
-                const match = bankTransactions.find(bt => bt.transactionId === tx.transactionId);
+                const match = btByTxId.get(String(tx.transactionId).trim());
                 if (match) return match;
             }
-            return bankTransactions.find(bt =>
-                Math.abs(bt.amount - tx.amount) < 0.01 &&
-                bt.type === tx.type &&
-                Math.abs(new Date(bt.entryDate).getTime() - new Date(tx.entryDate).getTime()) < 60000
-            );
+            const approxKey = `${Number(tx.amount).toFixed(2)}_${tx.type}`;
+            const candidates = btByApproxKey.get(approxKey);
+            if (candidates && candidates.length > 0) {
+                const txTime = new Date(tx.entryDate).getTime();
+                return candidates.find(bt => Math.abs(new Date(bt.entryDate).getTime() - txTime) < 60000) || null;
+            }
+            return null;
         };
 
         const InvoiceSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
@@ -1726,25 +1723,47 @@ exports.getBankTransactions = async (req, res, next) => {
         const Supplier = require("../../Supplier/Model/SupplierModel");
 
         const contactIds = transactions.map(t => t.contact).filter(Boolean);
+        const txMongoIds = transactions.map(t => t._id);
+
+        const setOffOrConditions = [
+            { primaryLedgerEntry: { $in: txMongoIds } },
+            { bankTransaction: { $in: txMongoIds } }
+        ];
+        if (manualJournalIds.length > 0) {
+            setOffOrConditions.push({ ledgerJournal: { $in: manualJournalIds } });
+        }
+        if (txIds.length > 0) {
+            setOffOrConditions.push({ transactionId: { $in: txIds } });
+        }
+
         const [customersList, suppliersList, setOffHistories] = await Promise.all([
             Customer.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
             Supplier.find({ _id: { $in: contactIds } }, "name companyName displayName").lean(),
-            InvoiceSetOffHistory.find({
-                $or: [
-                    { primaryLedgerEntry: { $in: transactions.map(t => t._id) } },
-                    { bankTransaction: { $in: transactions.map(t => t._id) } },
-                    { ledgerJournal: { $in: manualJournalIds } },
-                    { transactionId: { $in: txIds } }
-                ]
-            }).populate("customer", "name companyName displayName").populate("supplier", "name companyName displayName").lean()
+            InvoiceSetOffHistory.find({ $or: setOffOrConditions })
+                .populate("customer", "name companyName displayName")
+                .populate("supplier", "name companyName displayName")
+                .lean()
         ]);
 
         const customerMap = new Map(customersList.map(c => [String(c._id), c.name || c.companyName || c.displayName || ""]));
         const supplierMap = new Map(suppliersList.map(s => [String(s._id), s.name || s.companyName || s.displayName || ""]));
 
+        // Build O(1) History index maps to eliminate O(N^2) linear searching
+        const historyByLedgerEntry = new Map();
+        const historyByBankTx = new Map();
+        const historyByJournal = new Map();
+        const historyByTxId = new Map();
+
+        for (const h of setOffHistories) {
+            if (h.primaryLedgerEntry) historyByLedgerEntry.set(String(h.primaryLedgerEntry), h);
+            if (h.bankTransaction) historyByBankTx.set(String(h.bankTransaction), h);
+            if (h.ledgerJournal) historyByJournal.set(String(h.ledgerJournal), h);
+            if (h.transactionId) historyByTxId.set(String(h.transactionId).trim(), h);
+        }
+
         // Map transactions to mimic LedgerEntry fields for frontend compatibility
         const mappedTransactions = transactions.map(tx => {
-            const obj = tx.toObject();
+            const obj = { ...tx };
             obj.date = tx.entryDate;
             obj.referenceId = tx.transactionId; // mapping transactionId to referenceId
             obj.bankAccount = account._id;
@@ -1767,7 +1786,7 @@ exports.getBankTransactions = async (req, res, next) => {
                 }
             }
 
-            // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists
+            // Enrich customer, invoice, and offset accounting code if matching BankTransaction exists (O(1) lookup)
             const bt = findBankTx(tx);
             if (bt) {
                 obj.customer = bt.customer || obj.customer;
@@ -1778,13 +1797,11 @@ exports.getBankTransactions = async (req, res, next) => {
                 obj.setOffSummary = bt.setOffSummary || obj.setOffSummary;
             }
 
-            // Enrich from InvoiceSetOffHistory
-            const history = setOffHistories.find(h =>
-                (h.primaryLedgerEntry && String(h.primaryLedgerEntry) === String(tx._id)) ||
-                (h.bankTransaction && String(h.bankTransaction) === String(tx._id)) ||
-                (h.ledgerJournal && String(h.ledgerJournal) === String(tx.manualJournal)) ||
-                (tx.transactionId && h.transactionId && String(h.transactionId) === String(tx.transactionId))
-            );
+            // Enrich from InvoiceSetOffHistory (O(1) instant lookup)
+            const history = historyByLedgerEntry.get(String(tx._id)) ||
+                            historyByBankTx.get(String(tx._id)) ||
+                            (tx.manualJournal ? historyByJournal.get(String(tx.manualJournal)) : null) ||
+                            (tx.transactionId ? historyByTxId.get(String(tx.transactionId).trim()) : null);
 
             if (history) {
                 if (history.targetType === "SUPPLIER" || history.supplier) {

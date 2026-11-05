@@ -54,8 +54,7 @@ exports.getPurchaseOrderByIdService = async (id) => {
             .populate("supplier", "name contactPerson email")
             .populate("createdBy", "name email fullName")
             .populate("approvedBy", "name email fullName")
-            .populate("items.accountId")
-            .populate("editHistory.editedBy", "name email fullName role");
+            .populate("items.accountId");
     } catch (error) {
         throw error;
     }

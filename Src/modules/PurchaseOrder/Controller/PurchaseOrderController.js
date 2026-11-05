@@ -11,6 +11,7 @@ const { getSetting } = require("../../SystemSettings/Repo/SystemSettingsRepo.js"
 const uploadToS3 = require("../../../utils/uploadToS3");
 const uploadLocal = require("../../../utils/uploadLocal");
 const PurchaseOrderService = require("../Service/PurchaseOrderService.js");
+const PurchaseOrder = require("../Model/PurchaseOrderModel.js");
 
 // ─── Role Hierarchy Levels ────────────────────────────────────────────
 const ROLE_LEVEL = {
@@ -140,24 +141,248 @@ const addPurchaseOrder = async (req, res) => {
         poData.createdBy = req.user.id;
         poData.creatorRole = req.user.role;
 
+        // ─── 1. PRE-VALIDATE LINKED PR ALLOCATION LIMITS ────────────────────────
+        const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+        const prAllocationsMap = new Map();
+
+        // Check item-level allocations and description fallback first
+        if (Array.isArray(poData.items) && poData.items.length > 0) {
+            poData.items.forEach(it => {
+                if (Array.isArray(it.prAllocations) && it.prAllocations.length > 0) {
+                    it.prAllocations.forEach(alloc => {
+                        const key = alloc.prId ? String(alloc.prId) : (alloc.prNumber ? String(alloc.prNumber).trim() : null);
+                        if (key) {
+                            const existing = prAllocationsMap.get(key) || { alloc, totalQty: 0 };
+                            existing.totalQty += (Number(alloc.allocatedQuantity) || Number(it.quantity) || 0);
+                            prAllocationsMap.set(key, existing);
+                        }
+                    });
+                } else if (it.description) {
+                    // Fallback to description regex: Requisition #PR-OW-11-2026-00002
+                    const match = it.description.match(/Requisition\s*#?\s*(PR-OW-[\w-]+)/i);
+                    if (match && match[1]) {
+                        const prNum = match[1].trim();
+                        const existing = prAllocationsMap.get(prNum) || { alloc: { prNumber: prNum }, totalQty: 0 };
+                        existing.totalQty += (Number(it.quantity) || 0);
+                        prAllocationsMap.set(prNum, existing);
+                    }
+                }
+            });
+        }
+
+        // Fallback to top-level linkedPRs if no item allocations detected
+        if (prAllocationsMap.size === 0 && Array.isArray(poData.linkedPRs) && poData.linkedPRs.length > 0) {
+            poData.linkedPRs.forEach(alloc => {
+                const key = alloc.prId ? String(alloc.prId) : (alloc.prNumber ? String(alloc.prNumber).trim() : null);
+                if (key) {
+                    const existing = prAllocationsMap.get(key) || { alloc, totalQty: 0 };
+                    existing.totalQty += (Number(alloc.allocatedQuantity) || 0);
+                    prAllocationsMap.set(key, existing);
+                }
+            });
+        }
+
+        const prsToUpdate = [];
+        for (const [key, { alloc, totalQty }] of prAllocationsMap.entries()) {
+            const query = alloc.prId ? { _id: alloc.prId } : { requestNumber: alloc.prNumber };
+            const pr = await WorkshopProcurement.findOne(query);
+            if (!pr) {
+                return res.status(404).json({
+                    success: false,
+                    message: `Purchase Requisition "${alloc.prNumber || alloc.prId}" not found.`
+                });
+            }
+
+            // Only APPROVED / RELEASED / WAITING_QUOTATION / PARTIALLY_CONVERTED can be used
+            const validStatuses = ["APPROVED", "RELEASED", "WAITING_QUOTATION", "PARTIALLY_CONVERTED"];
+            if (!validStatuses.includes(pr.status)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Requisition "${pr.requestNumber}" is in "${pr.status}" status. Only APPROVED or RELEASED requisitions can be converted into Purchase Orders.`
+                });
+            }
+
+            const currentRemaining = pr.remainingQuantity !== undefined
+                ? Number(pr.remainingQuantity)
+                : (Number(pr.quantity) - (Number(pr.fulfilledQuantity) || 0));
+
+            if (currentRemaining <= 0 || pr.status === "CONVERTED_TO_PO") {
+                return res.status(400).json({
+                    success: false,
+                    message: `Requisition "${pr.requestNumber}" has already reached its total unit limit (${pr.fulfilledQuantity || pr.quantity}/${pr.quantity} units fulfilled). No further Purchase Orders can be created for this Requisition.`
+                });
+            }
+
+            if (totalQty > currentRemaining) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Cannot allocate ${totalQty} units for Requisition "${pr.requestNumber}". Only ${currentRemaining} unit(s) remaining out of ${pr.quantity} total units.`
+                });
+            }
+
+            prsToUpdate.push({ pr, allocQty: totalQty });
+        }
+
         // Set status based on role
         if (req.user.role === ROLES.ADMIN) {
-            poData.status = "APPROVED";
+            poData.status = req.body.status || "APPROVED";
             poData.approvedBy = req.user.id;
             poData.approverRole = req.user.role;
+        } else if (req.user.role === ROLES.MERCHENDISE) {
+            poData.status = req.body.status || "PO_ISSUED";
+            if (poData.status === "PO_ISSUED" && !poData.officialPONumber) {
+                const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+                poData.officialPONumber = `PO-OFFICIAL-${Date.now()}-${randomString}`;
+            }
         } else if (req.user.role === ROLES.WORKSHOPSTAFF) {
             poData.status = "REQUESTED";
         } else if (req.user.role === ROLES.WORKSHOPMANAGER) {
             poData.status = "MANAGER_APPROVED";
         } else {
-            poData.status = "WAITING";
+            poData.status = req.body.status || "WAITING";
         }
 
+        if ((!poData.linkedPRs || poData.linkedPRs.length === 0) && prsToUpdate.length > 0) {
+            poData.linkedPRs = prsToUpdate.map(({ pr, allocQty }) => ({
+                prId: pr._id,
+                prNumber: pr.requestNumber,
+                allocatedQuantity: allocQty,
+                originalPRQuantity: pr.quantity
+            }));
+        }
+
+        // Initialize Audit History with Creation Log
+        const creatorName = req.user.fullName || req.user.name || (req.user.role ? req.user.role.replace(/_/g, ' ') : 'Workshop Manager');
+        const linkedPRNames = prsToUpdate.length > 0
+            ? prsToUpdate.map(({ pr, allocQty }) => `${pr.requestNumber} (${allocQty} unit(s))`).join(', ')
+            : (Array.isArray(poData.linkedPRs) && poData.linkedPRs.length > 0 ? poData.linkedPRs.map(p => p.prNumber).join(', ') : '');
+
+        const linkedPRSummary = linkedPRNames ? ` Connected to PR(s): ${linkedPRNames}.` : '';
+
+        poData.editHistory = [{
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: creatorName,
+            action: "CREATED",
+            previousStatus: "NONE",
+            newStatus: poData.status,
+            changesSummary: `PR Quotation ${poData.purchaseOrderNumber} created by ${creatorName} (${req.user.role}) with status: ${poData.status}.${linkedPRSummary}`,
+            notes: poData.notes || ''
+        }];
+
         const newPO = await addPurchaseOrderService(poData);
+
+        // Update linked PRs atomically
+        try {
+            for (const { pr, allocQty } of prsToUpdate) {
+                const prevFulfilled = Number(pr.fulfilledQuantity) || 0;
+                const newFulfilled = prevFulfilled + allocQty;
+                const newRemaining = Math.max(0, (Number(pr.quantity) || 0) - newFulfilled);
+
+                pr.fulfilledQuantity = newFulfilled;
+                pr.remainingQuantity = newRemaining;
+                if (newRemaining === 0) {
+                    pr.status = "CONVERTED_TO_PO";
+                } else {
+                    pr.status = "PARTIALLY_CONVERTED";
+                }
+
+                if (!pr.linkedPOs) pr.linkedPOs = [];
+                pr.linkedPOs.push({
+                    poId: newPO._id,
+                    poNumber: newPO.purchaseOrderNumber,
+                    allocatedQuantity: allocQty,
+                    allocatedAt: new Date()
+                });
+                await pr.save();
+            }
+        } catch (allocErr) {
+            console.error("[PurchaseOrderController] Error updating linked PR allocations:", allocErr);
+        }
+
         return res.status(201).json({ success: true, data: newPO });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
+};
+
+const ensureLinkedPRs = (po) => {
+    if (!po) return po;
+    const poObj = po.toObject ? po.toObject() : po;
+
+    // 1. Ensure linkedPRs
+    if (!Array.isArray(poObj.linkedPRs) || poObj.linkedPRs.length === 0) {
+        const prMap = new Map();
+        if (Array.isArray(poObj.items)) {
+            poObj.items.forEach(it => {
+                if (Array.isArray(it.prAllocations)) {
+                    it.prAllocations.forEach(alloc => {
+                        const num = alloc.prNumber || alloc.prId;
+                        if (num && !prMap.has(String(num))) {
+                            prMap.set(String(num), {
+                                prId: alloc.prId,
+                                prNumber: alloc.prNumber || String(alloc.prId),
+                                allocatedQuantity: alloc.allocatedQuantity || it.quantity || 0,
+                                originalPRQuantity: alloc.originalPRQuantity || 0
+                            });
+                        }
+                    });
+                }
+                if (it.description) {
+                    const match = it.description.match(/(PR-OW-[\w-]+)/i);
+                    if (match && match[1]) {
+                        const prNum = match[1].trim();
+                        if (!prMap.has(prNum)) {
+                            prMap.set(prNum, {
+                                prNumber: prNum,
+                                allocatedQuantity: it.quantity || 0
+                            });
+                        }
+                    }
+                }
+            });
+        }
+
+        if (poObj.purchaseOrderNumber && poObj.purchaseOrderNumber.includes("PR-OW-")) {
+            const match = poObj.purchaseOrderNumber.match(/(PR-OW-[\w-]+)/i);
+            if (match && match[1] && !prMap.has(match[1])) {
+                prMap.set(match[1], {
+                    prNumber: match[1],
+                    allocatedQuantity: 0
+                });
+            }
+        }
+
+        if (prMap.size > 0) {
+            poObj.linkedPRs = Array.from(prMap.values());
+            PurchaseOrder.updateOne({ _id: poObj._id }, { $set: { linkedPRs: poObj.linkedPRs } }).catch(() => {});
+        }
+    }
+
+    // 2. Ensure initial creation editHistory log if missing
+    if (!Array.isArray(poObj.editHistory) || poObj.editHistory.length === 0) {
+        const creatorName = poObj.createdBy?.fullName || poObj.createdBy?.name || (poObj.creatorRole ? poObj.creatorRole.replace(/_/g, ' ') : 'Workshop Manager');
+        const linkedPRNames = Array.isArray(poObj.linkedPRs) && poObj.linkedPRs.length > 0
+            ? poObj.linkedPRs.map(p => p.prNumber).join(', ')
+            : '';
+        const linkedSummary = linkedPRNames ? ` Connected to PR(s): ${linkedPRNames}.` : '';
+
+        poObj.editHistory = [{
+            editedAt: poObj.createdAt || new Date(),
+            editedBy: poObj.createdBy?._id || poObj.createdBy,
+            editorRole: poObj.creatorRole || 'WORKSHOPMANAGER',
+            editorName: creatorName,
+            action: 'CREATED',
+            previousStatus: 'NONE',
+            newStatus: poObj.status || 'WAITING',
+            changesSummary: `PR Quotation ${poObj.purchaseOrderNumber} created by ${creatorName} with status: ${poObj.status || 'WAITING'}.${linkedSummary}`,
+            notes: poObj.notes || ''
+        }];
+        PurchaseOrder.updateOne({ _id: poObj._id }, { $set: { editHistory: poObj.editHistory } }).catch(() => {});
+    }
+
+    return poObj;
 };
 
 /**
@@ -203,7 +428,7 @@ const getPurchaseOrders = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: result.data,
+            data: (result.data || []).map(ensureLinkedPRs),
             pagination: {
                 total: result.total,
                 page: result.page,
@@ -226,7 +451,7 @@ const getPurchaseOrderById = async (req, res) => {
             return res.status(404).json({ success: false, message: "Purchase Order not found" });
         }
 
-        let poObj = po.toObject ? po.toObject() : po;
+        let poObj = ensureLinkedPRs(po);
 
         try {
             if (po.purchaseOrderNumber && po.purchaseOrderNumber.startsWith("PO-PR-")) {
@@ -371,11 +596,16 @@ const approvePurchaseOrder = async (req, res) => {
             currentPO.supplier = supplier;
         }
 
+        const approverName = req.user.fullName || req.user.name || (req.user.role ? req.user.role.replace(/_/g, ' ') : 'Approver');
         const historyRecord = {
             editedAt: new Date(),
             editedBy: approverId,
             editorRole: approverRole,
+            editorName: approverName,
+            action: status === "APPROVED" ? "APPROVED" : status === "REJECTED" ? "REJECTED" : status === "RECEIVED" ? "RECEIVED" : status,
             previousStatus: previousStatus,
+            newStatus: status,
+            notes: note || '',
             changesSummary: ""
         };
 
@@ -386,7 +616,7 @@ const approvePurchaseOrder = async (req, res) => {
                 currentPO.totalAmount = currentPO.merchandiserTotalAmount;
                 historyRecord.changesSummary = `Approved merchandiser pricing. Total amount updated from original $${currentPO.originalTotalAmount} to proposed $${currentPO.totalAmount}.`;
             } else {
-                historyRecord.changesSummary = `Approved Purchase Order.`;
+                historyRecord.changesSummary = `Approved Purchase Order quotation.`;
             }
 
             currentPO.items = currentPO.items.map(item => {
@@ -397,11 +627,31 @@ const approvePurchaseOrder = async (req, res) => {
             });
         } else if (status === "REJECTED") {
             currentPO.rejectionNote = note;
-            historyRecord.changesSummary = `Rejected merchandiser proposed pricing. Note: "${note || 'No note provided'}"`;
+            historyRecord.changesSummary = `Revision requested for quotation. Note: "${note || 'No note provided'}"`;
         } else if (status === "RECEIVED") {
             historyRecord.changesSummary = `Purchase Order marked as RECEIVED.`;
         } else {
             historyRecord.changesSummary = `Status updated to ${status}.`;
+        }
+
+        if (!Array.isArray(currentPO.editHistory)) {
+            currentPO.editHistory = [];
+        }
+
+        // If no prior history existed, add the creation entry first
+        if (currentPO.editHistory.length === 0) {
+            const creatorName = currentPO.createdBy?.fullName || currentPO.createdBy?.name || (currentPO.creatorRole ? currentPO.creatorRole.replace(/_/g, ' ') : 'Workshop Manager');
+            currentPO.editHistory.push({
+                editedAt: currentPO.createdAt || new Date(),
+                editedBy: currentPO.createdBy?._id || currentPO.createdBy,
+                editorRole: currentPO.creatorRole || 'WORKSHOPMANAGER',
+                editorName: creatorName,
+                action: 'CREATED',
+                previousStatus: 'NONE',
+                newStatus: previousStatus,
+                changesSummary: `PR Quotation ${currentPO.purchaseOrderNumber} created by ${creatorName} with status: ${previousStatus}.`,
+                notes: currentPO.notes || ''
+            });
         }
 
         currentPO.editHistory.push(historyRecord);
@@ -728,7 +978,7 @@ const getEligiblePurchaseOrdersForBilling = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            data: result.data,
+            data: (result.data || []).map(ensureLinkedPRs),
             pagination: {
                 total: result.total,
                 page: result.page,
@@ -755,6 +1005,209 @@ const bulkUploadPurchaseOrders = async (req, res) => {
     }
 };
 
+/**
+ * Merchandiser requests revision from Finance Admin / Admin.
+ * Status becomes REVISION_REQUESTED.
+ */
+const requestRevision = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const po = await PurchaseOrder.findById(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        const previousStatus = po.status;
+        po.status = "REVISION_REQUESTED";
+        po.revisionReason = reason;
+
+        const userName = req.user.fullName || req.user.name || "Merchandiser";
+        if (!Array.isArray(po.editHistory)) po.editHistory = [];
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: userName,
+            action: "REVISION_REQUESTED",
+            previousStatus,
+            newStatus: "REVISION_REQUESTED",
+            changesSummary: `Revision requested by ${userName}. Reason: "${reason}". Sent to Finance for review.`,
+            notes: reason,
+        });
+
+        await po.save();
+        return res.status(200).json({ success: true, data: ensureLinkedPRs(po), message: "Revision requested successfully" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Finance Admin / Admin reviews revision request.
+ * If APPROVE: status becomes REVISION_APPROVED, isRevisionAllowed = true.
+ * If REJECT: status returns to previous status (e.g. MANAGER_APPROVED or WAITING), isRevisionAllowed = false.
+ */
+const reviewRevision = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { decision, note } = req.body;
+        const po = await PurchaseOrder.findById(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        const previousStatus = po.status;
+        const userName = req.user.fullName || req.user.name || (req.user.role === ROLES.ADMIN ? "Admin" : "Finance Admin");
+
+        if (decision === "APPROVE") {
+            po.status = "REVISION_APPROVED";
+            po.isRevisionAllowed = true;
+            po.revisionDecisionNote = note || "Revision approved. Merchandiser may edit line items.";
+        } else {
+            po.status = "MANAGER_APPROVED";
+            po.isRevisionAllowed = false;
+            po.revisionDecisionNote = note || "Revision request denied by Finance.";
+        }
+
+        if (!Array.isArray(po.editHistory)) po.editHistory = [];
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: userName,
+            action: decision === "APPROVE" ? "REVISION_APPROVED" : "REVISION_DENIED",
+            previousStatus,
+            newStatus: po.status,
+            changesSummary: decision === "APPROVE" 
+                ? `Finance (${userName}) approved revision request. Quotation line items unlocked for editing.`
+                : `Finance (${userName}) denied revision request. Quotation remains in previous state.`,
+            notes: note || "",
+        });
+
+        await po.save();
+        return res.status(200).json({ success: true, data: ensureLinkedPRs(po), message: `Revision request ${decision === 'APPROVE' ? 'approved' : 'denied'}` });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Merchandiser resubmits modified line items & pricing to Finance Admin / Admin.
+ * Status becomes PENDING_FINANCE_APPROVAL, isRevisionAllowed = false.
+ */
+const resubmitProposal = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { items, notes } = req.body;
+        const po = await PurchaseOrder.findById(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        const previousStatus = po.status;
+        let calculatedProposedTotal = 0;
+        let calculatedBaseTotal = 0;
+
+        const updatedItems = items.map((item, idx) => {
+            const existingItem = (po.items || [])[idx] || {};
+            const qty = Number(item.quantity) || Number(existingItem.quantity) || 1;
+            const originalUnitPrice = Number(item.unitPrice) !== undefined ? Number(item.unitPrice) : Number(existingItem.unitPrice) || 0;
+            const merchPrice = item.merchandiserPrice !== undefined && item.merchandiserPrice !== null 
+                ? Number(item.merchandiserPrice) 
+                : (existingItem.merchandiserPrice !== undefined ? Number(existingItem.merchandiserPrice) : originalUnitPrice);
+
+            calculatedBaseTotal += qty * originalUnitPrice;
+            calculatedProposedTotal += qty * merchPrice;
+
+            return {
+                ...existingItem.toObject ? existingItem.toObject() : existingItem,
+                itemName: item.itemName || existingItem.itemName,
+                quantity: qty,
+                unitPrice: originalUnitPrice,
+                merchandiserPrice: merchPrice,
+                description: item.description !== undefined ? item.description : existingItem.description,
+                accountId: item.accountId || existingItem.accountId,
+                prAllocations: item.prAllocations || existingItem.prAllocations || [],
+                images: item.images || existingItem.images || []
+            };
+        });
+
+        po.items = updatedItems;
+        po.originalTotalAmount = calculatedBaseTotal;
+        po.merchandiserTotalAmount = calculatedProposedTotal;
+        po.totalAmount = calculatedProposedTotal;
+        po.status = "PENDING_FINANCE_APPROVAL";
+        po.isRevisionAllowed = false;
+        if (notes) po.notes = notes;
+
+        const userName = req.user.fullName || req.user.name || "Merchandiser";
+        if (!Array.isArray(po.editHistory)) po.editHistory = [];
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: userName,
+            action: "PROPOSAL_RESUBMITTED",
+            previousStatus,
+            newStatus: "PENDING_FINANCE_APPROVAL",
+            changesSummary: `Merchandiser (${userName}) resubmitted revised quotation line items & parts. Total proposed amount: $${calculatedProposedTotal.toFixed(2)}. Sent to Finance for approval.`,
+            notes: notes || "",
+        });
+
+        await po.save();
+        return res.status(200).json({ success: true, data: ensureLinkedPRs(po), message: "Proposal resubmitted for Finance approval" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Merchandiser issues the official Purchase Order from the approved quotation.
+ * Finalizes supplier, delivery terms, sets status to PO_ISSUED (or APPROVED).
+ */
+const issueOfficialPO = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { supplier, supplierDetails, deliveryDate, paymentTerms, shippingTerms, notes } = req.body;
+        const po = await PurchaseOrder.findById(id);
+        if (!po) {
+            return res.status(404).json({ success: false, message: "Purchase Order not found" });
+        }
+
+        const previousStatus = po.status;
+        if (supplier) po.supplier = supplier;
+        if (supplierDetails) po.supplierDetails = supplierDetails;
+        if (deliveryDate) po.deliveryDate = deliveryDate;
+        if (paymentTerms) po.paymentTerms = paymentTerms;
+        if (shippingTerms) po.shippingTerms = shippingTerms;
+        if (notes) po.notes = notes;
+
+        po.status = "PO_ISSUED";
+        const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
+        po.officialPONumber = `PO-OFFICIAL-${Date.now()}-${randomString}`;
+
+        const userName = req.user.fullName || req.user.name || "Merchandiser";
+        if (!Array.isArray(po.editHistory)) po.editHistory = [];
+        po.editHistory.push({
+            editedAt: new Date(),
+            editedBy: req.user.id,
+            editorRole: req.user.role,
+            editorName: userName,
+            action: "PO_ISSUED",
+            previousStatus,
+            newStatus: "PO_ISSUED",
+            changesSummary: `Official Purchase Order issued by ${userName} (${po.officialPONumber}). Supplier: ${po.supplierDetails?.name || 'Selected Supplier'}, Delivery: ${deliveryDate ? new Date(deliveryDate).toLocaleDateString() : 'Standard'}.`,
+            notes: notes || "",
+        });
+
+        await po.save();
+        return res.status(200).json({ success: true, data: ensureLinkedPRs(po), message: "Official Purchase Order issued successfully" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     addPurchaseOrder,
     getPurchaseOrders,
@@ -766,4 +1219,8 @@ module.exports = {
     uploadPODocument,
     auditPurchaseOrder,
     bulkUploadPurchaseOrders,
+    requestRevision,
+    reviewRevision,
+    resubmitProposal,
+    issueOfficialPO,
 };
