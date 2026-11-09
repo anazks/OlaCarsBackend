@@ -337,12 +337,18 @@ exports.getAllCustomers = async (req, res) => {
         }
 
         if (search && search.trim() !== '') {
-            const searchRegex = new RegExp(search.trim(), 'i');
+            const escapeRegex = (s) => s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+            const cleanSearch = search.trim();
+            const terms = cleanSearch.split(/\s+/).filter(Boolean).map(escapeRegex);
+            const searchRegex = new RegExp(terms.join('.*'), 'i');
             query.$or = [
                 { name: searchRegex },
                 { email: searchRegex },
                 { phone: searchRegex },
-                { customerId: searchRegex }
+                { customerId: searchRegex },
+                { customerNumber: searchRegex },
+                { cfVehicleNo: searchRegex },
+                { cfFleetNo: searchRegex }
             ];
         }
 

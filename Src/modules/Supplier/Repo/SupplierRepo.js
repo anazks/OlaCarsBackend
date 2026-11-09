@@ -23,7 +23,7 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 exports.getSuppliersService = async (queryParams = {}, options = {}) => {
     try {
         const queryOptions = {
-            searchFields: ["name", "contactPerson", "email"],
+            searchFields: ["name", "contactPerson", "email", "companyName", "vendorNumber", "displayName", "phone", "cfRuc"],
             filterFields: ["category", "isActive"],
             dateFilterField: "createdAt",
             populate: { path: "createdBy", select: "name email" },
