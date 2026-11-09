@@ -174,6 +174,13 @@ router.post(
     BankAccountController.recordManualPayment
 );
 
+// Recalculate running balances for all accounts
+router.post(
+    "/recalculate-all-balances",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN, ROLES.FINANCESTAFF),
+    BankAccountController.recalculateAllBankBalances
+);
+
 // Recalculate running balances for specific account
 router.post(
     "/:id/recalculate-balances",

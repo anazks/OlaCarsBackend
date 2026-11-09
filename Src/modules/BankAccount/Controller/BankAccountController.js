@@ -2513,7 +2513,7 @@ exports.recalculateBankBalances = async (req, res, next) => {
     try {
         const { id } = req.params;
         const BankAccount = require("../Model/BankAccountModel");
-        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+        const { recalculateRunningBalances, syncAccountingCodeBalances, syncLatestBankBalance } = require("../Service/BankAccountService");
 
         const account = await BankAccount.findOne({ _id: id, isDeleted: false });
         if (!account) {
@@ -2524,6 +2524,8 @@ exports.recalculateBankBalances = async (req, res, next) => {
         if (account.accountingCode) {
             await syncAccountingCodeBalances(account.accountingCode);
         }
+
+        await syncLatestBankBalance(account._id);
 
         const updatedAccount = await BankAccount.findById(account._id);
 
@@ -2545,13 +2547,15 @@ exports.recalculateBankBalances = async (req, res, next) => {
 exports.recalculateAllBankBalances = async (req, res, next) => {
     try {
         const BankAccount = require("../Model/BankAccountModel");
-        const { recalculateRunningBalances, syncAccountingCodeBalances } = require("../Service/BankAccountService");
+        const { recalculateRunningBalances, syncAccountingCodeBalances, syncLatestBankBalance } = require("../Service/BankAccountService");
 
         const accounts = await BankAccount.find({ isDeleted: false });
         for (const acc of accounts) {
             await recalculateRunningBalances(acc._id);
             if (acc.accountingCode) {
                 await syncAccountingCodeBalances(acc.accountingCode);
+            }
+            if (acc._id) { await syncLatestBankBalance(acc._id);
             }
         }
 

@@ -1503,7 +1503,10 @@ const recalculateRunningBalances = async (bankAccountId) => {
         await syncAccountingCodeBalances(account.accountingCode);
     }
 
-    return finalBalance;
+    // 5. Connect and invoke syncLatestBankBalance to ensure the bank account's currentBalance is synced
+    const syncedBalance = await syncLatestBankBalance(account._id);
+
+    return syncedBalance !== null ? syncedBalance : finalBalance;
 };
 
 const bulkDeleteTransactions = async (bankAccountId, transactionIds) => {
@@ -1851,6 +1854,12 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
         }
 
         let finalDesc = description !== undefined ? description : (entry.description || '');
+        let hasDateUpdate = false;
+        let finalEntryDate = oldEntryDate || (bankTx && bankTx.entryDate) || entry.entryDate;
+        let isCustomerChanged = false;
+        let isSupplierChanged = false;
+        let isInvoiceChanged = false;
+        let isBillChanged = false;
 
         if (bankTx) {
             // Load partner ledger entry if double-entry is present
@@ -1901,8 +1910,8 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
             };
 
             // Construct finalEntryDate: preserve existing entry date unless entryDate is explicitly provided in update
-            let finalEntryDate = oldEntryDate || (bankTx && bankTx.entryDate) || entry.entryDate;
-            let hasDateUpdate = false;
+            finalEntryDate = oldEntryDate || (bankTx && bankTx.entryDate) || entry.entryDate;
+            hasDateUpdate = false;
             if (entryDate !== undefined && entryDate !== null && entryDate !== "") {
                 hasDateUpdate = true;
                 const parsedEditDate = new Date(entryDate);
@@ -1963,10 +1972,10 @@ const bulkEditTransactions = async (bankAccountId, updates) => {
 
             // Check if Amount, Customer, Supplier, Invoice, or Bill is changed or unlinked
             const isAmountChanged = amount !== undefined && Math.abs(Number(amount) - oldAmount) > 0.001;
-            const isCustomerChanged = hasCustomerInPayload && String(oldCustomerId || '') !== String(newCustomerId || '');
-            const isSupplierChanged = hasSupplierInPayload && String(oldSupplierId || '') !== String(newSupplierId || '');
-            const isInvoiceChanged = hasInvoiceInPayload && String(oldInvoiceId || '') !== String(newInvoiceId || '');
-            const isBillChanged = hasBillInPayload && String(oldBillId || '') !== String(newBillId || '');
+            isCustomerChanged = hasCustomerInPayload && String(oldCustomerId || '') !== String(newCustomerId || '');
+            isSupplierChanged = hasSupplierInPayload && String(oldSupplierId || '') !== String(newSupplierId || '');
+            isInvoiceChanged = hasInvoiceInPayload && String(oldInvoiceId || '') !== String(newInvoiceId || '');
+            isBillChanged = hasBillInPayload && String(oldBillId || '') !== String(newBillId || '');
             const isExplicitUnlink = (hasCustomerInPayload && !newCustomerId) || (hasSupplierInPayload && !newSupplierId);
 
             const hasExistingSetOff = (bankTx.invoices && bankTx.invoices.length > 0) ||
