@@ -177,6 +177,12 @@ const syncAccountingCodeBalances = async (accountingCodeId) => {
         await codeDoc.save();
         console.log(`[BankAccountService] Synced AccountingCode ${codeDoc.code}: debitTotal=${debitTotal}, creditTotal=${creditTotal}, currentBalance=${codeDoc.currentBalance}`);
     }
+
+    // Auto-sync linked BankAccount currentBalance
+    const bankDoc = await BankAccount.findOne({ accountingCode: accountingCodeId, isDeleted: false });
+    if (bankDoc) {
+        await syncLatestBankBalance(bankDoc._id);
+    }
 };
 
 
@@ -381,10 +387,10 @@ const getAllBankAccounts = async (queryParams = {}) => {
             const ledgerCount = ledgerAgg.length > 0 ? ledgerAgg[0].count : 0;
 
             const initialBal = Number(account.initialBalance || 0);
-            accObject.currentBalance = initialBal + debitTotal - creditTotal;
+            accObject.currentBalance = Number(account.currentBalance !== undefined && account.currentBalance !== null ? account.currentBalance : initialBal);
             accObject.transactionCount = ledgerCount;
         } else {
-            accObject.currentBalance = Number(account.initialBalance || 0);
+            accObject.currentBalance = Number(account.currentBalance !== undefined && account.currentBalance !== null ? account.currentBalance : (account.initialBalance || 0));
             accObject.transactionCount = 0;
         }
         return accObject;
@@ -422,10 +428,12 @@ const getBankAccountById = async (id) => {
         const ledgerCount = ledgerAgg.length > 0 ? ledgerAgg[0].count : 0;
 
         const initialBal = Number(account.initialBalance || 0);
-        accObject.currentBalance = initialBal + debitTotal - creditTotal;
+        const latestBalance = await syncLatestBankBalance(account._id);
+        accObject.currentBalance = latestBalance !== null ? latestBalance : Number(account.currentBalance !== undefined && account.currentBalance !== null ? account.currentBalance : initialBal);
         accObject.transactionCount = ledgerCount;
     } else {
-        accObject.currentBalance = Number(account.initialBalance || 0);
+        const latestBalance = await syncLatestBankBalance(account._id);
+        accObject.currentBalance = latestBalance !== null ? latestBalance : Number(account.currentBalance !== undefined && account.currentBalance !== null ? account.currentBalance : (account.initialBalance || 0));
         accObject.transactionCount = 0;
     }
     return accObject;
@@ -1346,7 +1354,7 @@ const deleteAllTransactions = async (id) => {
     // Reset current balance back to initial balance
     const previousBalance = account.currentBalance;
     account.currentBalance = account.initialBalance || 0;
-    await account.save();
+    await BankAccount.updateOne({ _id: account._id }, { $set: { currentBalance: account.currentBalance } });
 
     if (account.accountingCode) {
         const { syncAccountingCodeBalances } = require("./BankAccountService");
@@ -1359,6 +1367,57 @@ const deleteAllTransactions = async (id) => {
         previousBalance,
         newBalance: account.currentBalance
     };
+};
+
+const syncLatestBankBalance = async (bankAccountId) => {
+    if (!bankAccountId) return null;
+
+    const BankAccount = require("../Model/BankAccountModel");
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+
+    const account = await BankAccount.findById(bankAccountId).select("initialBalance accountingCode currentBalance").lean();
+    if (!account) return null;
+
+    let latestBalance = null;
+
+    // 1. Primary: If account has accountingCode, fetch latest running balance from LedgerEntry (authoritative ledger)
+    if (account.accountingCode) {
+        const codeId = account.accountingCode._id || account.accountingCode;
+        const latestLedger = await LedgerEntry.findOne({ accountingCode: codeId, isDeleted: { $ne: true } })
+            .sort({ entryDate: -1, createdAt: -1, _id: -1 })
+            .select("runningBalance")
+            .lean();
+
+        if (latestLedger && latestLedger.runningBalance !== undefined && latestLedger.runningBalance !== null) {
+            latestBalance = Number(latestLedger.runningBalance);
+        }
+    }
+
+    // 2. Fallback to BankTransaction if no LedgerEntry running balance found
+    if (latestBalance === null) {
+        const latestBankTx = await BankTransaction.findOne({ bankAccount: bankAccountId })
+            .sort({ entryDate: -1, createdAt: -1, _id: -1 })
+            .select("runningBalance")
+            .lean();
+
+        if (latestBankTx && latestBankTx.runningBalance !== undefined && latestBankTx.runningBalance !== null) {
+            latestBalance = Number(latestBankTx.runningBalance);
+        }
+    }
+
+    // 3. If no transactions exist, reset to initialBalance
+    if (latestBalance === null) {
+        latestBalance = Number(account.initialBalance || 0);
+    }
+
+    // 4. Atomic update - does NOT trigger pre/post save hooks (Zero recursion)
+    await BankAccount.updateOne(
+        { _id: bankAccountId },
+        { $set: { currentBalance: latestBalance } }
+    );
+
+    return latestBalance;
 };
 
 const recalculateRunningBalances = async (bankAccountId) => {
@@ -1436,8 +1495,8 @@ const recalculateRunningBalances = async (bankAccountId) => {
 
     // 3. Update BankAccount currentBalance to ledgerBalanceAccum if accountingCode exists
     const finalBalance = account.accountingCode ? ledgerBalanceAccum : bankBalanceAccum;
+    await BankAccount.updateOne({ _id: account._id }, { $set: { currentBalance: finalBalance } });
     account.currentBalance = finalBalance;
-    await account.save();
 
     // 4. Sync AccountingCode balance
     if (account.accountingCode) {
@@ -4544,6 +4603,7 @@ module.exports = {
     recordManualPayment,
     deleteAllTransactions,
     recalculateRunningBalances,
+    syncLatestBankBalance,
     bulkDeleteTransactions,
     bulkEditTransactions,
     ensureSubAccountingCode,

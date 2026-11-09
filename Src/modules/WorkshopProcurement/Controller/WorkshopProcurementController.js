@@ -55,8 +55,74 @@ exports.createRequest = async (req, res) => {
             status: "PENDING"
         };
 
-        data.remainingQuantity = Number(data.quantity) || 1;
-        data.fulfilledQuantity = 0;
+        // Multi-item parsing & population
+        let parsedItems = [];
+        if (req.body.items) {
+            try {
+                parsedItems = typeof req.body.items === 'string' ? JSON.parse(req.body.items) : req.body.items;
+            } catch (err) {
+                console.error("Failed to parse items array:", err);
+            }
+        }
+
+        if (Array.isArray(parsedItems) && parsedItems.length > 0) {
+            const formattedItems = parsedItems.map((it) => {
+                const itemQty = Number(it.quantity) || 1;
+                return {
+                    part: it.part || it._id || undefined,
+                    itemCode: it.itemCode || '',
+                    partNumber: it.partNumber || '',
+                    partName: it.partName || 'Spare Part',
+                    category: it.category || 'Other',
+                    quantity: itemQty,
+                    unitOfMeasure: it.unitOfMeasure || 'PCS',
+                    isNewItem: Boolean(it.isNewItem),
+                    unitCost: Number(it.unitCost) || 0,
+                    fullSizePhoto: it.fullSizePhoto || fullSizePhoto || '',
+                    closeUpPhoto: it.closeUpPhoto || closeUpPhoto || '',
+                    status: 'PENDING',
+                    remainingQuantity: itemQty,
+                    fulfilledQuantity: 0,
+                    receivedQuantity: 0
+                };
+            });
+
+            data.items = formattedItems;
+            const primaryItem = formattedItems[0];
+            data.part = primaryItem.part;
+            data.itemCode = primaryItem.itemCode;
+            data.partNumber = primaryItem.partNumber;
+            data.partName = formattedItems.length > 1 
+                ? `${primaryItem.partName} (+${formattedItems.length - 1} more items)` 
+                : primaryItem.partName;
+            data.category = primaryItem.category;
+            data.unitOfMeasure = primaryItem.unitOfMeasure;
+            data.quantity = formattedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+            data.remainingQuantity = data.quantity;
+            data.fulfilledQuantity = 0;
+        } else {
+            data.remainingQuantity = Number(data.quantity) || 1;
+            data.fulfilledQuantity = 0;
+            if (data.partName || data.part) {
+                data.items = [{
+                    part: data.part,
+                    itemCode: data.itemCode || '',
+                    partNumber: data.partNumber || '',
+                    partName: data.partName || 'Spare Part',
+                    category: data.category || 'Other',
+                    quantity: Number(data.quantity) || 1,
+                    unitOfMeasure: data.unitOfMeasure || 'PCS',
+                    isNewItem: Boolean(data.isNewItem),
+                    unitCost: Number(data.unitCost) || 0,
+                    fullSizePhoto: fullSizePhoto || '',
+                    closeUpPhoto: closeUpPhoto || '',
+                    status: 'PENDING',
+                    remainingQuantity: Number(data.quantity) || 1,
+                    fulfilledQuantity: 0,
+                    receivedQuantity: 0
+                }];
+            }
+        }
 
         if (!data.branch) {
             return res.status(400).json({ success: false, message: "Branch ID is required" });
@@ -102,6 +168,53 @@ exports.getRequests = async (req, res) => {
         }
 
         const result = await getProcurementRequests(req.query, { baseQuery });
+
+        try {
+            const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel.js");
+            const prIds = (result.data || []).map(d => d._id);
+            if (prIds.length > 0) {
+                const issuedPOs = await PurchaseOrder.find({
+                    $or: [
+                        { "linkedPRs.prId": { $in: prIds } },
+                        { "items.prAllocations.prId": { $in: prIds } }
+                    ],
+                    status: { $in: ["PO_ISSUED", "OFFICIAL_PO_ISSUED", "ISSUED", "CONVERTED_TO_PO"] }
+                }).select("purchaseOrderNumber officialPONumber linkedPRs items status");
+
+                const issuedPRIdSet = new Set();
+                issuedPOs.forEach(po => {
+                    (po.linkedPRs || []).forEach(lp => {
+                        if (lp.prId) issuedPRIdSet.add(lp.prId.toString());
+                    });
+                    (po.items || []).forEach(it => {
+                        (it.prAllocations || []).forEach(pa => {
+                            if (pa.prId) issuedPRIdSet.add(pa.prId.toString());
+                        });
+                    });
+                });
+
+                if (issuedPRIdSet.size > 0) {
+                    const toUpdateInDb = [];
+                    result.data = result.data.map(d => {
+                        const obj = d.toObject ? d.toObject() : { ...d };
+                        if (issuedPRIdSet.has(obj._id.toString()) && (obj.status === "RELEASED" || obj.status === "APPROVED")) {
+                            obj.status = "CONVERTED_TO_PO";
+                            toUpdateInDb.push(obj._id);
+                        }
+                        return obj;
+                    });
+                    if (toUpdateInDb.length > 0) {
+                        WorkshopProcurement.updateMany(
+                            { _id: { $in: toUpdateInDb } },
+                            { $set: { status: "CONVERTED_TO_PO" } }
+                        ).catch(e => console.error("Auto sync PR status to CONVERTED_TO_PO error:", e));
+                    }
+                }
+            }
+        } catch (syncErr) {
+            console.error("Error checking issued POs for PRs:", syncErr);
+        }
+
         res.status(200).json({
             success: true,
             data: result.data,
@@ -151,7 +264,25 @@ exports.approveRequest = async (req, res) => {
         const previousStatus = request.status;
 
         // Editable fields updated by Workshop Manager
-        if (quantity) request.quantity = quantity;
+        if (req.body.items) {
+            let updatedItems = [];
+            try {
+                updatedItems = typeof req.body.items === 'string' ? JSON.parse(req.body.items) : req.body.items;
+            } catch (e) {
+                console.error("Failed to parse updated items:", e);
+            }
+            if (Array.isArray(updatedItems) && updatedItems.length > 0) {
+                request.items = updatedItems.map((it) => ({
+                    ...it,
+                    quantity: Number(it.quantity) || 1,
+                    remainingQuantity: it.remainingQuantity !== undefined ? Number(it.remainingQuantity) : (Number(it.quantity) || 1),
+                    fulfilledQuantity: Number(it.fulfilledQuantity) || 0
+                }));
+                request.quantity = updatedItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+            }
+        } else if (quantity) {
+            request.quantity = quantity;
+        }
         if (itemCode !== undefined) request.itemCode = itemCode;
         if (partNumber !== undefined) request.partNumber = partNumber;
         if (partName !== undefined) request.partName = partName;
@@ -185,6 +316,13 @@ exports.approveRequest = async (req, res) => {
             request.verifiedAt = new Date();
             request.releasedAt = new Date();
         } else if (status === "RETURNED_TO_TECHNICIAN") {
+            const isCreatedByManager = request.requestedByRole === "WORKSHOPMANAGER" || request.requestedByRole === "BRANCHMANAGER" || request.requestedByRole === "ADMIN";
+            if (isCreatedByManager) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Purchase Requests initiated by the Workshop Manager cannot be returned to a technician. You can edit the details directly or cancel/reject the PR."
+                });
+            }
             request.status = "RETURNED_TO_TECHNICIAN";
             request.returnReason = returnReason || "Details need correction by technician";
         } else if (status === "REJECTED") {
@@ -215,19 +353,25 @@ exports.approveRequest = async (req, res) => {
                 const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel.js");
                 let existingPO = await PurchaseOrder.findOne({ "linkedPRs.prId": request._id });
                 if (!existingPO) {
-                    const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
-                    const poNumber = `PO-${Date.now()}-${randomString}`;
-                    const po = new PurchaseOrder({
-                        purchaseOrderNumber: poNumber,
-                        branch: request.branch,
-                        purpose: "Spare Parts",
-                        status: "MANAGER_APPROVED",
-                        createdBy: request.requestedBy,
-                        creatorRole: request.requestedByRole || "WORKSHOPSTAFF",
-                        approvedBy: req.user.id,
-                        approverRole: req.user.role,
-                        totalAmount: Number(request.quantity || 1) * Number(request.part?.unitCost || 0),
-                        items: [{
+                    const poNumber = request.requestNumber.startsWith("PO-")
+                        ? request.requestNumber
+                        : `PO-${request.requestNumber}`;
+                    const poItems = (request.items && request.items.length > 0)
+                        ? request.items.map((it) => ({
+                            itemName: it.partName || "Spare Part",
+                            quantity: Number(it.quantity) || 1,
+                            unitPrice: Number(it.unitCost) || 0,
+                            description: `${it.itemCode ? `[${it.itemCode}] ` : ''}${it.partNumber ? `Part#: ${it.partNumber}` : ''}`.trim() || request.notes || "",
+                            images: [it.fullSizePhoto || request.fullSizePhoto, it.closeUpPhoto || request.closeUpPhoto].filter(Boolean),
+                            prAllocations: [{
+                                prId: request._id,
+                                prNumber: request.requestNumber,
+                                prItemId: it._id,
+                                allocatedQuantity: Number(it.quantity) || 1,
+                                originalPRQuantity: Number(it.quantity) || 1
+                            }]
+                        }))
+                        : [{
                             itemName: request.partName || (request.part?.partName) || "Spare Part",
                             quantity: Number(request.quantity) || 1,
                             unitPrice: Number(request.part?.unitCost) || 0,
@@ -239,7 +383,21 @@ exports.approveRequest = async (req, res) => {
                                 allocatedQuantity: Number(request.quantity) || 1,
                                 originalPRQuantity: Number(request.quantity) || 1
                             }]
-                        }],
+                        }];
+
+                    const totalAmount = poItems.reduce((acc, it) => acc + ((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)), 0);
+
+                    const po = new PurchaseOrder({
+                        purchaseOrderNumber: poNumber,
+                        branch: request.branch,
+                        purpose: "Spare Parts",
+                        status: "MANAGER_APPROVED",
+                        createdBy: request.requestedBy,
+                        creatorRole: request.requestedByRole || "WORKSHOPSTAFF",
+                        approvedBy: req.user.id,
+                        approverRole: req.user.role,
+                        totalAmount: totalAmount,
+                        items: poItems,
                         linkedPRs: [{
                             prId: request._id,
                             prNumber: request.requestNumber,
@@ -255,7 +413,7 @@ exports.approveRequest = async (req, res) => {
                             action: "CREATED",
                             previousStatus: "NONE",
                             newStatus: "MANAGER_APPROVED",
-                            changesSummary: `PR Quotation ${poNumber} auto-released from Workshop PR ${request.requestNumber}.`,
+                            changesSummary: `PR Quotation ${poNumber} auto-released from Workshop PR ${request.requestNumber} with ${poItems.length} item(s).`,
                             notes: request.notes || ""
                         }]
                     });
@@ -346,8 +504,15 @@ exports.getRequestById = async (req, res) => {
 
         try {
             const PurchaseOrder = require("../../PurchaseOrder/Model/PurchaseOrderModel.js");
-            const purchaseOrderNumber = `PO-PR-${request.requestNumber}`;
-            const linkedPO = await PurchaseOrder.findOne({ purchaseOrderNumber })
+            const linkedPO = await PurchaseOrder.findOne({
+                $or: [
+                    { "linkedPRs.prId": request._id },
+                    { "items.prAllocations.prId": request._id },
+                    { purchaseOrderNumber: `PO-${request.requestNumber}` },
+                    { purchaseOrderNumber: `PO-PR-${request.requestNumber}` },
+                    { purchaseOrderNumber: request.requestNumber }
+                ]
+            })
                 .populate("editHistory.editedBy", "fullName name email role")
                 .populate("branch")
                 .populate("supplier", "name contactPerson email")
@@ -355,6 +520,10 @@ exports.getRequestById = async (req, res) => {
                 .populate("approvedBy", "name email fullName");
             if (linkedPO) {
                 requestObj.linkedPO = linkedPO;
+                if (["PO_ISSUED", "OFFICIAL_PO_ISSUED", "ISSUED", "CONVERTED_TO_PO"].includes(linkedPO.status) && (requestObj.status === "RELEASED" || requestObj.status === "APPROVED")) {
+                    requestObj.status = "CONVERTED_TO_PO";
+                    WorkshopProcurement.findByIdAndUpdate(request._id, { status: "CONVERTED_TO_PO" }).catch(e => console.error(e));
+                }
             }
         } catch (poErr) {
             console.error("Failed to find/populate linked PO:", poErr);

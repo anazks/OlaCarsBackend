@@ -101,8 +101,9 @@ exports.deleteAllTransactions = async (req, res, next) => {
         const bankTxDeleteResult = await BankTransaction.deleteMany({ bankAccount: id });
 
         // Reset balance to initial balance
+        await BankAccount.updateOne({ _id: id }, { $set: { currentBalance: account.initialBalance || 0 } });
         account.currentBalance = account.initialBalance || 0;
-        await account.save();
+        // Balance updated atomically via updateOne (no recursive hooks)
 
         const { syncAccountingCodeBalances } = require("../Service/BankAccountService");
         if (accCodeId) {
@@ -242,8 +243,9 @@ exports.uploadBankStatement = async (req, res, next) => {
             createdEntries.push(entry);
         }
 
+        await BankAccount.updateOne({ _id: id }, { $set: { currentBalance: balanceAccum } });
         account.currentBalance = balanceAccum;
-        await account.save();
+        // Balance updated atomically via updateOne (no recursive hooks)
 
 
         res.status(200).json({
@@ -513,7 +515,7 @@ exports.bulkUploadTransactions = async (req, res, next) => {
         const Supplier = require("../../Supplier/Model/SupplierModel");
         const PaymentReceived = require("../../PaymentReceived/Model/PaymentReceivedModel");
         const mongoose = require("mongoose");
-        const { autoSetOffInvoices, autoSetOffBills, ensureSubAccountingCode, syncAccountingCodeBalances, recalculateRunningBalances } = require("../Service/BankAccountService");
+        const { autoSetOffInvoices, autoSetOffBills, ensureSubAccountingCode, syncAccountingCodeBalances, recalculateRunningBalances, syncLatestBankBalance } = require("../Service/BankAccountService");
 
         const allBranches = await Branch.find({ isDeleted: false, status: "ACTIVE" });
 
@@ -1444,7 +1446,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                 }
             }
         } else if (createdEntries.length > 0) {
-            console.log(`[BulkUpload] Intermediate batch (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || '?'}) processed ${createdEntries.length} entries. Skipping balance recalculation until final batch.`);
+            console.log(`[BulkUpload] Intermediate batch (${(batchIndex !== undefined ? batchIndex + 1 : 1)}/${totalBatches || '?'}) processed ${createdEntries.length} entries. Syncing latest balance.`);
+            await syncLatestBankBalance(id);
         }
 
         const updatedAccount = await BankAccount.findById(id);

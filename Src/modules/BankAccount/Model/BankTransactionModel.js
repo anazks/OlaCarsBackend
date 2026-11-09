@@ -100,6 +100,7 @@ const bankTransactionSchema = new mongoose.Schema(
 );
 
 bankTransactionSchema.index({ bankAccount: 1 });
+bankTransactionSchema.index({ bankAccount: 1, entryDate: -1, createdAt: -1, _id: -1 });
 bankTransactionSchema.index({ branch: 1 });
 bankTransactionSchema.index({ type: 1 });
 bankTransactionSchema.index({ entryDate: 1 });

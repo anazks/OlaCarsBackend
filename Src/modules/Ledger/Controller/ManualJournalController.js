@@ -168,6 +168,13 @@ exports.deleteJournal = async (req, res) => {
         for (const codeId of affectedCodeIds) {
             try {
                 await syncAccountingCodeBalances(codeId);
+                // Resync bank account balances after manual journal delete
+                const BankAccount = require("../../BankAccount/Model/BankAccountModel");
+                const { recalculateRunningBalances } = require("../../BankAccount/Service/BankAccountService");
+                const bankDoc = await BankAccount.findOne({ accountingCode: codeId, isDeleted: false });
+                if (bankDoc) {
+                    await recalculateRunningBalances(bankDoc._id);
+                }
             } catch (syncErr) {
                 console.error(`[ManualJournalController] Failed to sync balance for ${codeId}:`, syncErr);
             }

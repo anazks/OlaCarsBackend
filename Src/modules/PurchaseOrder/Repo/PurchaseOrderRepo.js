@@ -25,7 +25,7 @@ const { applyQueryFeatures } = require("../../../shared/utils/queryHelper");
 exports.getPurchaseOrdersService = async (queryParams = {}, options = {}) => {
     try {
         const queryOptions = {
-            searchFields: ["purchaseOrderNumber", "items.itemName"],
+            searchFields: ["purchaseOrderNumber", "officialPONumber", "linkedPRs.prNumber", "items.itemName"],
             filterFields: ["purpose", "status", "isUsed", "isBilled", "supplier", "branch"],
             populate: [
                 { path: "branch" },

@@ -302,12 +302,29 @@ const deleteLedgerJournal = async (req, res) => {
         }
 
         const journalId = entry.manualJournal;
+        // Collect all affected accounting codes from journal entries before deletion
+        const journalEntries = await LedgerEntry.find({ manualJournal: journalId }).select("accountingCode").lean();
+        const affectedCodes = [...new Set(journalEntries.map(e => e.accountingCode ? String(e.accountingCode) : null).filter(Boolean))];
 
-        // Delete ALL ledger entries for this journal (both DEBIT + CREDIT sides)
         const delEntries = await LedgerEntry.deleteMany({ manualJournal: journalId });
 
         // Delete the ManualJournal header
         await ManualJournal.deleteOne({ _id: journalId });
+
+        // Resync accounting code balances and bank accounts after journal delete
+        const { syncAccountingCodeBalances, recalculateRunningBalances } = require("../../BankAccount/Service/BankAccountService");
+        const BankAccount = require("../../BankAccount/Model/BankAccountModel");
+        for (const cId of affectedCodes) {
+            try {
+                await syncAccountingCodeBalances(cId);
+                const bankDoc = await BankAccount.findOne({ accountingCode: cId, isDeleted: false });
+                if (bankDoc) {
+                    await recalculateRunningBalances(bankDoc._id);
+                }
+            } catch (syncErr) {
+                console.error("[deleteLedgerJournal] Failed to sync bank account for " + cId + ":", syncErr);
+            }
+        }
 
         return res.status(200).json({
             success: true,
@@ -509,6 +526,13 @@ const deleteSingleLedgerEntry = async (req, res) => {
             const { syncAccountingCodeBalances } = require("../../BankAccount/Service/BankAccountService");
             try {
                 await syncAccountingCodeBalances(codeId);
+                // Resync bankDoc running balances after single ledger delete
+                const BankAccount = require("../../BankAccount/Model/BankAccountModel");
+                const { recalculateRunningBalances } = require("../../BankAccount/Service/BankAccountService");
+                const bankDoc = await BankAccount.findOne({ accountingCode: codeId, isDeleted: false });
+                if (bankDoc) {
+                    await recalculateRunningBalances(bankDoc._id);
+                }
             } catch (err) {
                 console.error(`Failed to sync balance for account ${codeId}:`, err);
             }

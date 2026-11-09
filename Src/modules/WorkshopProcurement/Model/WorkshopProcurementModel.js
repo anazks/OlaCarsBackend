@@ -69,6 +69,33 @@ const WorkshopProcurementSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "InventoryPart",
         },
+        // Multi-item support: list of items in this purchase requisition
+        items: [
+            {
+                part: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: "InventoryPart",
+                },
+                itemCode: { type: String },
+                partNumber: { type: String },
+                partName: { type: String, required: true },
+                category: {
+                    type: String,
+                    enum: ["Engine", "Electrical", "Suspension", "Lubricants", "Consumables", "Body", "Tyres", "Parts", "Spare Parts", "Other"],
+                    default: "Other",
+                },
+                quantity: { type: Number, required: true, min: 1 },
+                unitOfMeasure: { type: String, default: "PCS" },
+                isNewItem: { type: Boolean, default: false },
+                unitCost: { type: Number, default: 0 },
+                fullSizePhoto: { type: String },
+                closeUpPhoto: { type: String },
+                status: { type: String, default: "PENDING" },
+                remainingQuantity: { type: Number },
+                fulfilledQuantity: { type: Number, default: 0 },
+                receivedQuantity: { type: Number, default: 0 }
+            }
+        ],
         quantity: {
             type: Number,
             required: true,
@@ -104,6 +131,8 @@ const WorkshopProcurementSchema = new mongoose.Schema(
                 "RECEIVED",
                 "REJECTED",
                 "CONVERTED_TO_PO",
+                "PO_CREATED",
+                "ORDER_PURCHASED",
                 "PARTIALLY_CONVERTED",
                 "WAITING_QUOTATION"
             ],

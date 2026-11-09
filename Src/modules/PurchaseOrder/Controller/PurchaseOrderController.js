@@ -231,8 +231,8 @@ const addPurchaseOrder = async (req, res) => {
         } else if (req.user.role === ROLES.MERCHENDISE) {
             poData.status = req.body.status || "PO_ISSUED";
             if (poData.status === "PO_ISSUED" && !poData.officialPONumber) {
-                const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
-                poData.officialPONumber = `PO-OFFICIAL-${Date.now()}-${randomString}`;
+                poData.officialPONumber = poData.purchaseOrderNumber 
+                    || (poData.linkedPRs?.[0]?.prNumber ? (poData.linkedPRs[0].prNumber.startsWith('PO-') ? poData.linkedPRs[0].prNumber : `PO-${poData.linkedPRs[0].prNumber}`) : undefined);
             }
         } else if (req.user.role === ROLES.WORKSHOPSTAFF) {
             poData.status = "REQUESTED";
@@ -526,8 +526,7 @@ const getPurchaseOrderById = async (req, res) => {
                 .populate("supplier")
                 .populate("branch")
                 .populate("createdBy", "fullName name email role")
-                .populate("approvedBy", "fullName name email role")
-                .populate("editHistory.editedBy", "fullName name email role");
+                .populate("approvedBy", "fullName name email role");
         }
 
         if (!po) {
@@ -536,10 +535,10 @@ const getPurchaseOrderById = async (req, res) => {
                 const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
                 const pr = await WorkshopProcurement.findById(req.params.id).populate("part branch requestedBy");
                 if (pr && ["RELEASED", "APPROVED", "WAITING_QUOTATION", "PARTIALLY_CONVERTED"].includes(pr.status)) {
-                    const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
-                    const poNumber = `PO-${Date.now()}-${randomString}`;
+                    const poNumber = pr.requestNumber ? (pr.requestNumber.startsWith('PO-') ? pr.requestNumber : `PO-${pr.requestNumber}`) : `PO-${Date.now()}`;
                     po = new PurchaseOrder({
                         purchaseOrderNumber: poNumber,
+                        officialPONumber: poNumber,
                         branch: pr.branch?._id || pr.branch,
                         purpose: "Spare Parts",
                         status: "MANAGER_APPROVED",
@@ -1242,6 +1241,7 @@ const reviewRevision = async (req, res) => {
 /**
  * Merchandiser resubmits modified line items & pricing to Finance Admin / Admin.
  * Status becomes PENDING_FINANCE_APPROVAL, isRevisionAllowed = false.
+ * Validates that each item's quantity cannot exceed the connected Purchase Requisition quantity.
  */
 const resubmitProposal = async (req, res) => {
     try {
@@ -1252,13 +1252,111 @@ const resubmitProposal = async (req, res) => {
             return res.status(404).json({ success: false, message: "Purchase Order not found" });
         }
 
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, message: "Line items are required." });
+        }
+
+        // Fetch all connected Workshop Procurement (PR) documents to enforce exact quantity limits
+        const WorkshopProcurement = require("../../WorkshopProcurement/Model/WorkshopProcurementModel.js");
+        const linkedPRIds = (po.linkedPRs || []).map(p => p.prId).filter(Boolean);
+        (po.items || []).forEach(it => {
+            (it.prAllocations || []).forEach(a => {
+                if (a.prId) linkedPRIds.push(a.prId);
+            });
+        });
+
+        let prRecords = [];
+        if (linkedPRIds.length > 0) {
+            prRecords = await WorkshopProcurement.find({ _id: { $in: linkedPRIds } });
+        }
+        const prMap = new Map();
+        prRecords.forEach(pr => {
+            prMap.set(pr._id.toString(), pr);
+            if (pr.requestNumber) prMap.set(pr.requestNumber, pr);
+        });
+
+        // 1. Validate each item quantity against connected PR quantity limit
+        for (let idx = 0; idx < items.length; idx++) {
+            const item = items[idx];
+            const existingItem = (po.items || [])[idx] || {};
+            const qty = Number(item.quantity) !== undefined && item.quantity !== null && !isNaN(Number(item.quantity))
+                ? Number(item.quantity)
+                : (Number(existingItem.quantity) || 1);
+
+            if (qty < 1) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Quantity for item "${item.itemName || existingItem.itemName || (idx + 1)}" must be at least 1 unit.`
+                });
+            }
+
+            // Determine maximum allowed quantity from connected PR
+            let maxAllowedQty = null;
+
+            // 1. From item's prAllocations
+            if (existingItem.prAllocations && existingItem.prAllocations.length > 0) {
+                let allocTotal = 0;
+                for (const alloc of existingItem.prAllocations) {
+                    const prDoc = (alloc.prId && prMap.get(alloc.prId.toString())) || (alloc.prNumber && prMap.get(alloc.prNumber));
+                    let prLimit = 0;
+                    if (prDoc && Array.isArray(prDoc.items) && prDoc.items.length > 0) {
+                        const matchedSubItem = prDoc.items.find(sub => 
+                            (alloc.prItemId && sub._id?.toString() === alloc.prItemId.toString()) ||
+                            (sub.itemCode && existingItem.itemCode && sub.itemCode === existingItem.itemCode) ||
+                            (sub.partName && existingItem.itemName && sub.partName.toLowerCase() === existingItem.itemName.toLowerCase())
+                        );
+                        if (matchedSubItem) {
+                            prLimit = Number(matchedSubItem.quantity);
+                        }
+                    }
+                    if (!prLimit) {
+                        prLimit = Number(alloc.originalPRQuantity) || Number(alloc.allocatedQuantity) || (prDoc ? Number(prDoc.quantity) : 0);
+                    }
+                    allocTotal += prLimit;
+                }
+                if (allocTotal > 0) maxAllowedQty = allocTotal;
+            }
+
+            // 2. From quotation linkedPRs matching connected PR
+            if (!maxAllowedQty && po.linkedPRs && po.linkedPRs.length > 0) {
+                const descMatch = existingItem.description ? existingItem.description.match(/(PR-OW-[\w-]+)/i) : null;
+                const prNum = descMatch ? descMatch[1] : null;
+                if (prNum) {
+                    const matched = po.linkedPRs.find(p => p.prNumber === prNum);
+                    if (matched) {
+                        const prDoc = (matched.prId && prMap.get(matched.prId.toString())) || prMap.get(matched.prNumber);
+                        maxAllowedQty = prDoc ? Number(prDoc.quantity) : (Number(matched.originalPRQuantity) || Number(matched.allocatedQuantity));
+                    }
+                }
+                if (!maxAllowedQty && po.linkedPRs.length === 1 && po.items.length === 1) {
+                    const singlePR = po.linkedPRs[0];
+                    const prDoc = (singlePR.prId && prMap.get(singlePR.prId.toString())) || prMap.get(singlePR.prNumber);
+                    maxAllowedQty = prDoc ? Number(prDoc.quantity) : (Number(singlePR.originalPRQuantity) || Number(singlePR.allocatedQuantity));
+                }
+            }
+
+            // 3. Fallback to existing original item quantity
+            if (!maxAllowedQty || maxAllowedQty <= 0) {
+                maxAllowedQty = Number(existingItem.quantity) || 1;
+            }
+
+            if (qty > maxAllowedQty) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Quantity for item "${item.itemName || existingItem.itemName}" cannot exceed ${maxAllowedQty} unit(s) (Maximum quantity requested in connected Purchase Requisition).`
+                });
+            }
+        }
+
         const previousStatus = po.status;
         let calculatedProposedTotal = 0;
         let calculatedBaseTotal = 0;
 
         const updatedItems = items.map((item, idx) => {
             const existingItem = (po.items || [])[idx] || {};
-            const qty = Number(item.quantity) || Number(existingItem.quantity) || 1;
+            const qty = Number(item.quantity) !== undefined && item.quantity !== null && !isNaN(Number(item.quantity))
+                ? Number(item.quantity)
+                : (Number(existingItem.quantity) || 1);
             const originalUnitPrice = Number(item.unitPrice) !== undefined ? Number(item.unitPrice) : Number(existingItem.unitPrice) || 0;
             const merchPrice = item.merchandiserPrice !== undefined && item.merchandiserPrice !== null 
                 ? Number(item.merchandiserPrice) 
@@ -1266,6 +1364,13 @@ const resubmitProposal = async (req, res) => {
 
             calculatedBaseTotal += qty * originalUnitPrice;
             calculatedProposedTotal += qty * merchPrice;
+
+            // Keep prAllocations in sync with the revised quantity
+            const updatedAllocations = (existingItem.prAllocations || []).map(alloc => ({
+                ...alloc.toObject ? alloc.toObject() : alloc,
+                allocatedQuantity: qty,
+                originalPRQuantity: alloc.originalPRQuantity || alloc.allocatedQuantity || qty
+            }));
 
             return {
                 ...existingItem.toObject ? existingItem.toObject() : existingItem,
@@ -1275,10 +1380,25 @@ const resubmitProposal = async (req, res) => {
                 merchandiserPrice: merchPrice,
                 description: item.description !== undefined ? item.description : existingItem.description,
                 accountId: item.accountId || existingItem.accountId,
-                prAllocations: item.prAllocations || existingItem.prAllocations || [],
+                prAllocations: updatedAllocations,
                 images: item.images || existingItem.images || []
             };
         });
+
+        // Also update po.linkedPRs allocated quantities in sync
+        if (po.linkedPRs && po.linkedPRs.length > 0) {
+            po.linkedPRs = po.linkedPRs.map((linked) => {
+                const itemForPR = updatedItems.find(it => 
+                    (it.prAllocations || []).some(a => a.prNumber === linked.prNumber || a.prId?.toString() === linked.prId?.toString())
+                ) || (updatedItems.length === 1 && po.linkedPRs.length === 1 ? updatedItems[0] : null);
+
+                return {
+                    ...linked.toObject ? linked.toObject() : linked,
+                    allocatedQuantity: itemForPR ? itemForPR.quantity : linked.allocatedQuantity,
+                    originalPRQuantity: linked.originalPRQuantity || linked.allocatedQuantity
+                };
+            });
+        }
 
         po.items = updatedItems;
         po.originalTotalAmount = calculatedBaseTotal;
@@ -1298,7 +1418,7 @@ const resubmitProposal = async (req, res) => {
             action: "PROPOSAL_RESUBMITTED",
             previousStatus,
             newStatus: "PENDING_FINANCE_APPROVAL",
-            changesSummary: `Merchandiser (${userName}) resubmitted revised quotation line items & parts. Total proposed amount: $${calculatedProposedTotal.toFixed(2)}. Sent to Finance for approval.`,
+            changesSummary: `Merchandiser (${userName}) resubmitted revised quotation line items & parts within connected PR quantity limits. Total proposed amount: $${calculatedProposedTotal.toFixed(2)}. Sent to Finance for approval.`,
             notes: notes || "",
         });
 
@@ -1331,8 +1451,14 @@ const issueOfficialPO = async (req, res) => {
         if (notes) po.notes = notes;
 
         po.status = "PO_ISSUED";
-        const randomString = Math.random().toString(36).substring(2, 6).toUpperCase();
-        po.officialPONumber = `PO-OFFICIAL-${Date.now()}-${randomString}`;
+        
+        // Official PO number is identical to the Quotation / Requisition ID
+        const resolvedOfficialPONumber = req.body.officialPONumber?.trim() 
+            || po.purchaseOrderNumber 
+            || (po.linkedPRs?.[0]?.prNumber ? (po.linkedPRs[0].prNumber.startsWith('PO-') ? po.linkedPRs[0].prNumber : `PO-${po.linkedPRs[0].prNumber}`) : undefined)
+            || `PO-${Date.now()}`;
+
+        po.officialPONumber = resolvedOfficialPONumber;
 
         const userName = req.user.fullName || req.user.name || "Merchandiser";
         if (!Array.isArray(po.editHistory)) po.editHistory = [];
@@ -1344,7 +1470,7 @@ const issueOfficialPO = async (req, res) => {
             action: "PO_ISSUED",
             previousStatus,
             newStatus: "PO_ISSUED",
-            changesSummary: `Official Purchase Order issued by ${userName} (${po.officialPONumber}). Supplier: ${po.supplierDetails?.name || 'Selected Supplier'}, Delivery: ${deliveryDate ? new Date(deliveryDate).toLocaleDateString() : 'Standard'}.`,
+            changesSummary: `Official Purchase Order issued by ${userName} (Official PO #: ${po.officialPONumber}). Supplier: ${po.supplierDetails?.name || 'Selected Supplier'}, Delivery: ${deliveryDate ? new Date(deliveryDate).toLocaleDateString() : 'Standard'}.`,
             notes: notes || "",
         });
 
