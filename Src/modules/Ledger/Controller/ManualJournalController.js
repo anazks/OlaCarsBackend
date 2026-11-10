@@ -37,8 +37,9 @@ exports.getJournals = async (req, res) => {
             query.status = req.query.status;
         }
 
-        // Date range filter (applied when search is not active, allowing explicit search to find records across all dates)
-        if (!req.query.search && (req.query.startDate || req.query.endDate)) {
+        // Date range filter
+        const enforceDateRange = req.query.enforceDateRange === "true" || req.query.enforceDateRange === true;
+        if ((!req.query.search || enforceDateRange) && (req.query.startDate || req.query.endDate)) {
             query.date = {};
             if (req.query.startDate) {
                 const startStr = req.query.startDate.includes("T") ? req.query.startDate : `${req.query.startDate}T00:00:00.000Z`;
@@ -61,20 +62,26 @@ exports.getJournals = async (req, res) => {
         }
 
         // Pagination parameters
+        const isAll = req.query.all === "true" || req.query.all === true;
         const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
+        const limit = isAll ? 0 : (parseInt(req.query.limit) || 10);
+        const skip = isAll ? 0 : ((page - 1) * limit);
 
         const ManualJournal = require("../Model/ManualJournalModel");
         const total = await ManualJournal.countDocuments(query);
-        const totalPages = Math.ceil(total / limit);
+        const totalPages = isAll ? 1 : Math.ceil(total / (limit || 1));
 
         const { getManualJournalsRepo } = require("../Repo/ManualJournalRepo");
-        const journals = await getManualJournalsRepo(query, { 
+        const queryOptions = { 
             populate: "branch createdBy",
-            skip,
-            limit
-        });
+            sort: { date: -1, createdAt: -1 }
+        };
+        if (!isAll) {
+            queryOptions.skip = skip;
+            queryOptions.limit = limit;
+        }
+
+        const journals = await getManualJournalsRepo(query, queryOptions);
 
         res.status(200).json({
             status: "success",
