@@ -247,20 +247,50 @@ class GpsService {
     }
 
     async getVehiclesList() {
-        // Cache devices list for 60 seconds
+        // Cache devices list for 2 minutes
         if (this.devicesCache && this.devicesCache.data && this.devicesCache.expiresAt > Date.now()) {
             console.log('[GPS Service] Returning cached device list');
             return this.devicesCache.data;
         }
 
         try {
-            const result = await this.requestApi('jimi.user.device.list', { target: TRACKSOLID_USER_ID });
-            // The API returns a page structure or array depending on the exact version
-            const devices = Array.isArray(result) ? result : (result.list || result.data || []);
+            // 1. Fetch child accounts to cover the entire fleet (sub-accounts)
+            let accounts = [TRACKSOLID_USER_ID];
+            try {
+                const childrenRes = await this.requestApiRaw('jimi.user.child.list', { target: TRACKSOLID_USER_ID });
+                const children = Array.isArray(childrenRes.result) ? childrenRes.result : [];
+                if (children.length > 0) {
+                    accounts = [TRACKSOLID_USER_ID, ...children.map(c => c.account).filter(Boolean)];
+                }
+            } catch (err) {
+                console.warn('[GPS Service] jimi.user.child.list warning:', err.message);
+            }
+
+            // 2. Concurrently fetch devices across all accounts
+            const allResponses = await Promise.all(
+                accounts.map(acc => this.requestApiRaw('jimi.user.device.list', { target: acc }).catch(err => {
+                    console.warn(`[GPS Service] jimi.user.device.list error for ${acc}:`, err.message);
+                    return { result: [] };
+                }))
+            );
+
+            const deviceMap = new Map();
+            allResponses.forEach((res, i) => {
+                const acc = accounts[i];
+                const list = Array.isArray(res.result) ? res.result : (res.data || res.list || []);
+                list.forEach(d => {
+                    if (d && d.imei && !deviceMap.has(d.imei)) {
+                        deviceMap.set(d.imei, { ...d, account: acc });
+                    }
+                });
+            });
+
+            const devices = Array.from(deviceMap.values());
+            console.log(`[GPS Service] Loaded ${devices.length} total fleet devices across ${accounts.length} accounts.`);
 
             this.devicesCache = {
                 data: devices,
-                expiresAt: Date.now() + 60000 // 60 seconds cache
+                expiresAt: Date.now() + 120000 // 2 minutes cache
             };
             return devices;
         } catch (e) {
@@ -854,7 +884,8 @@ class GpsService {
 
             // Enhance all vehicles with local database details
             const enhancedVehicles = vehicles.map(v => {
-                const deviceName = v.deviceName || v.vehicleName || v.vehicleNumber || v.imei || '';
+                const rawDeviceName = v.deviceName || v.vehicleName || (v.imei ? `VL802-${String(v.imei).slice(-5)}` : 'N/A');
+                const rawVehNumber = v.vehicleNumber && !v.vehicleNumber.toUpperCase().startsWith('DAÑADO') ? v.vehicleNumber.trim() : '';
                 const groupName = v.deviceGroup || v.deviceGroupId || 'Default group';
 
                 const matchedDbVeh = dbVehicles.find(dbV => {
@@ -863,8 +894,8 @@ class GpsService {
                     const dbGps = dbV.basicDetails?.gpsSerialNumber?.toLowerCase().trim();
                     const dbFleet = dbV.basicDetails?.fleetNumber?.toLowerCase().trim();
 
-                    const vPlate = v.vehicleNumber?.toLowerCase().trim();
-                    const vName = v.deviceName?.toLowerCase().trim();
+                    const vPlate = rawVehNumber?.toLowerCase().trim();
+                    const vName = rawDeviceName?.toLowerCase().trim();
                     const vVin = v.carFrame?.toLowerCase().trim();
                     const vImei = v.imei?.toLowerCase().trim();
 
@@ -878,31 +909,34 @@ class GpsService {
                     );
                 });
 
-                let vehicleNumber = v.vehicleNumber || v.deviceName || (v.imei ? `VL802-0${String(v.imei).slice(-4)}` : 'N/A');
-                let driverName = v.driverName || (v.driverPhone ? `Driver (${v.driverPhone})` : 'Unassigned');
-                let driverStatus = v.driverStatus || (v.driverName ? 'ACTIVE' : 'UNASSIGNED');
-                let customerName = v.customerName || v.assignedCustomer || v.clientName || v.renterName || 'Direct Fleet / N/A';
-
+                let vehicleNumber = '';
                 if (matchedDbVeh) {
-                    vehicleNumber = matchedDbVeh.legalDocs?.registrationNumber || matchedDbVeh.basicDetails?.fleetNumber || vehicleNumber;
-                    if (matchedDbVeh.currentDriver) {
-                        const d = matchedDbVeh.currentDriver;
-                        driverName = d.personalInfo?.fullName || d.fullName || d.driverId || driverName;
-                        driverStatus = d.status || 'ACTIVE';
+                    vehicleNumber = matchedDbVeh.legalDocs?.registrationNumber || matchedDbVeh.basicDetails?.fleetNumber || '';
+                }
+                if (!vehicleNumber && rawVehNumber) {
+                    vehicleNumber = rawVehNumber;
+                }
+
+                const isDanado = rawDeviceName.toUpperCase().includes('DAÑADO');
+                let displayName = rawDeviceName;
+                if (vehicleNumber) {
+                    if (isDanado) {
+                        displayName = `${vehicleNumber} (DAÑADO)`;
+                    } else if (rawDeviceName && rawDeviceName !== vehicleNumber) {
+                        displayName = `${vehicleNumber} (${rawDeviceName})`;
+                    } else {
+                        displayName = vehicleNumber;
                     }
-                    if (matchedDbVeh.customerName || matchedDbVeh.renter) {
-                        customerName = matchedDbVeh.customerName || matchedDbVeh.renter || customerName;
-                    }
+                } else if (isDanado) {
+                    displayName = `DAÑADO (Unit ${String(v.imei).slice(-5)})`;
                 }
 
                 return {
                     ...v,
-                    deviceName,
+                    deviceName: rawDeviceName,
+                    vehicleNumber: vehicleNumber || 'Unassigned',
+                    displayName,
                     groupName,
-                    vehicleNumber,
-                    driverName,
-                    driverStatus,
-                    customerName,
                     matchedDbVeh
                 };
             });
@@ -919,17 +953,24 @@ class GpsService {
                 filteredVehicles = filteredVehicles.filter(v => (v.deviceGroup === group || v.deviceGroupId === group || v.groupName === group));
             }
 
-            // Filter by search query if provided
+            // Filter by search query if provided (supports deviceName, vehicleNumber, displayName, IMEI, mcType, group)
             if (searchQuery) {
-                filteredVehicles = filteredVehicles.filter(v =>
-                    (v.deviceName && v.deviceName.toLowerCase().includes(searchQuery)) ||
-                    (v.imei && v.imei.toLowerCase().includes(searchQuery)) ||
-                    (v.vehicleNumber && v.vehicleNumber.toLowerCase().includes(searchQuery)) ||
-                    (v.driverName && v.driverName.toLowerCase().includes(searchQuery)) ||
-                    (v.customerName && v.customerName.toLowerCase().includes(searchQuery)) ||
-                    (v.groupName && v.groupName.toLowerCase().includes(searchQuery)) ||
-                    (v.driverStatus && v.driverStatus.toLowerCase().includes(searchQuery))
-                );
+                filteredVehicles = filteredVehicles.filter(v => {
+                    const dName = (v.deviceName || '').toLowerCase();
+                    const vNum = (v.vehicleNumber || '').toLowerCase();
+                    const dPlay = (v.displayName || '').toLowerCase();
+                    const imei = (v.imei || '').toLowerCase();
+                    const group = (v.groupName || v.deviceGroup || '').toLowerCase();
+                    const mc = (v.mcType || '').toLowerCase();
+                    return (
+                        dName.includes(searchQuery) ||
+                        vNum.includes(searchQuery) ||
+                        dPlay.includes(searchQuery) ||
+                        imei.includes(searchQuery) ||
+                        group.includes(searchQuery) ||
+                        mc.includes(searchQuery)
+                    );
+                });
             }
 
             // Batch query jimi.open.platform.report.mileage in chunks of 100 IMEIs
@@ -972,15 +1013,13 @@ class GpsService {
             const allProcessedRows = filteredVehicles.map(v => {
                 const matchedDbVeh = v.matchedDbVeh;
                 const deviceName = v.deviceName;
+                const displayName = v.displayName || v.deviceName;
                 const groupName = v.groupName;
                 const vehicleNumber = v.vehicleNumber;
-                const driverName = v.driverName;
-                const driverStatus = v.driverStatus;
-                const customerName = v.customerName;
 
                 const m = mileageMap.get(String(v.imei)) || {};
                 const distKm = parseFloat(m.totalMileage || 0) || 0;
-                const mcType = m.mcType || 'VL802';
+                const mcType = m.mcType || v.mcType || 'VL802';
 
                 const firstGpsTime = m.startTime && m.startTime !== 'N/A' ? m.startTime : startTime;
                 const lastGpsTime = m.endTime && m.endTime !== 'N/A' ? m.endTime : endTime;
@@ -1034,38 +1073,32 @@ class GpsService {
 
                 return {
                     imei: v.imei,
+                    deviceName,
                     device: deviceName,
+                    displayName,
+                    vehicleNumber,
                     mcType,
                     group: groupName,
-                    vehicleNumber,
-                    customerName,
-                    driverName,
-                    driverStatus,
                     distance: Number(distKm.toFixed(2)),
-                    maxSpeed: distKm > 0 ? 65 : 0,
-                    engineHoursSeconds: runtimeSec,
-                    engineHoursFormatted,
-                    fuelConsumed,
-                    startDate,
                     startTime: firstGpsTime,
                     endTime: lastGpsTime,
+                    startDate,
                     odometerStart: odoStart,
                     odometerEnd: odoEnd,
+                    engineHoursFormatted,
+                    engineHoursSeconds: runtimeSec,
+                    fuelConsumed,
                     averageSpeed: avgSpeed,
-                    tripCount: distKm > 0 ? 1 : 0
+                    maxSpeed: distKm > 0 ? 65 : 0
                 };
             });
 
-            // Sort: Devices with mileage on top (highest first), then assigned drivers, then alphabetical
+            // Sort: Devices with mileage on top (highest first), then by distance descending, then by displayName
             allProcessedRows.sort((a, b) => {
                 if (b.distance !== a.distance) {
                     return b.distance - a.distance;
                 }
-                const isUnassignedA = !a.driverName || a.driverName === 'Unassigned';
-                const isUnassignedB = !b.driverName || b.driverName === 'Unassigned';
-                if (isUnassignedA && !isUnassignedB) return 1;
-                if (!isUnassignedA && isUnassignedB) return -1;
-                return (a.driverName || '').localeCompare(b.driverName || '');
+                return (a.displayName || a.deviceName || '').localeCompare(b.displayName || b.deviceName || '');
             });
 
             const totalRecords = allProcessedRows.length;
