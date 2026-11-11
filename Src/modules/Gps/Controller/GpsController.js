@@ -220,8 +220,8 @@ const getGpsObdData = async (req, res, next) => {
 
 const getFleetSummaryReport = async (req, res, next) => {
     try {
-        const { imeis, group, startTime, endTime, reportType, page, limit, search } = req.query;
-        const data = await GpsService.getFleetSummaryReport({ imeis, group, startTime, endTime, reportType, page, limit, search });
+        const { imeis, group, subAccount, startTime, endTime, reportType, page, limit, search } = req.query;
+        const data = await GpsService.getFleetSummaryReport({ imeis, group, subAccount, startTime, endTime, reportType, page, limit, search });
         res.status(200).json({ success: true, data });
     } catch (error) {
         next(error);

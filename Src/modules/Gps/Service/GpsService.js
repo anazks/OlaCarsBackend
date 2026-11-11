@@ -22,6 +22,7 @@ class GpsService {
         this.locationsCache = {};
         this.fleetSummaryCache = new Map();
         this.deviceFirstTripDate = new Map();
+        this.dbVehiclesCache = null;
     }
 
     loadCache() {
@@ -792,11 +793,12 @@ class GpsService {
         }
     }
 
-    async getFleetSummaryReport({ imeis, group, startTime, endTime, reportType = 'Summary', page = 1, limit = 25, search = '', filterMileage = 0 }) {
+    async getFleetSummaryReport({ imeis, group, subAccount, startTime, endTime, reportType = 'Summary', page = 1, limit = 25, search = '', filterMileage = 0 }) {
         try {
             const pageNum = Math.max(1, parseInt(page, 10) || 1);
             const limitNum = Math.min(3000, Math.max(1, parseInt(limit, 10) || 25));
             const searchQuery = String(search || '').trim().toLowerCase();
+            const subAccountFilter = String(subAccount || '').trim();
 
             // Default time period and date normalization
             const nowObj = new Date();
@@ -806,15 +808,12 @@ class GpsService {
             const normalizeDateStr = (str, isEnd = false) => {
                 if (!str) return null;
                 let s = String(str).trim().replace('T', ' ');
-                // If format is YYYY-MM-DD
                 if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
                     return isEnd ? `${s} 23:59:59` : `${s} 00:00:00`;
                 }
-                // If format is YYYY-MM-DD HH:mm
                 if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)) {
                     return `${s}:00`;
                 }
-                // If format is YYYY-MM-DD HH:mm:ss
                 if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
                     return s;
                 }
@@ -848,7 +847,7 @@ class GpsService {
             startTime = normStart;
             endTime = normEnd;
 
-            const cacheKey = `${imeis || 'ALL'}_${group || 'ALL'}_${startTime}_${endTime}_${reportType}_p${pageNum}_l${limitNum}_s${searchQuery}`;
+            const cacheKey = `${imeis || 'ALL'}_${group || 'ALL'}_${subAccountFilter || 'ALL'}_${startTime}_${endTime}_${reportType}_p${pageNum}_l${limitNum}_s${searchQuery}`;
             if (!this.fleetSummaryCache) {
                 this.fleetSummaryCache = new Map();
             }
@@ -859,7 +858,7 @@ class GpsService {
                 return cached.data;
             }
 
-            console.log(`[GPS Service] Generating Fleet Summary Report via jimi.open.platform.report.mileage: page=${pageNum}, limit=${limitNum}, range: ${startTime} -> ${endTime}`);
+            console.log(`[GPS Service] Generating Fleet Summary Report: page=${pageNum}, limit=${limitNum}, range: ${startTime} -> ${endTime}, search='${searchQuery}', subAccount='${subAccountFilter}'`);
 
             let vehicles = [];
             try {
@@ -869,17 +868,23 @@ class GpsService {
                 vehicles = [];
             }
 
-            // Fetch local database vehicles & drivers to map vehicleNumber, driverName, and status
+            // Fetch local database vehicles (cached for 5 minutes)
             let dbVehicles = [];
             try {
-                require('../../Driver/Model/DriverModel');
-                const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
-                dbVehicles = await Vehicle.find({})
-                    .select('basicDetails legalDocs currentDriver status customerName renter')
-                    .populate('currentDriver', 'personalInfo status driverId fullName')
-                    .lean();
+                if (this.dbVehiclesCache && (now - this.dbVehiclesCache.timestamp < 5 * 60 * 1000)) {
+                    dbVehicles = this.dbVehiclesCache.data;
+                } else {
+                    const mongoose = require('mongoose');
+                    if (mongoose.connection && mongoose.connection.readyState === 1) {
+                        const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
+                        dbVehicles = await Vehicle.find({})
+                            .select('basicDetails.vin basicDetails.fleetNumber basicDetails.gpsSerialNumber basicDetails.odometer legalDocs.registrationNumber')
+                            .lean();
+                        this.dbVehiclesCache = { timestamp: now, data: dbVehicles };
+                    }
+                }
             } catch (dbErr) {
-                console.warn('[GPS Service] Local DB vehicle/driver lookup warning:', dbErr.message);
+                console.warn('[GPS Service] Local DB vehicle lookup warning:', dbErr.message);
             }
 
             // Enhance all vehicles with local database details
@@ -887,8 +892,9 @@ class GpsService {
                 const rawDeviceName = v.deviceName || v.vehicleName || (v.imei ? `VL802-${String(v.imei).slice(-5)}` : 'N/A');
                 const rawVehNumber = v.vehicleNumber && !v.vehicleNumber.toUpperCase().startsWith('DAÑADO') ? v.vehicleNumber.trim() : '';
                 const groupName = v.deviceGroup || v.deviceGroupId || 'Default group';
+                const account = v.account || 'ARRENDADORA_OLA_CARS';
 
-                const matchedDbVeh = dbVehicles.find(dbV => {
+                const matchedDbVeh = (dbVehicles && dbVehicles.length > 0) ? dbVehicles.find(dbV => {
                     const dbReg = dbV.legalDocs?.registrationNumber?.toLowerCase().trim();
                     const dbVin = dbV.basicDetails?.vin?.toLowerCase().trim();
                     const dbGps = dbV.basicDetails?.gpsSerialNumber?.toLowerCase().trim();
@@ -907,7 +913,7 @@ class GpsService {
                         (dbFleet && vPlate && dbFleet === vPlate) ||
                         (dbFleet && vName && dbFleet === vName)
                     );
-                });
+                }) : null;
 
                 let vehicleNumber = '';
                 if (matchedDbVeh) {
@@ -933,6 +939,7 @@ class GpsService {
 
                 return {
                     ...v,
+                    account,
                     deviceName: rawDeviceName,
                     vehicleNumber: vehicleNumber || 'Unassigned',
                     displayName,
@@ -941,43 +948,91 @@ class GpsService {
                 };
             });
 
-            // Filter by IMEIs if specified
+            // 1. Filter by sub-account if specified
             let filteredVehicles = enhancedVehicles;
+            if (subAccountFilter && subAccountFilter !== 'ALL') {
+                filteredVehicles = filteredVehicles.filter(v => v.account === subAccountFilter);
+            }
+
+            // 2. Filter by IMEIs if specified
             if (imeis && imeis !== 'ALL') {
                 const imeiSet = new Set(imeis.split(',').map(i => i.trim()).filter(Boolean));
                 filteredVehicles = filteredVehicles.filter(v => imeiSet.has(v.imei));
             }
 
-            // Filter by group if specified
+            // 3. Filter by group if specified
             if (group && group !== 'ALL') {
-                filteredVehicles = filteredVehicles.filter(v => (v.deviceGroup === group || v.deviceGroupId === group || v.groupName === group));
+                filteredVehicles = filteredVehicles.filter(v => (v.deviceGroup === group || v.deviceGroupId === group || v.groupName === group || v.account === group));
             }
 
-            // Filter by search query if provided (supports deviceName, vehicleNumber, displayName, IMEI, mcType, group)
+            // 4. Filter by search query if provided (supports deviceName, vehicleNumber, displayName, IMEI, mcType, account, group)
             if (searchQuery) {
                 filteredVehicles = filteredVehicles.filter(v => {
                     const dName = (v.deviceName || '').toLowerCase();
                     const vNum = (v.vehicleNumber || '').toLowerCase();
                     const dPlay = (v.displayName || '').toLowerCase();
                     const imei = (v.imei || '').toLowerCase();
-                    const group = (v.groupName || v.deviceGroup || '').toLowerCase();
+                    const grp = (v.groupName || v.deviceGroup || '').toLowerCase();
                     const mc = (v.mcType || '').toLowerCase();
+                    const acc = (v.account || '').toLowerCase();
                     return (
                         dName.includes(searchQuery) ||
                         vNum.includes(searchQuery) ||
                         dPlay.includes(searchQuery) ||
                         imei.includes(searchQuery) ||
-                        group.includes(searchQuery) ||
-                        mc.includes(searchQuery)
+                        grp.includes(searchQuery) ||
+                        mc.includes(searchQuery) ||
+                        acc.includes(searchQuery)
                     );
                 });
             }
 
-            // Batch query jimi.open.platform.report.mileage in chunks of 100 IMEIs
-            const allImeis = filteredVehicles.map(v => v.imei).filter(Boolean);
+            // Predictable alphabetical sorting by vehicleNumber/displayName
+            filteredVehicles.sort((a, b) => {
+                const nameA = (a.vehicleNumber !== 'Unassigned' ? a.vehicleNumber : a.displayName || a.deviceName || '').toLowerCase();
+                const nameB = (b.vehicleNumber !== 'Unassigned' ? b.vehicleNumber : b.displayName || b.deviceName || '').toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+
+            const totalRecords = filteredVehicles.length;
+            const totalPages = Math.ceil(totalRecords / limitNum) || 1;
+            const safePage = Math.min(Math.max(1, pageNum), totalPages);
+            const startIndex = (safePage - 1) * limitNum;
+
+            if (totalRecords === 0) {
+                return {
+                    summaryRows: [],
+                    totals: {
+                        totalDevices: 0,
+                        activeDevices: 0,
+                        totalDistance: 0,
+                        totalFuel: 0,
+                        averageSpeed: 0,
+                        totalEngineHoursSeconds: 0,
+                        totalEngineHoursFormatted: "0 m"
+                    },
+                    pagination: {
+                        total: 0,
+                        page: 1,
+                        limit: limitNum,
+                        totalPages: 1
+                    }
+                };
+            }
+
+            // Pagination Engineering: Slice the target batch BEFORE calling Tracksolid mileage API
+            // For exports (limit >= 3000), fetch all filtered. For UI pagination/search, fetch ONLY the current slice!
+            const targetVehicles = (limitNum >= 3000)
+                ? filteredVehicles
+                : filteredVehicles.slice(startIndex, startIndex + limitNum);
+
+            console.log(`[GPS Service] Sliced ${targetVehicles.length} target vehicles (from total ${totalRecords}) for Tracksolid mileage API`);
+
+            // Batch query jimi.open.platform.report.mileage in chunks of 100 IMEIs for targetVehicles ONLY
+            const targetImeis = targetVehicles.map(v => v.imei).filter(Boolean);
             const imeiChunks = [];
-            for (let i = 0; i < allImeis.length; i += 100) {
-                imeiChunks.push(allImeis.slice(i, i + 100));
+            for (let i = 0; i < targetImeis.length; i += 100) {
+                imeiChunks.push(targetImeis.slice(i, i + 100));
             }
 
             const mileageMap = new Map();
@@ -1010,12 +1065,13 @@ class GpsService {
 
             const periodStartDate = startTime ? String(startTime).split(' ')[0].split('T')[0] : 'N/A';
 
-            const allProcessedRows = filteredVehicles.map(v => {
+            const processedRows = targetVehicles.map(v => {
                 const matchedDbVeh = v.matchedDbVeh;
                 const deviceName = v.deviceName;
                 const displayName = v.displayName || v.deviceName;
                 const groupName = v.groupName;
                 const vehicleNumber = v.vehicleNumber;
+                const account = v.account || 'ARRENDADORA_OLA_CARS';
 
                 const m = mileageMap.get(String(v.imei)) || {};
                 const distKm = parseFloat(m.totalMileage || 0) || 0;
@@ -1077,6 +1133,7 @@ class GpsService {
                     device: deviceName,
                     displayName,
                     vehicleNumber,
+                    account,
                     mcType,
                     group: groupName,
                     distance: Number(distKm.toFixed(2)),
@@ -1093,54 +1150,47 @@ class GpsService {
                 };
             });
 
-            // Sort: Devices with mileage on top (highest first), then by distance descending, then by displayName
-            allProcessedRows.sort((a, b) => {
+            // Sort target slice: Devices with mileage on top (highest first), then by distance descending
+            processedRows.sort((a, b) => {
                 if (b.distance !== a.distance) {
                     return b.distance - a.distance;
                 }
                 return (a.displayName || a.deviceName || '').localeCompare(b.displayName || b.deviceName || '');
             });
 
-            const totalRecords = allProcessedRows.length;
-            const totalPages = Math.ceil(totalRecords / limitNum) || 1;
-            const safePage = Math.min(Math.max(1, pageNum), totalPages);
+            const pageFleetDistance = Number(processedRows.reduce((sum, r) => sum + r.distance, 0).toFixed(2));
+            const pageFleetFuel = Number(processedRows.reduce((sum, r) => sum + r.fuelConsumed, 0).toFixed(1));
+            const pageEngineHoursSeconds = processedRows.reduce((sum, r) => sum + r.engineHoursSeconds, 0);
 
-            const startIndex = (safePage - 1) * limitNum;
-            const paginatedRows = allProcessedRows.slice(startIndex, startIndex + limitNum);
+            const totalDays = Math.floor(pageEngineHoursSeconds / 86400);
+            const totalHrs = Math.floor((pageEngineHoursSeconds % 86400) / 3600);
+            const totalMins = Math.floor((pageEngineHoursSeconds % 3600) / 60);
 
-            const totalFleetDistance = Number(allProcessedRows.reduce((sum, r) => sum + r.distance, 0).toFixed(2));
-            const totalFleetFuel = Number(allProcessedRows.reduce((sum, r) => sum + r.fuelConsumed, 0).toFixed(1));
-            const totalEngineHoursSeconds = allProcessedRows.reduce((sum, r) => sum + r.engineHoursSeconds, 0);
-
-            const totalDays = Math.floor(totalEngineHoursSeconds / 86400);
-            const totalHrs = Math.floor((totalEngineHoursSeconds % 86400) / 3600);
-            const totalMins = Math.floor((totalEngineHoursSeconds % 3600) / 60);
-
-            let totalEngineHoursFormatted = "0 m";
+            let pageEngineHoursFormatted = "0 m";
             if (totalDays > 0) {
-                totalEngineHoursFormatted = `${totalDays} d ${totalHrs} h ${totalMins} m`;
+                pageEngineHoursFormatted = `${totalDays} d ${totalHrs} h ${totalMins} m`;
             } else if (totalHrs > 0) {
-                totalEngineHoursFormatted = `${totalHrs} h ${totalMins} m`;
+                pageEngineHoursFormatted = `${totalHrs} h ${totalMins} m`;
             } else if (totalMins > 0) {
-                totalEngineHoursFormatted = `${totalMins} m`;
+                pageEngineHoursFormatted = `${totalMins} m`;
             }
 
-            const fleetAvgSpeed = totalEngineHoursSeconds > 0
-                ? Number((totalFleetDistance / (totalEngineHoursSeconds / 3600)).toFixed(2))
+            const fleetAvgSpeed = pageEngineHoursSeconds > 0
+                ? Number((pageFleetDistance / (pageEngineHoursSeconds / 3600)).toFixed(2))
                 : 0;
 
-            const activeDevicesCount = allProcessedRows.filter(r => r.distance > 0).length;
+            const activeDevicesCount = processedRows.filter(r => r.distance > 0).length;
 
             const result = {
-                summaryRows: paginatedRows,
+                summaryRows: processedRows,
                 totals: {
                     totalDevices: totalRecords,
                     activeDevices: activeDevicesCount,
-                    totalDistance: totalFleetDistance,
-                    totalFuel: totalFleetFuel,
+                    totalDistance: pageFleetDistance,
+                    totalFuel: pageFleetFuel,
                     averageSpeed: fleetAvgSpeed,
-                    totalEngineHoursSeconds,
-                    totalEngineHoursFormatted
+                    totalEngineHoursSeconds: pageEngineHoursSeconds,
+                    totalEngineHoursFormatted: pageEngineHoursFormatted
                 },
                 pagination: {
                     total: totalRecords,
