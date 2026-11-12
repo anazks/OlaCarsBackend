@@ -36,14 +36,19 @@ exports.createDebitNote = async (req, res) => {
  */
 exports.applyDebitNote = async (req, res) => {
     try {
-        const { invoiceId } = req.body;
-        if (!invoiceId) {
-            throw new Error("Target invoiceId is required to apply debit note.");
+        const { invoiceId, billId } = req.body;
+        if (!invoiceId && !billId) {
+            throw new Error("Target invoiceId or billId is required to apply debit note.");
         }
-        const doc = await DebitNoteService.applyDebitNoteToInvoice(req.params.id, invoiceId);
+        let doc;
+        if (billId) {
+            doc = await DebitNoteService.applyDebitNoteToBill(req.params.id, billId);
+        } else {
+            doc = await DebitNoteService.applyDebitNoteToInvoice(req.params.id, invoiceId);
+        }
         res.status(200).json({ 
             success: true, 
-            message: "Debit Note successfully applied to invoice.", 
+            message: billId ? "Debit Note successfully applied to bill." : "Debit Note successfully applied to invoice.", 
             data: doc 
         });
     } catch (error) {
@@ -135,15 +140,24 @@ exports.deleteDebitNote = async (req, res) => {
  */
 exports.bulkUploadDebitNotes = async (req, res) => {
     try {
-        const actor = { id: req.user.id, role: req.user.role };
+        const actor = { id: req.user?.id || req.user?._id, role: req.user?.role || 'ADMIN' };
         const { rows } = req.body;
         if (!Array.isArray(rows) || rows.length === 0) {
             return res.status(400).json({ success: false, message: "No valid rows provided for bulk upload." });
         }
         const result = await DebitNoteService.bulkUploadDebitNotes(rows, actor);
+
+        if (result.createdCount === 0 && result.errors && result.errors.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Failed to create Debit Notes: ${result.errors[0]}`,
+                data: result
+            });
+        }
+
         res.status(201).json({
             success: true,
-            message: `Successfully processed ${result.createdCount} Debit Notes.`,
+            message: `Successfully created ${result.createdCount} Debit Notes.`,
             data: result
         });
     } catch (error) {

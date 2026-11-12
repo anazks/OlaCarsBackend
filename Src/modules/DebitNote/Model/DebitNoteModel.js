@@ -4,6 +4,7 @@ const debitNoteSchema = new mongoose.Schema({
     debitNoteNumber: { 
         type: String, 
         required: true, 
+        unique: true,
         trim: true 
     },
     customerId: { 
@@ -26,9 +27,18 @@ const debitNoteSchema = new mongoose.Schema({
         ref: 'Invoice', 
         required: false 
     },
+    billId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Bill',
+        required: false
+    },
     invoices: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Invoice'
+    }],
+    bills: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Bill'
     }],
     taxId: {
         type: mongoose.Schema.Types.ObjectId,
