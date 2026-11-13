@@ -2509,6 +2509,33 @@ exports.changeTransactionDescription = async (req, res, next) => {
     }
 };
 
+exports.changeTransactionBranch = async (req, res, next) => {
+    try {
+        const { transactionId } = req.params;
+        const { branchId } = req.body;
+
+        if (!branchId) {
+            return res.status(400).json({ success: false, message: "Valid branch ID is required" });
+        }
+
+        const options = {
+            createdBy: req.user?._id,
+            creatorRole: req.user?.role
+        };
+
+        const result = await BankAccountService.updateTransactionBranch(transactionId, branchId, options);
+
+        res.status(200).json({
+            success: true,
+            message: "Successfully updated transaction branch",
+            data: result
+        });
+    } catch (error) {
+        console.error("Error in changeTransactionBranch controller:", error);
+        next(error);
+    }
+};
+
 exports.recalculateBankBalances = async (req, res, next) => {
     try {
         const { id } = req.params;

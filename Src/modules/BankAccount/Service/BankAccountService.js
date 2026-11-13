@@ -978,6 +978,7 @@ const recordManualPayment = async (targetId, data) => {
     // Create BankTransaction record for Target Bank Account
     const BankTransaction = require("../Model/BankTransactionModel");
     const targetBankTx = new BankTransaction({
+        branch: finalBranchId,
         bankAccount: targetAccount._id,
         transactionId: result.journal?.journalNumber || `TXN-${Date.now()}`,
         entryDate: parsedDate,
@@ -1025,6 +1026,7 @@ const recordManualPayment = async (targetId, data) => {
 
         // Create BankTransaction record for Offset Bank Account
         const offsetBankTx = new BankTransaction({
+            branch: finalBranchId,
             bankAccount: offsetAccount._id,
             transactionId: result.journal?.journalNumber || `TXN-${Date.now()}`,
             entryDate: parsedDate,
@@ -4603,6 +4605,149 @@ const updateTransactionDescription = async (transactionId, newDescription, optio
     };
 };
 
+/**
+ * Dedicated Service 9: Update Transaction Branch
+ * Updates the branch location across the transaction and all connected legs/manual journals
+ * while keeping all other values (amounts, dates, accounting codes, contacts) unchanged.
+ */
+const updateTransactionBranch = async (transactionId, newBranchId, options = {}) => {
+    if (!newBranchId) {
+        throw new Error("Valid branch ID is required");
+    }
+
+    const Branch = require("../../Branch/Model/BranchModel");
+    const branchDoc = await Branch.findOne({ _id: newBranchId, isDeleted: false });
+    if (!branchDoc) {
+        throw new Error("Branch not found");
+    }
+
+    const BankTransaction = require("../Model/BankTransactionModel");
+    const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+    const InvoiceBillSetOffHistory = require("../Model/InvoiceBillSetOffHistoryModel");
+    const ManualJournal = require("../../Ledger/Model/ManualJournalModel");
+
+    let primaryEntry = null;
+    let bankTx = null;
+    const txStringId = String(transactionId);
+
+    if (mongoose.Types.ObjectId.isValid(transactionId)) {
+        primaryEntry = await LedgerEntry.findById(transactionId);
+        bankTx = await BankTransaction.findById(transactionId);
+        if (bankTx && bankTx.ledgerEntry && !primaryEntry) {
+            primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+        }
+    }
+
+    if (!primaryEntry) {
+        primaryEntry = await LedgerEntry.findOne({ transactionId: txStringId });
+    }
+    if (!bankTx) {
+        bankTx = await BankTransaction.findOne({ transactionId: txStringId });
+    }
+    if (!primaryEntry && bankTx && bankTx.ledgerEntry) {
+        primaryEntry = await LedgerEntry.findById(bankTx.ledgerEntry);
+    }
+    if (!bankTx && primaryEntry) {
+        bankTx = await BankTransaction.findOne({
+            $or: [
+                { ledgerEntry: primaryEntry._id },
+                { transactionId: primaryEntry.transactionId }
+            ]
+        });
+    }
+
+    if (!primaryEntry && !bankTx) {
+        throw new Error("Transaction not found");
+    }
+
+    const existingDate = (primaryEntry && primaryEntry.entryDate) || (bankTx && bankTx.entryDate);
+    if (existingDate) {
+        const dObj = new Date(existingDate);
+        const y = dObj.getUTCFullYear();
+        const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(dObj.getUTCDate()).padStart(2, '0');
+        if (`${y}-${m}-${d}` <= '2026-06-15') {
+            throw new Error("Transactions on or before 15/06/2026 cannot be modified");
+        }
+    }
+
+    // Collect all connected ledger conditions
+    const connectedConditions = [];
+    if (primaryEntry) {
+        connectedConditions.push({ _id: primaryEntry._id });
+        if (primaryEntry.manualJournal) connectedConditions.push({ manualJournal: primaryEntry.manualJournal });
+        if (primaryEntry.transaction) connectedConditions.push({ transaction: primaryEntry.transaction });
+        if (primaryEntry.transactionId) connectedConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    if (bankTx) {
+        if (bankTx.transactionId) connectedConditions.push({ transactionId: String(bankTx.transactionId) });
+        if (bankTx.ledgerEntry) connectedConditions.push({ _id: bankTx.ledgerEntry });
+    }
+    if (txStringId) {
+        connectedConditions.push({ transactionId: txStringId });
+    }
+
+    // Find set-off history if any
+    const historyConditions = [];
+    if (primaryEntry) {
+        historyConditions.push({ primaryLedgerEntry: primaryEntry._id });
+        historyConditions.push({ partnerLedgerEntries: primaryEntry._id });
+    }
+    if (bankTx) {
+        historyConditions.push({ bankTransaction: bankTx._id });
+    }
+    if (txStringId) {
+        historyConditions.push({ transactionId: txStringId });
+    }
+
+    const history = await InvoiceBillSetOffHistory.findOne({ $or: historyConditions });
+    if (history) {
+        history.branch = branchDoc._id;
+        await history.save();
+        if (history.partnerLedgerEntries && history.partnerLedgerEntries.length > 0) {
+            connectedConditions.push({ _id: { $in: history.partnerLedgerEntries } });
+        }
+    }
+
+    const connectedEntries = await LedgerEntry.find({ $or: connectedConditions });
+
+    // 1. Update all connected LedgerEntries
+    for (const connEntry of connectedEntries) {
+        connEntry.branch = branchDoc._id;
+        await connEntry.save();
+    }
+
+    // 2. Update ManualJournal
+    const journalIds = connectedEntries.map(e => e.manualJournal).filter(Boolean);
+    if (journalIds.length > 0) {
+        await ManualJournal.updateMany(
+            { _id: { $in: journalIds } },
+            { $set: { branch: branchDoc._id } }
+        );
+    }
+
+    // 3. Update matching BankTransaction records
+    const btConditions = [
+        ...(primaryEntry ? [{ _id: primaryEntry._id }, { ledgerEntry: primaryEntry._id }] : []),
+        ...(bankTx ? [{ _id: bankTx._id }] : []),
+        ...(txStringId ? [{ transactionId: txStringId }] : [])
+    ];
+    if (primaryEntry && primaryEntry.transactionId) {
+        btConditions.push({ transactionId: String(primaryEntry.transactionId) });
+    }
+    const matchedBankTxs = await BankTransaction.find({ $or: btConditions });
+    for (const bt of matchedBankTxs) {
+        bt.branch = branchDoc._id;
+        await bt.save();
+    }
+
+    return {
+        success: true,
+        transactionId,
+        branch: branchDoc
+    };
+};
+
 module.exports = {
     createBankAccount,
     getAllBankAccounts,
@@ -4627,5 +4772,6 @@ module.exports = {
     updateInterBankTransactionAmount,
     updateLinkedAccountingCode,
     updateTransactionDate,
-    updateTransactionDescription
+    updateTransactionDescription,
+    updateTransactionBranch
 };

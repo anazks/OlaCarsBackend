@@ -90,6 +90,13 @@ router.put(
     BankAccountController.changeTransactionDescription
 );
 
+// 9. Change Transaction Branch
+router.put(
+    "/transactions/:transactionId/branch",
+    authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
+    BankAccountController.changeTransactionBranch
+);
+
 router.put(
     "/:id",
     authorize(ROLES.ADMIN, ROLES.FINANCEADMIN),
