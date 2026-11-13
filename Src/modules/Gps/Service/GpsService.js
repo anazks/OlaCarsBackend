@@ -878,7 +878,7 @@ class GpsService {
                     if (mongoose.connection && mongoose.connection.readyState === 1) {
                         const { Vehicle } = require('../../Vehicle/Model/VehicleModel');
                         dbVehicles = await Vehicle.find({})
-                            .select('basicDetails.vin basicDetails.fleetNumber basicDetails.gpsSerialNumber basicDetails.odometer legalDocs.registrationNumber')
+                            .select('basicDetails.vin basicDetails.fleetNumber basicDetails.gpsSerialNumber basicDetails.odometer basicDetails.odometerReadingDate legalDocs.registrationNumber updatedAt')
                             .lean();
                         this.dbVehiclesCache = { timestamp: now, data: dbVehicles };
                     }
@@ -1081,16 +1081,32 @@ class GpsService {
                 const lastGpsTime = m.endTime && m.endTime !== 'N/A' ? m.endTime : endTime;
                 const startDate = firstGpsTime.split(' ')[0] || periodStartDate;
 
-                const currentOdo = (v.odometer || v.basicDetails?.odometer || matchedDbVeh?.basicDetails?.odometer || null);
-                let odoEnd = 0;
-                let odoStart = 0;
+                const benchmarkOdo = Number(matchedDbVeh?.basicDetails?.odometer || v.basicDetails?.odometer || v.odometer || 0);
+                const benchmarkDateRaw = matchedDbVeh?.basicDetails?.odometerReadingDate || matchedDbVeh?.updatedAt;
+                const benchmarkDate = benchmarkDateRaw ? new Date(benchmarkDateRaw) : null;
 
-                if (currentOdo !== null && !isNaN(currentOdo) && currentOdo > 0) {
-                    odoEnd = currentOdo;
-                    odoStart = Math.max(0, odoEnd - distKm);
+                const periodStartObj = startTime ? new Date(String(startTime).replace(' ', 'T')) : null;
+                const periodEndObj = endTime ? new Date(String(endTime).replace(' ', 'T')) : null;
+
+                let odoStart = 0;
+                let odoEnd = 0;
+
+                if (!isNaN(benchmarkOdo) && benchmarkOdo > 0) {
+                    // Scenario: If the user selects a time range way before the updated odometer date from vehicle page,
+                    // let the start and end be the last updated kilometers.
+                    if (benchmarkDate && periodEndObj && !isNaN(periodEndObj.getTime()) && periodEndObj < benchmarkDate) {
+                        odoStart = benchmarkOdo;
+                        odoEnd = benchmarkOdo;
+                    } else {
+                        // Normal scenario:
+                        // Odometer start is the updated count from /vehicles/:id, and odometer end is (odometer start + distKm)
+                        odoStart = benchmarkOdo;
+                        odoEnd = Number((benchmarkOdo + distKm).toFixed(2));
+                    }
                 } else if (distKm > 0) {
-                    odoEnd = distKm;
+                    // Fallback when no benchmark odometer is present in vehicle profile
                     odoStart = 0;
+                    odoEnd = Number(distKm.toFixed(2));
                 }
 
                 odoStart = Number(odoStart.toFixed(2));

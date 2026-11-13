@@ -96,6 +96,7 @@ const vehicleSchema = new mongoose.Schema(
                 enum: ["Hatchback", "Saloon", "Coupe", "Convertible", "Truck"],
             },
             odometer: { type: Number },
+            odometerReadingDate: { type: Date, default: Date.now },
             gpsSerialNumber: { type: String },
             condition: { type: String, enum: ["New", "Used"] },
             weeklyRent: { type: Number, default: 0 },
