@@ -6,7 +6,7 @@ const path = require('path');
 const TRACKSOLID_API_URL = process.env.TRACKSOLID_API_URL || 'https://us-open.tracksolidpro.com/route/rest';
 const TRACKSOLID_APP_KEY = process.env.TRACKSOLID_APP_KEY || '8FB345B8693CCD0036B18E9F2E03AD30339A22A4105B6558';
 const TRACKSOLID_USER_ID = process.env.TRACKSOLID_USER_ID || 'ARRENDADORA_OLA_CARS';
-const TRACKSOLID_USER_PWD_MD5 = process.env.TRACKSOLID_USER_PWD_MD5 || '2144ad865844e27229d4125b659f2406';
+const TRACKSOLID_USER_PWD_MD5 = process.env.TRACKSOLID_USER_PWD_MD5 || '6e5563d33e4d127dad825bbde0e1ac50';
 const TRACKSOLID_APP_SECRET = process.env.TRACKSOLID_APP_SECRET || 'ca18517f84354a4d88573c123c817329';
 
 const CACHE_FILE = path.join(__dirname, 'gps_token_cache.json');

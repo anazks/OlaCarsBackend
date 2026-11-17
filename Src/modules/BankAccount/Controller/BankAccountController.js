@@ -172,8 +172,8 @@ exports.uploadBankStatement = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "No accounting code linked to this bank account" });
         }
 
-        const createdBy = req.user?._id || req.user?.id || req.user?.userId;
-        const creatorRole = req.user?.role || "ADMIN";
+        const createdBy = req.user?._id || req.user?.id || req.user?.userId || "6a2290019fa01283dd165204";
+        const creatorRole = (req.user?.role || "ADMIN").toUpperCase();
 
         const ManualJournalService = require("../../Ledger/Service/ManualJournalService");
         const AccountingCode = require("../../AccountingCode/Model/AccountingCodeModel");
@@ -529,8 +529,8 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "No accounting code linked to this bank account" });
         }
 
-        const createdBy = req.user?._id || req.user?.id || req.user?.userId;
-        const creatorRole = req.user?.role || "ADMIN";
+        const createdBy = req.user?._id || req.user?.id || req.user?.userId || "6a2290019fa01283dd165204";
+        const creatorRole = (req.user?.role || "ADMIN").toUpperCase();
 
         const accountingCodeDoc = await AccountingCode.findOne({ _id: accCodeId });
         if (!accountingCodeDoc) {
@@ -605,14 +605,85 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             if (s.supplierCode) supplierByNameMap.set(normalizeForMap(s.supplierCode), s);
         }
 
+        // Robust token & fuzzy matching helper for Customers (handles maternal surnames, e.g. "DOMINGUEZ")
+        const resolveCustomerByName = (rawName) => {
+            if (!rawName) return null;
+            const norm = normalizeForMap(rawName);
+            if (customerByNameMap.has(norm)) return customerByNameMap.get(norm);
+
+            const stripped = norm.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (customerByNameMap.has(stripped)) return customerByNameMap.get(stripped);
+
+            for (const c of allCustomers) {
+                const cName = normalizeForMap(c.name || c.displayName || c.companyName || "");
+                if (!cName || cName.length < 3) continue;
+                if (stripped === cName || stripped.includes(cName) || cName.includes(stripped)) {
+                    return c;
+                }
+                const cTokens = cName.replace(/[,.-]/g, ' ').split(' ').filter(t => t.length > 2 && t !== 's.a' && t !== 'sa');
+                if (cTokens.length > 0 && cTokens.every(t => stripped.includes(t))) {
+                    return c;
+                }
+            }
+            return null;
+        };
+
+        // Robust token & fuzzy matching helper for Drivers
+        const resolveDriverByName = (rawName) => {
+            if (!rawName) return null;
+            const norm = normalizeForMap(rawName);
+            if (driverByNameMap.has(norm)) return driverByNameMap.get(norm);
+
+            const stripped = norm.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (driverByNameMap.has(stripped)) return driverByNameMap.get(stripped);
+
+            for (const d of allDrivers) {
+                const fullName = normalizeForMap(d.personalInfo?.fullName || d.name || "");
+                if (!fullName || fullName.length < 3) continue;
+                if (stripped === fullName || stripped.includes(fullName) || fullName.includes(stripped)) {
+                    return d;
+                }
+                const dTokens = fullName.replace(/[,.-]/g, ' ').split(' ').filter(t => t.length > 2);
+                if (dTokens.length > 0 && dTokens.every(t => stripped.includes(t))) {
+                    return d;
+                }
+            }
+            return null;
+        };
+
+        // Robust token & fuzzy matching helper for Suppliers
+        const resolveSupplierByName = (rawName) => {
+            if (!rawName) return null;
+            const norm = normalizeForMap(rawName);
+            if (supplierByNameMap.has(norm)) return supplierByNameMap.get(norm);
+
+            const stripped = norm.replace(/[,.-]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (supplierByNameMap.has(stripped)) return supplierByNameMap.get(stripped);
+
+            for (const s of allSuppliers) {
+                const sName = normalizeForMap(s.name || s.companyName || s.displayName || "");
+                if (!sName || sName.length < 3) continue;
+                if (stripped === sName || stripped.includes(sName) || sName.includes(stripped)) {
+                    return s;
+                }
+                const sTokens = sName.replace(/[,.-]/g, ' ').split(' ').filter(t => t.length > 2 && t !== 's.a' && t !== 'sa');
+                if (sTokens.length > 0 && sTokens.every(t => stripped.includes(t))) {
+                    return s;
+                }
+            }
+            return null;
+        };
+
         // ── Batch transactionId duplicate check ──
         const allTxIdsInBatch = transactions
             .map(tx => {
                 const prefixVal = tx.PREFIX || tx.prefix;
                 const numberVal = tx.NUMBER || tx.number;
                 let txId = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
-                if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
-                    txId = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
+                if (!txId && prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
+                    const pStr = String(prefixVal).trim();
+                    const nStr = String(numberVal).trim();
+                    txId = nStr.startsWith('-') || pStr.endsWith('-') ? `${pStr}${nStr}` : `${pStr}-${nStr}`;
                 }
                 return txId ? String(txId).trim() : null;
             })
@@ -732,10 +803,12 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const remarksVal = tx.REMARKS || tx.Remarks || tx["Transaction Details"] || tx.transactionDetails || tx.transaction_details || "";
             const branchVal = tx.BRANCH || tx.Branch || tx.branch || "";
 
-            // Combine PREFIX & NUMBER for transaction ID
+            // Combine PREFIX & NUMBER for transaction ID (preserve provided formatted reference)
             let transactionIdVal = tx.transactionId || tx.transaction_id || tx.referenceNumber || tx.reference_number || undefined;
-            if (prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
-                transactionIdVal = `${String(prefixVal).trim()}${String(numberVal).trim()}`;
+            if (!transactionIdVal && prefixVal !== undefined && numberVal !== undefined && prefixVal !== null && numberVal !== null) {
+                const pStr = String(prefixVal).trim();
+                const nStr = String(numberVal).trim();
+                transactionIdVal = nStr.startsWith('-') || pStr.endsWith('-') ? `${pStr}${nStr}` : `${pStr}-${nStr}`;
             }
 
             // Polarity: RECEIPT = DEBIT, PAYMENT = CREDIT
@@ -894,7 +967,18 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             const hasSupplier = Boolean((supplierNameVal && String(supplierNameVal).trim()) || (supplierIdVal && !hasDriver));
             const hasCustomer = Boolean((customerNameVal && String(customerNameVal).trim()) || (customerIdVal && !hasDriver && !hasSupplier));
 
-            const filledEntityCount = [hasDriver, hasSupplier, hasCustomer].filter(Boolean).length;
+            let filledEntityCount = [hasDriver, hasSupplier, hasCustomer].filter(Boolean).length;
+
+            if (filledEntityCount > 1) {
+                // If both driver and customer are set, verify if they refer to the same person instead of dropping
+                if (hasDriver && hasCustomer && !hasSupplier) {
+                    const normD = normalizeForMap(driverNameVal);
+                    const normC = normalizeForMap(customerNameVal);
+                    if (normD === normC || normD.includes(normC) || normC.includes(normD)) {
+                        filledEntityCount = 1;
+                    }
+                }
+            }
 
             if (filledEntityCount > 1) {
                 skippedTransactions.push({
@@ -914,52 +998,29 @@ exports.bulkUploadTransactions = async (req, res, next) => {
             let isCustomer = false;
 
             if (driverNameVal && String(driverNameVal).trim()) {
-                if (!includeDrivers) {
-                    skippedTransactions.push({
-                        transactionId: transactionIdVal || "-",
-                        date: dateVal,
-                        description: finalDescription || descVal || remarksVal || "Driver transaction",
-                        amount: amountVal,
-                        type: typeVal,
-                        party: String(driverNameVal).trim(),
-                        reason: "Driver transaction bypassed (Driver processing toggle is turned off)"
-                    });
-                    continue;
-                }
-
                 isDriver = true;
                 const rawName = String(driverNameVal).trim();
-                const normalizedName = normalizeForMap(rawName);
-
-                // O(1) Map lookup instead of DB findOne with regex
-                let driverDoc = driverByNameMap.get(normalizedName) || null;
+                let driverDoc = resolveDriverByName(rawName);
 
                 if (driverDoc) {
                     customerDoc = customerByDriverIdMap.get(String(driverDoc._id)) || null;
                 }
 
                 if (!customerDoc) {
-                    customerDoc = customerByNameMap.get(normalizedName) || null;
+                    customerDoc = resolveCustomerByName(rawName);
                 }
 
                 if (customerDoc && !driverDoc && customerDoc.driver) {
                     driverDoc = driverByIdMap.get(String(customerDoc.driver)) || null;
                 }
 
-                // If neither driverDoc nor customerDoc is found in DB, skip row
-                if (!driverDoc && !customerDoc) {
-                    skippedTransactions.push({
-                        transactionId: transactionIdVal || "-",
-                        date: dateVal,
-                        description: finalDescription || descVal || remarksVal || "Transaction",
-                        amount: amountVal,
-                        type: typeVal,
-                        reason: `Driver "${driverNameVal}" not found in database`
-                    });
-                    continue;
+                // If includeDrivers is false, do NOT drop the bank ledger entry!
+                // Simply set isDriver = false so it records as standard Customer Prepayment/AR without invoice set-off
+                if (!includeDrivers) {
+                    isDriver = false;
                 }
 
-                // Ensure customerDoc is linked for driver auto set-off & ledger recording
+                // Ensure customerDoc is linked for ledger recording if driverDoc exists
                 if (driverDoc && !customerDoc) {
                     customerDoc = await Customer.create({
                         name: driverDoc.personalInfo?.fullName || driverDoc.name || rawName,
@@ -970,6 +1031,13 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                         creatorRole
                     });
                 }
+
+                // If still no customerDoc, ensure it books to Accounts Receivable rather than dropping bank statement money
+                if (!customerDoc && !driverDoc) {
+                    if (!accountsNameVal && !parentAccountVal) {
+                        accountsNameVal = "Accounts Receivable";
+                    }
+                }
             } else if (customerIdVal || (customerNameVal && String(customerNameVal).trim())) {
                 isCustomer = true;
                 if (customerIdVal) {
@@ -977,19 +1045,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     customerDoc = customerByIdMap.get(String(customerIdVal)) || null;
                 } else {
                     const rawName = String(customerNameVal).trim();
-                    const normalizedName = normalizeForMap(rawName);
-
-                    // O(1) Map lookup by normalized name
-                    customerDoc = customerByNameMap.get(normalizedName) || null;
+                    customerDoc = resolveCustomerByName(rawName);
 
                     if (!customerDoc) {
                         // Try matching as driver name
-                        const matchedDriver = driverByNameMap.get(normalizedName) || null;
+                        const matchedDriver = resolveDriverByName(rawName);
                         if (matchedDriver) {
                             customerDoc = customerByDriverIdMap.get(String(matchedDriver._id)) || null;
                             if (!customerDoc) {
-                                const driverFullName = normalizeForMap(matchedDriver.personalInfo?.fullName || "");
-                                customerDoc = customerByNameMap.get(driverFullName) || null;
+                                const driverFullName = matchedDriver.personalInfo?.fullName || "";
+                                customerDoc = resolveCustomerByName(driverFullName);
                             }
                             if (customerDoc) {
                                 isDriver = true;
@@ -998,30 +1063,16 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     }
                 }
 
+                // If includeDrivers is false, do NOT drop the bank ledger entry!
                 if (isDriver && !includeDrivers) {
-                    skippedTransactions.push({
-                        transactionId: transactionIdVal || "-",
-                        date: dateVal,
-                        description: finalDescription || descVal || remarksVal || "Driver transaction",
-                        amount: amountVal,
-                        type: typeVal,
-                        party: customerDoc?.name || customerNameVal || "Driver",
-                        reason: "Driver transaction bypassed (Driver processing toggle is turned off)"
-                    });
-                    continue;
+                    isDriver = false; // Bypass invoice set-off, but keep bank transaction
                 }
 
-                // If customer is not found in DB, skip row
+                // If customer is not found in DB, fallback to Accounts Receivable rather than dropping bank transaction
                 if (!customerDoc) {
-                    skippedTransactions.push({
-                        transactionId: transactionIdVal || "-",
-                        date: dateVal,
-                        description: finalDescription || descVal || remarksVal || "Transaction",
-                        amount: amountVal,
-                        type: typeVal,
-                        reason: `Customer "${customerNameVal || customerIdVal}" not found in database`
-                    });
-                    continue;
+                    if (!accountsNameVal && !parentAccountVal) {
+                        accountsNameVal = "Accounts Receivable";
+                    }
                 }
             }
 
@@ -1031,23 +1082,14 @@ exports.bulkUploadTransactions = async (req, res, next) => {
                     supplierDoc = supplierByIdMap.get(String(supplierIdVal)) || null;
                 } else {
                     const rawSupName = String(supplierNameVal).trim();
-                    const normalizedName = normalizeForMap(rawSupName);
-
-                    // O(1) Map lookup by normalized name
-                    supplierDoc = supplierByNameMap.get(normalizedName) || null;
+                    supplierDoc = resolveSupplierByName(rawSupName);
                 }
 
-                // If vendor/supplier is not found in DB, skip row
+                // If vendor/supplier is not found in DB, fallback to Accounts Payable rather than dropping bank transaction
                 if (!supplierDoc) {
-                    skippedTransactions.push({
-                        transactionId: transactionIdVal || "-",
-                        date: dateVal,
-                        description: finalDescription || descVal || remarksVal || "Transaction",
-                        amount: amountVal,
-                        type: typeVal,
-                        reason: `Vendor/Supplier "${supplierNameVal || supplierIdVal}" not found in database`
-                    });
-                    continue;
+                    if (!accountsNameVal && !parentAccountVal) {
+                        accountsNameVal = "Accounts Payable";
+                    }
                 }
             }
 

@@ -22,7 +22,7 @@ async function run() {
     const apiUrl = "https://us-open.tracksolidpro.com/route/rest";
     const appKey = "8FB345B8693CCD0036B18E9F2E03AD30339A22A4105B6558";
     const userId = "ARRENDADORA_OLA_CARS";
-    const userPwdMd5 = "2144ad865844e27229d4125b659f2406";
+    const userPwdMd5 = "6e5563d33e4d127dad825bbde0e1ac50";
     const appSecret = "";
 
     const timestamp = getUtcTimestamp();

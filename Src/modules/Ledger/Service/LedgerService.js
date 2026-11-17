@@ -222,6 +222,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                         amount: totalAmount,
                         description: `Payment Received (Debit Bank/Cash) - Deposited to ${paymentTransaction.accountingCode.name || "selected account"} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                         entryDate: paymentTransaction.paymentDate || new Date(),
+                        transactionId: pmtRec.referenceNumber || pmtRec.paymentNumber,
                         createdBy: paymentTransaction.createdBy,
                         creatorRole: finalCreatorRole,
                         invoice: targetInvoiceId
@@ -237,6 +238,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                             amount: appliedAmount,
                             description: `Payment Received (Credit Accounts Receivable) - Customer: ${customerName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                             entryDate: paymentTransaction.paymentDate || new Date(),
+                            transactionId: pmtRec.referenceNumber || pmtRec.paymentNumber,
                             createdBy: paymentTransaction.createdBy,
                             creatorRole: finalCreatorRole,
                             invoice: targetInvoiceId
@@ -253,6 +255,7 @@ exports.autoGenerateLedgerEntry = async (paymentTransaction) => {
                             amount: excessAmount,
                             description: `Payment Received (Credit Advance Received From Customer) - Customer: ${customerName} (PR: ${pmtRec.paymentNumber}). Notes: ${paymentTransaction.notes || "None"}.`,
                             entryDate: paymentTransaction.paymentDate || new Date(),
+                            transactionId: pmtRec.referenceNumber || pmtRec.paymentNumber,
                             createdBy: paymentTransaction.createdBy,
                             creatorRole: finalCreatorRole,
                             invoice: targetInvoiceId
