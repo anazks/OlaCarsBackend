@@ -4,6 +4,19 @@ exports.createBillFromPO = async (req, res, next) => {
     try {
         const { poId, ...overrides } = req.body;
         const bill = await BillService.createBillFromPO(poId, req.user, overrides);
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "CREATE",
+                entityType: "BILL",
+                entityId: bill._id,
+                entityIdentifier: bill.billNumber,
+                amount: bill.totalAmount || 0,
+                description: `Created Bill ${bill.billNumber} from PO`,
+                branchId: req.user.branchId
+            });
+        } catch (logErr) {}
         res.status(201).json({
             success: true,
             data: bill
@@ -77,6 +90,19 @@ exports.disposePO = async (req, res, next) => {
 exports.createBill = async (req, res, next) => {
     try {
         const bill = await BillService.createBill(req.body, req.user);
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "CREATE",
+                entityType: "BILL",
+                entityId: bill._id,
+                entityIdentifier: bill.billNumber,
+                amount: bill.totalAmount || 0,
+                description: `Created Bill ${bill.billNumber}`,
+                branchId: req.user.branchId
+            });
+        } catch (logErr) {}
         res.status(201).json({
             success: true,
             message: "Bill created successfully",

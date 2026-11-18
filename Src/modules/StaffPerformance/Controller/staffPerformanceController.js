@@ -24,7 +24,7 @@ exports.getPerformance = async (req, res) => {
         }
 
         // Staff type filter
-        if (req.query.type && ["finance", "operation"].includes(req.query.type)) {
+        if (req.query.type) {
             filters.type = req.query.type;
         }
 
@@ -66,6 +66,40 @@ exports.getIndividualPerformance = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || "Failed to fetch individual staff performance data",
+        });
+    }
+};
+
+exports.getStaffAuditTrail = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { startDate, endDate, entityType, action, limit, page } = req.query;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Staff ID is required",
+            });
+        }
+
+        const result = await staffPerformanceService.getStaffAuditTrail(id, {
+            startDate,
+            endDate,
+            entityType,
+            action,
+            limit,
+            page,
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: result,
+        });
+    } catch (error) {
+        console.error("Staff audit trail error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Failed to fetch staff audit trail",
         });
     }
 };

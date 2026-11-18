@@ -93,7 +93,10 @@ exports.createManualInvoice = async (req, res) => {
         // Handle optional file upload
         if (req.file) {
             const uploadLocal = require("../../../utils/uploadLocal");
-            const fileUrl = uploadLocal(req.file, "invoices");
+            const fileUrl = uploadLocal(req.file, "invoices", req.user, {
+                module: "INVOICE",
+                entityReference: invoiceData.invoiceNumber || "Manual Invoice"
+            });
             invoiceData.supportingDocument = {
                 name: req.file.originalname,
                 url: fileUrl,
@@ -102,6 +105,24 @@ exports.createManualInvoice = async (req, res) => {
         }
 
         const result = await InvoiceService.createManualInvoice(invoiceData, createdBy, creatorRole);
+
+        // Track employee activity
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "CREATE",
+                entityType: "INVOICE",
+                entityId: result._id,
+                entityIdentifier: result.invoiceNumber,
+                amount: result.total || result.subtotal || 0,
+                description: `Created invoice ${result.invoiceNumber}`,
+                fileUrl: result.supportingDocument?.url,
+                fileName: result.supportingDocument?.name,
+                branchId: req.user.branchId
+            });
+        } catch (logErr) {}
+
         return res.status(201).json({ success: true, message: "Manual invoice created successfully", data: result });
     } catch (error) {
         return res.status(400).json({ success: false, message: error.message });

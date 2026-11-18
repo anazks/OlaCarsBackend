@@ -310,7 +310,10 @@ exports.recordManualPayment = async (req, res, next) => {
         const uploadLocal = require("../../../utils/uploadLocal");
         let supportingDocument;
         if (req.file) {
-            const fileUrl = uploadLocal(req.file, "manual-payments");
+            const fileUrl = uploadLocal(req.file, "manual-payments", req.user, {
+                module: "BANK_PAYMENT_PROOF",
+                entityReference: `Bank Payment: ${amount}`
+            });
             supportingDocument = {
                 name: req.file.originalname,
                 url: fileUrl,
@@ -336,6 +339,22 @@ exports.recordManualPayment = async (req, res, next) => {
             userId: req.user?._id || req.user?.id,
             userRole: req.user?.role
         });
+
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "PAYMENT_RECORDED",
+                entityType: "BANK_TRANSACTION",
+                entityId: result?.transaction?._id || id,
+                entityIdentifier: `Manual ${entryType}`,
+                amount: Number(amount) || 0,
+                description: `Recorded manual ${entryType} of ${amount}`,
+                fileUrl: supportingDocument?.url,
+                fileName: supportingDocument?.name,
+                branchId
+            });
+        } catch (logErr) {}
 
         res.status(200).json({
             success: true,
@@ -487,6 +506,34 @@ exports.bulkUploadTransactions = async (req, res, next) => {
     });
 
     try {
+        // Track the upload in staff activity log on the first batch
+        if (fileName && (!batchIndex || Number(batchIndex) === 0)) {
+            try {
+                const { trackUpload, logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+                trackUpload({
+                    originalName: fileName,
+                    fileUrl: `/uploads/bank-statements/${fileName}`,
+                    storageType: "LOCAL",
+                    module: "BANK_STATEMENT",
+                    entityId: id,
+                    entityReference: fileName,
+                    actor: req.user,
+                    notes: `Bulk bank statement upload for account ${id} (${Array.isArray(transactions) ? transactions.length : 0} rows)`
+                }).catch(() => {});
+
+                logActivity({
+                    actor: req.user,
+                    action: "BULK_IMPORT",
+                    entityType: "BANK_STATEMENT",
+                    entityId: id,
+                    entityIdentifier: fileName,
+                    description: `Imported bank statement ${fileName} (${Array.isArray(transactions) ? transactions.length : 0} transactions)`,
+                    fileName,
+                    branchId
+                }).catch(() => {});
+            } catch (trackErr) {}
+        }
+
         // Extend request timeout to 10 minutes for large batch processing
         req.setTimeout(600000);
         if (res.socket) res.socket.setTimeout(600000);

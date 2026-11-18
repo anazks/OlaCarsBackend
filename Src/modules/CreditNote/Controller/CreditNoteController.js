@@ -12,7 +12,10 @@ exports.createCreditNote = async (req, res) => {
         // Handle optional file upload
         if (req.file) {
             const uploadLocal = require("../../../utils/uploadLocal");
-            const fileUrl = uploadLocal(req.file, "credit-notes");
+            const fileUrl = uploadLocal(req.file, "credit-notes", req.user, {
+                module: "CREDIT_NOTE",
+                entityReference: creditNoteData.creditNoteNumber
+            });
             creditNoteData.supportingDocument = {
                 name: req.file.originalname,
                 url: fileUrl,
@@ -21,6 +24,23 @@ exports.createCreditNote = async (req, res) => {
         }
 
         const savedDoc = await CreditNoteService.createCreditNote(creditNoteData, actor);
+
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "CREATE",
+                entityType: "CREDIT_NOTE",
+                entityId: savedDoc._id,
+                entityIdentifier: savedDoc.creditNoteNumber,
+                amount: savedDoc.amount || 0,
+                description: `Created Credit Note ${savedDoc.creditNoteNumber}`,
+                fileUrl: savedDoc.supportingDocument?.url,
+                fileName: savedDoc.supportingDocument?.name,
+                branchId: req.user.branchId
+            });
+        } catch (logErr) {}
+
         res.status(201).json({ 
             success: true, 
             message: "Credit Note issued successfully in PENDING status.",

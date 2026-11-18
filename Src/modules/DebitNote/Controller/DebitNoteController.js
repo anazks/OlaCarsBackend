@@ -12,7 +12,10 @@ exports.createDebitNote = async (req, res) => {
         // Handle optional file upload
         if (req.file) {
             const uploadLocal = require("../../../utils/uploadLocal");
-            const fileUrl = uploadLocal(req.file, "debit-notes");
+            const fileUrl = uploadLocal(req.file, "debit-notes", req.user, {
+                module: "DEBIT_NOTE",
+                entityReference: debitNoteData.debitNoteNumber
+            });
             debitNoteData.supportingDocument = {
                 name: req.file.originalname,
                 url: fileUrl,
@@ -21,6 +24,23 @@ exports.createDebitNote = async (req, res) => {
         }
 
         const savedDoc = await DebitNoteService.createDebitNote(debitNoteData, actor);
+
+        try {
+            const { logActivity } = require("../../StaffPerformance/Service/staffActivityService");
+            logActivity({
+                actor: req.user,
+                action: "CREATE",
+                entityType: "DEBIT_NOTE",
+                entityId: savedDoc._id,
+                entityIdentifier: savedDoc.debitNoteNumber,
+                amount: savedDoc.amount || 0,
+                description: `Created Debit Note ${savedDoc.debitNoteNumber}`,
+                fileUrl: savedDoc.supportingDocument?.url,
+                fileName: savedDoc.supportingDocument?.name,
+                branchId: req.user.branchId
+            });
+        } catch (logErr) {}
+
         res.status(201).json({ 
             success: true, 
             message: "Debit Note issued successfully.",

@@ -6,10 +6,21 @@ const OperationStaff = require("../../OperationStaff/Model/OperationStaffModel")
 const BranchManager = require("../../BranchManager/Model/BranchManagerModel");
 const CountryManager = require("../../CountryManager/Model/CountryManagerModel");
 const Branch = require("../../Branch/Model/BranchModel");
+const Admin = require("../../Admin/model/adminModel");
 const FinanceAdmin = require("../../FinanceAdmin/model/FinanceAdminModel");
 const OperationAdmin = require("../../OperationAdmin/model/OperationAdminModel");
 const Target = require("../Model/TargetModel");
 const Lease = require("../../Lease/Model/LeaseModel");
+const { Invoice } = require("../../Invoice/Model/InvoiceModel");
+const Bill = require("../../Bill/Model/BillModel");
+const DebitNote = require("../../DebitNote/Model/DebitNoteModel");
+const CreditNote = require("../../CreditNote/Model/CreditNoteModel");
+const BankTransaction = require("../../BankAccount/Model/BankTransactionModel");
+const LedgerEntry = require("../../Ledger/Model/LedgerEntryModel");
+const BankAccount = require("../../BankAccount/Model/BankAccountModel");
+const SystemUpload = require("../Model/SystemUploadModel");
+const StaffActivityLog = require("../Model/StaffActivityLogModel");
+const { getStaffDetailsRepo, getStaffAuditTrailRepo } = require("../Repo/StaffPerformanceRepo");
 
 /**
  * Aggregates performance metrics for finance and operation staff
@@ -468,6 +479,11 @@ const getStaffPerformance = async (filters = {}) => {
             });
         };
 
+        if (type === "all" || type === "admin") {
+            const rootAdmins = await Admin.find({ isDeleted: false }).select("-passwordHash -refreshToken -failedLoginAttempts -lockUntil").lean();
+            rootAdmins.forEach(admin => pushAdminMetrics(admin, 'admin'));
+        }
+
         if (type === "all" || type === "finance-admin") {
             const fAdmins = await FinanceAdmin.find({ isDeleted: false }).select("-passwordHash -refreshToken -failedLoginAttempts -lockUntil").lean();
             fAdmins.forEach(admin => pushAdminMetrics(admin, 'finance-admin'));
@@ -632,15 +648,380 @@ const getStaffPerformance = async (filters = {}) => {
     result.branchManagers.forEach(s => s.targetStats = mapTargetsToEntity(s.branchId, 'BRANCH', s.metrics));
     result.countryManagers.forEach(s => s.targetStats = mapTargetsToEntity(s.country, 'COUNTRY', s.metrics));
 
+    // ─────────────────────────────────────────────────────────────
+    // Daily Work Output & Productivity Aggregation
+    // Invoices, Bills, Debit/Credit Notes, Bank Transactions & Uploads
+    // ─────────────────────────────────────────────────────────────
+    const allStaffList = [
+        ...result.financeStaff,
+        ...result.operationStaff,
+        ...result.branchManagers,
+        ...result.countryManagers,
+        ...result.globalAdmins
+    ];
+
+    const staffObjectIds = allStaffList
+        .map(s => s.staffId)
+        .filter(id => id && mongoose.Types.ObjectId.isValid(id))
+        .map(id => new mongoose.Types.ObjectId(id));
+
+    const staffStringIds = staffObjectIds.map(id => id.toString());
+    const allStaffVariants = [...staffObjectIds, ...staffStringIds];
+
+    const workMatch = {
+        createdBy: { $in: allStaffVariants },
+        ...(Object.keys(timelineMatch).length > 0 ? { createdAt: timelineMatch } : {})
+    };
+
+    const uploadMatch = {
+        uploadedBy: { $in: allStaffVariants },
+        ...(Object.keys(timelineMatch).length > 0 ? { createdAt: timelineMatch } : {})
+    };
+
+    const activityMatch = {
+        userId: { $in: allStaffVariants },
+        ...(Object.keys(timelineMatch).length > 0 ? { createdAt: timelineMatch } : {})
+    };
+
+    // Get all Bank Account accounting code IDs for ledger transactions
+    const bankAccounts = await BankAccount.find({ isDeleted: { $ne: true } }).select("accountingCode").lean();
+    const bankAccCodeIds = bankAccounts.map(b => b.accountingCode).filter(Boolean);
+
+    const [
+        invoiceAgg,
+        billAgg,
+        debitNoteAgg,
+        creditNoteAgg,
+        ledgerBankAgg,
+        directBankTxAgg,
+        uploadAgg,
+        activityAgg
+    ] = await Promise.all([
+        Invoice.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: {
+                        $sum: {
+                            $ifNull: [
+                                "$totalAmountDue",
+                                { $ifNull: ["$total", { $ifNull: ["$subtotal", { $ifNull: ["$baseAmount", 0] }] }] }
+                            ]
+                        }
+                    }
+                }
+            }
+        ]),
+        Bill.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: { $ifNull: ["$totalAmount", 0] } }
+                }
+            }
+        ]),
+        DebitNote.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: { $ifNull: ["$amount", 0] } }
+                }
+            }
+        ]),
+        CreditNote.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: { $ifNull: ["$amount", 0] } }
+                }
+            }
+        ]),
+        // Bank transactions recorded in LedgerEntry (bank accounts' ledger entries)
+        LedgerEntry.aggregate([
+            {
+                $match: {
+                    isDeleted: { $ne: true },
+                    accountingCode: { $in: bankAccCodeIds },
+                    ...workMatch
+                }
+            },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: { $ifNull: ["$amount", 0] } }
+                }
+            }
+        ]),
+        // Direct BankTransaction model entries (if any)
+        BankTransaction.aggregate([
+            { $match: workMatch },
+            {
+                $group: {
+                    _id: "$createdBy",
+                    count: { $sum: 1 },
+                    totalAmount: { $sum: { $ifNull: ["$amount", 0] } }
+                }
+            }
+        ]),
+        SystemUpload.aggregate([
+            { $match: uploadMatch },
+            {
+                $group: {
+                    _id: "$uploadedBy",
+                    count: { $sum: 1 }
+                }
+            }
+        ]),
+        StaffActivityLog.aggregate([
+            { $match: activityMatch },
+            {
+                $group: {
+                    _id: "$userId",
+                    count: { $sum: 1 },
+                    recentActivities: {
+                        $push: {
+                            action: "$action",
+                            entityType: "$entityType",
+                            entityIdentifier: "$entityIdentifier",
+                            amount: "$amount",
+                            description: "$description",
+                            timestamp: "$timestamp"
+                        }
+                    }
+                }
+            }
+        ])
+    ]);
+
+    const staffWorkMap = {};
+    const initWork = (id) => {
+        const k = id.toString();
+        if (!staffWorkMap[k]) {
+            staffWorkMap[k] = {
+                invoicesCount: 0,
+                invoicesTotalAmount: 0,
+                billsCount: 0,
+                billsTotalAmount: 0,
+                debitNotesCount: 0,
+                debitNotesTotalAmount: 0,
+                creditNotesCount: 0,
+                creditNotesTotalAmount: 0,
+                bankTransactionsCount: 0,
+                bankTransactionsTotalAmount: 0,
+                uploadsCount: 0,
+                totalDailyWorkDone: 0,
+                recentAudit: []
+            };
+        }
+        return staffWorkMap[k];
+    };
+
+    staffObjectIds.forEach(id => initWork(id));
+
+    let sumInvoices = 0, sumInvoiceAmt = 0;
+    let sumBills = 0, sumBillAmt = 0;
+    let sumDN = 0, sumDNAmt = 0;
+    let sumCN = 0, sumCNAmt = 0;
+    let sumBank = 0, sumBankAmt = 0;
+    let sumUploads = 0;
+
+    invoiceAgg.forEach(i => {
+        const s = initWork(i._id);
+        s.invoicesCount = i.count;
+        s.invoicesTotalAmount = i.totalAmount;
+        sumInvoices += i.count;
+        sumInvoiceAmt += i.totalAmount;
+    });
+
+    billAgg.forEach(b => {
+        const s = initWork(b._id);
+        s.billsCount = b.count;
+        s.billsTotalAmount = b.totalAmount;
+        sumBills += b.count;
+        sumBillAmt += b.totalAmount;
+    });
+
+    debitNoteAgg.forEach(d => {
+        const s = initWork(d._id);
+        s.debitNotesCount = d.count;
+        s.debitNotesTotalAmount = d.totalAmount;
+        sumDN += d.count;
+        sumDNAmt += d.totalAmount;
+    });
+
+    creditNoteAgg.forEach(c => {
+        const s = initWork(c._id);
+        s.creditNotesCount = c.count;
+        s.creditNotesTotalAmount = c.totalAmount;
+        sumCN += c.count;
+        sumCNAmt += c.totalAmount;
+    });
+
+    ledgerBankAgg.forEach(t => {
+        const s = initWork(t._id);
+        s.bankTransactionsCount += t.count;
+        s.bankTransactionsTotalAmount += t.totalAmount;
+        sumBank += t.count;
+        sumBankAmt += t.totalAmount;
+    });
+
+    directBankTxAgg.forEach(t => {
+        const s = initWork(t._id);
+        s.bankTransactionsCount += t.count;
+        s.bankTransactionsTotalAmount += t.totalAmount;
+        sumBank += t.count;
+        sumBankAmt += t.totalAmount;
+    });
+
+    uploadAgg.forEach(u => {
+        const s = initWork(u._id);
+        s.uploadsCount = u.count;
+        sumUploads += u.count;
+    });
+
+    activityAgg.forEach(a => {
+        const s = initWork(a._id);
+        s.recentAudit = (a.recentActivities || []).slice(0, 10);
+    });
+
+    let activeContributors = 0;
+    Object.values(staffWorkMap).forEach(s => {
+        s.totalDailyWorkDone = s.invoicesCount + s.billsCount + s.debitNotesCount + s.creditNotesCount + s.bankTransactionsCount + s.uploadsCount;
+        if (s.totalDailyWorkDone > 0) activeContributors++;
+    });
+
+    // Attach workMetrics to all staff objects
+    const attachWork = (s) => {
+        const wm = staffWorkMap[s.staffId?.toString()] || initWork(s.staffId);
+        s.workMetrics = wm;
+        // Keep metrics.totalStageActions in sync so existing sorting remains reliable
+        if (wm.totalDailyWorkDone > (s.metrics.totalStageActions || 0)) {
+            s.metrics.totalStageActions = wm.totalDailyWorkDone;
+        }
+    };
+
+    result.financeStaff.forEach(attachWork);
+    result.operationStaff.forEach(attachWork);
+    result.branchManagers.forEach(attachWork);
+    result.countryManagers.forEach(attachWork);
+    result.globalAdmins.forEach(attachWork);
+
+    // Build timeline daily trend for charts
+    const start = startDate ? new Date(startDate) : new Date(new Date().setDate(1));
+    const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const [dailyInvoices, dailyBills, dailyDN, dailyCN, dailyLedgerBank, dailyDirectBank, dailyUp] = await Promise.all([
+        Invoice.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        Bill.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        DebitNote.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        CreditNote.aggregate([
+            { $match: { isDeleted: { $ne: true }, ...workMatch } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        LedgerEntry.aggregate([
+            {
+                $match: {
+                    isDeleted: { $ne: true },
+                    accountingCode: { $in: bankAccCodeIds },
+                    ...workMatch
+                }
+            },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        BankTransaction.aggregate([
+            { $match: workMatch },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ]),
+        SystemUpload.aggregate([
+            { $match: uploadMatch },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } }
+        ])
+    ]);
+
+    const dailyMap = {};
+    const curr = new Date(start);
+    while (curr <= end) {
+        const dStr = curr.toISOString().split("T")[0];
+        dailyMap[dStr] = {
+            date: dStr,
+            invoices: 0,
+            bills: 0,
+            debitNotes: 0,
+            creditNotes: 0,
+            bankTransactions: 0,
+            uploads: 0,
+            total: 0
+        };
+        curr.setDate(curr.getDate() + 1);
+    }
+
+    const mergeDaily = (arr, key) => {
+        arr.forEach(a => {
+            if (dailyMap[a._id]) {
+                dailyMap[a._id][key] = (dailyMap[a._id][key] || 0) + a.count;
+                dailyMap[a._id].total += a.count;
+            }
+        });
+    };
+
+    mergeDaily(dailyInvoices, "invoices");
+    mergeDaily(dailyBills, "bills");
+    mergeDaily(dailyDN, "debitNotes");
+    mergeDaily(dailyCN, "creditNotes");
+    mergeDaily(dailyLedgerBank, "bankTransactions");
+    mergeDaily(dailyDirectBank, "bankTransactions");
+    mergeDaily(dailyUp, "uploads");
+
+    result.summary = {
+        totalInvoices: sumInvoices,
+        totalInvoiceAmount: sumInvoiceAmt,
+        totalBills: sumBills,
+        totalBillAmount: sumBillAmt,
+        totalDebitNotes: sumDN,
+        totalDebitNoteAmount: sumDNAmt,
+        totalCreditNotes: sumCN,
+        totalCreditNoteAmount: sumCNAmt,
+        totalBankTransactions: sumBank,
+        totalBankTransactionAmount: sumBankAmt,
+        totalUploads: sumUploads,
+        totalDailyWorkDone: sumInvoices + sumBills + sumDN + sumCN + sumBank + sumUploads,
+        activeStaffCount: activeContributors || allStaffList.length
+    };
+
+    result.dailyTrend = Object.values(dailyMap);
+
     return result;
 };
 
-const { getStaffDetailsRepo } = require("../Repo/StaffPerformanceRepo");
 const getIndividualStaffPerformance = async (staffId, startDate, endDate) => {
     return await getStaffDetailsRepo(staffId, startDate, endDate);
 };
 
+const getStaffAuditTrail = async (staffId, options) => {
+    return await getStaffAuditTrailRepo(staffId, options);
+};
+
 module.exports = {
     getStaffPerformance,
-    getIndividualStaffPerformance
+    getIndividualStaffPerformance,
+    getStaffAuditTrail
 };
