@@ -1064,6 +1064,138 @@ class GpsService {
             }
 
             const periodStartDate = startTime ? String(startTime).split(' ')[0].split('T')[0] : 'N/A';
+            const periodStartObj = startTime ? new Date(String(startTime).replace(' ', 'T')) : null;
+            const periodEndObj = endTime ? new Date(String(endTime).replace(' ', 'T')) : null;
+
+            // Prior GPS mileage cache initialization (cache distance between last odometer update and report startTime)
+            if (!this.priorMileageCache) {
+                this.priorMileageCache = new Map();
+            }
+
+            const priorMileageMap = new Map();
+            const nowMs = Date.now();
+
+            // Identify vehicles needing prior GPS distance (between last odometer update date and report startTime)
+            const priorMileageTasks = [];
+            targetVehicles.forEach(v => {
+                const matchedDbVeh = v.matchedDbVeh;
+                const benchmarkOdo = Number(matchedDbVeh?.basicDetails?.odometer || v.basicDetails?.odometer || v.odometer || 0);
+                const benchmarkDateRaw = matchedDbVeh?.basicDetails?.odometerReadingDate || matchedDbVeh?.updatedAt;
+                const benchmarkDate = benchmarkDateRaw ? new Date(benchmarkDateRaw) : null;
+
+                if (
+                    v.imei &&
+                    !isNaN(benchmarkOdo) &&
+                    benchmarkOdo > 0 &&
+                    benchmarkDate &&
+                    !isNaN(benchmarkDate.getTime()) &&
+                    periodStartObj &&
+                    !isNaN(periodStartObj.getTime()) &&
+                    benchmarkDate < periodStartObj
+                ) {
+                    // Maximum time range for jimi.open.platform.report.mileage is 92 days
+                    const maxDiffMs = 92 * 24 * 60 * 60 * 1000;
+                    let effectiveBenchDate = benchmarkDate;
+                    let priorBeginTime;
+                    if (periodStartObj.getTime() - benchmarkDate.getTime() > maxDiffMs) {
+                        effectiveBenchDate = new Date(periodStartObj.getTime() - maxDiffMs);
+                        priorBeginTime = formatD(effectiveBenchDate);
+                        console.warn(`[GPS Service] Benchmark date for IMEI ${v.imei} exceeds 92 days prior to startTime. Clamped to: ${priorBeginTime}`);
+                    } else {
+                        const dateStr = String(benchmarkDateRaw || '').trim();
+                        if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+                            const datePart = dateStr.split('T')[0];
+                            const timePart = dateStr.includes('T') ? dateStr.split('T')[1].replace('Z', '') : '';
+                            if (!timePart || timePart.startsWith('00:00:00')) {
+                                priorBeginTime = `${datePart} 00:00:00`;
+                            }
+                        }
+                        if (!priorBeginTime) {
+                            priorBeginTime = formatD(effectiveBenchDate);
+                        }
+                    }
+                    const priorEndTime = startTime;
+                    if (priorBeginTime < priorEndTime) {
+                        const cacheKey = `${v.imei}_${priorBeginTime}_${priorEndTime}`;
+
+                        const cached = this.priorMileageCache.get(cacheKey);
+                        if (cached && (nowMs - cached.timestamp < 10 * 60 * 1000)) {
+                            priorMileageMap.set(String(v.imei), cached.km);
+                        } else {
+                            priorMileageTasks.push({
+                                imei: String(v.imei),
+                                priorBeginTime,
+                                priorEndTime,
+                                cacheKey
+                            });
+                        }
+                    }
+                }
+            });
+
+            // Group tasks by identical (priorBeginTime, priorEndTime) to batch query multiple IMEIs together
+            if (priorMileageTasks.length > 0) {
+                const timeGroups = new Map();
+                priorMileageTasks.forEach(task => {
+                    const groupKey = `${task.priorBeginTime}___${task.priorEndTime}`;
+                    if (!timeGroups.has(groupKey)) {
+                        timeGroups.set(groupKey, {
+                            beginTime: task.priorBeginTime,
+                            endTime: task.priorEndTime,
+                            tasks: []
+                        });
+                    }
+                    timeGroups.get(groupKey).tasks.push(task);
+                });
+
+                // Execute grouped queries with a concurrency limit
+                const groupList = Array.from(timeGroups.values());
+                const concurrency = 6;
+                for (let i = 0; i < groupList.length; i += concurrency) {
+                    const chunk = groupList.slice(i, i + concurrency);
+                    await Promise.all(chunk.map(async (group) => {
+                        const imeisForGroup = group.tasks.map(t => t.imei);
+                        // Query in chunks of up to 100 IMEIs per Tracksolid request
+                        for (let j = 0; j < imeisForGroup.length; j += 100) {
+                            const subImeis = imeisForGroup.slice(j, j + 100);
+                            try {
+                                const res = await this.requestApiRaw('jimi.open.platform.report.mileage', {
+                                    imeis: subImeis.join(','),
+                                    begin_time: group.beginTime,
+                                    end_time: group.endTime,
+                                    page_size: 100,
+                                    start_row: 1,
+                                    filter_mileage: 0
+                                }).catch(err => {
+                                    console.warn(`[GPS Service] Prior mileage batch error (${subImeis.join(',')}):`, err.message);
+                                    return { data: { rows: [] } };
+                                });
+
+                                const rows = (res && res.data && Array.isArray(res.data.rows)) ? res.data.rows : [];
+                                const rowMap = new Map();
+                                rows.forEach(r => {
+                                    if (r && r.imei) {
+                                        rowMap.set(String(r.imei), parseFloat(r.totalMileage || 0) || 0);
+                                    }
+                                });
+
+                                group.tasks.forEach(task => {
+                                    if (subImeis.includes(task.imei)) {
+                                        const km = rowMap.get(task.imei) || 0;
+                                        this.priorMileageCache.set(task.cacheKey, { timestamp: Date.now(), km });
+                                        priorMileageMap.set(task.imei, km);
+                                    }
+                                });
+                            } catch (err) {
+                                console.warn(`[GPS Service] Failed prior mileage query:`, err.message);
+                                subImeis.forEach(imei => {
+                                    priorMileageMap.set(imei, 0);
+                                });
+                            }
+                        }
+                    }));
+                }
+            }
 
             const processedRows = targetVehicles.map(v => {
                 const matchedDbVeh = v.matchedDbVeh;
@@ -1085,21 +1217,23 @@ class GpsService {
                 const benchmarkDateRaw = matchedDbVeh?.basicDetails?.odometerReadingDate || matchedDbVeh?.updatedAt;
                 const benchmarkDate = benchmarkDateRaw ? new Date(benchmarkDateRaw) : null;
 
-                const periodStartObj = startTime ? new Date(String(startTime).replace(' ', 'T')) : null;
-                const periodEndObj = endTime ? new Date(String(endTime).replace(' ', 'T')) : null;
-
                 let odoStart = 0;
                 let odoEnd = 0;
 
                 if (!isNaN(benchmarkOdo) && benchmarkOdo > 0) {
-                    // Scenario: If the user selects a time range way before the updated odometer date from vehicle page,
-                    // let the start and end be the last updated kilometers.
                     if (benchmarkDate && periodEndObj && !isNaN(periodEndObj.getTime()) && periodEndObj < benchmarkDate) {
+                        // Scenario: If the user selects a time range way before the updated odometer date,
+                        // keep start and end at the benchmark odometer
                         odoStart = benchmarkOdo;
                         odoEnd = benchmarkOdo;
+                    } else if (benchmarkDate && periodStartObj && !isNaN(periodStartObj.getTime()) && benchmarkDate < periodStartObj) {
+                        // Benchmark odometer was updated before the report start date:
+                        // Odometer Start = (last odometer updated km + GPS mileage read from last update date to start date)
+                        const priorGpsKm = priorMileageMap.get(String(v.imei)) || 0;
+                        odoStart = Number((benchmarkOdo + priorGpsKm).toFixed(2));
+                        odoEnd = Number((odoStart + distKm).toFixed(2));
                     } else {
-                        // Normal scenario:
-                        // Odometer start is the updated count from /vehicles/:id, and odometer end is (odometer start + distKm)
+                        // Benchmark odometer was updated on or after the start date (or no update date recorded):
                         odoStart = benchmarkOdo;
                         odoEnd = Number((benchmarkOdo + distKm).toFixed(2));
                     }
