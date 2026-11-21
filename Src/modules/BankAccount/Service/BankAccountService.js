@@ -1085,7 +1085,11 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
         const bankTxIds = bankTransactions.map(bt => bt._id).filter(Boolean);
         const ledgerEntryIds = ledgerEntries.map(l => l._id).filter(Boolean);
 
-        // 2. Delete associated PaymentReceived and PaymentMade records by exact match
+        // 2. Pre-fetch and delete associated PaymentReceived and PaymentMade records by exact match
+        let prNumbers = [];
+        let prIds = [];
+        let prInvoiceIds = [];
+        let pmInvoiceIds = [];
         if (validTxIds.length > 0 || bankTxIds.length > 0) {
             const prConditions = [];
             const pmConditions = [];
@@ -1098,8 +1102,26 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
                 pmConditions.push({ referenceNumber: { $in: bankTxIds.map(b => b.toString()) } });
             }
 
-            if (prConditions.length > 0) await PaymentReceived.deleteMany({ $or: prConditions });
-            if (pmConditions.length > 0) await PaymentMade.deleteMany({ $or: pmConditions });
+            if (prConditions.length > 0) {
+                try {
+                    const matchedPRs = await PaymentReceived.find({ $or: prConditions });
+                    prNumbers = matchedPRs.map(p => p.paymentNumber).filter(Boolean);
+                    prIds = matchedPRs.map(p => p._id.toString()).filter(Boolean);
+                    prInvoiceIds = matchedPRs.flatMap(p => p.invoices || []).map(inv => inv.invoiceId ? String(inv.invoiceId) : null).filter(Boolean);
+                    await PaymentReceived.deleteMany({ $or: prConditions });
+                } catch (delPrErr) {
+                    console.error("Error finding/deleting matching PaymentReceived:", delPrErr);
+                }
+            }
+            if (pmConditions.length > 0) {
+                try {
+                    const matchedPMs = await PaymentMade.find({ $or: pmConditions });
+                    pmInvoiceIds = matchedPMs.flatMap(p => p.bills || []).map(b => b.billId ? String(b.billId) : null).filter(Boolean);
+                    await PaymentMade.deleteMany({ $or: pmConditions });
+                } catch (delPmErr) {
+                    console.error("Error finding/deleting matching PaymentMade:", delPmErr);
+                }
+            }
         }
 
         // 3. Delete matching InvoiceBillSetOffHistory records
@@ -1130,7 +1152,7 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
         const exactDeletedTxValue = ledgerTxAmount > 0 ? ledgerTxAmount : bankTxAmount;
 
         // 4. Revert Customer Invoices
-        const candidateInvoiceIds = new Set();
+        const candidateInvoiceIds = new Set(prInvoiceIds);
         for (const btx of bankTransactions) {
             let setOffItems = [];
             if (Array.isArray(btx.invoices) && btx.invoices.length > 0) {
@@ -1144,34 +1166,51 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
             }
         }
 
+        const allMatchIds = [...new Set([
+            ...validTxIds,
+            ...bankTxIds.map(b => b.toString()),
+            ...prNumbers,
+            ...prIds
+        ])];
+
         const invQueryConditions = [];
-        if (validTxIds.length > 0) invQueryConditions.push({ "payments.transactionId": { $in: validTxIds } });
+        if (allMatchIds.length > 0) {
+            invQueryConditions.push({ "payments.transactionId": { $in: allMatchIds } });
+            invQueryConditions.push({ "payments.referenceNumber": { $in: allMatchIds } });
+            const validObjIds = allMatchIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+            if (validObjIds.length > 0) {
+                invQueryConditions.push({ "payments.paymentReceivedId": { $in: validObjIds } });
+            }
+        }
         const invObjectIds = Array.from(candidateInvoiceIds).filter(id => mongoose.Types.ObjectId.isValid(id));
         if (invObjectIds.length > 0) invQueryConditions.push({ _id: { $in: invObjectIds } });
 
         if (invQueryConditions.length > 0) {
             const invoices = await Invoice.find({ $or: invQueryConditions });
             for (const invoice of invoices) {
-                let deduction = Number(exactDeletedTxValue || 0);
                 const remainingPayments = [];
+                let removedPaymentsTotal = 0;
                 let paymentRemoved = false;
                 if (Array.isArray(invoice.payments)) {
                     for (const p of invoice.payments) {
-                        const isMatch = validTxIds.some(tId =>
+                        const isMatch = allMatchIds.some(tId =>
                             (p.transactionId && String(p.transactionId).trim() === String(tId).trim()) ||
+                            (p.referenceNumber && String(p.referenceNumber).trim() === String(tId).trim()) ||
                             (p.reference && String(p.reference).trim() === String(tId).trim()) ||
-                            (p.paymentReference && String(p.paymentReference).trim() === String(tId).trim())
+                            (p.paymentReference && String(p.paymentReference).trim() === String(tId).trim()) ||
+                            (p.paymentReceivedId && String(p.paymentReceivedId).trim() === String(tId).trim()) ||
+                            (p.note && prNumbers.some(prNum => p.note.includes(prNum)))
                         );
-                        if (isMatch && !paymentRemoved) {
+                        if (isMatch) {
                             paymentRemoved = true;
+                            removedPaymentsTotal += Number(p.amount || 0);
                         } else {
                             remainingPayments.push(p);
                         }
                     }
-                    if (!paymentRemoved && remainingPayments.length > 0) remainingPayments.pop();
                 }
 
-                if (deduction <= 0 && !paymentRemoved) continue;
+                if (!paymentRemoved && removedPaymentsTotal <= 0) continue;
 
                 const totalInvoiceAmount = Number(
                     invoice.totalAmountDue !== undefined && invoice.totalAmountDue > 0
@@ -1183,26 +1222,29 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
                                 : ((invoice.amountPaid || 0) + (invoice.balance || 0))))
                 );
 
-                const newAmountPaid = Math.max(0, (invoice.amountPaid || 0) - deduction);
+                const newAmountPaid = remainingPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
                 const newBalance = Math.max(0, totalInvoiceAmount - newAmountPaid);
 
                 // Recalculate status evaluating due date
-                let newStatus = invoice.status;
+                let newStatus = "PENDING";
                 const now = new Date();
                 const isOverdue = invoice.dueDate && new Date(invoice.dueDate) < now;
 
-                if (newBalance >= totalInvoiceAmount - 0.01) {
-                    newStatus = isOverdue ? "OVERDUE" : "PENDING";
-                } else if (newBalance > 0.01) {
+                if (newBalance <= 0) {
+                    newStatus = "PAID";
+                } else if (newAmountPaid > 0) {
                     newStatus = isOverdue ? "OVERDUE" : "PARTIAL";
                 } else {
-                    newStatus = "PAID";
+                    newStatus = isOverdue ? "OVERDUE" : "PENDING";
                 }
 
                 invoice.amountPaid = newAmountPaid;
                 invoice.balance = newBalance;
                 invoice.status = newStatus;
                 invoice.payments = remainingPayments;
+                if (newStatus !== "PAID") {
+                    invoice.paidAt = undefined;
+                }
                 await invoice.save();
 
                 // Sync ServiceBill if WORKSHOP invoice
@@ -1210,7 +1252,7 @@ const revertInvoiceSetOffsForTransactions = async (bankTransactions = [], ledger
                     try {
                         const bill = await ServiceBill.findById(invoice.serviceBill);
                         if (bill) {
-                            const newBillAmountPaid = Math.max(0, (bill.amountPaid || 0) - deduction);
+                            const newBillAmountPaid = Math.max(0, (bill.amountPaid || 0) - removedPaymentsTotal);
                             const newBillPaymentStatus = newBillAmountPaid >= bill.totalAmount - 0.01 ? "PAID" : (newBillAmountPaid > 0.01 ? "PARTIAL" : "UNPAID");
                             await ServiceBill.findByIdAndUpdate(bill._id, {
                                 $set: {
@@ -3796,20 +3838,59 @@ const updateCustomerContact = async (transactionId, newCustomerId, options = {})
         throw new Error("Transaction not found");
     }
 
-    // 1. Reverse existing set-off (Customer or Vendor)
+    // 0. Validate target Customer / Driver BEFORE reversing existing set-off
+    let custDoc = null;
+    let resolvedCustomerId = null;
+    if (newCustomerId) {
+        if (mongoose.Types.ObjectId.isValid(newCustomerId)) {
+            custDoc = await Customer.findById(newCustomerId);
+        }
+        if (!custDoc) {
+            // Check if newCustomerId is a Driver ID or driverId code
+            const DriverModule = require("../../Driver/Model/DriverModel");
+            const Driver = DriverModule.Driver || DriverModule;
+            let driverDoc = null;
+            if (mongoose.Types.ObjectId.isValid(newCustomerId)) {
+                driverDoc = await Driver.findById(newCustomerId);
+            }
+            if (!driverDoc) {
+                driverDoc = await Driver.findOne({ driverId: String(newCustomerId).trim() });
+            }
+            if (!driverDoc) {
+                driverDoc = await Driver.findOne({ "personalInfo.fullName": new RegExp(String(newCustomerId).trim(), "i") });
+            }
+            if (driverDoc) {
+                custDoc = await Customer.findOne({ driver: driverDoc._id });
+                if (!custDoc && driverDoc.personalInfo?.fullName) {
+                    custDoc = await Customer.findOne({ name: new RegExp(driverDoc.personalInfo.fullName.trim(), "i") });
+                }
+                if (!custDoc) {
+                    custDoc = await Customer.create({
+                        name: driverDoc.personalInfo?.fullName || `Driver ${driverDoc.driverId}`,
+                        driver: driverDoc._id,
+                        customerId: driverDoc.driverId ? `CUST-${driverDoc.driverId}` : undefined,
+                        email: driverDoc.personalInfo?.email,
+                        phone: driverDoc.personalInfo?.phone,
+                        status: "Active"
+                    });
+                }
+            }
+        }
+        if (!custDoc) {
+            throw new Error(`Customer or Driver not found for identifier: ${newCustomerId}`);
+        }
+        resolvedCustomerId = custDoc._id;
+    }
+
+    // 1. Reverse existing set-off (Customer or Vendor) ONLY AFTER new customer/driver is validated
     await reverseSetOffFromHistory(transactionId);
 
     const txAmount = bankTx ? bankTx.amount : (primaryEntry ? primaryEntry.amount : 0);
 
     let setOffResult = null;
-    if (newCustomerId) {
-        const custDoc = await Customer.findById(newCustomerId);
-        if (!custDoc) {
-            throw new Error("Customer not found");
-        }
-
+    if (resolvedCustomerId) {
         // Apply set-off to new Customer
-        setOffResult = await autoSetOffInvoices(newCustomerId, txAmount, {
+        setOffResult = await autoSetOffInvoices(resolvedCustomerId, txAmount, {
             ...options,
             bankTransactionId: bankTx ? bankTx._id : undefined,
             existingBankLedgerEntryId: primaryEntry ? primaryEntry._id : undefined,
@@ -3822,14 +3903,14 @@ const updateCustomerContact = async (transactionId, newCustomerId, options = {})
 
         // Update contact & names
         if (bankTx) {
-            bankTx.customer = newCustomerId;
+            bankTx.customer = resolvedCustomerId;
             bankTx.customerName = custDoc.name;
             bankTx.supplier = undefined;
             bankTx.supplierName = undefined;
             await bankTx.save();
         }
         if (primaryEntry) {
-            primaryEntry.contact = newCustomerId;
+            primaryEntry.contact = resolvedCustomerId;
             primaryEntry.supplier = undefined;
             await primaryEntry.save();
         }

@@ -28,8 +28,66 @@ exports.getInvoicesService = async (queryParams = {}, options = {}) => {
     const cleanSearch = queryParams.search ? queryParams.search.trim() : '';
     const isFullInvoice = /^(?:INV|MAN|WRK)-\d{5,10}(?:-\d{4})?$/i.test(cleanSearch) || /^WRK-\d{6,8}-\d{4}$/i.test(cleanSearch);
 
-    if (queryParams.driver) query.driver = queryParams.driver;
-    if (queryParams.customer) query.customer = queryParams.customer;
+    if (queryParams.driver) {
+        if (mongoose.Types.ObjectId.isValid(queryParams.driver)) {
+            query.driver = new mongoose.Types.ObjectId(queryParams.driver);
+        } else {
+            query.driver = queryParams.driver;
+        }
+    }
+    if (queryParams.customer) {
+        const Customer = require("../../Customer/Model/CustomerModel");
+        const DriverModule = require("../../Driver/Model/DriverModel");
+        const Driver = DriverModule.Driver || DriverModule;
+
+        const customerObjIds = [];
+        const driverObjIds = [];
+
+        try {
+            if (mongoose.Types.ObjectId.isValid(queryParams.customer)) {
+                const rawId = new mongoose.Types.ObjectId(queryParams.customer);
+                // 1. Check if queryParams.customer is a Customer ID
+                const custDoc = await Customer.findById(rawId);
+                if (custDoc) {
+                    customerObjIds.push(custDoc._id);
+                    if (custDoc.driver) {
+                        const drvId = typeof custDoc.driver === 'object' ? custDoc.driver._id : custDoc.driver;
+                        if (drvId && mongoose.Types.ObjectId.isValid(drvId)) {
+                            driverObjIds.push(new mongoose.Types.ObjectId(drvId));
+                        }
+                    }
+                } else {
+                    // 2. Check if queryParams.customer is a Driver ID
+                    const driverDoc = await Driver.findById(rawId);
+                    if (driverDoc) {
+                        driverObjIds.push(driverDoc._id);
+                        const linkedCust = await Customer.findOne({ driver: driverDoc._id });
+                        if (linkedCust) {
+                            customerObjIds.push(linkedCust._id);
+                        }
+                    } else {
+                        customerObjIds.push(rawId);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[InvoiceRepo] Error resolving customer/driver in queryParams:', e);
+        }
+
+        const orConditions = [];
+        if (customerObjIds.length > 0) {
+            orConditions.push({ customer: { $in: customerObjIds } });
+        }
+        if (driverObjIds.length > 0) {
+            orConditions.push({ driver: { $in: driverObjIds } });
+        }
+        if (orConditions.length === 0) {
+            orConditions.push({ customer: queryParams.customer });
+        }
+
+        query.$and = query.$and || [];
+        query.$and.push({ $or: orConditions });
+    }
     if (queryParams.vehicle) query.vehicle = queryParams.vehicle;
 
     if (queryParams.branch) {

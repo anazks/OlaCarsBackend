@@ -242,6 +242,29 @@ const createWorkOrderHandler = async (req, res) => {
             }
         }
 
+        // Sync lastMaintenanceOdometer ONLY for PREVENTIVE maintenance
+        const isPreventive = ['PREVENTIVE', 'PREVENTIVE MAINTENANCE'].includes(String(data.workOrderType || '').toUpperCase().trim());
+        if (isPreventive && data.vehicleId && data.odometerAtEntry !== undefined && !isNaN(Number(data.odometerAtEntry)) && Number(data.odometerAtEntry) > 0) {
+            try {
+                const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+                const odoNum = Number(data.odometerAtEntry);
+                const currentVeh = await Vehicle.findById(data.vehicleId);
+                if (currentVeh) {
+                    const updateFields = {
+                        "maintenanceDetails.lastMaintenanceOdometer": odoNum
+                    };
+                    if (!currentVeh.basicDetails?.odometer || odoNum > currentVeh.basicDetails.odometer) {
+                        updateFields["basicDetails.odometer"] = odoNum;
+                        updateFields["basicDetails.odometerReadingDate"] = new Date();
+                    }
+                    await Vehicle.findByIdAndUpdate(data.vehicleId, { $set: updateFields });
+                    console.log(`[WORK-ORDER SYNC] Updated vehicle ${data.vehicleId} lastMaintenanceOdometer to ${odoNum} KM for PREVENTIVE maintenance`);
+                }
+            } catch (vSyncErr) {
+                console.error("[WORK-ORDER SYNC ERROR] Failed to update vehicle lastMaintenanceOdometer:", vSyncErr.message);
+            }
+        }
+
         const freshWo = await WorkOrderRepo.getWorkOrderById(wo._id);
         return res.status(201).json({ success: true, data: freshWo || wo });
     } catch (error) {
@@ -321,6 +344,31 @@ const updateWorkOrderHandler = async (req, res) => {
         const wo = await WorkOrderRepo.updateWorkOrder(id, updatePayload);
         if (!wo) {
             return res.status(404).json({ success: false, message: 'Work order not found' });
+        }
+
+        // If this work order is PREVENTIVE and odometerAtEntry is updated, sync vehicle lastMaintenanceOdometer
+        const effectiveType = workOrderType || wo.workOrderType;
+        const isPreventive = ['PREVENTIVE', 'PREVENTIVE MAINTENANCE'].includes(String(effectiveType || '').toUpperCase().trim());
+        if (isPreventive && wo.vehicleId && odometerAtEntry !== undefined && !isNaN(Number(odometerAtEntry)) && Number(odometerAtEntry) > 0) {
+            try {
+                const { Vehicle } = require("../../Vehicle/Model/VehicleModel");
+                const vId = wo.vehicleId?._id || wo.vehicleId;
+                const odoNum = Number(odometerAtEntry);
+                const currentVeh = await Vehicle.findById(vId);
+                if (currentVeh) {
+                    const updateFields = {
+                        "maintenanceDetails.lastMaintenanceOdometer": odoNum
+                    };
+                    if (!currentVeh.basicDetails?.odometer || odoNum > currentVeh.basicDetails.odometer) {
+                        updateFields["basicDetails.odometer"] = odoNum;
+                        updateFields["basicDetails.odometerReadingDate"] = new Date();
+                    }
+                    await Vehicle.findByIdAndUpdate(vId, { $set: updateFields });
+                    console.log(`[WORK-ORDER UPDATE SYNC] Updated vehicle ${vId} lastMaintenanceOdometer to ${odoNum} KM for PREVENTIVE`);
+                }
+            } catch (vSyncErr) {
+                console.error("[WORK-ORDER UPDATE SYNC ERROR] Failed to update vehicle lastMaintenanceOdometer:", vSyncErr.message);
+            }
         }
         const updated = await WorkOrderRepo.getWorkOrderById(id);
         return res.status(200).json({ success: true, data: updated || wo });

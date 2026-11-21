@@ -26,6 +26,16 @@ const seedSystemSettings = async () => {
                 value: false,
                 description: "Toggle to suspend or enable the automated monthly asset depreciation cron job.",
             },
+            {
+                key: "maintenanceThresholdKm",
+                value: 1000,
+                description: "Default maintenance interval threshold in KM for vehicle service alerts.",
+            },
+            {
+                key: "maintenanceWarningPercent",
+                value: 0.8,
+                description: "Ratio of maintenance threshold (e.g. 0.8 = 80%) at which vehicle enters DUE / Approaching maintenance status.",
+            },
         ];
 
         for (const setting of defaultSettings) {

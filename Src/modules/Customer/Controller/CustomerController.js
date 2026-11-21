@@ -341,6 +341,75 @@ exports.getAllCustomers = async (req, res) => {
             const cleanSearch = search.trim();
             const terms = cleanSearch.split(/\s+/).filter(Boolean).map(escapeRegex);
             const searchRegex = new RegExp(terms.join('.*'), 'i');
+
+            let matchingDriverIds = [];
+            try {
+                // Find matching vehicles first (by plate number, reg number, fleet number, or vin)
+                let vehicleIds = [];
+                try {
+                    const matchingVehicles = await Vehicle.find({
+                        isDeleted: false,
+                        $or: [
+                            { plateNumber: searchRegex },
+                            { "legalDocs.registrationNumber": searchRegex },
+                            { "basicDetails.fleetNumber": searchRegex },
+                            { "basicDetails.vin": searchRegex }
+                        ]
+                    }).select('_id').lean();
+                    vehicleIds = matchingVehicles.map(v => v._id);
+                } catch (vErr) {
+                    console.error('[getAllCustomers] Vehicle search error:', vErr.message);
+                }
+
+                const driverOrConditions = [
+                    { driverId: searchRegex },
+                    { "personalInfo.fullName": searchRegex },
+                    { "personalInfo.phone": searchRegex },
+                    { "personalInfo.email": searchRegex }
+                ];
+                if (vehicleIds.length > 0) {
+                    driverOrConditions.push({ currentVehicle: { $in: vehicleIds } });
+                }
+
+                const matchingDrivers = await Driver.find({
+                    isDeleted: false,
+                    $or: driverOrConditions
+                }).select('_id personalInfo driverId branch status').lean();
+
+                if (matchingDrivers.length > 0) {
+                    matchingDriverIds = matchingDrivers.map(d => d._id);
+
+                    // Ensure matching drivers have a corresponding Customer record
+                    const existingCusts = await Customer.find({
+                        driver: { $in: matchingDriverIds },
+                        isDeleted: false
+                    }).select('driver').lean();
+                    const existingDriverSet = new Set(existingCusts.map(c => c.driver ? c.driver.toString() : ''));
+
+                    for (const d of matchingDrivers) {
+                        if (!existingDriverSet.has(d._id.toString())) {
+                            try {
+                                const newCustId = await getNextCustomerId();
+                                await Customer.create({
+                                    customerId: newCustId,
+                                    name: d.personalInfo?.fullName || `Driver ${d.driverId || ''}`.trim(),
+                                    email: d.personalInfo?.email,
+                                    phone: d.personalInfo?.phone,
+                                    branch: d.branch,
+                                    driver: d._id,
+                                    isDriver: true,
+                                    status: d.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE'
+                                });
+                            } catch (cErr) {
+                                console.error('[getAllCustomers] Auto-create customer for driver failed:', cErr.message);
+                            }
+                        }
+                    }
+                }
+            } catch (dErr) {
+                console.error('[getAllCustomers] Driver search error:', dErr.message);
+            }
+
             query.$or = [
                 { name: searchRegex },
                 { email: searchRegex },
@@ -350,6 +419,10 @@ exports.getAllCustomers = async (req, res) => {
                 { cfVehicleNo: searchRegex },
                 { cfFleetNo: searchRegex }
             ];
+
+            if (matchingDriverIds.length > 0) {
+                query.$or.push({ driver: { $in: matchingDriverIds } });
+            }
         }
 
         // Whitelist sortable fields to prevent injection
@@ -366,7 +439,7 @@ exports.getAllCustomers = async (req, res) => {
             .populate('branch')
             .populate({
                 path: 'driver',
-                select: 'driverId status currentVehicle',
+                select: 'driverId status currentVehicle personalInfo',
                 populate: {
                     path: 'currentVehicle',
                     select: 'legalDocs basicDetails plateNumber'

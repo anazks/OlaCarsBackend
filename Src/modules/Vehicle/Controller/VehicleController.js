@@ -807,7 +807,20 @@ const updateVehicle = async (req, res, next) => {
 const getVehiclesDueForService = async (req, res, next) => {
     try {
         const { Vehicle } = require("../Model/VehicleModel");
-        const warningPercent = parseFloat(req.query.warningPercent) || 0.8; // default 80%
+        const SystemSettings = require("../../SystemSettings/Model/SystemSettingsModel");
+        
+        let sysThreshold = 1000;
+        let sysWarning = 0.8;
+        try {
+            const tDoc = await SystemSettings.findOne({ key: "maintenanceThresholdKm" });
+            if (tDoc && !isNaN(Number(tDoc.value))) sysThreshold = Number(tDoc.value);
+            const wDoc = await SystemSettings.findOne({ key: "maintenanceWarningPercent" });
+            if (wDoc && !isNaN(Number(wDoc.value))) sysWarning = Number(wDoc.value);
+        } catch (settingsErr) {
+            console.warn("[getVehiclesDueForService] Could not read system settings:", settingsErr.message);
+        }
+
+        const warningPercent = parseFloat(req.query.warningPercent) || sysWarning;
 
         const baseQuery = {
             isDeleted: false,
@@ -843,7 +856,9 @@ const getVehiclesDueForService = async (req, res, next) => {
         // Compute maintenance status for each vehicle
         const result = vehicles.map(v => {
             const odometer = v.basicDetails?.odometer || 0;
-            const threshold = v.maintenanceDetails?.maintenanceThresholdKm || 1000;
+            const threshold = (v.maintenanceDetails?.maintenanceThresholdKm && Number(v.maintenanceDetails.maintenanceThresholdKm) > 0)
+                ? Number(v.maintenanceDetails.maintenanceThresholdKm)
+                : sysThreshold;
             const lastServiceOdo = v.maintenanceDetails?.lastMaintenanceOdometer || 0;
             const distanceSinceService = Math.max(0, odometer - lastServiceOdo);
             const percentUsed = threshold > 0 ? (distanceSinceService / threshold) : 0;
