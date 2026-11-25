@@ -3,20 +3,23 @@ const connectDB = require('./Src/config/dbConfig');
 const gpsService = require('./Src/modules/Gps/Service/GpsService');
 
 function getYesterdayDateRange() {
-    const now = new Date();
-    // Yesterday
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
+    // Current date in Panama (UTC-5)
+    const panamaFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Panama',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    const panamaTodayStr = panamaFormatter.format(new Date());
+    const [y, m, d] = panamaTodayStr.split('-').map(Number);
+    // Safely subtract 1 day in UTC to avoid daylight saving shifts
+    const dateObj = new Date(Date.UTC(y, m - 1, d - 1, 12, 0, 0));
+    const yesterdayStr = panamaFormatter.format(dateObj);
 
-    const pad = (n) => String(n).padStart(2, '0');
-    const year = yesterday.getFullYear();
-    const month = pad(yesterday.getMonth() + 1);
-    const day = pad(yesterday.getDate());
+    const startTime = `${yesterdayStr} 00:00:00`;
+    const endTime = `${yesterdayStr} 23:59:59`;
 
-    const startTime = `${year}-${month}-${day} 00:00:00`;
-    const endTime = `${year}-${month}-${day} 23:59:59`;
-
-    return { dateStr: `${year}-${month}-${day}`, startTime, endTime };
+    return { dateStr: yesterdayStr, startTime, endTime };
 }
 
 async function run() {

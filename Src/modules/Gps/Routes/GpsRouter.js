@@ -115,5 +115,10 @@ router.get("/obd", authenticate, authorize(...ALLOWED_ROLES), GpsController.getG
 router.get("/detail", authenticate, authorize(...ALLOWED_ROLES), GpsController.getGpsDeviceDetail);
 router.get("/fleet-summary-report", authenticate, authorize(...ALLOWED_ROLES), GpsController.getFleetSummaryReport);
 
+// GPS / Tracksolid Platform Configuration (Accessible ONLY by Workshop Manager and Admin)
+router.get("/config", authenticate, authorize(ROLES.WORKSHOPMANAGER, ROLES.ADMIN), GpsController.getGpsConfig);
+router.put("/config", authenticate, authorize(ROLES.WORKSHOPMANAGER, ROLES.ADMIN), GpsController.updateGpsConfig);
+router.post("/config/test", authenticate, authorize(ROLES.WORKSHOPMANAGER, ROLES.ADMIN), GpsController.testGpsConnection);
+
 module.exports = router;
 

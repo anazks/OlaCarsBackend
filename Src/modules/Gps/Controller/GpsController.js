@@ -1,6 +1,20 @@
 const GpsService = require('../Service/GpsService');
 const { GpsNotification } = require("../Model/GpsNotificationModel");
 
+const formatPanamaDateTime = (date = new Date()) => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Panama',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    return formatter.format(date).replace(', ', ' ');
+};
+
 const getGpsVehicles = async (req, res, next) => {
     try {
         const vehicles = await GpsService.getVehiclesList();
@@ -74,15 +88,10 @@ const getGpsMileage = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'IMEIs parameter is required' });
         }
 
-        const now = new Date();
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const formatDate = (date) => {
-            const pad = (n) => String(n).padStart(2, "0");
-            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-        };
-
-        const defaultStart = formatDate(startOfToday);
-        const defaultEnd = formatDate(now);
+        const panamaNow = formatPanamaDateTime(new Date());
+        const panamaToday = panamaNow.split(' ')[0];
+        const defaultStart = `${panamaToday} 00:00:00`;
+        const defaultEnd = panamaNow;
 
         const data = await GpsService.getMileage(imeis, startTime || defaultStart, endTime || defaultEnd);
         res.status(200).json({ success: true, data });
@@ -98,15 +107,10 @@ const getGpsTrackList = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'IMEI parameter is required' });
         }
 
-        const now = new Date();
-        const past24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const formatDate = (date) => {
-            const pad = (n) => String(n).padStart(2, "0");
-            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-        };
-
-        const defaultBegin = formatDate(past24Hours);
-        const defaultEnd = formatDate(now);
+        const panamaNow = formatPanamaDateTime(new Date());
+        const past24hPanama = formatPanamaDateTime(new Date(Date.now() - 24 * 60 * 60 * 1000));
+        const defaultBegin = past24hPanama;
+        const defaultEnd = panamaNow;
 
         const data = await GpsService.getTrackList(imei, beginTime || defaultBegin, endTime || defaultEnd);
         res.status(200).json({ success: true, data });
@@ -188,15 +192,10 @@ const getGpsObdData = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'IMEI parameter is required' });
         }
 
-        const now = new Date();
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const formatDate = (date) => {
-            const pad = (n) => String(n).padStart(2, "0");
-            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-        };
-
-        const defaultStart = formatDate(startOfToday);
-        const defaultEnd = formatDate(now);
+        const panamaNow = formatPanamaDateTime(new Date());
+        const panamaToday = panamaNow.split(' ')[0];
+        const defaultStart = `${panamaToday} 00:00:00`;
+        const defaultEnd = panamaNow;
 
         try {
             const data = await GpsService.getObdData(imei, startTime || defaultStart, endTime || defaultEnd);
@@ -241,6 +240,40 @@ const getGpsDeviceDetail = async (req, res, next) => {
     }
 };
 
+const getGpsConfig = async (req, res, next) => {
+    try {
+        const config = await GpsService.getConfigPublic();
+        res.status(200).json({ success: true, data: config });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateGpsConfig = async (req, res, next) => {
+    try {
+        const config = await GpsService.updateConfig(req.body, req.user?.id);
+        res.status(200).json({
+            success: true,
+            message: 'Tracksolid GPS configuration updated successfully',
+            data: config
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const testGpsConnection = async (req, res, next) => {
+    try {
+        const result = await GpsService.testConnection(req.body);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        res.status(200).json(result);
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getGpsVehicles,
     getGpsLocations,
@@ -253,5 +286,8 @@ module.exports = {
     getGpsNotifications,
     getGpsObdData,
     getFleetSummaryReport,
-    getGpsDeviceDetail
+    getGpsDeviceDetail,
+    getGpsConfig,
+    updateGpsConfig,
+    testGpsConnection
 };

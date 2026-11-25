@@ -11,9 +11,46 @@ const TRACKSOLID_APP_SECRET = process.env.TRACKSOLID_APP_SECRET || 'ca18517f8435
 
 const CACHE_FILE = path.join(__dirname, 'gps_token_cache.json');
 
+const formatPanamaDateTime = (date = new Date()) => {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Panama',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    return formatter.format(date).replace(', ', ' ');
+};
+
+// Convert Panama local time string ("YYYY-MM-DD HH:mm:ss") to UTC string ("YYYY-MM-DD HH:mm:ss")
+// Tracksolid API interprets begin_time and end_time as UTC.
+const panamaTimeToUtc = (panamaTimeStr) => {
+    if (!panamaTimeStr) return panamaTimeStr;
+    const cleaned = String(panamaTimeStr).trim().replace('T', ' ');
+    const isoStr = cleaned.includes('-05:00') ? cleaned : `${cleaned.replace(' ', 'T')}-05:00`;
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return panamaTimeStr;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+};
+
+// Convert UTC string from Tracksolid response ("YYYY-MM-DD HH:mm:ss") to Panama local time (UTC-5)
+const utcToPanamaTime = (utcTimeStr) => {
+    if (!utcTimeStr || utcTimeStr === 'N/A') return utcTimeStr;
+    const cleaned = String(utcTimeStr).trim().replace('T', ' ');
+    const isoStr = cleaned.endsWith('Z') ? cleaned : `${cleaned.replace(' ', 'T')}Z`;
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return utcTimeStr;
+    return formatPanamaDateTime(d);
+};
+
 class GpsService {
     constructor() {
         this.tokenCache = null;
+        this.activeConfig = null;
         this.loadCache();
         this.devicesCache = {
             data: null,
@@ -23,6 +60,157 @@ class GpsService {
         this.fleetSummaryCache = new Map();
         this.deviceFirstTripDate = new Map();
         this.dbVehiclesCache = null;
+    }
+
+    async loadDbConfig() {
+        try {
+            const SystemSettings = require('../../SystemSettings/Model/SystemSettingsModel');
+            const setting = await SystemSettings.findOne({ key: 'tracksolid_gps_config' });
+            if (setting && setting.value) {
+                return setting.value;
+            }
+        } catch (err) {
+            console.warn('[GPS Service] Could not load GPS config from DB, using env fallback:', err.message);
+        }
+        return null;
+    }
+
+    async getEffectiveConfig() {
+        if (!this.activeConfig) {
+            const dbConfig = await this.loadDbConfig();
+            this.activeConfig = {
+                apiUrl: dbConfig?.apiUrl || process.env.TRACKSOLID_API_URL || TRACKSOLID_API_URL,
+                appKey: dbConfig?.appKey || process.env.TRACKSOLID_APP_KEY || TRACKSOLID_APP_KEY,
+                userId: dbConfig?.userId || process.env.TRACKSOLID_USER_ID || TRACKSOLID_USER_ID,
+                userPwdMd5: dbConfig?.userPwdMd5 || process.env.TRACKSOLID_USER_PWD_MD5 || TRACKSOLID_USER_PWD_MD5,
+                appSecret: dbConfig?.appSecret || process.env.TRACKSOLID_APP_SECRET || TRACKSOLID_APP_SECRET,
+                apiVersion: dbConfig?.apiVersion || process.env.TRACKSOLID_API_VERSION || '1.0'
+            };
+        }
+        return this.activeConfig;
+    }
+
+    async getConfigPublic() {
+        const config = await this.getEffectiveConfig();
+        return {
+            apiUrl: config.apiUrl,
+            appKey: config.appKey,
+            userId: config.userId,
+            userPwdMd5: config.userPwdMd5,
+            appSecret: config.appSecret,
+            apiVersion: config.apiVersion,
+            isConfigured: Boolean(config.appKey && config.userId)
+        };
+    }
+
+    async updateConfig(newConfig, updatedBy) {
+        const SystemSettings = require('../../SystemSettings/Model/SystemSettingsModel');
+        const updated = {
+            apiUrl: newConfig.apiUrl?.trim() || process.env.TRACKSOLID_API_URL || TRACKSOLID_API_URL,
+            appKey: newConfig.appKey?.trim() || process.env.TRACKSOLID_APP_KEY || TRACKSOLID_APP_KEY,
+            userId: newConfig.userId?.trim() || process.env.TRACKSOLID_USER_ID || TRACKSOLID_USER_ID,
+            userPwdMd5: newConfig.userPwdMd5?.trim() || process.env.TRACKSOLID_USER_PWD_MD5 || TRACKSOLID_USER_PWD_MD5,
+            appSecret: newConfig.appSecret?.trim() || process.env.TRACKSOLID_APP_SECRET || TRACKSOLID_APP_SECRET,
+            apiVersion: newConfig.apiVersion?.trim() || process.env.TRACKSOLID_API_VERSION || '1.0'
+        };
+
+        await SystemSettings.findOneAndUpdate(
+            { key: 'tracksolid_gps_config' },
+            {
+                key: 'tracksolid_gps_config',
+                value: updated,
+                description: 'Tracksolid Pro GPS API integration credentials and configuration',
+                updatedBy: updatedBy || null
+            },
+            { upsert: true, new: true }
+        );
+
+        this.activeConfig = updated;
+        this.tokenCache = null;
+        try {
+            if (fs.existsSync(CACHE_FILE)) {
+                fs.unlinkSync(CACHE_FILE);
+            }
+        } catch {}
+
+        return this.getConfigPublic();
+    }
+
+    async testConnection(testParams = {}) {
+        const current = await this.getEffectiveConfig();
+        const configToTest = {
+            apiUrl: testParams.apiUrl?.trim() || current.apiUrl,
+            appKey: testParams.appKey?.trim() || current.appKey,
+            userId: testParams.userId?.trim() || current.userId,
+            userPwdMd5: testParams.userPwdMd5?.trim() || current.userPwdMd5,
+            appSecret: testParams.appSecret?.trim() || current.appSecret,
+            apiVersion: testParams.apiVersion?.trim() || current.apiVersion || '1.0'
+        };
+
+        const params = {
+            method: 'jimi.oauth.token.get',
+            timestamp: this.getTimestamp(),
+            app_key: configToTest.appKey,
+            v: configToTest.apiVersion,
+            format: 'json',
+            sign_method: 'md5',
+            user_id: configToTest.userId,
+            user_pwd_md5: configToTest.userPwdMd5,
+            expires_in: 7200
+        };
+        params.sign = this.generateSign(params, configToTest.appSecret);
+
+        const searchParams = new URLSearchParams();
+        for (const key in params) {
+            if (params[key] !== undefined && params[key] !== null && params[key] !== '') {
+                searchParams.append(key, params[key]);
+            }
+        }
+
+        try {
+            const response = await fetch(configToTest.apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: searchParams.toString()
+            });
+
+            const text = await response.text();
+            console.log(`\n=================== [TRACKSOLID RAW API RESPONSE] ===================`);
+            console.log(`Method: ${params.method}`);
+            console.log(`Raw Payload:\n${text}`);
+            console.log(`====================================================================\n`);
+
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error(`Tracksolid API returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 100)}`);
+            }
+            if (data.code !== 0 && data.code !== 200 && data.code !== '0') {
+                return {
+                    success: false,
+                    code: data.code,
+                    message: data.message || 'Authentication with Tracksolid failed',
+                    details: data
+                };
+            }
+
+            return {
+                success: true,
+                code: 0,
+                message: 'Successfully connected and authenticated with Tracksolid GPS platform!',
+                data: {
+                    expiresIn: data.result?.expiresIn || data.data?.expiresIn || 7200,
+                    connectedAccount: configToTest.userId
+                }
+            };
+        } catch (err) {
+            return {
+                success: false,
+                code: -1,
+                message: `Connection error: ${err.message}`
+            };
+        }
     }
 
     loadCache() {
@@ -80,11 +268,12 @@ class GpsService {
             accessToken = await this.getAccessToken();
         }
 
+        const config = await this.getEffectiveConfig();
         const params = {
             method,
             timestamp: this.getTimestamp(),
-            app_key: TRACKSOLID_APP_KEY,
-            v: process.env.TRACKSOLID_API_VERSION || '1.0',
+            app_key: config.appKey,
+            v: config.apiVersion || '1.0',
             format: 'json',
             sign_method: 'md5',
             ...additionalParams
@@ -94,7 +283,7 @@ class GpsService {
             params.access_token = accessToken;
         }
 
-        params.sign = this.generateSign(params, TRACKSOLID_APP_SECRET);
+        params.sign = this.generateSign(params, config.appSecret);
 
         const searchParams = new URLSearchParams();
         for (const key in params) {
@@ -104,17 +293,28 @@ class GpsService {
         }
 
         try {
-            console.log(`[GPS API REQUEST] URL: ${TRACKSOLID_API_URL} | Method: ${method}`);
+            const requestBody = searchParams.toString();
+            console.log(`\n=================== [TRACKSOLID RAW API REQUEST] ===================`);
+            console.log(`Method         : ${method}`);
+            console.log(`Target URL     : ${config.apiUrl}`);
+            console.log(`Request Params :`, JSON.stringify(params, null, 2));
+            console.log(`Raw Form Body  :\n${requestBody}`);
+            console.log(`====================================================================\n`);
 
-            const response = await fetch(TRACKSOLID_API_URL, {
+            const response = await fetch(config.apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: searchParams.toString()
+                body: requestBody
             });
 
             const text = await response.text();
+            console.log(`\n=================== [TRACKSOLID RAW API RESPONSE] ===================`);
+            console.log(`Method: ${method}`);
+            console.log(`Raw Payload:\n${text}`);
+            console.log(`====================================================================\n`);
+
             let data;
             try {
                 data = JSON.parse(text);
@@ -123,6 +323,9 @@ class GpsService {
             }
 
             console.log(`[GPS API RESPONSE] Method: ${method} | Code: ${data.code} | Message: ${data.message || 'success'}`);
+            if (method.includes('mileage') || method.includes('trip')) {
+                console.log(`[TRACKSOLID DISTANCE API RESPONSE] Method: ${method} | Data:`, JSON.stringify(data, null, 2));
+            }
 
             if (data.code !== 0 && data.code !== 200 && data.code !== '0') {
                 throw new Error(`Tracksolid API Error: ${data.message || JSON.stringify(data)}`);
@@ -140,11 +343,12 @@ class GpsService {
             accessToken = await this.getAccessToken();
         }
 
+        const config = await this.getEffectiveConfig();
         const params = {
             method,
             timestamp: this.getTimestamp(),
-            app_key: TRACKSOLID_APP_KEY,
-            v: process.env.TRACKSOLID_API_VERSION || '1.0',
+            app_key: config.appKey,
+            v: config.apiVersion || '1.0',
             format: 'json',
             sign_method: 'md5',
             ...additionalParams
@@ -154,7 +358,7 @@ class GpsService {
             params.access_token = accessToken;
         }
 
-        params.sign = this.generateSign(params, TRACKSOLID_APP_SECRET);
+        params.sign = this.generateSign(params, config.appSecret);
 
         const searchParams = new URLSearchParams();
         for (const key in params) {
@@ -164,18 +368,38 @@ class GpsService {
         }
 
         try {
-            console.log(`[GPS API REQUEST RAW] URL: ${TRACKSOLID_API_URL} | Method: ${method}`);
+            const requestBody = searchParams.toString();
+            console.log(`\n=================== [TRACKSOLID RAW API REQUEST RAW] ===================`);
+            console.log(`Method         : ${method}`);
+            console.log(`Target URL     : ${config.apiUrl}`);
+            console.log(`Request Params :`, JSON.stringify(params, null, 2));
+            console.log(`Raw Form Body  :\n${requestBody}`);
+            console.log(`========================================================================\n`);
 
-            const response = await fetch(TRACKSOLID_API_URL, {
+            const response = await fetch(config.apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: searchParams.toString()
+                body: requestBody
             });
-            const data = await response.json();
+            const text = await response.text();
+            console.log(`\n=================== [TRACKSOLID RAW API RESPONSE] ===================`);
+            console.log(`Method: ${params.method}`);
+            console.log(`Raw Payload:\n${text}`);
+            console.log(`====================================================================\n`);
+
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error(`Tracksolid API returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 100)}`);
+            }
 
             console.log(`[GPS API RESPONSE RAW] Method: ${method} | Code: ${data.code} | Message: ${data.message || 'success'}`);
+            if (method.includes('mileage') || method.includes('trip')) {
+                console.log(`[TRACKSOLID DISTANCE RAW API RESPONSE] Method: ${method} | Data:`, JSON.stringify(data, null, 2));
+            }
 
             if (data.code !== 0 && data.code !== 200 && data.code !== '0') {
                 throw new Error(`Tracksolid API Error: ${data.message || JSON.stringify(data)}`);
@@ -193,20 +417,21 @@ class GpsService {
         }
 
         try {
+            const config = await this.getEffectiveConfig();
             const params = {
                 method: 'jimi.oauth.token.get',
                 timestamp: this.getTimestamp(),
-                app_key: TRACKSOLID_APP_KEY,
-                v: process.env.TRACKSOLID_API_VERSION || '1.0',
+                app_key: config.appKey,
+                v: config.apiVersion || '1.0',
                 format: 'json',
                 sign_method: 'md5',
-                user_id: TRACKSOLID_USER_ID,
-                user_pwd_md5: TRACKSOLID_USER_PWD_MD5,
+                user_id: config.userId,
+                user_pwd_md5: config.userPwdMd5,
                 expires_in: 7200
             };
-            params.sign = this.generateSign(params, TRACKSOLID_APP_SECRET);
+            params.sign = this.generateSign(params, config.appSecret);
 
-            console.log(`[GPS TOKEN REQUEST] URL: ${TRACKSOLID_API_URL}`);
+            console.log(`[GPS TOKEN REQUEST] URL: ${config.apiUrl}`);
 
             const searchParams = new URLSearchParams();
             for (const key in params) {
@@ -215,14 +440,25 @@ class GpsService {
                 }
             }
 
-            const response = await fetch(TRACKSOLID_API_URL, {
+            const response = await fetch(config.apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
                 body: searchParams.toString()
             });
-            const data = await response.json();
+            const text = await response.text();
+            console.log(`\n=================== [TRACKSOLID RAW API RESPONSE] ===================`);
+            console.log(`Method: ${params.method}`);
+            console.log(`Raw Payload:\n${text}`);
+            console.log(`====================================================================\n`);
+
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (err) {
+                throw new Error(`Tracksolid API returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 100)}`);
+            }
 
             console.log(`[GPS TOKEN RESPONSE] Data:`, JSON.stringify(data, null, 2));
 
@@ -255,13 +491,14 @@ class GpsService {
         }
 
         try {
+            const config = await this.getEffectiveConfig();
             // 1. Fetch child accounts to cover the entire fleet (sub-accounts)
-            let accounts = [TRACKSOLID_USER_ID];
+            let accounts = [config.userId];
             try {
-                const childrenRes = await this.requestApiRaw('jimi.user.child.list', { target: TRACKSOLID_USER_ID });
+                const childrenRes = await this.requestApiRaw('jimi.user.child.list', { target: config.userId });
                 const children = Array.isArray(childrenRes.result) ? childrenRes.result : [];
                 if (children.length > 0) {
-                    accounts = [TRACKSOLID_USER_ID, ...children.map(c => c.account).filter(Boolean)];
+                    accounts = [config.userId, ...children.map(c => c.account).filter(Boolean)];
                 }
             } catch (err) {
                 console.warn('[GPS Service] jimi.user.child.list warning:', err.message);
@@ -397,9 +634,10 @@ class GpsService {
 
     async getTripsReport(imei, startTime, endTime, pageNo = 1, pageSize = 100, type = 'day') {
         try {
+            const config = await this.getEffectiveConfig();
             console.log(`[GPS Service] Fetching trips report for IMEI: ${imei} from ${startTime} to ${endTime} (type: ${type}, page: ${pageNo})`);
             const result = await this.requestApi('jimi.open.platform.report.trips', {
-                account: TRACKSOLID_USER_ID,
+                account: config.userId,
                 imeis: imei,
                 type: type || 'day',
                 start_time: startTime,
@@ -656,13 +894,16 @@ class GpsService {
                 chunks.push(imeiList.slice(i, i + chunkSize));
             }
 
+            const utcStartTime = panamaTimeToUtc(startTime);
+            const utcEndTime = panamaTimeToUtc(endTime);
+
             const results = await Promise.all(chunks.map(async (chunkImeis) => {
                 const chunkImeiStr = chunkImeis.join(',');
                 try {
                     const responseBody = await this.requestApiRaw('jimi.device.track.mileage', {
                         imeis: chunkImeiStr,
-                        begin_time: startTime,
-                        end_time: endTime,
+                        begin_time: utcStartTime,
+                        end_time: utcEndTime,
                         start_row: 1,
                         page_size: 100
                     });
@@ -694,6 +935,8 @@ class GpsService {
                         const officialTotalMeters = dataItem.totalMileage !== undefined ? Number(dataItem.totalMileage) : totalDistMeters;
                         const finalDistMeters = officialTotalMeters > 0 ? officialTotalMeters : totalDistMeters;
                         const distKm = Number((finalDistMeters / 1000).toFixed(2));
+
+                        console.log(`[TRACKSOLID DISTANCE VALUE] IMEI: ${imei} | raw dataItem.totalMileage: ${dataItem.totalMileage} | tripSegmentsSum: ${totalDistMeters}m | finalDistMeters: ${finalDistMeters}m | distKm: ${distKm}km`);
 
                         const avgSpeed = totalRuntimeSec > 0 
                             ? Number((distKm / (totalRuntimeSec / 3600)).toFixed(2)) 
@@ -752,11 +995,13 @@ class GpsService {
 
     async getTrackList(imei, beginTime, endTime) {
         try {
-            console.log(`[GPS Service] Fetching track list for IMEI: ${imei} from ${beginTime} to ${endTime}`);
+            console.log(`[GPS Service] Fetching track list for IMEI: ${imei} from ${beginTime} to ${endTime} (Panama local)`);
+            const utcBeginTime = panamaTimeToUtc(beginTime);
+            const utcEndTime = panamaTimeToUtc(endTime);
             const result = await this.requestApi('jimi.device.track.list', {
                 imei,
-                begin_time: beginTime,
-                end_time: endTime
+                begin_time: utcBeginTime,
+                end_time: utcEndTime
             });
             return Array.isArray(result) ? result : (result.list || result.data || result);
         } catch (e) {
@@ -777,11 +1022,13 @@ class GpsService {
 
     async getObdData(imei, startTime, endTime) {
         try {
-            console.log(`[GPS Service] Fetching OBD data for IMEI: ${imei} from ${startTime} to ${endTime}`);
+            console.log(`[GPS Service] Fetching OBD data for IMEI: ${imei} from ${startTime} to ${endTime} (Panama local)`);
+            const utcStartTime = panamaTimeToUtc(startTime);
+            const utcEndTime = panamaTimeToUtc(endTime);
             const responseBody = await this.requestApiRaw('jimi.device.obd.list', {
                 imeis: imei,
-                start_time: startTime,
-                end_time: endTime,
+                start_time: utcStartTime,
+                end_time: utcEndTime,
                 page: '1',
                 pageSize: '100'
             });
@@ -800,10 +1047,8 @@ class GpsService {
             const searchQuery = String(search || '').trim().toLowerCase();
             const subAccountFilter = String(subAccount || '').trim();
 
-            // Default time period and date normalization
-            const nowObj = new Date();
-            const pad = (n) => String(n).padStart(2, "0");
-            const formatD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            // Default time period and date normalization (Panama UTC-5 timezone)
+            const formatD = (d) => formatPanamaDateTime(d);
 
             const normalizeDateStr = (str, isEnd = false) => {
                 if (!str) return null;
@@ -826,10 +1071,10 @@ class GpsService {
             let normEnd = normalizeDateStr(endTime, true);
 
             if (!normStart || !normEnd) {
-                // Default to past 30 days so active telemetry is populated on initial load
-                const past30 = new Date(nowObj.getTime() - 30 * 86400000);
+                // Default to past 30 days in Panama timezone
+                const past30 = new Date(Date.now() - 30 * 86400000);
                 normStart = normStart || formatD(past30);
-                normEnd = normEnd || formatD(nowObj);
+                normEnd = normEnd || formatD(new Date());
             } else {
                 // Tracksolid Pro jimi.open.platform.report.mileage allows up to 3 months (92 days)
                 const startObj = new Date(normStart.replace(' ', 'T'));
@@ -1035,13 +1280,16 @@ class GpsService {
                 imeiChunks.push(targetImeis.slice(i, i + 100));
             }
 
+            const utcStartTime = panamaTimeToUtc(startTime);
+            const utcEndTime = panamaTimeToUtc(endTime);
+
             const mileageMap = new Map();
             try {
                 const chunkResponses = await Promise.all(imeiChunks.map(chunk =>
                     this.requestApiRaw('jimi.open.platform.report.mileage', {
                         imeis: chunk.join(','),
-                        begin_time: startTime,
-                        end_time: endTime,
+                        begin_time: utcStartTime,
+                        end_time: utcEndTime,
                         page_size: 100,
                         start_row: 1,
                         filter_mileage: 0
@@ -1053,6 +1301,13 @@ class GpsService {
 
                 chunkResponses.forEach(res => {
                     const rows = (res && res.data && Array.isArray(res.data.rows)) ? res.data.rows : [];
+                    if (rows.length > 0) {
+                        console.log(`[TRACKSOLID FLEET MILEAGE REPORT] Received ${rows.length} vehicle distance record(s):`, rows.map(r => ({
+                            imei: r.imei,
+                            totalMileage: r.totalMileage,
+                            unit: 'km (Tracksolid report default)'
+                        })));
+                    }
                     rows.forEach(r => {
                         if (r && r.imei) {
                             mileageMap.set(String(r.imei), r);
@@ -1159,10 +1414,12 @@ class GpsService {
                         for (let j = 0; j < imeisForGroup.length; j += 100) {
                             const subImeis = imeisForGroup.slice(j, j + 100);
                             try {
+                                const utcGroupBegin = panamaTimeToUtc(group.beginTime);
+                                const utcGroupEnd = panamaTimeToUtc(group.endTime);
                                 const res = await this.requestApiRaw('jimi.open.platform.report.mileage', {
                                     imeis: subImeis.join(','),
-                                    begin_time: group.beginTime,
-                                    end_time: group.endTime,
+                                    begin_time: utcGroupBegin,
+                                    end_time: utcGroupEnd,
                                     page_size: 100,
                                     start_row: 1,
                                     filter_mileage: 0
@@ -1209,8 +1466,8 @@ class GpsService {
                 const distKm = parseFloat(m.totalMileage || 0) || 0;
                 const mcType = m.mcType || v.mcType || 'VL802';
 
-                const firstGpsTime = m.startTime && m.startTime !== 'N/A' ? m.startTime : startTime;
-                const lastGpsTime = m.endTime && m.endTime !== 'N/A' ? m.endTime : endTime;
+                const firstGpsTime = m.startTime && m.startTime !== 'N/A' ? utcToPanamaTime(m.startTime) : startTime;
+                const lastGpsTime = m.endTime && m.endTime !== 'N/A' ? utcToPanamaTime(m.endTime) : endTime;
                 const startDate = firstGpsTime.split(' ')[0] || periodStartDate;
 
                 const benchmarkOdo = Number(matchedDbVeh?.basicDetails?.odometer || v.basicDetails?.odometer || v.odometer || 0);
